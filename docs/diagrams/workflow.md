@@ -139,6 +139,7 @@ Morning, about 10 minutes:
 4. For each Manual item, write a brief and open a fresh session in the repo:
 
    ```
+   Work in a worktree named <N>-<slug>.
    Work on #N: <one-line goal>.
    Read first: <files, ADRs, links>.
    Decided: <settled points, with links>.
@@ -149,11 +150,23 @@ Morning, about 10 minutes:
 During the day, at each phase boundary choose, in this order: continue · subagent · `/clear` ·
 `/compact` · `/handoff` (only for a new directory, harness or mid-phase side task).
 
+**Parallel sessions.** One folder can only have one branch checked out, so two sessions in the
+same folder change each other's files underneath them. The main folder stays on `main` for the
+coordinating session; every work session gets its own git worktree under `.claude/worktrees/`
+(the session's worktree tool creates one on a new branch from `origin/main`).
+
+- Each worktree needs its own `pnpm install` once the repo has dependencies. The pnpm store is
+  shared, so it's fast.
+- The local Supabase stack is one per machine and shared by every worktree.
+- `.git` writes (worktrees, commits, pushes) run outside the sandbox.
+
 Evening, about 10 minutes:
 
 1. Update the board: statuses, `blocked:*` labels with their reason.
 2. A light `/retro` if you built something. Note any step you repeated by hand.
-3. `remember` handoff with the top 3 next.
+3. Remove the worktrees whose PRs have merged: check `git worktree list`, then
+   `git worktree remove .claude/worktrees/<name>`.
+4. `remember` handoff with the top 3 next.
 
 ## Automation stages
 

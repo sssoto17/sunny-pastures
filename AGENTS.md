@@ -30,6 +30,10 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - When designing a module, name the design pattern(s) it uses and the alternatives considered, and
   record them in its ADR.
 - Never commit secrets: read them from env vars and keep placeholders in `.env.example`.
+- Parallel sessions never share a branch. The main folder stays on `main` and belongs to the
+  coordinating session. Any session that changes files or needs another branch works in its own
+  git worktree under `.claude/worktrees/`, named `<N>-<slug>` after its issue (use the worktree
+  tool before the first edit). Never `git checkout` or `git switch` in the main folder.
 - A mistake that happens twice is a missing safeguard: mechanical mistakes become checks (lint
   rule, Fallow boundary, test, CI step), judgement calls become standards (this file or
   `CONSTRAINTS.md`). The weekly retro looks for them; see `docs/diagrams/workflow.md`,
