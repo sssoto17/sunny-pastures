@@ -64,6 +64,32 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
 
 When a skill publishes tickets, give each one a milestone, add it to the Project, and set Track, Mode, Size, Priority and Week. Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
 
+## Workstreams
+
+A **workstream** is one goal inside a milestone, worked as a set of tickets. Every workstream
+starts with the same kickoff, and how it's grouped depends on how many workstreams share its
+milestone.
+
+### Grouping
+
+The milestone is the default grouping: it already has the tickets, the due date and a progress bar.
+
+- **One workstream in a milestone** (for example M1, the persistence spike): no parent issue. The tickets go straight into the milestone, and the milestone description plays the parent's role.
+- **Several workstreams in a milestone**: each workstream gets a parent issue titled `<milestone>: <workstream>`, in the same milestone and on the Project with Track, Mode and Priority set. Its body states the goal and an "Acceptance criteria" list, and links the ADRs and PRs it rests on. Its tickets are its sub-issues (see **Make an issue a sub-issue of a parent**). Size and Week stay on the tickets, not the parent.
+- A parent is never worked directly. It closes when its last sub-issue closes.
+- Don't add parents afterwards to a milestone whose tickets are already published.
+
+### Kickoff
+
+Before any ticket exists, a workstream goes through design and idea refinement, in this order:
+
+1. **Frame it.** Create the parent issue (or fill in the milestone description) with the goal and the known constraints. It doesn't have to be complete yet.
+2. **Grill it.** Pick by scope:
+   - `/grill-with-docs` when the open decisions fit in one session. It resolves them and writes `GLOSSARY.md` terms and ADRs as they settle.
+   - `/wayfinder` when they don't: the workstream is too big or too foggy for one session. The wayfinder map is a sub-issue of the workstream's parent, so its decision tickets stay apart from the build tickets. Each decision ticket can run its own `/grill-with-docs`.
+3. **Set up context.** Run `/context-engineering` to decide what a fresh session needs to work any ticket: the ADRs, glossary terms and code areas to read first. The result goes into the parent (or milestone description) as a short **Context** section. Rules files such as `AGENTS.md` change only when the workstream opens a new area of the repo (for example `packages/sim` in M2 or `apps/web` in M3), and only with the admin's approval.
+4. **Ticket it.** Run `/to-tickets` from the grill's outcome. The tickets become sub-issues of the parent (or go straight into the milestone).
+
 ## Priority
 
 Priority orders work inside a milestone; MoSCoW (`docs/requirements/moscow.md`) decides scope. They are separate: a Could can be P0 for the week it's being built.
@@ -86,7 +112,7 @@ The admin may move an issue **Backlog → Ready** only when it is chosen *and* e
 holds (the definition of ready):
 
 1. **Fields set**: milestone, Track, Mode, Size, Priority and Week.
-2. **Checkable outcome**: the body states the goal and a "Done when" list that a reviewer can verify (a test, a command, a file, a number).
+2. **Checkable outcome**: the body states the goal and an "Acceptance criteria" list that a reviewer can verify (a test, a command, a file, a number).
 3. **Fits one session**: Size is S or M. An L is split into smaller issues first.
 4. **Unblocked**: no `blocked:*` label, and every native blocker is closed.
 5. **No open decision**: the decisions it rests on are recorded (ADR, `GLOSSARY.md`, `SPEC.md`) and linked. If working it would mean making a new design decision, it gets `blocked:decision` or a grill instead.
@@ -100,7 +126,7 @@ all of:
 
 - no step needs the admin (no secrets, dashboards or manual setup);
 - it doesn't touch protected paths: `tests/acceptance/`, `.github/`, config files, `AGENTS.md`, `CONSTRAINTS.md`;
-- every "Done when" item is verified by CI alone.
+- every item under "Acceptance criteria" is verified by CI alone.
 
 **The other moves:**
 
