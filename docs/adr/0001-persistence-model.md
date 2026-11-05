@@ -97,7 +97,11 @@ data. Inbox writes run in the same transaction as the commit. No action ever wri
 
 ## Decision rule (fixed before measuring)
 
-1. **Gate.** First, a round-trip check per store: commit a farm, load it back, and require a
+1. **Gate.** Step 0, with no database: the in-memory sim runs the 500-action script twice and
+   replays it from in-memory snapshots at N = 1, 25 and 100, and every run must give the same
+   hash. This step decides where any later failure lies: if it fails, the sim is at fault; if
+   it passes but a store fails a later step, that store's code is at fault.
+   Next, a round-trip check per store: commit a farm, load it back, and require a
    strict deep-equal (types included) with the in-memory farm, so a type mismatch shows up as a
    store bug before any hash is compared. Then the same 500 scripted actions (including an 8-hour gap and some invalid actions)
    give an identical state hash in A, every B and the in-memory sim, and B's `stateAt` matches
