@@ -130,7 +130,10 @@ Supabase Postgres, one schema per store. Locust 2.47.0 runs 50 and 200 players (
 2–8 s between taps, 20% returning after 8 hours via a spike-only clock-offset header), each
 player seeded with about 1,000 actions, 1 min warm-up plus 5 min measured, 3 runs per
 configuration, plus one stress run per store. A concurrency script fires a gift and a harvest at
-one farm at the same moment 1,000 times per store. Everything runs on one WSL2 laptop. Code
+one farm at the same moment 1,000 times per store. Everything runs on one WSL2 laptop. Locust,
+the spike server and Postgres run on the same machine, wherever the matrix runs: a network hop
+between Locust and the server would add the same delay to A and B, and the 2× term of the
+decision rule would loosen by that delay in B's favour. Code
 lives on `prototype/persistence` and is not merged; results are in `docs/spikes/persistence/`.
 
 ## Results
