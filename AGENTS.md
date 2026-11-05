@@ -15,7 +15,8 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - `apps/web/`: the Next.js app: UI, game API and persistence. `src/server/` is server-only.
 - `tests/acceptance/`: black-box tests over HTTP. Agent PRs must not modify them.
 - `tools/load/`, `tools/analysis/`: Python, used only for Locust load tests and data analysis.
-- `docs/`: `adr/`, `agents/`, `diagrams/`, `plans/`, `retros/`, `spikes/`.
+- `docs/`: `adr/`, `agents/`, `diagrams/`, `plans/`, `requirements/` (MoSCoW in `moscow.md`),
+  `retros/`, `spikes/`.
 
 ## Rules
 
@@ -38,7 +39,7 @@ Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone a
 
 ### Triage labels
 
-Work is manual by default; automated work carries `factory:` labels. Labels: `triage`, `ready`, `factory:ready`, and `blocked:decision` / `blocked:external` / `blocked:owner` for why an issue can't move yet. See `docs/agents/triage-labels.md`.
+Work is manual by default; automated work carries `factory:` labels. Labels: `triage`, `ready`, `factory:ready`, and `blocked:decision` / `blocked:external` / `blocked:admin` for why an issue can't move yet. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

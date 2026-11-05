@@ -20,8 +20,8 @@ A `blocked:*` label says why an issue can't be worked, or can't be queued for th
 
 | Label              | Use when                                                                 |
 | ------------------ | ------------------------------------------------------------------------ |
-| `blocked:decision` | A design or scope decision by the owner is still open                    |
+| `blocked:decision` | A design or scope decision by the admin is still open                    |
 | `blocked:external` | It waits on something outside the project: a service, a person, upstream |
-| `blocked:owner`    | Only the owner can do it: config, secrets, protected files, dashboards   |
+| `blocked:admin`    | Only the admin can do it: config, secrets, protected files, dashboards   |
 
 An issue blocked by another issue uses GitHub's native issue dependencies instead (see `issue-tracker.md`, **Blocking**), not a label.

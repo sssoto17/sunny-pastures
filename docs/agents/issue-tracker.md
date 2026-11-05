@@ -55,7 +55,7 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
 
 | Field  | Field id                         | Options (name = option id)                                                                 |
 | ------ | -------------------------------- | ------------------------------------------------------------------------------------------ |
-| Status | `PVTSSF_lAHOCI1msM4BqXYMzhou1Sw` | Todo=`97a20eba` Ready=`eb23e874` In progress=`03b81b61` In review=`e763de54` Done=`04fb4a2b` |
+| Status | `PVTSSF_lAHOCI1msM4BqXYMzhou1Sw` | Backlog=`97a20eba` Ready=`eb23e874` In progress=`03b81b61` In review=`e763de54` Done=`04fb4a2b` |
 | Track  | `PVTSSF_lAHOCI1msM4BqXYMzhou1gg` | Build=`60e95dc9` Design=`df832856` Report=`d064f0c0` Infra=`3200c1d7` Evaluation=`145afb58` |
 | Mode   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g0` | Manual=`ca9bd7b8` Factory=`f92520e5`                                                       |
 | Size   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g4` | S=`7a7f9f73` M=`e0e2efb6` L=`c7dede81`                                                     |
