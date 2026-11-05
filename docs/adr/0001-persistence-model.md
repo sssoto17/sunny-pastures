@@ -112,8 +112,10 @@ data. Inbox writes run in the same transaction as the commit. No action ever wri
    cost is also reported in µs per action and projected at 10× for the full sim.
 
 **Timebox.** If the full Locust matrix isn't done by Sat 7 Nov 22:00, one run per configuration
-counts. If the gate still fails at Sat 18:00, A is chosen provisionally and determinism is
-followed up in M2.
+counts. If the gate still fails at Sat 18:00, what happens depends on where the failure is
+traced. A failure in the sim (non-determinism) means A is chosen provisionally, because A doesn't
+rely on replay, and determinism is followed up in M2. A failure in one store's own code takes
+only that store out of the comparison until it's fixed; the rule then decides among the rest.
 
 ## Method
 
