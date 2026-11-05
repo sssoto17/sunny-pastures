@@ -56,6 +56,12 @@ interface AuditableStore extends GameStore {
 }
 ```
 
+Every store checks what it loads before returning it: `seq` and `at` must be safe integers
+(`Number.isSafeInteger`), or `load` throws a store error. Postgres drivers return `bigint`
+columns as strings by default, and a string `at` would otherwise reach the state hash and look
+like a simulation bug. The driver is also configured to parse `bigint` as a number, but the
+check at the boundary is the guard; the driver setting is only a convenience.
+
 Gifts use a shared inbox table outside the comparison. Sending a gift is the sender's action and
 inserts the gift (id `<senderId>:<seq>`); claiming it is the recipient's action, whose payload the
 server fills with the gift's goods before `apply`, so a farm's replay never needs another farm's
@@ -91,7 +97,9 @@ data. Inbox writes run in the same transaction as the commit. No action ever wri
 
 ## Decision rule (fixed before measuring)
 
-1. **Gate.** The same 500 scripted actions (including an 8-hour gap and some invalid actions)
+1. **Gate.** First, a round-trip check per store: commit a farm, load it back, and require a
+   strict deep-equal (types included) with the in-memory farm, so a type mismatch shows up as a
+   store bug before any hash is compared. Then the same 500 scripted actions (including an 8-hour gap and some invalid actions)
    give an identical state hash in A, every B and the in-memory sim, and B's `stateAt` matches
    the sim at 10 random times. A failure is a bug to fix, not an input to the decision.
 2. **B wins unless** either holds for a B variant:
