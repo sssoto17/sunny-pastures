@@ -1,0 +1,139 @@
+# Workflow
+
+How work moves from an idea to merged code, and which skill runs at each step. Addy Osmani's
+skills own the gates (constraints, spec, plan, review, ship). Matt Pocock's skills own the design
+depth and the tracker loop (grilling, domain language, deep modules, tickets, implementation,
+retros). Each job has exactly one owning skill.
+
+Last changed: 2026-11-05 (Stage 0: everything below is started by hand).
+
+## The loops
+
+```mermaid
+flowchart TB
+  subgraph M["Milestone loop: every 1–2 weeks"]
+    direction TB
+    G["/grill-with-docs<br/>+ domain-modeling, codebase-design<br/>→ GLOSSARY.md, ADRs"]
+    Q{"Settled in<br/>conversation?"}
+    P["/prototype<br/>branch prototype/‹name›"]
+    R["/research<br/>background agent → cited .md"]
+    S["/spec → SPEC.md"]
+    PL["/plan → docs/plans/NN-‹slug›.md"]
+    T["/to-tickets → GitHub issues<br/>milestone · Week · Track · Mode · Size"]
+    G --> Q
+    Q -- "needs a runnable answer" --> P
+    P -- "what it taught" --> G
+    Q -- "needs facts" --> R
+    R -- "findings" --> G
+    Q -- "yes" --> S --> PL --> T
+    Q -. "spike or small chunk" .-> T
+  end
+
+  subgraph D["Daily loop"]
+    direction TB
+    AM["Morning: read the handoff + This week board<br/>pick ≤ 3 outcomes"]
+    F["Factory items: launch first"]
+    B["Manual items: brief → fresh session"]
+    I["/implement #N<br/>drives /tdd + /code-review"]
+    PR["Pull request"]
+    MR{"You review<br/>and merge"}
+    PM["Evening: update the board<br/>light /retro · remember handoff"]
+    AM --> F
+    AM --> B
+    F --> PR
+    B --> I --> PR --> MR --> PM
+  end
+
+  subgraph W["Weekly: last project day"]
+    direction TB
+    ICA["/improve-codebase-architecture<br/>→ deepening candidates"]
+    RT["/retro → docs/retros/YYYY-MM-DD.md"]
+  end
+
+  subgraph GATE["Milestone gate: slice 29 Nov · freeze 20 Dec · hand-in 5 Jan"]
+    direction TB
+    RV["/review + security-and-hardening<br/>/test: Playwright smoke"]
+    SH{"/ship<br/>go or no-go"}
+    RV --> SH
+  end
+
+  T -- "tickets on the board" --> AM
+  PM -- "next day" --> AM
+  PM -- "end of week" --> ICA
+  ICA -- "the candidate you pick" --> G
+  ICA --> RT
+  RT -. "environment fixes" .-> D
+  PM -- "milestone done" --> RV
+  SH -- "go: playtest or hand-in" --> G
+  SH -- "no-go: fix tickets" --> AM
+
+  classDef decide fill:#e3ab4b33,stroke:#b0731a,stroke-width:2px
+  class Q,MR,SH decide
+```
+
+Gold diamonds are your decisions. Every PR is merged by you, factory PRs included.
+
+## When to use what
+
+| When | Skill | Produces | You decide |
+|---|---|---|---|
+| Once, week 1 | `setup-matt-pocock-skills` (done) | `docs/agents/*.md` | tracker settings |
+| | Addy `/constraints` | `CONSTRAINTS.md` | the quality bar |
+| Start of a milestone | `grill-with-docs` (+ `domain-modeling`, `codebase-design`) | `GLOSSARY.md`, ADRs (pattern + alternatives) | every design decision |
+| ↳ needs a runnable answer | `prototype` | `prototype/<name>` branch, never merged | what it taught |
+| ↳ needs facts | `research` (background) | cited `.md` | nothing: it feeds the grill |
+| | Addy `/spec` | `SPEC.md` (living, doubles as the requirements chapter) | edit and approve |
+| | Addy `/plan` | `docs/plans/NN-<slug>.md`, frozen once published | approve the plan |
+| | `to-tickets` | GitHub issues with native blocking edges, on the Project | nothing: it publishes |
+| Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`) | PR | review and merge |
+| ↳ high stakes: sim determinism, authority, RLS | Addy `doubt-driven-development` | adversarial review | |
+| ↳ framework APIs: Next, Drizzle, Supabase | Addy `source-driven-development` | docs-verified code | |
+| ↳ module or API shape | Addy `api-and-interface-design` + `codebase-design` | interface sketch | the interface |
+| ↳ something broke | `diagnosing-bugs` | regression test + fix | |
+| ↳ only the admin can do it | `wizard` | setup script; issue gets `blocked:admin` until done | |
+| Weekly | `improve-codebase-architecture` | deepening candidates | which one to pick |
+| | `retro` | `docs/retros/YYYY-MM-DD.md` + environment fixes | which fixes to adopt |
+| Milestone gate | Addy `/review` + `security-and-hardening`, `/test`, `/ship` | go/no-go with rollback plan | go or no-go |
+| After playtests | `triage` | feedback turned into ready issues | what's worth doing |
+| End of day | `remember` | handoff with the top 3 next | |
+
+Not used, because another skill owns the job: Addy `interview-me` and `idea-refine`
+(`grill-with-docs`), Matt `to-spec` (`/spec`), Addy `/build` (`implement`), Addy
+`documentation-and-adrs` (`domain-modeling`). `wayfinder` stays in reserve for an effort too foggy
+for one grill.
+
+## Daily routine (Stage 0)
+
+Morning, about 10 minutes:
+
+1. Read the handoff the session starts with.
+2. Open the **This week** board. Pick at most 3 outcomes: usually 1 design and 1–2 build.
+3. Launch Factory items first, so agents work while you design.
+4. For each Manual item, write a brief and open a fresh session in the repo:
+
+   ```
+   Work on #N: <one-line goal>.
+   Read first: <files, ADRs, links>.
+   Decided: <settled points, with links>.
+   Start with: <skill>.
+   Report back: <PR link, check output, open questions>.
+   ```
+
+During the day, at each phase boundary choose, in this order: continue · subagent · `/clear` ·
+`/compact` · `/handoff` (only for a new directory, harness or mid-phase side task).
+
+Evening, about 10 minutes:
+
+1. Update the board: statuses, `blocked:*` labels with their reason.
+2. A light `/retro` if you built something. Note any step you repeated by hand.
+3. `remember` handoff with the top 3 next.
+
+## Automation stages
+
+| Stage | When | What runs |
+|---|---|---|
+| 0 | now | Everything above, by hand. Note repeated steps in each retro. |
+| 1 | ~week 2 | Read-only `/today`: handoff + this week's board → brief, agenda, a brief per Manual item, a prompt per Factory item. |
+| 2 | ~week 3 | Billetto-style gather script, background review agents, action batch, check every ~75 min, `/today wrap`. |
+
+Automate a step only after doing it by hand 3 times with the same result.
