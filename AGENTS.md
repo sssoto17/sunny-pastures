@@ -39,7 +39,7 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 
 ### Issue tracker
 
-Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone and on the Sunny Pastures Project with a Priority (P0–P3). An issue moves from Backlog to Ready only when it meets the definition of ready. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone and on the Sunny Pastures Project with a Priority (P0–P3). Ready means the admin has chosen to focus on it now; only the admin moves an issue there, and only when it meets the definition of ready. Agents create issues in Backlog. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -133,7 +133,8 @@ Each answer becomes an issue or a direct change in the same week, never only a n
 Morning, about 10 minutes:
 
 1. Read the handoff the session starts with.
-2. Open the **This week** board. Pick at most 3 outcomes: usually 1 design and 1–2 build.
+2. Open the **This week** board. Pick at most 3 outcomes (usually 1 design and 1–2 build) and
+   move them to **Ready**. Ready is your focus; everything else stays in Backlog.
 3. Launch Factory items first, so agents work while you design.
 4. For each Manual item, write a brief and open a fresh session in the repo:
 

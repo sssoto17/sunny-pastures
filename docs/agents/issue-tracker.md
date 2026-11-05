@@ -62,7 +62,7 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
 | Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
 | Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
 
-When a skill publishes tickets, give each one a milestone, add it to the Project, and set Track, Mode, Size, Priority and Week. Mode is `Manual` unless the ticket carries `factory:ready`. Status is `Backlog` unless the ticket meets every Ready criterion below.
+When a skill publishes tickets, give each one a milestone, add it to the Project, and set Track, Mode, Size, Priority and Week. Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
 
 ## Priority
 
@@ -77,7 +77,13 @@ Priority orders work inside a milestone; MoSCoW (`docs/requirements/moscow.md`) 
 
 ## Status rules
 
-**Backlog → Ready** only when every one of these holds (the definition of ready):
+**Ready means "chosen for now".** The Ready column holds only what the admin has decided to focus
+on at the moment; Backlog holds everything else, including issues that could be worked but aren't
+wanted yet. Keep Ready short: roughly what fits the next one or two project days. Only the admin
+moves an issue to Ready; skills and agents create issues in Backlog and never promote them.
+
+The admin may move an issue **Backlog → Ready** only when it is chosen *and* every one of these
+holds (the definition of ready):
 
 1. **Fields set**: milestone, Track, Mode, Size, Priority and Week.
 2. **Checkable outcome**: the body states the goal and a "Done when" list that a reviewer can verify (a test, a command, a file, a number).
@@ -85,7 +91,12 @@ Priority orders work inside a milestone; MoSCoW (`docs/requirements/moscow.md`) 
 4. **Unblocked**: no `blocked:*` label, and every native blocker is closed.
 5. **No open decision**: the decisions it rests on are recorded (ADR, `GLOSSARY.md`, `SPEC.md`) and linked. If working it would mean making a new design decision, it gets `blocked:decision` or a grill instead.
 
-**`factory:ready`** additionally requires all of:
+An issue that meets all five but isn't chosen stays in Backlog. When its last blocker closes,
+nothing moves automatically: whether it becomes the focus is the admin's call.
+
+**`factory:ready`** is also the admin's choice, to delegate rather than work it. The factory only
+picks up issues that are in Ready *and* carry `factory:ready`, and the label additionally requires
+all of:
 
 - no step needs the admin (no secrets, dashboards or manual setup);
 - it doesn't touch protected paths: `tests/acceptance/`, `.github/`, config files, `AGENTS.md`, `CONSTRAINTS.md`;
@@ -98,6 +109,5 @@ Priority orders work inside a milestone; MoSCoW (`docs/requirements/moscow.md`) 
 | Ready → In progress      | Someone starts it: the admin is assigned (manual), or the factory claims it (factory). A branch exists. |
 | In progress → In review  | A PR is open with `Closes #N` and its checks are green.                                   |
 | In review → Done         | The admin merged the PR (the issue closes, and the Project moves it).                     |
-| Any → Backlog            | It turns out not ready: add the `blocked:*` label that says why, or split it.            |
+| Any → Backlog            | It turns out not ready (add the `blocked:*` label that says why, or split it), or the admin drops it from the current focus. |
 
-A skill may create an issue directly in `Ready` only when it meets every Ready criterion; otherwise it starts in `Backlog` and the admin promotes it.
