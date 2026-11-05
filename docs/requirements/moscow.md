@@ -6,7 +6,7 @@ resistance; the UI stays functional.
 
 Each item has a stable ID so requirements, issues and the report can refer to it. The detailed
 requirement specification (acceptance criteria per item) comes out of the requirements grill and
-lands in `SPEC.md`; this file only ranks the scope.
+lands in `spec.md` next to this file; this file only ranks the scope.
 
 Last changed: 2026-11-05.
 

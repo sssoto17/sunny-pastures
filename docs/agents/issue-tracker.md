@@ -115,7 +115,7 @@ holds (the definition of ready):
 2. **Checkable outcome**: the body states the goal and an "Acceptance criteria" list that a reviewer can verify (a test, a command, a file, a number).
 3. **Fits one session**: Size is S or M. An L is split into smaller issues first.
 4. **Unblocked**: no `blocked:*` label, and every native blocker is closed.
-5. **No open decision**: the decisions it rests on are recorded (ADR, `GLOSSARY.md`, `SPEC.md`) and linked. If working it would mean making a new design decision, it gets `blocked:decision` or a grill instead.
+5. **No open decision**: the decisions it rests on are recorded (ADR, `GLOSSARY.md`, `docs/requirements/spec.md`) and linked. If working it would mean making a new design decision, it gets `blocked:decision` or a grill instead.
 
 An issue that meets all five but isn't chosen stays in Backlog. When its last blocker closes,
 nothing moves automatically: whether it becomes the focus is the admin's call.

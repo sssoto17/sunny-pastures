@@ -15,8 +15,8 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - `apps/web/`: the Next.js app: UI, game API and persistence. `src/server/` is server-only.
 - `tests/acceptance/`: black-box tests over HTTP. Agent PRs must not modify them.
 - `tools/load/`, `tools/analysis/`: Python, used only for Locust load tests and data analysis.
-- `docs/`: `adr/`, `agents/`, `diagrams/`, `plans/`, `requirements/` (MoSCoW in `moscow.md`),
-  `retros/`, `spikes/`.
+- `docs/`: `adr/`, `agents/`, `diagrams/`, `plans/`, `requirements/` (MoSCoW in `moscow.md`,
+  the requirement specification in `spec.md`), `retros/`, `spikes/`.
 
 ## Rules
 

@@ -17,7 +17,7 @@ flowchart TB
     Q{"Settled in<br/>conversation?"}
     P["/prototype<br/>branch prototype/‹name›"]
     R["/research<br/>background agent → cited .md"]
-    S["/spec → SPEC.md"]
+    S["/spec → docs/requirements/spec.md"]
     PL["/plan → docs/plans/NN-‹slug›.md"]
     T["/to-tickets → GitHub issues<br/>milestone · Week · Track · Mode · Size"]
     G --> Q
@@ -82,7 +82,7 @@ Gold diamonds are your decisions. Every PR is merged by you, factory PRs include
 | Start of a milestone | `grill-with-docs` (+ `domain-modeling`, `codebase-design`) | `GLOSSARY.md`, ADRs (pattern + alternatives) | every design decision |
 | ↳ needs a runnable answer | `prototype` | `prototype/<name>` branch, never merged | what it taught |
 | ↳ needs facts | `research` (background) | cited `.md` | nothing: it feeds the grill |
-| | Addy `/spec` | `SPEC.md` (living, doubles as the requirements chapter) | edit and approve |
+| | Addy `/spec` | `docs/requirements/spec.md` (living, doubles as the requirements chapter) | edit and approve |
 | | Addy `/plan` | `docs/plans/NN-<slug>.md`, frozen once published | approve the plan |
 | | `to-tickets` | GitHub issues with native blocking edges, on the Project | nothing: it publishes |
 | Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`) | PR | review and merge |
@@ -116,7 +116,7 @@ as early as possible: the cheapest moment is the first repeat.
 | Property failures | fast-check's shrunk counterexample | a named regression test kept next to the property |
 | Repeated review findings | `code-review` flagging the same kind of issue twice | a check or a standard, via `retro` |
 | Playtests | tester feedback | `triage` → `ready` issues; the next grill may reopen a MoSCoW item |
-| Load tests | Locust latency and storage numbers | response-time limits in `SPEC.md`, so later runs check against measured numbers |
+| Load tests | Locust latency and storage numbers | response-time limits in `docs/requirements/spec.md`, so later runs check against measured numbers |
 | Repeated manual steps | daily routine, noted in retros | the next automation stage (`/today`, factory) |
 
 **Weekly retro convention.** Besides "what went well and what didn't", every weekly `retro` asks:
