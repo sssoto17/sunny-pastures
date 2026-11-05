@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# builds and test output
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+test-results/
+playwright-report/
+
+# env files: only examples are committed
+.env*
+!.env*.example
+
+# Python (tools/load, tools/analysis)
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+
+# Supabase local stack
+supabase/.branches/
+supabase/.temp/
+
+# agent and editor scratch
+.claude/settings.local.json
+.claude/worktrees/
+.claude/.cc-writes
+.scratch/
+.DS_Store
+.vscode/
+*.log

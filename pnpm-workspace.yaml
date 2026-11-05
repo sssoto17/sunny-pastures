@@ -1,0 +1,6 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Refuse versions published less than 7 days ago (minutes), so a hijacked release has time to be caught.
+minimumReleaseAge: 10080
