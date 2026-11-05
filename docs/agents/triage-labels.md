@@ -8,11 +8,11 @@ This is a solo project: every issue is written by the owner, so there is no repo
 | -------------------------- | -------------------- | ----------------------------------------------- |
 | `needs-triage`             | `triage`             | Needs evaluation before it can be worked        |
 | `needs-info`               | a `blocked:*` label  | Can't move until the reason named below clears  |
-| `ready-for-agent`          | `factory:ready`      | Fully specified; the factory may pick it up     |
-| `ready-for-human`          | `ready`              | Fully specified; worked manually                |
+| `ready-for-agent`          | `factory:ready`      | Fully specified; the factory may pick it up without the admin |
+| `ready-for-human`          | no label             | The default. Readiness is the Project **Status** `Ready` (see `issue-tracker.md`, **Status rules**) |
 | `wontfix`                  | no label             | Close with `gh issue close <n> --reason "not planned" --comment "<why>"` |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table. When you apply `factory:ready`, also set the issue's Project **Mode** to `Factory` (see `issue-tracker.md`).
+When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table. A role with no label means: remove `triage` if present and set the Status the role implies. `factory:ready` is the only label that says an issue can be worked without the admin in the loop; when you apply it, also set the issue's Project **Mode** to `Factory`.
 
 ## Blocked
 

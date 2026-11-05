@@ -39,11 +39,11 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 
 ### Issue tracker
 
-Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone and on the Sunny Pastures Project. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone and on the Sunny Pastures Project with a Priority (P0–P3). An issue moves from Backlog to Ready only when it meets the definition of ready. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Work is manual by default; automated work carries `factory:` labels. Labels: `triage`, `ready`, `factory:ready`, and `blocked:decision` / `blocked:external` / `blocked:admin` for why an issue can't move yet. See `docs/agents/triage-labels.md`.
+Work is manual by default and carries no label for it; readiness is the Project Status. `factory:ready` is the only label that says an issue can be worked without the admin. Other labels: `triage`, and `blocked:decision` / `blocked:external` / `blocked:admin` for why an issue can't move yet. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
