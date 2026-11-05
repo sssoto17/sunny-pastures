@@ -92,7 +92,7 @@ Gold diamonds are your decisions. Every PR is merged by you, factory PRs include
 | ↳ something broke | `diagnosing-bugs` | regression test + fix | |
 | ↳ only the admin can do it | `wizard` | setup script; issue gets `blocked:admin` until done | |
 | Weekly | `improve-codebase-architecture` | deepening candidates | which one to pick |
-| | `retro` | `docs/retros/YYYY-MM-DD.md` + environment fixes | which fixes to adopt |
+| | `retro` (see **Weekly retro convention**) | `docs/retros/YYYY-MM-DD.md`, new checks and standards | which fixes to adopt |
 | Milestone gate | Addy `/review` + `security-and-hardening`, `/test`, `/ship` | go/no-go with rollback plan | go or no-go |
 | After playtests | `triage` | feedback turned into ready issues | what's worth doing |
 | End of day | `remember` | handoff with the top 3 next | |
@@ -101,6 +101,32 @@ Not used, because another skill owns the job: Addy `interview-me` and `idea-refi
 (`grill-with-docs`), Matt `to-spec` (`/spec`), Addy `/build` (`implement`), Addy
 `documentation-and-adrs` (`domain-modeling`). `wayfinder` stays in reserve for an effort too foggy
 for one grill.
+
+## Self-improving loops
+
+The project should get harder to break over time. A mistake that happens twice is a missing
+safeguard. Matt's rule decides the kind of safeguard: **mechanical mistakes become checks**
+(a lint rule, a Fallow boundary, a test, a CI step), **judgement calls become standards** (a line
+in `AGENTS.md` or `CONSTRAINTS.md`, a coding standard `code-review` enforces). Add the safeguard
+as early as possible: the cheapest moment is the first repeat.
+
+| Loop | Output of | Feeds |
+|---|---|---|
+| Complexity and coupling | Fallow hotspots, duplication, cycles | weekly `improve-codebase-architecture` candidates |
+| Property failures | fast-check's shrunk counterexample | a named regression test kept next to the property |
+| Repeated review findings | `code-review` flagging the same kind of issue twice | a check or a standard, via `retro` |
+| Playtests | tester feedback | `triage` → `ready` issues; the next grill may reopen a MoSCoW item |
+| Load tests | Locust latency and storage numbers | response-time limits in `SPEC.md`, so later runs check against measured numbers |
+| Repeated manual steps | daily routine, noted in retros | the next automation stage (`/today`, factory) |
+
+**Weekly retro convention.** Besides "what went well and what didn't", every weekly `retro` asks:
+
+1. Which mistakes or review findings happened more than once? Turn each into a check or a
+   standard, and record which one in the retro file.
+2. Which manual steps did I repeat? Note each one with its count toward the 3-repetition rule.
+3. Which tool output isn't feeding anything yet? Propose the loop that would use it.
+
+Each answer becomes an issue or a direct change in the same week, never only a note.
 
 ## Daily routine (Stage 0)
 

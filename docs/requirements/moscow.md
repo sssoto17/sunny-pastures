@@ -81,3 +81,29 @@ Consciously out of scope for this project. Candidates for the report's Perspecti
 | WONT-03 | Custom artwork                                                                           |
 | WONT-04 | Company or client context: the project refers to the game only                           |
 | WONT-05 | Reusing Revenge of the Assassin (the 1st-semester JS browser game) beyond a brief mention |
+| WONT-06 | A sync engine such as Zero (Rocicorp) in place of the hand-built prediction, action log and reconciliation |
+
+## Notes on tools considered
+
+Kept here so the report's technology chapter can cite the reasoning.
+
+- **Zero (WONT-06).** Its custom mutators run the same code optimistically on the client and
+  authoritatively on the server, then rebase: the closest existing answer to sub-questions 2 and 3.
+  Adopting it would outsource the contribution the report argues for. It syncs rows rather than
+  simulating time, so offline progress would still be ours to build. It also needs a long-running
+  `zero-cache` server and Postgres logical replication, which doesn't fit Vercel + Supabase on a
+  small budget. Cite it as related work and in Perspective.
+- **Phaser (or another game engine).** A game engine covers rendering, a frame loop, input,
+  physics and assets. This project's engine is the simulation (`packages/sim`), which Phaser
+  doesn't provide, and an idle game needs no frame loop: state is a function of time. The UI is
+  DOM-based (WONT-02). If a drawn farm map is ever wanted, PixiJS inside a React component is the
+  lighter option.
+- **Vercel Workflow SDK (not a game dependency; candidate for the software factory).** Durable
+  functions: `"use workflow"` / `"use step"`, saved and retried steps, `sleep()` that costs nothing
+  while waiting, and hooks that pause until something external resumes them. Internally each run
+  is an append-only event log replayed through a deterministic function: the same idea as the
+  action log and the sim, so it belongs in related work next to Temporal. For game time it would
+  be the server-tick model that lazy `advance()` avoids; durable timers are worth discussing as the
+  push-based alternative in sub-question 2, not building. Possible later uses: "production ready"
+  notifications, if notifications enter scope, and orchestrating the software factory
+  (issue → agent PR → CI → approval hook → merge), which is the strongest fit.

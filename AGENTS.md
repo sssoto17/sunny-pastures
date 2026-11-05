@@ -30,6 +30,10 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - When designing a module, name the design pattern(s) it uses and the alternatives considered, and
   record them in its ADR.
 - Never commit secrets: read them from env vars and keep placeholders in `.env.example`.
+- A mistake that happens twice is a missing safeguard: mechanical mistakes become checks (lint
+  rule, Fallow boundary, test, CI step), judgement calls become standards (this file or
+  `CONSTRAINTS.md`). The weekly retro looks for them; see `docs/diagrams/workflow.md`,
+  "Self-improving loops".
 
 ## Agent skills
 
