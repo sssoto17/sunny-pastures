@@ -80,3 +80,4 @@ Consciously out of scope for this project. Candidates for the report's Perspecti
 | WONT-02 | A canvas or game-engine renderer: the UI is DOM-based React                               |
 | WONT-03 | Custom artwork                                                                           |
 | WONT-04 | Company or client context: the project refers to the game only                           |
+| WONT-05 | Reusing Revenge of the Assassin (the 1st-semester JS browser game) beyond a brief mention |
