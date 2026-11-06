@@ -179,6 +179,19 @@ and upserted on every action, like A's state row, while B25 and B100 key snapsho
 that keeps B1's per-action write comparable with A's (#7). Code
 lives on `prototype/persistence` and is not merged; results are in `docs/spikes/persistence/`.
 
+**Load-run controls (#10).** The spike server exposes them only with `SPIKE_CLOCK=1`:
+`X-Spike-Clock-Offset` (non-negative ms added to server time; the `max(now, lastAt)` clamp still
+applies), `POST /spike/seed` and `GET /spike/storage`. Every response carries `Server-Timing`:
+**load** (store reads, including B's replay, the idempotency check and the gift lookup),
+**commit** (the commit transaction), **sim** (the rest of the handler) and **total**, written to a
+server CSV with the same numbers; a Decorator around `GameStore` measures them, so neither the
+handler nor the stores carry timing code. Players are seeded through the store's own commit path,
+player *i* with 1,000 + (*i* × 37) mod 100 actions, so replay tails spread across 0 to N−1. An
+active player whose plots are all growing spends the tap on a GET. Locust runs from its own uv
+project (uv, Python and Locust pinned; `exclude-newer` 7 days back), and its final stats come
+from `--json-file`, because the stats CSV is a periodic snapshot. The server's keep-alive timeout
+(65 s) exceeds the longest client wait, so idle connections aren't closed mid-reuse.
+
 ## Results
 
 _To be filled from `docs/spikes/persistence/results.csv`._
