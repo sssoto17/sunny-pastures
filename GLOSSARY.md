@@ -38,7 +38,104 @@ What a farm produces between a player's last action and their return, computed w
 back rather than while they are away.
 _Avoid_: idle income, catch-up, background ticks
 
+### What a farm makes
+
+**Goods**:
+Anything a farm can hold in storage and count: crops, animal products, feed and finished
+products. Coins are not goods.
+_Avoid_: items, resources, inventory, products (for the whole set)
+
+**Plot**:
+One patch of a field where a single crop is planted, grows and is harvested.
+_Avoid_: tile, slot, field (for one patch)
+
+**Trough**:
+An animal pen's store of feed. The animals eat from it on their own and keep producing until it
+is empty.
+_Avoid_: feeder, food bowl
+
+**Facility**:
+A building that turns goods into other goods by recipe: the feed mill, the bakery and the dairy.
+_Avoid_: building (for these), machine, factory, workshop
+
+**Recipe**:
+What a facility can make: the goods it takes, the goods it gives and how long it takes.
+_Avoid_: formula, blueprint, product
+
+**Job**:
+One run of a recipe in a facility's queue. Jobs run one after another; a job's goods wait in the
+facility until they are collected.
+_Avoid_: task, order (an order is something else), batch
+
+**Tier**:
+How far a facility has been upgraded, starting at 1. A higher tier works faster, can open more
+queue slots and makes more recipes available.
+_Avoid_: level (that is the player's), grade, rank
+
+**Add-on**:
+A purchase that changes how a facility works beyond its tier, such as automating a step or
+allowing more queue slots.
+_Avoid_: module, extension, perk
+
+**Loop**:
+The add-on that starts the facility's last recipe again whenever its inputs are in storage.
+_Avoid_: repeat, auto-craft
+
+**Collector**:
+The add-on that moves a facility's finished goods into storage.
+_Avoid_: auto-collect, conveyor
+
+**Silo**:
+The farm's storage for crops, with a capacity.
+_Avoid_: granary, storage (for one store)
+
+**Barn**:
+The farm's storage for every good that isn't a crop, with a capacity.
+_Avoid_: warehouse, storage (for one store)
+
+**Farmhand**:
+A hired worker who does manual work on the farm without the player: harvesting and replanting,
+carrying feed to troughs, delivering orders.
+_Avoid_: worker, helper, NPC, bot
+
+### Progress
+
+**Level**:
+The player's progress, raised by XP. It never goes down, and reaching one unlocks content.
+_Avoid_: rank, tier (that is a facility's), farm level
+
+**Unlocked**:
+Allowed by the player's level: an unlocked good may appear in orders, and an unlocked upgrade may
+be bought. Unlocked is not the same as owned or producible.
+_Avoid_: available, enabled
+
+**Producible**:
+A good the farm can make right now: it has the facility at the right tier, or the crop or animal,
+that the good needs.
+_Avoid_: available, craftable, unlocked
+
+**Clover**:
+The rare currency, earned by playing rather than bought, and spent to skip a wait. Not goods:
+it can't be gifted.
+_Avoid_: gems, premium currency, rare currency, time-skip currency
+
+### Orders
+
+**Order**:
+A request from a non-player character for certain goods, paying coins and XP when delivered.
+_Avoid_: quest, task, request, job
+
+**Order board**:
+The farm's open orders, one per slot. The number of slots grows with the player's level. A
+delivered or discarded order is replaced after a delay.
+_Avoid_: quest board, task list
+
 ### Between players
+
+**Friend**:
+A player you have agreed to be connected with, both ways, through an invite. Gifts and visits go
+only to friends.
+_Avoid_: contact, follower, neighbour, buddy
 
 **Gift**:
 Goods one player sends to another. The goods leave the sender's farm when it is sent, and reach
@@ -56,7 +153,8 @@ The client's own result of an action, shown immediately before the server has co
 _Avoid_: optimistic update, local state
 
 **Reconciliation**:
-Replacing a prediction with the server's result when the two disagree.
+Replacing a prediction with the server's result when the two disagree, then applying the
+client's still-unconfirmed actions on top of it again.
 _Avoid_: sync, rollback, correction
 
 **State hash**:

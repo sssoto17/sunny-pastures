@@ -8,7 +8,7 @@ Each item has a stable ID so requirements, issues and the report can refer to it
 requirement specification (acceptance criteria per item) comes out of the requirements grill and
 lands in `spec.md` next to this file; this file only ranks the scope.
 
-Last changed: 2026-11-05.
+Last changed: 2026-11-06 (requirements grill, #2).
 
 ## Must have
 
@@ -23,9 +23,9 @@ The game is not a valid answer to the research question without these.
 | MUST-03 | Production facilities with timed queues: feed mill, bakery, dairy                       |
 | MUST-04 | NPC order board: deliver goods for coins and XP                                         |
 | MUST-05 | Economy and progression: coins, XP and levels that unlock content                       |
-| MUST-06 | Upgrades for fields and facilities                                                      |
+| MUST-06 | Upgrades for fields, facility tiers, animal pens, silo and barn; Loop and Collector add-ons |
 | MUST-07 | Offline progress: the farm keeps producing while the player is away                     |
-| MUST-08 | Gifting: send goods to another player                                                   |
+| MUST-08 | Gifting: send goods to a friend (friend list, invite link)                              |
 | MUST-09 | Play without a sign-up form (Supabase anonymous sign-in)                               |
 
 **System qualities**
@@ -57,6 +57,9 @@ Clearly valuable; dropped only if the Musts are at risk.
 | SHOULD-01 | Read-only visits to another player's farm                                            |
 | SHOULD-02 | Free game assets instead of placeholder UI, with licences tracked in `CREDITS.md`    |
 | SHOULD-03 | Load tests with Locust, analysed in `tools/analysis`                                 |
+| SHOULD-04 | Link an email to an anonymous player, to keep the farm across browsers               |
+| SHOULD-05 | Farmhands on crops and troughs, with speed upgrades and the Foreman                  |
+| SHOULD-06 | Clovers: a rare currency earned in play, spent to skip waits                         |
 
 ## Could have
 
@@ -66,9 +69,12 @@ Only if there's time after the Musts and Shoulds, and only if they still serve t
 | -------- | ------------------------------------------------------------------------------------------ |
 | COULD-01 | Trading between players                                                                    |
 | COULD-02 | Real-time updates (Supabase Realtime): live notifications, live visits                     |
-| COULD-03 | Skill mini-games that earn time-skip currency, server-verifiable by seed and input replay  |
+| COULD-03 | Skill mini-games that earn clovers, server-verifiable by seed and input replay            |
 | COULD-04 | An event-store library in place of the hand-built action log                               |
 | COULD-05 | Admin dashboard for monitoring and feature flags ([#1](https://github.com/sssoto17/sunny-pastures/issues/1)) |
+| COULD-06 | Tractor: a farmhand works a whole field as one task                                        |
+| COULD-07 | Farmhands deliver orders while the player is away                                          |
+| COULD-08 | Production line add-on: a facility repeats a player-defined sequence of recipes            |
 
 ## Won't have (this time)
 
@@ -82,6 +88,7 @@ Consciously out of scope for this project. Candidates for the report's Perspecti
 | WONT-04 | Company or client context: the project refers to the game only                           |
 | WONT-05 | Reusing Revenge of the Assassin (the 1st-semester JS browser game) beyond a brief mention |
 | WONT-06 | A sync engine such as Zero (Rocicorp) in place of the hand-built prediction, action log and reconciliation |
+| WONT-07 | Playing without a connection: actions queued offline and sent later                     |
 
 ## Notes on tools considered
 
