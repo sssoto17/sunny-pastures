@@ -231,7 +231,7 @@ gate row is from `docs/spikes/persistence/gate.md` (#9): seed 42, every store en
 | Offline return p95 at 50 / 200 (ms) | 4 / 4 | 5 / 5 | 5 / 5 | 6 / 5 |
 | Lost updates / retries / 503s | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
 | Bytes per player-hour at 50 / 200 | 146,364 / 139,264 | 209,715 / 201,114 | 226,645 / 208,350 | 216,269 / 200,704 |
-| Replay cost (µs per action; ×10 projection) | n/a | _pending_ | _pending_ | _pending_ |
+| Replay cost (µs per action; ×10 projection) | n/a (no replay) | n/a (tail always 0) | 3.7 (reads 3.4, actions 3.8); ×10: 2.37 ms | 3.3 (reads 3.4, actions 3.5); ×10: 4.72 ms |
 | `stateAt` possible | no | yes | yes | yes |
 | Lines / moving parts | 94 code lines; `farms` + `processed_keys` | 129 code lines, shared by all B; `actions` + `snapshots` + injected `replay` | same | same |
 
@@ -243,6 +243,13 @@ Applied as written, the rule picks **B100**: every B passes step 2 against a 28 
 three B variants tie within 5 ms. Step 3's tie-break picks B100 over B1 by 410 bytes per
 player-hour, which is one 8 kB page per run and within run-to-run spread; the latencies tie within
 1 ms.
+
+**Replay cost (step 4, #29).** A least-squares line of `load` time against tail over every
+measured read and action in the normal runs. The slope includes reading the action rows from
+Postgres as well as applying them, so it is an upper bound on the sim's own cost. The ×10 column
+is intercept + 10 × slope × (N − 1), a mean. Applied to B100's measured worst-case p95 instead
+(2.46 ms plus nine more times 3.3 µs × 99), a 10× costlier sim gives about 5.4 ms, still a tenth
+of the 50 ms limit.
 
 **Stress runs (reported, not in the rule).** At about 1,450 requests/s, client p95 for actions is
 85 / 88 / 89 / 100 ms (A / B1 / B25 / B100), and server-side action p95 is 14.7 / 17.8 / 18.9 /
