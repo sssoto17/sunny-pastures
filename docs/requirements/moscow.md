@@ -23,7 +23,7 @@ The game is not a valid answer to the research question without these.
 | MUST-03 | Production facilities with timed queues: feed mill, bakery, dairy                       |
 | MUST-04 | NPC order board: deliver goods for coins and XP                                         |
 | MUST-05 | Economy and progression: coins, XP and levels that unlock content                       |
-| MUST-06 | Upgrades for fields, facility tiers, animal pens, silo and barn; Loop and Collector add-ons |
+| MUST-06 | Upgrades for fields, facility tiers, animal pens, silo and barn; Loop and Collector add-ons (Collector for pens too) |
 | MUST-07 | Offline progress: the farm keeps producing while the player is away                     |
 | MUST-08 | Gifting: send goods to a friend (friend list, invite link)                              |
 | MUST-09 | Play without a sign-up form (Supabase anonymous sign-in)                               |
@@ -60,6 +60,7 @@ Clearly valuable; dropped only if the Musts are at risk.
 | SHOULD-04 | Link an email to an anonymous player, to keep the farm across browsers               |
 | SHOULD-05 | Farmhands on crops and animals (feed and collect), with speed upgrades and the Foreman |
 | SHOULD-06 | Clovers: a rare currency earned in play, spent to skip waits                         |
+| SHOULD-07 | Away summary since the player last looked, across actions taken in between           |
 
 ## Could have
 
@@ -71,10 +72,11 @@ Only if there's time after the Musts and Shoulds, and only if they still serve t
 | COULD-02 | Real-time updates (Supabase Realtime): live notifications, live visits                     |
 | COULD-03 | Skill mini-games that earn clovers, server-verifiable by seed and input replay            |
 | COULD-04 | An event-store library in place of the hand-built action log                               |
-| COULD-05 | Admin dashboard for monitoring and feature flags ([#1](https://github.com/sssoto17/sunny-pastures/issues/1)) |
+| COULD-05 | Admin dashboard for monitoring and feature flags ([#1](https://github.com/sssoto17/sunny-pastures/issues/1)); a CLI script that replays a farm's log to reproduce a bug |
 | COULD-06 | Tractor: a farmhand works a whole field as one task                                        |
 | COULD-07 | Farmhands deliver orders while the player is away                                          |
 | COULD-08 | Production line add-on: a facility repeats a player-defined sequence of recipes            |
+| COULD-09 | Farm activity history: a timeline of the player's past actions                             |
 
 ## Won't have (this time)
 

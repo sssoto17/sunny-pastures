@@ -29,6 +29,11 @@ _Avoid_: version, revision, counter
 Rebuilding a farm by applying its accepted actions again, in sequence-number order.
 _Avoid_: recompute, re-run, rebuild
 
+**Audit**:
+Rebuilding a farm as it was at a past server time from its accepted actions, and checking that
+it obeys the rules and matches what was stored.
+_Avoid_: verification, inspection, cheat scan
+
 **Server time**:
 The only clock the game trusts. A device's clock never decides when anything happens.
 _Avoid_: client time, device time, now
@@ -73,8 +78,8 @@ queue slots and makes more recipes available.
 _Avoid_: level (that is the player's), grade, rank
 
 **Add-on**:
-A purchase that changes how a facility works beyond its tier, such as automating a step or
-allowing more queue slots.
+A purchase that changes how a facility or a pen works beyond its own upgrades, such as
+automating a step or allowing more queue slots.
 _Avoid_: module, extension, perk
 
 **Loop**:
@@ -82,7 +87,7 @@ The add-on that starts the facility's last recipe again whenever its inputs are 
 _Avoid_: repeat, auto-craft
 
 **Collector**:
-The add-on that moves a facility's finished goods into storage.
+The add-on that moves finished goods from a facility, or products from a pen, into storage.
 _Avoid_: auto-collect, conveyor
 
 **Silo**:

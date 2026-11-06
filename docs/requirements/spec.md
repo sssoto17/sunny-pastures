@@ -4,7 +4,7 @@ What Sunny Pastures must do for each item in [`moscow.md`](moscow.md), written s
 be checked. `moscow.md` ranks the scope; this file says when an item is done. It is also the
 starting point for the report's requirements chapter and for planning M2–M4.
 
-Status: **draft**. Points still open are marked _Open_ and listed under
+Status: **ready for review**. The few points still open are marked _Open_ and listed under
 [Open questions](#open-questions). The grill behind it is on issue #2.
 
 Last changed: 2026-11-06.
@@ -39,9 +39,10 @@ Words in **bold** in the criteria, and the terms they use, are defined in [`GLOS
   `packages/sim` and is tuned after playtest 1. A criterion that says "per content" means its test
   reads the value from content data instead of hard-coding it. This spec fixes only what exists,
   how it connects and the bounds that tests rely on.
-- **"Depends on ADR-0001"** marks a criterion that needs farm history: actions from before the
-  farm's last action. Whether that history exists depends on the persistence model decided in
-  #12. These criteria are settled after #12. Everything untagged holds for either store.
+- **Farm history** (actions from before the farm's last action) exists because
+  [ADR-0001](../adr/0001-persistence-model.md) chose store B100: an append-only action log per
+  farm, with a snapshot after every 100th action. The criteria that rely on it are listed under
+  [Farm history](#farm-history-after-adr-0001).
 - **Already settled, not reopened here:** offline progress is computed lazily: nothing runs while
   a player is away, and the next request brings the farm up to server time. Determinism,
   sequence numbers and idempotency keys come from the persistence spike (ADR-0001, #5–#11).
@@ -159,7 +160,7 @@ Upgrades for fields, facilities, pens and storage, and the first automation.
 | MUST-06.3 | **Pens**: trough capacity and the number of animals per pen can be upgraded. | `unit`, `content` |
 | MUST-06.4 | **Storage**: the **silo** (crops) and the **barn** (all other goods) each have a capacity. Larger capacities unlock with Level and are bought with coins. | `unit`, `content` |
 | MUST-06.5 | **Loop** add-on: when the facility has a free slot and the inputs are in storage, it starts the facility's last recipe again. This includes while the player is away. It stops when inputs or space run out. | `unit`, `prop` |
-| MUST-06.6 | **Collector** add-on: it moves a facility's finished goods into storage as soon as they're done, if they fit. If they don't fit, they wait in the facility. | `unit`, `prop` |
+| MUST-06.6 | **Collector** add-on, for a facility or a pen: it moves finished goods (from a facility) or products (from a pen) into storage as soon as they're done, if they fit. If they don't fit, they wait where they are. | `unit`, `prop` |
 | MUST-06.7 | An upgrade applies only to jobs, crops and production started after it was bought. Anything already running keeps its finish time. | `unit`, `prop` |
 | MUST-06.8 | A new farm has no automation: troughs hold one portion, and there are no add-ons. | `unit` |
 
@@ -173,7 +174,6 @@ The farm keeps producing while the player is away.
 | MUST-07.2 | Automated production stops when its output wouldn't fit in storage, or when inputs or coins run out. Storage capacity is the only bound: there is no time-based cap on offline progress. | `unit`, `prop` |
 | MUST-07.3 | **Away summary since the last action**: on return, the client shows what changed since the farm's last accepted action. It lists counts per good and a timeline of what happened, with server times ("03:12 the bakery finished 3 cookies"). The summary comes from advancing the farm, so client and server produce the same one. | `unit`, `ui`, `playtest` |
 | MUST-07.4 | Advancing the most-automated farm the content allows by 7 days takes < 50 ms on the server. That farm has max tiers, every add-on, full troughs and farmhands (if SHOULD-05 ships). | `bench` |
-| MUST-07.5 | **Depends on ADR-0001.** An away summary "since you last looked", reaching back across actions made in between (in another tab, by farmhands). | _after #12_ |
 
 ### MUST-08 Gifting
 
@@ -242,8 +242,10 @@ Optimistic client prediction, reconciled with the server's result.
 
 ### MUST-13 Persistence
 
-Survives concurrent actions and retries. The model is decided by ADR-0001 (#12), and these
-criteria hold for either store.
+Survives concurrent actions and retries. ADR-0001 chose store B100: an append-only action log per
+farm, with a snapshot after every 100th action. Its verdict holds up to about 200 concurrent
+players (about 37 requests/s). Before real load approaches the stress level (about 1,450
+requests/s on the load VM), B100 is measured against A again, as the ADR's revisit trigger says.
 
 | # | Criterion | Verified by |
 | --- | --- | --- |
@@ -252,6 +254,8 @@ criteria hold for either store.
 | MUST-13.3 | Concurrent actions on one farm never lose an update. A conflict is retried (at most 3 times). After that the request fails with a 503 and nothing is committed. | `accept`, `attack` (T4) |
 | MUST-13.4 | Sending a gift, and claiming one, is written in the same transaction as the farm. No gift is lost or claimed twice, even across a crash. | `accept`, `attack` (T4, T6) |
 | MUST-13.5 | The spike's concurrency check runs against the real store: 1,000 gift-and-harvest pairs fired at one farm at the same moment, with no lost update. | `accept` |
+| MUST-13.6 | Logs written under an earlier rules or content version still load after a release. CI replays a set of recorded logs under the new version. How this is achieved is decided in #31. | `ci` |
+| MUST-13.7 | Every query in a commit runs inside its transaction. A saturating stress run shows 0 `UNSAFE_TRANSACTION` errors and 0 lost updates (#28). | `accept`, `metric` |
 
 ### MUST-14 Property tests for the simulation
 
@@ -286,7 +290,7 @@ Mapped to the threat model and the OWASP Top 10 (2025).
 
 Each threat has at least one attack test, and each test fails if the attack succeeds. These tests
 *prevent* cheating and don't depend on the store. *Detecting* cheating after the fact is
-MUST-16.2.
+MUST-16.2 to MUST-16.5.
 
 | Threat | Attack | Expected result | OWASP 2025 |
 | --- | --- | --- | --- |
@@ -299,11 +303,15 @@ MUST-16.2.
 | T7 | Action spam | Over the per-farm rate limit → 429. Nothing committed. | A06 Insecure Design |
 | T8 | Malformed or oversized input | 400/422, no 500, no partial write | A05 Injection, A10 Mishandling of Exceptional Conditions |
 | T9 | Alt accounts funnelling goods by gifts | Capped by friends-only gifting, goods-only gifts and the daily limit | A06 Insecure Design |
+| T10 | Editing a log or snapshot row directly in the database | The audit flags the farm | A08 Software or Data Integrity Failures |
 
 | # | Criterion | Verified by |
 | --- | --- | --- |
-| MUST-16.1 | T1–T9 each have a passing attack test, and the table above is the report's threat model. | `attack` |
-| MUST-16.2 | **Depends on ADR-0001.** Audits that rebuild a farm at a past time (`stateAt`) and check it, plus the attack tests that rely on them. | _after #12_ |
+| MUST-16.1 | T1–T10 each have a passing attack test, and the table above is the report's threat model. | `attack` |
+| MUST-16.2 | **Audit route**: it rebuilds a farm at a time `t` from its log (`stateAt`) and checks it against the invariants in MUST-14. It refuses a `t` later than server time. | `accept` |
+| MUST-16.3 | **Log against snapshots**: replaying a farm's log from its first action gives the same state hash as every snapshot stored for it. A farm where they differ is flagged. | `accept`, `attack` (T10) |
+| MUST-16.4 | Editing a log row or a snapshot row directly in the database makes the audit flag that farm (T10). | `attack` (T10) |
+| MUST-16.5 | Only an account with the **admin** role can call the audit route. Every other caller gets 403. | `attack` (T5) |
 
 ### MUST-17 CI and deployment
 
@@ -356,6 +364,7 @@ These apply to every requirement above. _Open_: whether they get MoSCoW IDs of t
 | SHOULD-04 | An anonymous player can link an email. Signing in with it in another browser opens the same farm. |
 | SHOULD-05 | **Farmhands** on crops and animals:<br>• On crop duty, a farmhand harvests and replants (paying the seed price).<br>• On animal duty, a farmhand carries feed from the barn to the troughs and collects products from the pens into the barn.<br>• The player gives each farmhand a duty. It works by a fixed priority with fixed tie-breaks (lowest plot first), inside the simulation and with no randomness.<br>• Speed upgrades shorten a farmhand's working time. The **Foreman** upgrade lets farmhands choose their duty by a fixed priority across the farm.<br>• Farmhands are expensive and unlock late. Each further farmhand unlocks at a higher Level. |
 | SHOULD-06 | **Clovers**: a few at every level-up, plus a small seeded chance on each delivered order. A player spends them to skip an order-board refill delay or to finish a job or crop now. They are never sold and never gifted. |
+| SHOULD-07 | **Away summary since you last looked**: the browser keeps the server time of the farm it last showed. On return, the server compares the farm at that time (`stateAt`) with the farm now, and the summary lists the actions taken in between (in another tab, say) and what the farm produced. The kept time only decides what the summary shows, so trusting it is harmless. |
 
 ## Could have
 
@@ -365,10 +374,11 @@ These apply to every requirement above. _Open_: whether they get MoSCoW IDs of t
 | COULD-02 | Supabase Realtime pushes gift arrivals, and live changes during a visit, without a reload. |
 | COULD-03 | Skill mini-games earn **clovers**. The server verifies each result by replaying the player's inputs against the seed. |
 | COULD-04 | An event-store library replaces the hand-built action log, if ADR-0001 picks the log. The acceptance tests still pass unchanged. |
-| COULD-05 | An admin dashboard shows the MUST-19 metrics and toggles feature flags (#1). |
+| COULD-05 | An admin dashboard shows the MUST-19 metrics and toggles feature flags (#1). A CLI script replays one farm's log up to a given sequence number, to reproduce a reported bug. |
 | COULD-06 | **Tractor**: equipment that lets a farmhand on crops work a whole field as one task. |
 | COULD-07 | Farmhands deliver orders, earning XP and coins and making room in storage while the player is away. |
 | COULD-08 | **Production line** add-on: a facility repeats a sequence of recipes the player defines. It replaces Loop on that facility. |
+| COULD-09 | **Farm activity history**: the player sees a timeline of their past actions, read from the log ("Tue 14:02, delivered order: 4 bread"). |
 
 ## Won't have (this time)
 
@@ -376,33 +386,33 @@ WONT-01 to WONT-06 as in `moscow.md`, plus **WONT-07**: no play without a connec
 aren't queued offline to be sent later. Queuing them would put predictions on top of predictions,
 and stamp actions with times the server can't trust (MUST-11).
 
-## Depends on ADR-0001
+## Farm history (after ADR-0001)
 
-These need farm history and are settled after #12:
+During the grill, four requirements waited on #12 because they need farm history. ADR-0001 chose
+B100, so the history exists, and they were settled like this:
 
-1. **MUST-07.5** An away summary "since you last looked", reaching back across actions.
-2. **Farm activity history**: a timeline of past actions shown to the player. It isn't a MoSCoW
-   item yet. _Open_: whether it becomes one.
-3. **MUST-16.2** Detecting cheating after the fact: audits through `stateAt`, and the tests that
-   use them.
-4. **Support and debugging replay** of a reported bug. It isn't a MoSCoW item yet, and it is
-   tooling for the admin.
+| Requirement | Settled as |
+| --- | --- |
+| Away summary "since you last looked", across actions | SHOULD-07 |
+| Farm activity history, a timeline of past actions | COULD-09 |
+| Detecting cheating after the fact | MUST-16.2 to MUST-16.5, threat T10 |
+| Replaying a reported bug | COULD-05 (CLI script) |
 
-The grill checked these and kept them **untagged**, because each works under either store:
+The grill checked three more and kept them independent of the log:
 
 - the away summary since the last action (MUST-07.3), which comes from advancing the stored farm;
-- the gift history (MUST-08.7), which comes from the gift inbox, a table shared by both stores;
+- the gift history (MUST-08.7), which comes from the gift inbox;
 - the unlock curves (MUST-19.3), which come from a metrics table.
 
 ## Open questions
 
-1. **ADR-0001 (#12)**: settles the four items above.
-2. **A pen upgrade that collects**: farmhands on animal duty collect (SHOULD-05). The admin
-   would also like a pen upgrade for this. Its shape and priority are still open.
-3. **The browser-test tool** behind `ui` is a new dependency to approve.
-4. **The rate limit for T7** (actions per farm per second), and whether it lives in config or in
+1. **The browser-test tool** behind `ui` is a new dependency to approve.
+2. **The rate limit for T7** (actions per farm per second), and whether it lives in config or in
    content.
-5. **The OWASP 2025 mapping** in MUST-16: check it against the published list before the report
+3. **The OWASP 2025 mapping** in MUST-16: check it against the published list before the report
    cites it.
-6. **Baseline IDs**: whether BASE-01–05 move into `moscow.md` as Musts.
+4. **Baseline IDs**: whether BASE-01–05 move into `moscow.md` as Musts.
+5. **The admin role** (MUST-16.5): how an account gets it. Anonymous sign-in gives every player a
+   user, so the admin needs a role that only the admin can set.
+6. **Replaying old logs after a rules change** (MUST-13.6): decided in #31.
 7. **Where the state hash lives** (MUST-10.5): an M2 decision taken over from ADR-0001.
