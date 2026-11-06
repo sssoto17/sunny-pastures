@@ -56,9 +56,16 @@ interface GameStore {
 }
 
 interface AuditableStore extends GameStore {
-  stateAt(playerId: string, t: number): Promise<FarmState>; // B only
+  // B only. The farm at server time t: the actions up to t, then advanced to t. `seq` is the
+  // last action at or before t (0 before the first), so an audit can say which one it saw.
+  stateAt(playerId: string, t: number): Promise<{ state: FarmState; seq: number }>;
 }
 ```
+
+The audit route refuses a `t` later than server time (400): `stateAt` reads history, not a
+forecast. B's `load` doesn't compare the replayed hash with the last log row's answer hash. The
+gate covers determinism, and a per-load hash would add work to B's measured `load` that A doesn't
+do. (Amended 6 Nov after #9.)
 
 Every store checks what it loads before returning it: `seq` and `at` must be safe integers
 (`Number.isSafeInteger`), or `load` throws a store error. Postgres drivers return `bigint`
@@ -194,18 +201,21 @@ from `--json-file`, because the stats CSV is a periodic snapshot. The server's k
 
 ## Results
 
-_To be filled from `docs/spikes/persistence/results.csv`._
+_To be filled from `docs/spikes/persistence/results.csv`._ The gate row is from
+`docs/spikes/persistence/gate.md` (#9): seed 42, every store ends on hash `e1925b02…` at seq 456
+with 456/456 strict round trips, and every B's `stateAt` matches the sim 10/10. Identical on the
+cloud container (Postgres 16) and the laptop (Postgres 17).
 
 | | A | B1 | B25 | B100 |
 | --- | --- | --- | --- | --- |
-| Gate (hash equivalence) | | | | |
+| Gate (hash equivalence) | pass | pass | pass | pass |
 | p50 / p95 at 50 players (ms) | | | | |
 | p50 / p95 at 200 players (ms) | | | | |
 | Worst-case load p95 (ms) | | | | |
 | Offline return p95 (ms) | | | | |
 | Lost updates / retries / 503s | | | | |
 | Bytes per player-hour | | | | |
-| `stateAt` possible | no | | | |
+| `stateAt` possible | no | yes | yes | yes |
 | Lines / moving parts | | | | |
 
 ## Decision
