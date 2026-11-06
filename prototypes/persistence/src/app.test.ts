@@ -7,6 +7,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, type AppOptions, type TimingRow } from "./app.ts";
+import { stateHash } from "./sim.ts";
 import { firstFarm } from "./stores.ts";
 import { csvSink } from "./timing.ts";
 import type { Gift } from "./inbox.ts";
@@ -167,17 +168,33 @@ test("store time lands in load and commit, the rest of the handler in sim", asyn
   assert.equal(rows[0]!.offsetMs, 0);
 });
 
-test("a store with history still answers stateAt, and its time lands in load", async (t) => {
+test("a store with history still answers stateAt with its seq, and its time lands in load", async (t) => {
   const store = Object.assign(memoryStore(), {
     async stateAt(id: string) {
       await new Promise((r) => setTimeout(r, 20));
-      return firstFarm(id);
+      return { state: firstFarm(id), seq: 4 };
     },
   });
-  const { call } = await serve(t, { store, storeName: "B25" });
+  const { call } = await serve(t, { store, storeName: "B25", clock: () => 10 * MIN });
   const res = await call("/farms/f/at/5");
   assert.equal(res.status, 200);
   assert.ok(serverTiming(res).load! >= 19);
+  assert.deepStrictEqual(await res.json(), { at: 5, seq: 4, hash: stateHash(firstFarm("f")), state: firstFarm("f") });
+});
+
+test("stateAt at a t later than the request's server time is a 400 and never reaches the store", async (t) => {
+  const asked: number[] = [];
+  const store = Object.assign(memoryStore(), {
+    async stateAt(id: string, at: number) {
+      asked.push(at);
+      return { state: firstFarm(id), seq: 0 };
+    },
+  });
+  const { call } = await serve(t, { store, storeName: "B25", clock: () => 10 * MIN });
+  assert.equal((await call(`/farms/f/at/${10 * MIN + 1}`)).status, 400);
+  // The clock-offset header moves this request's server time, so the same t is history now.
+  assert.equal((await call(`/farms/f/at/${10 * MIN + 1}`, { offset: "1" })).status, 200);
+  assert.deepStrictEqual(asked, [10 * MIN + 1]);
 });
 
 test("the CSV sink writes a header and one line per row", async (t) => {

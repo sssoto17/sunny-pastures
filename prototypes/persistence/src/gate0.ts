@@ -102,7 +102,7 @@ function replayFromSnapshots(script: Script, rules: Rules, n: number) {
   return { hash, problems };
 }
 
-function report(result: Gate0Result, seed: number): string {
+export function report(result: Gate0Result, seed: number): string {
   const lines = [
     "Gate step 0 (ADR-0001): in-memory determinism, no database",
     `script: seed ${seed}, ${result.accepted + result.refused} actions ` +

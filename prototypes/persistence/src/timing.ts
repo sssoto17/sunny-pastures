@@ -9,7 +9,7 @@
 // #8 is changing), and timing inside each store (four copies, and B's replay hidden from A's).
 
 import { createWriteStream } from "node:fs";
-import type { GameStore } from "./store.ts";
+import type { AuditableStore, GameStore } from "./store.ts";
 
 export type Timings = { loadMs: number; commitMs: number };
 
@@ -22,14 +22,15 @@ export function timed(store: GameStore): { store: GameStore; timings: Timings } 
       timings[bucket] += performance.now() - start;
     });
   };
-  const view: GameStore & { stateAt?: (id: string, t: number) => Promise<unknown> } = {
+  const view: GameStore & Partial<Pick<AuditableStore, "stateAt">> = {
     load: (id) => measure("loadMs", () => store.load(id)),
     processed: (id, key) => measure("loadMs", () => store.processed(id, key)),
     commit: (id, entry) => measure("commitMs", () => store.commit(id, entry)),
     gift: (giftId) => measure("loadMs", () => store.gift(giftId)),
   };
-  // Only an auditable store gets stateAt, so the handler's 501 on A still works.
-  const auditable = store as GameStore & { stateAt?: (id: string, t: number) => Promise<unknown> };
+  // Only an auditable store gets stateAt, so the handler's 501 on A still works. Its answer,
+  // { state, seq }, is forwarded unchanged.
+  const auditable = store as GameStore & Partial<Pick<AuditableStore, "stateAt">>;
   if (typeof auditable.stateAt === "function") {
     const stateAt = auditable.stateAt.bind(store);
     view.stateAt = (id, t) => measure("loadMs", () => stateAt(id, t));

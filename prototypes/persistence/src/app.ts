@@ -2,7 +2,8 @@
 // reply. Transport only: the handler owns load → advance → apply → commit.
 //   GET  /farms/:id          → { seq, hash, state }, advanced to server time in memory, writes nothing
 //   POST /farms/:id/actions  ← { action, expectedSeq, idempotencyKey } → { seq, hash, rebased, retries }
-//   GET  /farms/:id/at/:t    → { at, hash, state }: the farm at server time t (ms); B only, 501 on A
+//   GET  /farms/:id/at/:t    → { at, seq, hash, state }: the farm at server time t (ms); B only, 501
+//                              on A, 400 for a t later than this request's server time
 // With SPIKE_CLOCK=1 only (load runs, never the game):
 //   X-Spike-Clock-Offset: <ms> on any request moves that request's server time forward
 //   POST /spike/seed     ← { prefix, players, actions? } → { seeded, skipped, farms: [{ farm, seq }] }
@@ -102,7 +103,7 @@ async function route(
   };
 
   if (read && req.method === "GET") return run("read", read[1]!, () => handleRead(store, clock, read[1]!));
-  if (audit && req.method === "GET") return run("stateAt", audit[1]!, () => handleStateAt(store, audit[1]!, audit[2]!));
+  if (audit && req.method === "GET") return run("stateAt", audit[1]!, () => handleStateAt(store, clock, audit[1]!, audit[2]!));
   if (act && req.method === "POST") {
     const body = await jsonBody(req);
     if (body instanceof Error) return { route: "action", farm: act[1]!, reply: badRequest(body) };

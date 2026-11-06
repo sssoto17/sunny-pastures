@@ -22,17 +22,19 @@ export async function handleRead(
   return { status: 200, body: { seq: record.seq, hash: stateHash(state), state } };
 }
 
-/** The audit read: the farm as it was at server time `t` (integer ms, from the URL). */
+/** The audit read: the farm as it was at server time `t` (integer ms, from the URL), never later than now. */
 export async function handleStateAt(
   store: GameStore,
+  now: Clock,
   farmId: string,
   t: string,
-): Promise<Reply<{ at: number; hash: string; state: FarmState }> | Reply<ErrorBody>> {
+): Promise<Reply<{ at: number; seq: number; hash: string; state: FarmState }> | Reply<ErrorBody>> {
   if (!isAuditable(store)) return { status: 501, body: { error: "this store keeps no history (stateAt is B only)" } };
   const at = /^\d+$/.test(t) ? Number(t) : NaN;
   if (!Number.isSafeInteger(at)) return { status: 400, body: { error: "t must be non-negative integer ms" } };
-  const state = await store.stateAt(farmId, at);
-  return { status: 200, body: { at, hash: stateHash(state), state } };
+  if (at > now()) return { status: 400, body: { error: "t is later than server time: stateAt reads history only" } };
+  const { state, seq } = await store.stateAt(farmId, at);
+  return { status: 200, body: { at, seq, hash: stateHash(state), state } };
 }
 
 function isAuditable(store: GameStore): store is AuditableStore {

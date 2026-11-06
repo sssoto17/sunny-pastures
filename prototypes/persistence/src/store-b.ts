@@ -102,10 +102,10 @@ export async function createStoreB(
       return { state: replay(record.state, tail, last.at), seq: last.seq, at: last.at };
     },
 
-    async stateAt(playerId: string, t: number): Promise<FarmState> {
+    async stateAt(playerId: string, t: number): Promise<{ state: FarmState; seq: number }> {
       if (!Number.isSafeInteger(t)) throw new RangeError(`t must be integer ms, got ${t}`);
       const { record, tail } = await read(playerId, t);
-      return replay(record.state, tail, t);
+      return { state: replay(record.state, tail, t), seq: tail.at(-1)?.seq ?? record.seq };
     },
 
     async processed(playerId: string, idempotencyKey: string): Promise<Answer | null> {
