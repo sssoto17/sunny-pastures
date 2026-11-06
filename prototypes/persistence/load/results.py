@@ -24,6 +24,12 @@ Definitions (proposed for ADR-0001's Method; the ADR doesn't fix them):
   by players and by the run's real hours (warm-up + measured).
 - **Lost updates** are accepted actions (200s) minus rows written: the log's new rows for B,
   new processed keys for A.
+- **Replay cost** (ADR-0001 step 4, B25 and B100): an ordinary least-squares line through `load`
+  time against tail (seq mod N, rebuilt as for the worst case) over every measured read and action
+  of the six normal runs (both player counts pooled). The slope is µs per tail action: reading the
+  action rows from Postgres as well as applying them, so an upper bound on the sim's own cost. The
+  projection is intercept + 10 × slope × (N − 1): the worst-case load if each replayed action cost
+  10× as much (the full sim). B1's tail is always 0, so it has no slope.
 """
 
 from __future__ import annotations
@@ -87,6 +93,43 @@ def tails(rows: list[dict], seeded: dict[str, int], n: int) -> tuple[list[tuple[
     return out, seq
 
 
+# --- replay cost (ADR-0001 step 4) ------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Fit:
+    """`load` ≈ intercept + slope × tail, from ordinary least squares."""
+
+    slope_us: float
+    intercept_ms: float
+    n: int
+
+    def projected_ms(self, snapshot_n: int) -> float:
+        """The worst-case load (tail N − 1) if each replayed action cost 10× as much."""
+        return self.intercept_ms + 10 * (self.slope_us / 1000) * (snapshot_n - 1)
+
+
+def fit_replay(samples: list[tuple[int, float]]) -> Fit:
+    """OLS of load ms against tail; the slope comes back in µs per action."""
+    n = len(samples)
+    mx = sum(t for t, _ in samples) / n
+    my = sum(ms for _, ms in samples) / n
+    sxx = sum((t - mx) ** 2 for t, _ in samples)
+    if sxx == 0:
+        raise ValueError("every sample has the same tail: no slope to fit")
+    slope = sum((t - mx) * (ms - my) for t, ms in samples) / sxx
+    return Fit(slope_us=slope * 1000, intercept_ms=my - slope * mx, n=n)
+
+
+def replay_samples(rows: list[dict], seeded: dict[str, int], n: int, start: int, end: float) -> list[tuple[str, int, float]]:
+    """(route, tail, load ms) for every accepted read and action in the measured window."""
+    with_tails, _ = tails(rows, seeded, n)
+    return [
+        (r["route"], tail, float(r["loadMs"]))
+        for r, tail in with_tails
+        if r["status"] == "200" and start <= int(r["t"]) <= end
+    ]
+
+
 # --- one configuration ------------------------------------------------------------------------
 
 @dataclass
@@ -110,6 +153,7 @@ class Config:
     accepted: int = 0
     written: int = 0
     seq_check: str = ""
+    replay: list[tuple[str, int, float]] = field(default_factory=list)  # B25, B100: (route, tail, load ms)
 
     @property
     def bytes_per_player_hour(self) -> float:
@@ -175,6 +219,8 @@ def load_config(folder: Path) -> Config:
         with_tails, final = tails(rows, seeded, n)
         log_rows = after["tables"]["actions"]["rows"]
         c.seq_check = "ok" if sum(final.values()) == log_rows else f"rebuilt {sum(final.values())} ≠ log {log_rows}"
+        if n in (25, 100):
+            c.replay = replay_samples(rows, seeded, n, start, end)
         if n == 100:
             c.worst_load_ms = [
                 float(r["loadMs"]) for r, tail in with_tails
@@ -286,7 +332,47 @@ def results_table(configs: list[Config]) -> str:
         return f"{100 * r / max(1, r + w):.1f}% / {100 * w / max(1, r + w):.1f}%"
     row("Read / write share", share)
     row("`stateAt` possible", lambda s: "no" if s == "A" else "yes")
+
+    def replay(s: str) -> str:
+        if s == "A":
+            return "n/a (no replay)"
+        if s == "B1":
+            return "n/a (tail always 0)"
+        fits = replay_fits(configs, s)
+        if not fits:
+            return "–"
+        pooled_fit = fits["pooled"]
+        return (f"{pooled_fit.slope_us:.1f} µs (reads {fits['read'].slope_us:.1f}, actions {fits['action'].slope_us:.1f}); "
+                f"×10: {pooled_fit.projected_ms(SNAPSHOT_N[s]):.2f} ms")
+    row("Replay cost (µs per action; ×10 projection)", replay)
     return head + "\n".join(lines)
+
+
+def replay_fits(configs: list[Config], store: str) -> dict[str, Fit]:
+    """The store's replay fits over its normal runs (both player counts): read, action, pooled."""
+    samples = [x for c in configs if c.kind == "normal" and c.store == store for x in c.replay]
+    if not samples:
+        return {}
+    fits = {"pooled": fit_replay([(t, ms) for _, t, ms in samples])}
+    for route in ("read", "action"):
+        fits[route] = fit_replay([(t, ms) for r, t, ms in samples if r == route])
+    return fits
+
+
+def replay_table(configs: list[Config]) -> str:
+    lines = ["| Store | Requests | Slope (µs per action) | Intercept (ms) | ×10 worst case: intercept + 10 × slope × (N − 1) (ms) |",
+             "|---|---|---:|---:|---:|"]
+    for s in ("B25", "B100"):
+        fits = replay_fits(configs, s)
+        for route in ("read", "action", "pooled"):
+            if route not in fits:
+                continue
+            f = fits[route]
+            label = {"read": "reads", "action": "actions", "pooled": "**pooled**"}[route]
+            lines.append(f"| {s} | {label} (n {f.n:,}) | {f.slope_us:.2f} | {f.intercept_ms:.3f} "
+                         f"| {f.projected_ms(SNAPSHOT_N[s]):.2f} |")
+    lines.append("| B1 | n/a: its tail is always 0, so there is no slope | | | |")
+    return "\n".join(lines)
 
 
 def decision(configs: list[Config]) -> str:
@@ -425,6 +511,8 @@ def main(argv: list[str]) -> None:
     print(results_table(configs))
     print("\n## Decision rule\n")
     print(decision(configs))
+    print("\n## Replay cost (ADR-0001 step 4)\n")
+    print(replay_table(configs))
     print("\n## Stress runs\n")
     print(stress_table(configs))
 
