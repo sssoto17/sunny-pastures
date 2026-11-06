@@ -62,7 +62,7 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
 | Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
 | Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
 
-When a skill publishes tickets, give each one a milestone, add it to the Project, and set Track, Mode, Size, Priority and Week. Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
+When a skill publishes tickets, give each one a milestone, add it to the Project, set Track, Mode, Size, Priority and Week, and add one type and one area label (see `triage-labels.md`). Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
 
 ## Workstreams
 
@@ -75,7 +75,7 @@ milestone.
 The milestone is the default grouping: it already has the tickets, the due date and a progress bar.
 
 - **One workstream in a milestone** (for example M1, the persistence spike): no parent issue. The tickets go straight into the milestone, and the milestone description plays the parent's role.
-- **Several workstreams in a milestone**: each workstream gets a parent issue titled `<milestone>: <workstream>`, in the same milestone and on the Project with Track, Mode and Priority set. Its body states the goal and an "Acceptance criteria" list, and links the ADRs and PRs it rests on. Its tickets are its sub-issues (see **Make an issue a sub-issue of a parent**). Size and Week stay on the tickets, not the parent.
+- **Several workstreams in a milestone**: each workstream gets a parent issue titled `<milestone>: <workstream>`, in the same milestone and on the Project with Track, Mode and Priority set, and with one type and one area label. Its body states the goal and an "Acceptance criteria" list, and links the ADRs and PRs it rests on. Its tickets are its sub-issues (see **Make an issue a sub-issue of a parent**). Size and Week stay on the tickets, not the parent.
 - A parent is never worked directly. It closes when its last sub-issue closes.
 - Don't add parents afterwards to a milestone whose tickets are already published.
 
@@ -111,11 +111,13 @@ moves an issue to Ready; skills and agents create issues in Backlog and never pr
 The admin may move an issue **Backlog → Ready** only when it is chosen *and* every one of these
 holds (the definition of ready):
 
-1. **Fields set**: milestone, Track, Mode, Size, Priority and Week.
+1. **Fields set**: milestone, Track, Mode, Size, Priority and Week, plus one type and one area label (`triage-labels.md`). This is also when an issue leaves `triage`.
 2. **Checkable outcome**: the body states the goal and an "Acceptance criteria" list that a reviewer can verify (a test, a command, a file, a number).
 3. **Fits one session**: Size is S or M. An L is split into smaller issues first.
 4. **Unblocked**: no `blocked:*` label, and every native blocker is closed.
-5. **No open decision**: the decisions it rests on are recorded (ADR, `GLOSSARY.md`, `docs/requirements/spec.md`) and linked. If working it would mean making a new design decision, it gets `blocked:decision` or a grill instead.
+5. **No open decision**: the decisions it rests on are recorded (ADR, `GLOSSARY.md`, `docs/requirements/spec.md`) and linked. If working it needs a quick call by the admin, answerable in a comment, it gets `blocked:decision`. If it needs real design work, a `design` issue blocks it through a native dependency.
+
+An `idea` issue never moves to Ready: it's fleshed out by a blocking `design` issue, or retyped once its body meets rules 2–5.
 
 An issue that meets all five but isn't chosen stays in Backlog. When its last blocker closes,
 nothing moves automatically: whether it becomes the focus is the admin's call.
