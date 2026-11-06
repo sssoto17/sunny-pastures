@@ -8,7 +8,7 @@
 // and there is no second write path to get wrong. It skips the HTTP layer and the handler's
 // load per action, which is what makes it fast enough.
 
-import { apply, mulberry32, stateHash, type Action, type FarmState } from "./sim.ts";
+import { apply, BAKERY_SLOTS, BREAD_WHEAT, mulberry32, stateHash, type Action, type FarmState } from "./sim.ts";
 import type { GameStore } from "./store.ts";
 
 export type SeedRequest = { prefix: string; players: number; actions: number };
@@ -82,9 +82,9 @@ async function seedFarm(store: GameStore, farm: string, count: number, endAt: nu
 }
 
 /**
- * `count` actions an active player would make, 2–8 s apart, waiting for wheat when every plot is
- * growing; shifted so the last one is at `endAt`. Plant and harvest only, like live traffic
- * until #8: when bake, collect and gifts are accepted, add them to `choices`.
+ * `count` actions an active player would make, 2–8 s apart, waiting when there is nothing to do;
+ * shifted so the last one is at `endAt`. Plant, harvest, bake and collect, the live load mix
+ * (#11); gifts stay out, as they do in Locust.
  */
 function history(start: FarmState, count: number, endAt: number): { action: Action; at: number }[] {
   let rng = (start.rng ^ 0x5eed) >>> 0;
@@ -104,6 +104,9 @@ function history(start: FarmState, count: number, endAt: number): { action: Acti
       else if (p.status === "ready" || p.readyAt <= t) choices.push({ type: "harvest", plot });
       else nextRipe = Math.min(nextRipe, p.readyAt);
     });
+    if (farm.wheat >= BREAD_WHEAT && farm.bakery.length < BAKERY_SLOTS) choices.push({ type: "bake" });
+    if (farm.bakery.some((j) => j.readyAt <= t)) choices.push({ type: "collect" });
+    else if (farm.bakery.length > 0) nextRipe = Math.min(nextRipe, farm.bakery[0]!.readyAt);
     if (choices.length === 0) {
       t = nextRipe;
       continue;

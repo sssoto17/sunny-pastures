@@ -1,5 +1,6 @@
 // Spike server (ADR-0001 "Method"). Routes and replies are in app.ts; this file only wires them up.
-// Reads PORT, DATABASE_URL, STORE (A|B), SNAPSHOT_N (1|25|100), and for load runs (#10):
+// Reads PORT, DATABASE_URL, STORE (A|B), SNAPSHOT_N (1|25|100), STORE_SCHEMA (default
+// store_<name>; the matrix gives each run a fresh one, #11), and for load runs (#10):
 //   SPIKE_CLOCK=1  honour X-Spike-Clock-Offset and serve /spike/seed and /spike/storage
 //   TIMING_CSV     where each response's timings go (default load/results/server-<store>-<time>.csv)
 
@@ -19,9 +20,10 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-let config;
+let config, schema;
 try {
   config = storeConfig(process.env);
+  schema = storeSchema(config, process.env);
 } catch (e) {
   console.error(e instanceof Error ? e.message : e);
   process.exit(1);
@@ -34,8 +36,7 @@ mkdirSync(dirname(csvPath), { recursive: true });
 const timing = csvSink(csvPath);
 
 const sql = connect(databaseUrl);
-const store = await createStore(sql, config);
-const schema = storeSchema(config);
+const store = await createStore(sql, config, schema);
 const server = createServer(
   createApp({
     store,
@@ -54,7 +55,7 @@ server.keepAliveTimeout = 65_000;
 server.headersTimeout = 66_000;
 
 server.listen(port, () => {
-  console.log(`spike server (store ${config.name}) on http://127.0.0.1:${port}`);
+  console.log(`spike server (store ${config.name}, schema ${schema}) on http://127.0.0.1:${port}`);
   console.log(`timings → ${csvPath}${spikeClock ? "; SPIKE_CLOCK=1: clock offset, /spike/seed, /spike/storage" : ""}`);
 });
 

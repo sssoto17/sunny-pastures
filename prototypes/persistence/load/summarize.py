@@ -4,6 +4,8 @@
 
 Prints, per run: Locust's requests, failures, p50 and p95 per request name, and the server's
 Server-Timing breakdown (load, sim, commit, total; p50 and p95 in ms) per route and status.
+If the run has window.json (a warm-up was discarded), only server rows inside it count, the same
+window as Locust's stats.
 """
 
 from __future__ import annotations
@@ -52,10 +54,17 @@ def locust(run: Path) -> None:
 
 def server(run: Path) -> None:
     groups: dict[tuple[str, str], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    window_file = run / "window.json"
+    window = json.loads(window_file.read_text()) if window_file.exists() else {}
+    start, end = window.get("measuredFrom", 0), window.get("measuredTo", float("inf"))
+    if window:
+        print(f"Server rows from the measured window only (warm-up of {window.get('warmupS', 0):g} s discarded).\n")
     with open(run / "server.csv", newline="") as f:
         for row in csv.DictReader(f):
             if row["route"] in ("seed", "storage"):
                 continue  # harness calls, not the measured traffic
+            if not start <= int(row["t"]) <= end:
+                continue  # warm-up
             key = (f"{row['method']} {row['route']}", row["status"])
             for col in ("loadMs", "simMs", "commitMs", "totalMs"):
                 groups[key][col].append(float(row[col]))

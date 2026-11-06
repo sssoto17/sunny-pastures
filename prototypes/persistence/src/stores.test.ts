@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { newFarm } from "./sim.ts";
-import { replay, storeConfig } from "./stores.ts";
+import { replay, storeConfig, storeSchema } from "./stores.ts";
 
 test("STORE and SNAPSHOT_N pick A, B1, B25 or B100", () => {
   assert.deepStrictEqual(storeConfig({}), { name: "A" }, "A by default, as in #5");
@@ -20,6 +20,15 @@ test("a store configuration that would measure the wrong thing is refused", () =
     { STORE: "C" },
   ]) {
     assert.throws(() => storeConfig(env), /STORE|SNAPSHOT_N/, JSON.stringify(env));
+  }
+});
+
+test("STORE_SCHEMA gives a load run its own fresh schema; without it the store's default", () => {
+  assert.equal(storeSchema({ name: "B25", snapshotN: 25 }), "store_b25");
+  assert.equal(storeSchema({ name: "A" }, {}), "store_a");
+  assert.equal(storeSchema({ name: "A" }, { STORE_SCHEMA: "m_a_u50_r1" }), "m_a_u50_r1");
+  for (const bad of ["", "A-1", "1abc", "x; drop table", "a".repeat(64)]) {
+    assert.throws(() => storeSchema({ name: "A" }, { STORE_SCHEMA: bad }), /STORE_SCHEMA/, JSON.stringify(bad));
   }
 });
 

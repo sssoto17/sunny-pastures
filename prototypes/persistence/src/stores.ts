@@ -46,8 +46,15 @@ export function firstFarm(playerId: string): FarmState {
 }
 
 /** The Postgres schema a configuration's tables live in: one per store variant. */
-export function storeSchema(config: StoreConfig): string {
-  return `store_${config.name.toLowerCase()}`;
+/**
+ * The store's schema: STORE_SCHEMA if set (a load run's own fresh schema, #11), else
+ * `store_<name>`. A lower-case Postgres identifier, so it needs no quoting anywhere.
+ */
+export function storeSchema(config: StoreConfig, env: { STORE_SCHEMA?: string } = {}): string {
+  const schema = env.STORE_SCHEMA;
+  if (schema === undefined) return `store_${config.name.toLowerCase()}`;
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) throw new Error(`STORE_SCHEMA must match [a-z_][a-z0-9_]{0,62}, got ${JSON.stringify(schema)}`);
+  return schema;
 }
 
 /** Every store shares one gift inbox (schema `inbox`), outside the comparison (#8). */
