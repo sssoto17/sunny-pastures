@@ -1,0 +1,105 @@
+[
+    {
+        "name": "GET /farms/:id [return]",
+        "method": "GET",
+        "last_request_timestamp": 1793985230.1238897,
+        "start_time": 1793985211.025,
+        "num_requests": 2,
+        "num_none_requests": 0,
+        "num_failures": 0,
+        "total_response_time": 6.076664000033816,
+        "max_response_time": 3.2899880000059056,
+        "min_response_time": 2.78667600002791,
+        "total_content_length": 568,
+        "response_times": {
+            "3": 2
+        },
+        "num_reqs_per_sec": {
+            "1793985221": 1,
+            "1793985230": 1
+        },
+        "num_fail_per_sec": {}
+    },
+    {
+        "name": "POST /farms/:id/actions [active]",
+        "method": "POST",
+        "last_request_timestamp": 1793985230.8416352,
+        "start_time": 1793985211.0250072,
+        "num_requests": 158,
+        "num_none_requests": 0,
+        "num_failures": 0,
+        "total_response_time": 1007.6595590003308,
+        "max_response_time": 24.991681000074095,
+        "min_response_time": 3.9436230000546857,
+        "total_content_length": 18012,
+        "response_times": {
+            "6": 68,
+            "7": 34,
+            "4": 8,
+            "11": 2,
+            "5": 31,
+            "9": 6,
+            "10": 1,
+            "12": 1,
+            "8": 6,
+            "25": 1
+        },
+        "num_reqs_per_sec": {
+            "1793985211": 8,
+            "1793985212": 8,
+            "1793985213": 6,
+            "1793985214": 11,
+            "1793985215": 10,
+            "1793985216": 4,
+            "1793985217": 5,
+            "1793985218": 8,
+            "1793985219": 9,
+            "1793985220": 4,
+            "1793985221": 9,
+            "1793985222": 12,
+            "1793985223": 6,
+            "1793985224": 7,
+            "1793985225": 7,
+            "1793985226": 9,
+            "1793985227": 8,
+            "1793985228": 8,
+            "1793985229": 7,
+            "1793985230": 12
+        },
+        "num_fail_per_sec": {}
+    },
+    {
+        "name": "POST /farms/:id/actions [return]",
+        "method": "POST",
+        "last_request_timestamp": 1793985230.1286469,
+        "start_time": 1793985211.0250192,
+        "num_requests": 19,
+        "num_none_requests": 0,
+        "num_failures": 0,
+        "total_response_time": 111.77474499993423,
+        "max_response_time": 8.058482000024014,
+        "min_response_time": 3.935819999924206,
+        "total_content_length": 2166,
+        "response_times": {
+            "6": 7,
+            "5": 5,
+            "7": 3,
+            "8": 2,
+            "4": 2
+        },
+        "num_reqs_per_sec": {
+            "1793985211": 2,
+            "1793985212": 1,
+            "1793985213": 2,
+            "1793985214": 3,
+            "1793985215": 1,
+            "1793985218": 2,
+            "1793985219": 1,
+            "1793985221": 3,
+            "1793985222": 2,
+            "1793985223": 1,
+            "1793985230": 1
+        },
+        "num_fail_per_sec": {}
+    }
+]
