@@ -53,6 +53,10 @@ print credentials, and what to use instead:
 | `supabase status` | `pnpm db:status`; `pnpm db:env` writes `DATABASE_URL` to `.env` without echoing it |
 | `env`, `printenv`, `cat .env` | `printenv NAME \| wc -c` to check a variable is set |
 
+As a backstop, a `UserPromptSubmit` hook (`.claude/hooks/block-secret-paste.sh`, registered in
+`.claude/settings.json`) refuses any prompt that contains a key, a token or a database URL with a
+password, before the session reads it. When you add a secret format, add its pattern there.
+
 The Supabase CLI writes these values to stderr as well as stdout, so `> /dev/null` or a `| sed`
 filter on stdout still leaks them. Capture both streams (`2>&1`) before filtering, as
 `supabase/db.sh` does.
