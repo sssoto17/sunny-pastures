@@ -1,1 +1,1 @@
-{"schema":"store_a","bytes":35266560,"tables":{"farms":{"rows":122,"bytes":425984},"processed_keys":{"rows":108930,"bytes":34840576}}}
+{"schema":"store_a","bytes":52183040,"tables":{"farms":{"rows":172,"bytes":425984},"processed_keys":{"rows":161879,"bytes":51757056}}}
