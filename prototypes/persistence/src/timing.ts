@@ -1,5 +1,5 @@
 // Request timings for the load runs (#10): where a request's server time goes, split into load
-// (store reads: load, processed, stateAt; B's replay is part of load), commit (store writes) and
+// (store reads: load, processed, gift, stateAt; B's replay is part of load), commit (store writes) and
 // sim (the rest of the handler: advance, apply, hashing, parsing). Sent as Server-Timing and
 // written to the server's CSV.
 //
@@ -26,6 +26,7 @@ export function timed(store: GameStore): { store: GameStore; timings: Timings } 
     load: (id) => measure("loadMs", () => store.load(id)),
     processed: (id, key) => measure("loadMs", () => store.processed(id, key)),
     commit: (id, entry) => measure("commitMs", () => store.commit(id, entry)),
+    gift: (giftId) => measure("loadMs", () => store.gift(giftId)),
   };
   // Only an auditable store gets stateAt, so the handler's 501 on A still works.
   const auditable = store as GameStore & { stateAt?: (id: string, t: number) => Promise<unknown> };

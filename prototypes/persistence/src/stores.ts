@@ -4,6 +4,7 @@
 
 import type { Sql } from "postgres";
 import { advance, apply, newFarm, type FarmState } from "./sim.ts";
+import { createInbox } from "./inbox.ts";
 import { createStoreA } from "./store-a.ts";
 import { createStoreB, type Replay, type SnapshotN } from "./store-b.ts";
 import type { GameStore } from "./store.ts";
@@ -49,10 +50,12 @@ export function storeSchema(config: StoreConfig): string {
   return `store_${config.name.toLowerCase()}`;
 }
 
-export function createStore(sql: Sql, config: StoreConfig, schema = storeSchema(config)): Promise<GameStore> {
+/** Every store shares one gift inbox (schema `inbox`), outside the comparison (#8). */
+export async function createStore(sql: Sql, config: StoreConfig, schema = storeSchema(config)): Promise<GameStore> {
+  const inbox = await createInbox(sql);
   return config.name === "A"
-    ? createStoreA(sql, { schema, newFarm: firstFarm })
-    : createStoreB(sql, { schema, snapshotN: config.snapshotN, newFarm: firstFarm, replay });
+    ? createStoreA(sql, { schema, newFarm: firstFarm, inbox })
+    : createStoreB(sql, { schema, snapshotN: config.snapshotN, newFarm: firstFarm, replay, inbox });
 }
 
 /** FNV-1a over the farm id: a stable seed, so a farm's bonus rolls don't depend on the server. */

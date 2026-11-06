@@ -9,13 +9,14 @@ import { join } from "node:path";
 import { createApp, type AppOptions, type TimingRow } from "./app.ts";
 import { firstFarm } from "./stores.ts";
 import { csvSink } from "./timing.ts";
+import type { Gift } from "./inbox.ts";
 import type { Answer, CommitEntry, CommitResult, FarmRecord, GameStore } from "./store.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 
 /** An in-memory GameStore with store A's semantics; `delay` makes a call take at least that long. */
-function memoryStore(delay: { load?: number; commit?: number } = {}): GameStore {
+function memoryStore(delay: { load?: number; commit?: number } = {}, gifts = new Map<string, Gift>()): GameStore {
   const farms = new Map<string, FarmRecord>();
   const keys = new Map<string, Answer>();
   const wait = (ms = 0) => (ms ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
@@ -26,6 +27,9 @@ function memoryStore(delay: { load?: number; commit?: number } = {}): GameStore 
     },
     async processed(id, key) {
       return keys.get(`${id}/${key}`) ?? null;
+    },
+    async gift(giftId) {
+      return gifts.get(giftId) ?? null;
     },
     async commit(id, e: CommitEntry): Promise<CommitResult> {
       await wait(delay.commit);
@@ -264,4 +268,14 @@ test("a malformed seed request is a 400", async (t) => {
   ]) {
     assert.equal((await call("/spike/seed", { method: "POST", body })).status, 400, JSON.stringify(body));
   }
+});
+
+test("a claim reaches the store's gift inbox through the timings", async (t) => {
+  const gifts = new Map<string, Gift>([
+    ["bob:1", { id: "bob:1", from: "bob", to: "f", goods: { wheat: 2, bread: 0 }, sentAt: 0, claimedAt: null }],
+  ]);
+  const { call } = await serve(t, { store: memoryStore({}, gifts) });
+  const claim = (giftId: string, key: string) => ({ action: { type: "claimGift", giftId }, expectedSeq: 0, idempotencyKey: key });
+  assert.equal((await call("/farms/f/actions", { method: "POST", body: claim("nobody:9", "k1") })).status, 422);
+  assert.equal((await call("/farms/f/actions", { method: "POST", body: claim("bob:1", "k2") })).status, 200);
 });

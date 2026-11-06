@@ -4,6 +4,7 @@ import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import postgres from "postgres";
 import { advance, apply, newFarm, type Action, type FarmState } from "./sim.ts";
+import { createInbox, type Inbox } from "./inbox.ts";
 import { connect } from "./store-a.ts";
 import { createStoreB, type Replay, type SnapshotN } from "./store-b.ts";
 import { replay } from "./stores.ts";
@@ -56,13 +57,16 @@ for (const n of [1, 25, 100] as const satisfies readonly SnapshotN[]) {
     const sql = connect(url!);
     const schema = `store_b${n}_test_${process.pid}_${Date.now()}`;
     let store: AuditableStore;
+    let inbox: Inbox;
 
     before(async () => {
-      store = await createStoreB(sql, { schema, snapshotN: n, newFarm: () => newFarm(1), replay });
+      inbox = await createInbox(sql, { schema: `${schema}_inbox` });
+      store = await createStoreB(sql, { schema, snapshotN: n, newFarm: () => newFarm(1), replay, inbox });
     });
 
     after(async () => {
       await sql`drop schema if exists ${sql(schema)} cascade`;
+      await sql`drop schema if exists ${sql(`${schema}_inbox`)} cascade`;
       await sql.end();
     });
 
@@ -108,7 +112,7 @@ for (const n of [1, 25, 100] as const satisfies readonly SnapshotN[]) {
     test(`load replays only the actions after the latest snapshot (every ${n === 1 ? "action, overwritten" : `${n}th action`})`, async () => {
       const farms = await play(store, "policy", 30);
       const counting = countingReplay();
-      const reader = await createStoreB(sql, { schema, snapshotN: n, newFarm: () => newFarm(1), replay: counting });
+      const reader = await createStoreB(sql, { schema, snapshotN: n, newFarm: () => newFarm(1), replay: counting, inbox });
 
       const loaded = await reader.load("policy");
       assert.deepStrictEqual(loaded, { state: farms[30], seq: 30, at: 29 * GROW });
@@ -121,7 +125,7 @@ for (const n of [1, 25, 100] as const satisfies readonly SnapshotN[]) {
       // B1 meets the strings in its snapshot row, B25 and B100 in the log row they replay.
       const raw = postgres(url!, { onnotice: () => {} });
       try {
-        const unguarded = await createStoreB(raw, { schema, snapshotN: n, newFarm: () => newFarm(1), replay });
+        const unguarded = await createStoreB(raw, { schema, snapshotN: n, newFarm: () => newFarm(1), replay, inbox });
         await assert.rejects(unguarded.load("round-trip"), StoreError);
       } finally {
         await raw.end();
@@ -152,7 +156,7 @@ for (const n of [1, 25, 100] as const satisfies readonly SnapshotN[]) {
     test("stateAt starts from the latest snapshot at or before t", async () => {
       await play(store, "audit-from", 30);
       const counting = countingReplay();
-      const reader = await createStoreB(sql, { schema, snapshotN: n, newFarm: () => newFarm(1), replay: counting });
+      const reader = await createStoreB(sql, { schema, snapshotN: n, newFarm: () => newFarm(1), replay: counting, inbox });
 
       await reader.stateAt("audit-from", 27 * GROW); // actions 1..28
       // B1 keeps only its latest snapshot (seq 30, after t), so it replays from the new farm.

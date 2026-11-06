@@ -2,6 +2,7 @@
 // `processed` lets the handler find a repeated key before it runs the sim, and the store keeps
 // the whole first answer so a duplicate returns it unchanged. (Admin decision, 2026-11-06.)
 
+import type { Gift } from "./inbox.ts";
 import type { Action, FarmState } from "./sim.ts";
 
 /** A farm as stored: the state after action `seq`, taken at `at`, not advanced. */
@@ -24,12 +25,20 @@ export type CommitEntry = {
 export type CommitResult =
   | { kind: "committed"; seq: number }
   | { kind: "duplicate"; answer: Answer }
-  | { kind: "conflict" };
+  | { kind: "conflict" }
+  /** The gift inbox refused the action's send or claim (#8); the commit wrote nothing. */
+  | { kind: "refused"; reason: string };
 
 export interface GameStore {
   load(playerId: string): Promise<FarmRecord>;
   processed(playerId: string, idempotencyKey: string): Promise<Answer | null>;
+  /**
+   * Writes the action, and in the same transaction the inbox's part of it: a `sendGift` inserts
+   * gift `<playerId>:<seq>`, a `claimGift` marks its gift claimed if it still isn't (#8).
+   */
   commit(playerId: string, entry: CommitEntry): Promise<CommitResult>;
+  /** A gift from the shared inbox, so the handler can fill a claim's goods before `apply`. */
+  gift(giftId: string): Promise<Gift | null>;
 }
 
 /** A store that keeps history and can rebuild a farm at an earlier time (B only). */
