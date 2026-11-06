@@ -7,6 +7,9 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "supabase:check": "v=$(supabase --version 2>/dev/null); [ \"$v\" = 2.122.0 ] || { echo \"Supabase CLI 2.122.0 required, found: ${v:-none}\" >&2; exit 1; }"
+    "supabase:check": "v=$(supabase --version 2>/dev/null); [ \"$v\" = 2.122.0 ] || { echo \"Supabase CLI 2.122.0 required, found: ${v:-none}\" >&2; exit 1; }",
+    "db:start": "supabase/db.sh start",
+    "db:status": "supabase/db.sh status",
+    "db:env": "supabase/db.sh env"
   }
 }

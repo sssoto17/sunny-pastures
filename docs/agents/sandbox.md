@@ -49,9 +49,13 @@ print credentials, and what to use instead:
 
 | Prints secrets | Use instead |
 |---|---|
-| `supabase start` (keys, S3 credentials, DB URL with password) | `supabase start > /dev/null`, then the line below |
-| `supabase status` | `supabase status -o env \| sed 's/=.*//'` for the names; extract one value straight into a file or variable without echoing it |
+| `supabase start` (keys, S3 credentials, DB URL with password) | `pnpm db:start` |
+| `supabase status` | `pnpm db:status`; `pnpm db:env` writes `DATABASE_URL` to `.env` without echoing it |
 | `env`, `printenv`, `cat .env` | `printenv NAME \| wc -c` to check a variable is set |
+
+The Supabase CLI writes these values to stderr as well as stdout, so `> /dev/null` or a `| sed`
+filter on stdout still leaks them. Capture both streams (`2>&1`) before filtering, as
+`supabase/db.sh` does.
 
 ## GitHub
 

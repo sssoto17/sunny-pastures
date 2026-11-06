@@ -32,8 +32,9 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - Never commit secrets: read them from env vars and keep placeholders in `.env.example`.
 - Never print secret values, and never hand the admin a command that does. The admin pastes
   terminal output back into sessions, so every command you run or suggest must hide keys, tokens,
-  passwords and credentials in URLs: silence the output, mask the values or list only the names
-  (`supabase status -o env | sed 's/=.*//'`, not a bare `supabase start` or `supabase status`).
+  passwords and credentials in URLs: silence the output, mask the values or list only the names.
+  For the local stack, use `pnpm db:start` / `db:status` / `db:env`, never a bare `supabase start`
+  or `supabase status`.
 - Before running commands, read `docs/agents/sandbox.md`. It lists the sandbox pitfalls:
   `supabase`, localhost services and `.git` writes have to run outside the sandbox.
 - Parallel sessions never share a branch. The main folder stays on `main` and belongs to the

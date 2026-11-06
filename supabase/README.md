@@ -14,21 +14,27 @@ CLI's 543xx default, so this stack can run beside another project's local Supaba
 
 ## Commands
 
-Run them from the repo root.
+Run them from the repo root (or a worktree's root).
 
-| Task  | Command                       | Notes                                                          |
-| ----- | ----------------------------- | -------------------------------------------------------------- |
-| Start | `supabase start`              | First run pulls the images. Prints the URLs and keys.          |
-| Info  | `supabase status`             | Shows them again, including `DB URL`.                          |
-| Stop  | `supabase stop`               | Keeps the data in Docker volumes.                              |
-| Reset | `supabase db reset`           | Recreates the local database and reruns migrations and seed.   |
-| Wipe  | `supabase stop --no-backup`   | Stops and deletes the local data.                              |
+| Task   | Command                     | Notes                                                                  |
+| ------ | --------------------------- | ---------------------------------------------------------------------- |
+| Start  | `pnpm db:start`             | First run pulls the images. Prints the URLs; every key is hidden.      |
+| Info   | `pnpm db:status`            | Same list again.                                                       |
+| `.env` | `pnpm db:env`               | Writes `DATABASE_URL` to `./.env` without printing it.                 |
+| Stop   | `supabase stop`             | Keeps the data in Docker volumes.                                      |
+| Reset  | `supabase db reset`         | Recreates the local database and reruns migrations and seed.           |
+| Wipe   | `supabase stop --no-backup` | Stops and deletes the local data.                                      |
+
+**Don't run `supabase start` or `supabase status` directly.** They print the local keys, S3
+credentials and the database password on stdout *and* stderr (even when piped), and terminal
+output often gets pasted into a session. `supabase/db.sh` captures both streams and hides every
+value except URLs, which keep the password hidden.
 
 ## Connection: `DATABASE_URL`
 
-Code reads the connection string from `DATABASE_URL` only, never from a literal in the repo.
-Copy `.env.example` to `.env` (ignored by git) and set it to the `DB URL` printed by
-`supabase status`.
+Code reads the connection string from `DATABASE_URL` only, never from a literal in the repo. Run
+`pnpm db:env` in each worktree that needs it: it appends `DATABASE_URL` to `.env` (ignored by
+git) unless one is already set. `.env.example` shows the shape.
 
 Check it is reachable:
 
