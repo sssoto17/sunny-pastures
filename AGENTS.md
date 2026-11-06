@@ -30,6 +30,12 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - When designing a module, name the design pattern(s) it uses and the alternatives considered, and
   record them in its ADR.
 - Never commit secrets: read them from env vars and keep placeholders in `.env.example`.
+- Never print secret values, and never hand the admin a command that does. The admin pastes
+  terminal output back into sessions, so every command you run or suggest must hide keys, tokens,
+  passwords and credentials in URLs: silence the output, mask the values or list only the names
+  (`supabase status -o env | sed 's/=.*//'`, not a bare `supabase start` or `supabase status`).
+- Before running commands, read `docs/agents/sandbox.md`. It lists the sandbox pitfalls:
+  `supabase`, localhost services and `.git` writes have to run outside the sandbox.
 - Parallel sessions never share a branch. The main folder stays on `main` and belongs to the
   coordinating session. Any session that changes files or needs another branch works in its own
   git worktree under `.claude/worktrees/`, named `<N>-<slug>` after its issue (use the worktree
