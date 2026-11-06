@@ -4,7 +4,8 @@
 // handler's loop without its clock. Each store must
 //   - load every commit back strictly equal (types included) to the in-memory farm (round trip),
 //   - end on step 0's state hash and seq (script),
-//   - for B, answer `stateAt` like the in-memory sim at 10 random times (stateAt).
+//   - for B, answer `stateAt` like the in-memory sim at 10 random times and at the middle of the
+//     script's 8-hour gap (stateAt), so offline progress is audited on every seed.
 // A failure is labelled by step 0: if step 0 failed, the sim is at fault; if it passed, the store.
 //
 // The script claims gifts it makes up (`alice:7`), which the inbox refuses unless they exist. So
@@ -20,7 +21,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { Sql } from "postgres";
 import { DEFAULT_SEED, report as report0, runGate0, type Gate0Result, type Rules } from "./gate0.ts";
 import { createInbox, type Inbox } from "./inbox.ts";
-import { generateScript, type Script } from "./script.ts";
+import { GAP_BEFORE_STEP, generateScript, type Script } from "./script.ts";
 import { advance, apply, mulberry32, newFarm, stateHash, type FarmState } from "./sim.ts";
 import { connect, createStoreA } from "./store-a.ts";
 import { createStoreB } from "./store-b.ts";
@@ -33,7 +34,9 @@ export type Check = "round trip" | "script" | "stateAt";
 
 export type Failure = { store: StoreName; check: Check; label: Label; detail: string };
 
-export type StateAtCheck = { t: number; seq: number; hash: string; match: boolean };
+/** `gap` marks the fixed audit time in the middle of the script's 8-hour gap. */
+export type StateAtCheck = { t: number; gap: boolean; seq: number; hash: string; match: boolean };
+export type AuditTime = { t: number; gap: boolean };
 
 export type StoreRun = {
   store: StoreName;
@@ -104,7 +107,7 @@ async function runStore(
   script: Script,
   rules: Rules,
   expected: { hash: string; seq: number },
-  times: number[],
+  times: AuditTime[],
   problems: { check: Check; detail: string }[],
 ): Promise<StoreRun> {
   const run: StoreRun = { store: spec.name, pass: false, hash: null, seq: null, roundTrips: 0, stateAt: [] };
@@ -128,15 +131,15 @@ async function runStore(
     }
 
     if (isAuditable(store)) {
-      for (const t of times) {
+      for (const { t, gap } of times) {
         const want = simAt(script, rules, t);
         const got = await store.stateAt(GATE_FARM, t);
         const match = isDeepStrictEqual(got, want);
-        run.stateAt.push({ t, seq: got.seq, hash: stateHash(got.state), match });
+        run.stateAt.push({ t, gap, seq: got.seq, hash: stateHash(got.state), match });
         if (!match) {
           problems.push({
             check: "stateAt",
-            detail: `at t=${t}: seq ${got.seq}, hash ${stateHash(got.state)}; the sim has seq ${want.seq}, hash ${stateHash(want.state)}`,
+            detail: `at t=${t}${gap ? " (middle of the 8-hour gap)" : ""}: seq ${got.seq}, hash ${stateHash(got.state)}; the sim has seq ${want.seq}, hash ${stateHash(want.state)}`,
           });
         }
       }
@@ -248,11 +251,25 @@ function simAt(script: Script, rules: Rules, t: number): { state: FarmState; seq
 }
 
 /**
- * Ten different times, spread over the script's steps rather than its clock: each picks a step at
+ * The audit times: ten random ones plus the middle of the 8-hour gap, in time order.
+ *
+ * The random ten are spread over the script's steps rather than its clock: each picks a step at
  * random, then a moment from that step up to just before the next one. Picking by clock would put
- * most of them in the 8-hour gap; picking by step still lands in it about once in 50.
+ * most of them in the gap; picking by step lands in it only about once in 50, so seed 42's ten
+ * all miss it. Offline progress is the heart of the research question, so one fixed time halfway
+ * through the gap is always audited too: the farm there has had no action for 4 hours and must
+ * still match the sim advanced to that moment.
  */
-function auditTimes(script: Script): number[] {
+function auditTimes(script: Script): AuditTime[] {
+  const random = randomAuditTimes(script).map((t) => ({ t, gap: false }));
+  const { steps } = script;
+  const before = steps[GAP_BEFORE_STEP - 1]!.at;
+  const after = steps[GAP_BEFORE_STEP]!.at;
+  const middle = before + Math.floor((after - before) / 2);
+  return [...random.filter((r) => r.t !== middle), { t: middle, gap: true }].sort((a, b) => a.t - b.t);
+}
+
+function randomAuditTimes(script: Script): number[] {
   const { steps } = script;
   let rng = (script.seed ^ STATE_AT_SEED) >>> 0;
   const draw = (below: number) => {
@@ -283,7 +300,11 @@ export function report(result: GateResult, seed: number): string {
       `${run.store.padEnd(5)} ${run.pass ? "PASS" : "FAIL"}  seq ${run.seq ?? "-"}  hash ${run.hash ?? "-"}  ` +
         `round trips ${run.roundTrips}/${result.step0.accepted}` +
         (run.store === "A" ? "  stateAt n/a (no history)" : `  stateAt ${run.stateAt.filter((c) => c.match).length}/${run.stateAt.length}`),
-      ...run.stateAt.map((c) => `        stateAt t=${String(c.t).padStart(8)}  seq ${String(c.seq).padStart(3)}  ${c.hash}  ${c.match ? "match" : "MISMATCH"}`),
+      ...run.stateAt.map(
+        (c) =>
+          `        stateAt t=${String(c.t).padStart(8)}  seq ${String(c.seq).padStart(3)}  ${c.hash}  ${c.match ? "match" : "MISMATCH"}` +
+          (c.gap ? "  (middle of the 8-hour gap)" : ""),
+      ),
     ]),
     ...result.failures.map((f) => `failure [${f.label}] ${f.store} ${f.check}: ${f.detail}`),
     "",
