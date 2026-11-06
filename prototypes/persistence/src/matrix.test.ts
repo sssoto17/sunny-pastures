@@ -76,3 +76,25 @@ test("a lock left by a runner that died (its pid is gone) is taken over", () => 
   const release = lock(path);
   release();
 });
+
+test("normal configurations carry ADR-0001's timing: 60 s warm-up, 300 s measured, players wait between taps", () => {
+  const [c] = plan({ stores: ["A"], users: [50], runs: 1 });
+  assert.deepStrictEqual([c!.kind, c!.warmupS, c!.measureS, c!.noWait], ["normal", 60, 300, false]);
+});
+
+test("one stress run per store comes after every normal configuration: 200 users, no wait, 60 s + 120 s", () => {
+  const configs = plan({ stores: ["A", "B1", "B25", "B100"], users: [50, 200], runs: 3, stress: { users: 200, warmupS: 60, measureS: 120 } });
+  assert.equal(configs.length, 28);
+  assert.deepStrictEqual(ids(configs.slice(24)), ["stress-A-u200", "stress-B1-u200", "stress-B25-u200", "stress-B100-u200"]);
+  assert.ok(configs.slice(0, 24).every((c) => c.kind === "normal" && !c.noWait));
+  const s = configs.find((c) => c.id === "stress-B25-u200")!;
+  assert.deepStrictEqual(
+    { kind: s.kind, users: s.users, warmupS: s.warmupS, measureS: s.measureS, noWait: s.noWait, schema: s.schema, env: s.env },
+    { kind: "stress", users: 200, warmupS: 60, measureS: 120, noWait: true, schema: "load_stress_b25_u200", env: { STORE: "B", SNAPSHOT_N: "25" } },
+  );
+});
+
+test("the normal timing can be shortened (dry runs) without touching the stress timing", () => {
+  const configs = plan({ stores: ["A"], users: [50], runs: 1, warmupS: 5, measureS: 10, stress: { users: 200, warmupS: 60, measureS: 120 } });
+  assert.deepStrictEqual(configs.map((c) => [c.id, c.warmupS, c.measureS]), [["r1-A-u50", 5, 10], ["stress-A-u200", 60, 120]]);
+});

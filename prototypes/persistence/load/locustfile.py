@@ -3,8 +3,9 @@
 Each Locust user plays one seeded farm, `<FARM_PREFIX>-<i>`, in spawn order; seed as many farms as
 users first (smoke.sh does). Two kinds of player, weighted 4:1:
 
-- ActivePlayer (80%): taps every 2-8 s. A tap is an action the player's own view of the farm
-  allows; if every plot is still growing, the tap is a look at the farm (a GET) instead.
+- ActivePlayer (80%): taps every 2-8 s. LOOK_SHARE (15%, #11) of its taps are a look at the
+  farm (a GET) whatever else it could do; the rest are an action the player's own view of the
+  farm allows, or a look if there is nothing to do yet.
 - ReturningPlayer (20%): comes back after 8 hours of server time (X-Spike-Clock-Offset grows by
   8 h on every return and never shrinks), GETs the farm (the offline return), makes a few
   actions 2-8 s apart, then is away again for a short real-time while.
@@ -13,6 +14,9 @@ Moves are a registry: each one picks an action from the player's view and update
 the server accepts it. SPIKE_ACTIONS names the enabled ones (default plant,harvest,bake,collect,
 per #11). Gifts stay out of the load mix: the concurrency script (#8) covers them, and a
 recipient has no inbox route to learn gift ids.
+
+Stress (#11): SPIKE_NO_WAIT=1 takes every wait out (between taps, between a returning player's
+visits), so each user taps again as soon as its last request is answered.
 
 Warm-up (ADR-0001: 1 min discarded): with WARMUP_S set, Locust's stats are reset that many seconds
 after the test starts, so --json-file and the CSVs hold only the measured window. WINDOW_FILE, if
@@ -35,7 +39,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import gevent
-from locust import HttpUser, between, events, task
+from locust import HttpUser, between, constant, events, task
 
 GROW_MS = 2 * 60_000
 #: The sim's bakery (src/sim.ts): wheat per loaf, bake time, and jobs queued at once.
@@ -46,16 +50,23 @@ HOUR_MS = 60 * 60_000
 RETURN_AFTER_MS = 8 * HOUR_MS
 #: Harvest only this long after the plot should be ripe, so client/server clock jitter can't 422.
 RIPE_MARGIN_MS = 500
+#: Share of an active player's taps that look at the farm (a GET) whatever else they could do (#11).
+LOOK_SHARE = 0.15
 
 FARM_PREFIX = os.environ.get("FARM_PREFIX", "load")
 ENABLED_MOVES = [
     m.strip() for m in os.environ.get("SPIKE_ACTIONS", "plant,harvest,bake,collect").split(",") if m.strip()
 ]
 
+#: The stress run (#11): no wait time anywhere.
+NO_WAIT = os.environ.get("SPIKE_NO_WAIT") == "1"
+
 WARMUP_S = float(os.environ.get("WARMUP_S", "0"))
 WINDOW_FILE = os.environ.get("WINDOW_FILE")
 
 _farm_ids = itertools.count()
+#: Locust's own randomness is the module-level `random`; choose_tap takes a Random so tests can seed it.
+_rng = random.Random()
 _window: dict = {"warmupS": WARMUP_S}
 
 
@@ -142,10 +153,39 @@ if unknown:
     raise SystemExit(f"SPIKE_ACTIONS names moves with no implementation: {', '.join(unknown)}")
 
 
+def choose_tap(
+    view: FarmView, now: int, moves: list[Move], rng: random.Random, look_share: float = LOOK_SHARE
+) -> tuple[Move, dict] | None:
+    """One tap: None is a look at the farm (a GET); otherwise a move and the action it chose.
+
+    A `look_share` of taps are looks whatever the view allows. The rest try the moves in random
+    order and take the first one the view allows; with nothing to do, the tap is a look too.
+    """
+    if rng.random() < look_share:
+        return None
+    for move in rng.sample(moves, len(moves)):
+        action = move.choose(view, now)
+        if action is not None:
+            return move, action
+    return None
+
+
+def waiting(low: float, high: float):
+    """Locust's wait_time: `low`-`high` s, or none at all in the stress run."""
+    return constant(0) if NO_WAIT else between(low, high)
+
+
+def between_taps() -> float:
+    """Seconds a returning player waits between the taps of one visit (2-8 s; 0 under stress)."""
+    return 0 if NO_WAIT else random.uniform(2, 8)
+
+
 class Player(HttpUser):
     abstract = True
     #: Which row of Locust's stats this player's requests land in.
     kind = "player"
+    #: Share of taps that are looks whatever the view allows (only active players have one).
+    look_share = 0.0
 
     def on_start(self) -> None:
         self.farm = f"{FARM_PREFIX}-{next(_farm_ids)}"
@@ -170,15 +210,12 @@ class Player(HttpUser):
             self.view = FarmView.from_read(res.json())
 
     def tap(self) -> None:
-        """One action the view allows, or a look at the farm if nothing can be done yet."""
+        """A look at the farm (look_share of taps, or nothing to do yet), else an action the view allows."""
         now = self.server_now()
-        moves = [MOVES[m] for m in ENABLED_MOVES]
-        random.shuffle(moves)
-        for move in moves:
-            action = move.choose(self.view, now)
-            if action is not None:
-                return self.act(move, action, now)
-        self.read_farm()
+        chosen = choose_tap(self.view, now, [MOVES[m] for m in ENABLED_MOVES], _rng, self.look_share)
+        if chosen is None:
+            return self.read_farm()
+        self.act(*chosen, now)
 
     def act(self, move: Move, action: dict, now: int) -> None:
         body = {"action": action, "expectedSeq": self.view.seq, "idempotencyKey": str(uuid.uuid4())}
@@ -204,7 +241,8 @@ class Player(HttpUser):
 class ActivePlayer(Player):
     weight = 4
     kind = "active"
-    wait_time = between(2, 8)
+    look_share = LOOK_SHARE
+    wait_time = waiting(2, 8)
 
     @task
     def play(self) -> None:
@@ -215,7 +253,7 @@ class ReturningPlayer(Player):
     weight = 1
     kind = "return"
     #: Real seconds away between visits; on the server's clock each absence is 8 hours.
-    wait_time = between(10, 30)
+    wait_time = waiting(10, 30)
     actions_per_visit = (2, 5)
 
     @task
@@ -224,13 +262,14 @@ class ReturningPlayer(Player):
         self.read_farm()  # the offline return: everything that grew while away
         for i in range(random.randint(*self.actions_per_visit)):
             if i:
-                gevent.sleep(random.uniform(2, 8))
+                gevent.sleep(between_taps())
             self.tap()
 
 
 @events.init.add_listener
 def _describe(environment, **_kwargs) -> None:
-    print(f"farms {FARM_PREFIX}-<i>; moves: {', '.join(ENABLED_MOVES)}; warm-up {WARMUP_S:g} s")
+    print(f"farms {FARM_PREFIX}-<i>; moves: {', '.join(ENABLED_MOVES)}; look share {LOOK_SHARE:g};"
+          f" warm-up {WARMUP_S:g} s{'; NO WAIT (stress)' if NO_WAIT else ''}")
 
 
 def _write_window() -> None:
