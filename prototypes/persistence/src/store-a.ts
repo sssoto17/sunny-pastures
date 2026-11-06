@@ -4,6 +4,7 @@
 // Idempotent Receiver (the first answer is stored with its key). The store never runs the sim.
 
 import postgres, { type Sql } from "postgres";
+import type { Inbox } from "./inbox.ts";
 import type { FarmState } from "./sim.ts";
 import { StoreError, type Answer, type CommitEntry, type CommitResult, type FarmRecord, type GameStore } from "./store.ts";
 
@@ -25,11 +26,14 @@ export type StoreAOptions = {
   schema?: string;
   /** The state of a farm that has never had an action accepted (seq 0). */
   newFarm: (playerId: string) => FarmState;
+  /** The shared gift inbox; its writes join the commit's transaction. */
+  inbox: Inbox;
 };
 
 class Conflict extends Error {}
+class Refused extends Error {}
 
-export async function createStoreA(sql: Sql, { schema = "store_a", newFarm }: StoreAOptions): Promise<GameStore> {
+export async function createStoreA(sql: Sql, { schema = "store_a", newFarm, inbox }: StoreAOptions): Promise<GameStore> {
   const s = sql(schema);
   await sql`create schema if not exists ${s}`;
   await sql`
@@ -67,6 +71,8 @@ export async function createStoreA(sql: Sql, { schema = "store_a", newFarm }: St
       return row ? (row.answer as Answer) : null;
     },
 
+    gift: (giftId) => inbox.gift(giftId),
+
     async commit(playerId: string, entry: CommitEntry): Promise<CommitResult> {
       const seq = entry.expectedSeq + 1;
       try {
@@ -97,10 +103,14 @@ export async function createStoreA(sql: Sql, { schema = "store_a", newFarm }: St
                   returning 1`;
           // Roll back the key claim too: a lost race must not use up the key.
           if (written.length === 0) throw new Conflict();
+          // After the farm write, so a race for this farm is a conflict (and a retry) first.
+          const refused = await inbox.forCommit(tx, playerId, seq, entry);
+          if (refused) throw new Refused(refused);
           return { kind: "committed", seq };
         });
       } catch (e) {
         if (e instanceof Conflict) return { kind: "conflict" };
+        if (e instanceof Refused) return { kind: "refused", reason: e.message };
         throw e;
       }
     },

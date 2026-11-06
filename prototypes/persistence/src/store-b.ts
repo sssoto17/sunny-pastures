@@ -6,6 +6,7 @@
 // functions: `replay` and `newFarm` are handed in when it is created (ADR-0001, proposed).
 
 import type { Sql } from "postgres";
+import type { Inbox } from "./inbox.ts";
 import type { Action, FarmState } from "./sim.ts";
 import { StoreError, type Answer, type AuditableStore, type CommitEntry, type CommitResult, type FarmRecord } from "./store.ts";
 
@@ -19,9 +20,12 @@ export type StoreBOptions = {
   snapshotN: SnapshotN;
   newFarm: (playerId: string) => FarmState;
   replay: Replay;
+  /** The shared gift inbox; its writes join the commit's transaction. */
+  inbox: Inbox;
 };
 
 class Conflict extends Error {}
+class Refused extends Error {}
 
 /** The same boundary check as store A: int8 columns must have arrived as safe integers. */
 function checked(playerId: string, from: string, row: { seq: unknown; at: unknown }): { seq: number; at: number } {
@@ -35,7 +39,7 @@ function checked(playerId: string, from: string, row: { seq: unknown; at: unknow
 
 export async function createStoreB(
   sql: Sql,
-  { snapshotN, schema = `store_b${snapshotN}`, newFarm, replay }: StoreBOptions,
+  { snapshotN, schema = `store_b${snapshotN}`, newFarm, replay, inbox }: StoreBOptions,
 ): Promise<AuditableStore> {
   const s = sql(schema);
   await sql`create schema if not exists ${s}`;
@@ -110,6 +114,8 @@ export async function createStoreB(
         where farm_id = ${playerId} and idempotency_key = ${idempotencyKey}`;
       return row ? (row.answer as Answer) : null;
     },
+    gift: (giftId) => inbox.gift(giftId),
+
     async commit(playerId: string, entry: CommitEntry): Promise<CommitResult> {
       const seq = entry.expectedSeq + 1;
       try {
@@ -134,6 +140,9 @@ export async function createStoreB(
             // Nothing was written, but roll back anyway so a lost race never leaves a trace.
             throw new Conflict();
           }
+          // After the append, so a race for this farm is a conflict (and a retry) first.
+          const refused = await inbox.forCommit(tx, playerId, seq, entry);
+          if (refused) throw new Refused(refused);
           if (snapshotN === 1) {
             // B1: one snapshot per farm, overwritten. The log append above already won the
             // farm's next seq, so no other commit for this farm races this write.
@@ -150,6 +159,7 @@ export async function createStoreB(
         });
       } catch (e) {
         if (e instanceof Conflict) return { kind: "conflict" };
+        if (e instanceof Refused) return { kind: "refused", reason: e.message };
         throw e;
       }
     },

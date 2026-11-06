@@ -11,8 +11,12 @@ function memoryStore(opts: { forcedConflicts?: number } = {}) {
   const farms = new Map<string, FarmRecord>();
   const keys = new Map<string, Answer>();
   let forced = opts.forcedConflicts ?? 0;
-  const store: GameStore & { commits: number } = {
+  const store: GameStore & { commits: number; actions: CommitEntry["action"][] } = {
     commits: 0,
+    actions: [],
+    async gift() {
+      return null;
+    },
     async load(id) {
       return structuredClone(farms.get(id) ?? { state: newFarm(1), seq: 0, at: 0 });
     },
@@ -31,6 +35,7 @@ function memoryStore(opts: { forcedConflicts?: number } = {}) {
       farms.set(id, structuredClone({ state: e.next, seq: e.expectedSeq + 1, at: e.at }));
       keys.set(k, e.answer);
       store.commits++;
+      store.actions.push(e.action);
       return { kind: "committed", seq: e.expectedSeq + 1 };
     },
   };
@@ -104,6 +109,18 @@ test("a repeated idempotency key returns the first answer, even if the action wo
   assert.equal(store.commits, 1);
 });
 
+test("a repeated key whose first commit lands between its processed check and its load still gets the first answer", async () => {
+  const store = memoryStore();
+  const first = await handleAction(store, () => 0, "f", plant(0, 0, "same"));
+  // The resend's `processed` ran just before the first commit, so it saw no answer yet; its
+  // `load` ran just after, so the plot is already growing and the rules refuse the plant.
+  let calls = 0;
+  const raced: GameStore = { ...store, processed: async (id, key) => (calls++ === 0 ? null : store.processed(id, key)) };
+  const again = await handleAction(raced, () => 0, "f", plant(0, 0, "same"));
+  assert.deepEqual(again, first);
+  assert.equal(store.commits, 1);
+});
+
 test("server time never runs backwards past the farm's last action", async () => {
   const store = memoryStore();
   await handleAction(store, () => 10 * MIN, "f", plant(0, 0, "k1"));
@@ -120,10 +137,38 @@ test("a malformed body is a 400 and touches nothing", async () => {
     { action: { type: "dance", plot: 0 }, expectedSeq: 0, idempotencyKey: "k" },
     { action: { type: "plant", plot: 0.5 }, expectedSeq: 0, idempotencyKey: "k" },
     { action: { type: "plant", plot: 0 }, expectedSeq: "0", idempotencyKey: "k" },
+    { action: { type: "sendGift", goods: { wheat: 1, bread: 0 } }, expectedSeq: 0, idempotencyKey: "k" },
+    { action: { type: "sendGift", to: "bob smith", goods: { wheat: 1, bread: 0 } }, expectedSeq: 0, idempotencyKey: "k" },
+    { action: { type: "sendGift", to: "bob" }, expectedSeq: 0, idempotencyKey: "k" },
+    { action: { type: "sendGift", to: "bob", goods: { wheat: "1", bread: 0 } }, expectedSeq: 0, idempotencyKey: "k" },
+    { action: { type: "claimGift" }, expectedSeq: 0, idempotencyKey: "k" },
+    { action: { type: "claimGift", giftId: "alice:1", goods: { wheat: 99, bread: 0 } }, expectedSeq: 0, idempotencyKey: "k" },
   ]) {
     assert.equal((await handleAction(store, () => 0, "f", body)).status, 400, JSON.stringify(body));
   }
   assert.equal(store.commits, 0);
+});
+
+test("all six actions parse: none of them is a 400", async () => {
+  const store = memoryStore();
+  for (const action of [
+    { type: "plant", plot: 0 },
+    { type: "harvest", plot: 0 },
+    { type: "bake" },
+    { type: "collect" },
+    { type: "sendGift", to: "bob", goods: { wheat: 1, bread: 0 } },
+    { type: "claimGift", giftId: "alice:1" },
+  ]) {
+    const res = await handleAction(store, () => 0, "f", { action, expectedSeq: 0, idempotencyKey: action.type });
+    assert.notEqual(res.status, 400, `${action.type}: ${JSON.stringify(res.body)}`);
+  }
+});
+
+test("only an action's known fields are committed", async () => {
+  const store = memoryStore();
+  const body = { action: { type: "plant", plot: 0, note: "x", wheat: 99 }, expectedSeq: 0, idempotencyKey: "k" };
+  assert.equal((await handleAction(store, () => 0, "f", body)).status, 200);
+  assert.deepStrictEqual(store.actions, [{ type: "plant", plot: 0 }]);
 });
 
 test("reading a farm advances it in memory and writes nothing", async () => {
