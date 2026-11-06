@@ -180,7 +180,9 @@ Supabase Postgres, one schema per store. Locust 2.47.0 runs 50 and 200 players (
 2–8 s between taps, 20% returning after 8 hours via a spike-only clock-offset header), each
 player seeded with about 1,000 actions, 1 min warm-up plus 5 min measured, 3 runs per
 configuration, plus one stress run per store. A concurrency script fires a gift and a harvest at
-one farm at the same moment 1,000 times per store. Everything runs on one WSL2 laptop. Locust,
+one farm at the same moment 1,000 times per store. The matrix runs on one Claude cloud VM
+(4 vCPUs, 16 GiB, PGDG Postgres 17, the local stack's major; `docs/spikes/persistence/matrix/README.md`),
+recorded in `machine.json`; the runner refuses to resume on a different machine. Locust,
 the spike server and Postgres run on the same machine, wherever the matrix runs: a network hop
 between Locust and the server would add the same delay to A and B, and the 2× term of the
 decision rule would loosen by that delay in B's favour. B1's snapshot table is keyed by farm
@@ -195,31 +197,57 @@ applies), `POST /spike/seed` and `GET /spike/storage`. Every response carries `S
 **commit** (the commit transaction), **sim** (the rest of the handler) and **total**, written to a
 server CSV with the same numbers; a Decorator around `GameStore` measures them, so neither the
 handler nor the stores carry timing code. Players are seeded through the store's own commit path,
-player *i* with 1,000 + (*i* × 37) mod 100 actions, so replay tails spread across 0 to N−1. An
-active player whose plots are all growing spends the tap on a GET. Locust runs from its own uv
+player *i* with 1,000 + (*i* × 37) mod 100 actions, so replay tails spread across 0 to N−1.
+Active players plant, harvest, bake and collect; 15% of their taps are a GET of their farm
+whatever else they could do, and a tap with nothing to do is a GET as well (#11). The stress run
+per store is 200 players with no wait time, 1 min warm-up + 2 min measured, after all other
+configurations. Locust runs from its own uv
 project (uv, Python and Locust pinned; `exclude-newer` 7 days back), and its final stats come
 from `--json-file`, because the stats CSV is a periodic snapshot. The server's keep-alive timeout
 (65 s) exceeds the longest client wait, so idle connections aren't closed mid-reuse.
 
+**Metrics (#11).** Action latency is Locust's POST time over the measured window, the three runs'
+histograms pooled. The worst-case load is the server's `load` time for requests whose farm had a
+99-action tail, rebuilt from the seeded seq and the accepted actions. Bytes per player-hour is
+schema growth (`pg_total_relation_size`) over the run ÷ players ÷ real hours. Offline return is
+Locust's `GET /farms/:id [return]`, the read after 8 hours of server time.
+
 ## Results
 
-_To be filled from `docs/spikes/persistence/results.csv`._ The gate row is from
-`docs/spikes/persistence/gate.md` (#9): seed 42, every store ends on hash `e1925b02…` at seq 456
-with 456/456 strict round trips, and every B's `stateAt` matches the sim 11/11 (10 random times
-plus the middle of the 8-hour gap, #15). Identical on the
-cloud container (Postgres 16) and the laptop (Postgres 17).
+From `docs/spikes/persistence/results.md` and `results.csv` (#11). The matrix ran on 6 Nov 2026
+on the cloud VM, on Postgres 17.11, and finished before any cut-off, so all three runs count. The
+gate row is from `docs/spikes/persistence/gate.md` (#9): seed 42, every store ends on hash
+`e1925b02…` at seq 456 with 456/456 strict round trips, and every B's `stateAt` matches the sim
+11/11 (10 random times plus the middle of the 8-hour gap, #15). Identical on the cloud container
+(Postgres 16), the laptop (Postgres 17) and the load VM (Postgres 17.11, rerun before the matrix).
 
 | | A | B1 | B25 | B100 |
 | --- | --- | --- | --- | --- |
 | Gate (hash equivalence) | pass | pass | pass | pass |
-| p50 / p95 at 50 players (ms) | | | | |
-| p50 / p95 at 200 players (ms) | | | | |
-| Worst-case load p95 (ms) | | | | |
-| Offline return p95 (ms) | | | | |
-| Lost updates / retries / 503s | | | | |
-| Bytes per player-hour | | | | |
+| p50 / p95 at 50 players (ms) | 5 / 8 | 6 / 9 | 6 / 9 | 6 / 9 |
+| p50 / p95 at 200 players (ms) | 5 / 8 | 6 / 9 | 6 / 8 | 6 / 8 |
+| p95 per run at 200 players (ms) | 8, 8, 7 | 10, 8, 8 | 9, 8, 8 | 8, 8, 8 |
+| Worst-case load p95 (ms) | n/a | n/a | n/a | 2.46 (n = 635) |
+| Offline return p95 at 50 / 200 (ms) | 4 / 4 | 5 / 5 | 5 / 5 | 6 / 5 |
+| Lost updates / retries / 503s | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| Bytes per player-hour at 50 / 200 | 146,364 / 139,264 | 209,715 / 201,114 | 226,645 / 208,350 | 216,269 / 200,704 |
+| Replay cost (µs per action; ×10 projection) | n/a | _pending_ | _pending_ | _pending_ |
 | `stateAt` possible | no | yes | yes | yes |
-| Lines / moving parts | | | | |
+| Lines / moving parts | 94 code lines; `farms` + `processed_keys` | 129 code lines, shared by all B; `actions` + `snapshots` + injected `replay` | same | same |
+
+Every normal configuration had 0 failures and 0 422s; p99 is 10–13 ms everywhere. The matrix load
+is light, about 37 requests/s at 200 players, and about half of requests are reads.
+
+Applied as written, the rule picks **B100**: every B passes step 2 against a 28 ms limit
+(max(2 × 8, 8 + 20)), and B100 passes the 50 ms worst-case load limit at 2.46 ms. In step 3 all
+three B variants tie within 5 ms. Step 3's tie-break picks B100 over B1 by 410 bytes per
+player-hour, which is one 8 kB page per run and within run-to-run spread; the latencies tie within
+1 ms.
+
+**Stress runs (reported, not in the rule).** At about 1,450 requests/s, client p95 for actions is
+85 / 88 / 89 / 100 ms (A / B1 / B25 / B100), and server-side action p95 is 14.7 / 17.8 / 18.9 /
+24.1 ms. B100's worst-case load p95 rises to 13.4 ms (n = 3,588). No lost updates, retries or
+503s. B100 had one failure: a postgres.js `UNSAFE_TRANSACTION` error, with nothing committed.
 
 ## Decision
 
