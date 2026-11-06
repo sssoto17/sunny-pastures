@@ -1,0 +1,24 @@
+{
+  "id": "r1-A-u50",
+  "run": 1,
+  "store": "A",
+  "users": 50,
+  "schema": "load_r1_a_u50",
+  "env": {
+    "STORE": "A"
+  },
+  "warmupS": 10,
+  "measureS": 20,
+  "startedAt": "2026-11-06T17:10:27.497Z",
+  "finishedAt": "2026-11-06T17:11:12.170Z",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "ramGiB": 16,
+    "os": "Ubuntu 24.04.5 LTS",
+    "postgres": "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+    "node": "v24.22.2",
+    "python": "3.13.18",
+    "locust": "2.47.0"
+  }
+}
