@@ -69,6 +69,11 @@ A farm with no accepted action loads as `{ state: newFarm, seq: 0, at: 0 }`. The
 `newFarm(playerId)` function when it is created; that builds content, it doesn't run the
 simulation. The farm's PRNG seed comes from its id, so a new farm is the same on every server.
 
+**Proposed (#7):** store B is also given `replay(state, actions, to)` when it is created, the same
+way it gets `newFarm`. It applies the actions in seq order, each at its own `at`, then advances to
+`to`. B's `load` and `stateAt` call it, but store code never imports the sim: the factory hands it
+in. If the rules refuse a logged action, `replay` throws instead of skipping it.
+
 A repeated idempotency key returns the first answer. The handler asks `processed` before it runs
 the simulation, because a resent action may no longer be valid (a resent "plant plot 0" finds the
 plot already growing) and would otherwise get a 422 instead of its first answer. The handler
@@ -153,7 +158,9 @@ configuration, plus one stress run per store. A concurrency script fires a gift 
 one farm at the same moment 1,000 times per store. Everything runs on one WSL2 laptop. Locust,
 the spike server and Postgres run on the same machine, wherever the matrix runs: a network hop
 between Locust and the server would add the same delay to A and B, and the 2× term of the
-decision rule would loosen by that delay in B's favour. Code
+decision rule would loosen by that delay in B's favour. B1's snapshot table is keyed by farm
+and upserted on every action, like A's state row, while B25 and B100 key snapshots by (farm, seq);
+that keeps B1's per-action write comparable with A's (#7). Code
 lives on `prototype/persistence` and is not merged; results are in `docs/spikes/persistence/`.
 
 ## Results
