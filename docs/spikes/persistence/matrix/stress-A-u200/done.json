@@ -1,0 +1,26 @@
+{
+  "id": "stress-A-u200",
+  "kind": "stress",
+  "run": 1,
+  "store": "A",
+  "users": 200,
+  "schema": "load_stress_a_u200",
+  "env": {
+    "STORE": "A"
+  },
+  "warmupS": 60,
+  "measureS": 120,
+  "noWait": true,
+  "startedAt": "2026-11-06T20:14:46.243Z",
+  "finishedAt": "2026-11-06T20:18:40.250Z",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "ramGiB": 16,
+    "os": "Ubuntu 24.04.5 LTS",
+    "postgres": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+    "node": "v24.22.1",
+    "python": "3.13.18",
+    "locust": "2.47.0"
+  }
+}

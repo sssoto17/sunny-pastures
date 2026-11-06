@@ -33,8 +33,14 @@ USERS=200 RUN_TIME=6m OUT=docs/spikes/persistence/<run> prototypes/persistence/l
 cd prototypes/persistence/load && uv run --locked python summarize.py <run folder>...
 ```
 
-- `locustfile.py`: 80% active players (a tap every 2–8 s), 20% returning players (+8 h of
-  server time per return, through `X-Spike-Clock-Offset`; it only grows). Moves are a registry;
+- `locustfile.py`: 80% active players (a tap every 2–8 s; 15% of their taps are a GET whatever
+  else they could do, #11), 20% returning players (+8 h of server time per return, through
+  `X-Spike-Clock-Offset`; it only grows). `SPIKE_NO_WAIT=1` takes every wait out (the stress run).
+- `results.py`: the matrix folder → `results.csv`, `chart.svg`, the Results table, the decision
+  rule step by step and the stress runs (`uv run --locked python results.py`); its
+  definitions are in its docstring.
+- `test_locustfile.py`, `test_results.py`: the tap choice and the stress waits
+  and the tail rebuild (`uv run --locked python -m unittest -v`). Moves are a registry;
   `SPIKE_ACTIONS` defaults to `plant,harvest,bake,collect` (#11). Gifts stay out of the mix.
 - `WARMUP_S` (smoke.sh, then Locust) resets Locust's stats that many seconds in; `RUN_TIME`
   includes it. `window.json` records the measured window, and `summarize.py` cuts `server.csv`

@@ -12,6 +12,8 @@
 // (or `pnpm --filter @sunny-pastures/persistence-spike matrix`). Env, all optional:
 //   MATRIX_OUT=docs/spikes/persistence/matrix  results folder (relative to the repo root)
 //   STORES=A,B1,B25,B100  USERS=50,200  RUNS=3  WARMUP_S=60  MEASURE_S=300
+//   STRESS=0        leave out the stress runs (one per store, after the rest: 200 users, no wait,
+//                   60 s + 120 s; STRESS_USERS, STRESS_WARMUP_S, STRESS_MEASURE_S change them)
 //   LIMIT=<n>       stop after n configurations in this invocation (the dry run uses 2)
 //   PUSH=0          commit but don't push; COMMIT_TRAILER=<text> appended to each commit message
 //   MATRIX_ALLOW_MACHINE_CHANGE=1  resume even though machine.json describes another machine
@@ -26,8 +28,11 @@ import type { Sql } from "postgres";
 export type StoreName = "A" | "B1" | "B25" | "B100";
 
 export type Configuration = {
-  /** `r<run>-<store>-u<users>`: the results folder's name. */
+  /** `r<run>-<store>-u<users>` (or `stress-<store>-u<users>`): the results folder's name. */
   id: string;
+  /** Normal configurations feed the decision rule; stress runs are reported only (#11). */
+  kind: "normal" | "stress";
+  /** 1, 2, 3 for normal configurations; stress runs are run 1 of their own. */
   run: number;
   store: StoreName;
   users: number;
@@ -35,25 +40,70 @@ export type Configuration = {
   schema: string;
   /** What the spike server needs to pick the store. */
   env: { STORE: "A" } | { STORE: "B"; SNAPSHOT_N: string };
+  /** Seconds of discarded warm-up, then seconds measured. */
+  warmupS: number;
+  measureS: number;
+  /** Players tap with no wait time (the stress run). */
+  noWait: boolean;
 };
 
-export type MatrixSpec = { stores: readonly StoreName[]; users: readonly number[]; runs: number };
+export type StressSpec = { users: number; warmupS: number; measureS: number };
 
-/** Every configuration, run-major: run 1 of each store × player count, then run 2, and so on. */
-export function plan({ stores, users, runs }: MatrixSpec): Configuration[] {
+export type MatrixSpec = {
+  stores: readonly StoreName[];
+  users: readonly number[];
+  runs: number;
+  /** Normal configurations' timing; ADR-0001's 60 s + 300 s by default. */
+  warmupS?: number;
+  measureS?: number;
+  /** One stress run per store, after every normal configuration (#11). */
+  stress?: StressSpec;
+};
+
+/** #11: 200 users, no wait time, 1 min warm-up + 2 min measured, one run per store. */
+export const STRESS: StressSpec = { users: 200, warmupS: 60, measureS: 120 };
+
+const storeEnv = (store: StoreName): Configuration["env"] =>
+  store === "A" ? { STORE: "A" } : { STORE: "B", SNAPSHOT_N: store.slice(1) };
+
+/**
+ * Every configuration, run-major: run 1 of each store × player count, then run 2, and so on;
+ * then the stress run of each store, so a timebox cut costs stress runs before any normal one.
+ */
+export function plan({ stores, users, runs, warmupS = 60, measureS = 300, stress }: MatrixSpec): Configuration[] {
   const configs: Configuration[] = [];
   for (let run = 1; run <= runs; run++) {
     for (const store of stores) {
       for (const u of users) {
         configs.push({
           id: `r${run}-${store}-u${u}`,
+          kind: "normal",
           run,
           store,
           users: u,
           schema: `load_r${run}_${store.toLowerCase()}_u${u}`,
-          env: store === "A" ? { STORE: "A" } : { STORE: "B", SNAPSHOT_N: store.slice(1) },
+          env: storeEnv(store),
+          warmupS,
+          measureS,
+          noWait: false,
         });
       }
+    }
+  }
+  if (stress) {
+    for (const store of stores) {
+      configs.push({
+        id: `stress-${store}-u${stress.users}`,
+        kind: "stress",
+        run: 1,
+        store,
+        users: stress.users,
+        schema: `load_stress_${store.toLowerCase()}_u${stress.users}`,
+        env: storeEnv(store),
+        warmupS: stress.warmupS,
+        measureS: stress.measureS,
+        noWait: true,
+      });
     }
   }
   return configs;
@@ -179,9 +229,14 @@ async function main(): Promise<number> {
     }),
     users: list(process.env.USERS, [50, 200], (s) => wholeNumber("USERS", s, 0)),
     runs: wholeNumber("RUNS", process.env.RUNS, 3),
+    warmupS: wholeNumber("WARMUP_S", process.env.WARMUP_S, 60),
+    measureS: wholeNumber("MEASURE_S", process.env.MEASURE_S, 300),
+    stress: process.env.STRESS === "0" ? undefined : {
+      users: wholeNumber("STRESS_USERS", process.env.STRESS_USERS, STRESS.users),
+      warmupS: wholeNumber("STRESS_WARMUP_S", process.env.STRESS_WARMUP_S, STRESS.warmupS),
+      measureS: wholeNumber("STRESS_MEASURE_S", process.env.STRESS_MEASURE_S, STRESS.measureS),
+    },
   };
-  const warmupS = wholeNumber("WARMUP_S", process.env.WARMUP_S, 60);
-  const measureS = wholeNumber("MEASURE_S", process.env.MEASURE_S, 300);
   const limit = wholeNumber("LIMIT", process.env.LIMIT, Number.MAX_SAFE_INTEGER);
   const push = process.env.PUSH !== "0";
   const trailer = process.env.COMMIT_TRAILER ? `\n\n${process.env.COMMIT_TRAILER}` : "";
@@ -230,18 +285,19 @@ async function main(): Promise<number> {
     for (const config of todo.slice(0, limit)) {
       const dir = join(out, config.id);
       const startedAt = new Date();
-      console.log(`\n=== ${config.id}: store ${config.store}, ${config.users} users, run ${config.run}, schema ${config.schema}`);
+      console.log(`\n=== ${config.id}: store ${config.store}, ${config.users} users, ${config.kind === "stress" ? "stress (no wait)" : `run ${config.run}`}, ${config.warmupS} s + ${config.measureS} s, schema ${config.schema}`);
       await sql`drop schema if exists ${sql(config.schema)} cascade`;
       const smoke = spawnSync(join(loadDir, "smoke.sh"), "SNAPSHOT_N" in config.env ? ["B", config.env.SNAPSHOT_N] : ["A"], {
         cwd: repo,
         stdio: "inherit",
-        timeout: (warmupS + measureS + 900) * 1000,
+        timeout: (config.warmupS + config.measureS + 900) * 1000,
         env: {
           ...process.env,
           STORE_SCHEMA: config.schema,
           USERS: String(config.users),
-          RUN_TIME: `${warmupS + measureS}s`,
-          WARMUP_S: String(warmupS),
+          RUN_TIME: `${config.warmupS + config.measureS}s`,
+          WARMUP_S: String(config.warmupS),
+          SPIKE_NO_WAIT: config.noWait ? "1" : "0",
           OUT: dir,
         },
       });
@@ -252,8 +308,6 @@ async function main(): Promise<number> {
       const finishedAt = new Date();
       writeFileSync(join(dir, DONE), JSON.stringify({
         ...config,
-        warmupS,
-        measureS,
         startedAt: startedAt.toISOString(),
         finishedAt: finishedAt.toISOString(),
         machine,

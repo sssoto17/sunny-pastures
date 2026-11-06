@@ -1,0 +1,26 @@
+{
+  "id": "r3-A-u50",
+  "kind": "normal",
+  "run": 3,
+  "store": "A",
+  "users": 50,
+  "schema": "load_r3_a_u50",
+  "env": {
+    "STORE": "A"
+  },
+  "warmupS": 60,
+  "measureS": 300,
+  "noWait": false,
+  "startedAt": "2026-11-06T19:22:48.064Z",
+  "finishedAt": "2026-11-06T19:29:00.567Z",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "ramGiB": 16,
+    "os": "Ubuntu 24.04.5 LTS",
+    "postgres": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+    "node": "v24.22.1",
+    "python": "3.13.18",
+    "locust": "2.47.0"
+  }
+}
