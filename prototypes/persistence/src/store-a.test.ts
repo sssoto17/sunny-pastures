@@ -3,6 +3,7 @@ import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import postgres from "postgres";
 import { apply, newFarm, type FarmState } from "./sim.ts";
+import { createInbox, type Inbox } from "./inbox.ts";
 import { connect, createStoreA } from "./store-a.ts";
 import { StoreError, type Answer, type GameStore } from "./store.ts";
 
@@ -22,13 +23,16 @@ function answer(seq: number): Answer {
 describe("store A", { skip: url ? false : "DATABASE_URL not set" }, () => {
   const sql = connect(url!);
   let store: GameStore;
+  let inbox: Inbox;
 
   before(async () => {
-    store = await createStoreA(sql, { schema, newFarm: () => newFarm(1) });
+    inbox = await createInbox(sql, { schema: `${schema}_inbox` });
+    store = await createStoreA(sql, { schema, newFarm: () => newFarm(1), inbox });
   });
 
   after(async () => {
     await sql`drop schema if exists ${sql(schema)} cascade`;
+    await sql`drop schema if exists ${sql(`${schema}_inbox`)} cascade`;
     await sql.end();
   });
 
@@ -79,7 +83,7 @@ describe("store A", { skip: url ? false : "DATABASE_URL not set" }, () => {
     // A client without the bigint parser: postgres.js then returns int8 columns as strings.
     const raw = postgres(url!, { onnotice: () => {} });
     try {
-      const unguarded = await createStoreA(raw, { schema, newFarm: () => newFarm(1) });
+      const unguarded = await createStoreA(raw, { schema, newFarm: () => newFarm(1), inbox });
       await assert.rejects(unguarded.load("round-trip"), StoreError);
     } finally {
       await raw.end();
