@@ -213,6 +213,7 @@ Supabase anonymous sign-in.
 | MUST-10.3 | All randomness comes from the farm's seeded PRNG, and the seed comes from the farm's id. | `prop`, `review` |
 | MUST-10.4 | Content is data inside the simulation. A content test checks it:<br>• every timer is a whole number of seconds between 10 s and 24 h;<br>• every recipe input can be produced by some unlocked route;<br>• every unlock refers to content that exists;<br>• Level thresholds rise strictly. | `content` |
 | MUST-10.5 | _Open (from ADR-0001):_ where the state hash is computed: outside the simulation in server and client code, or as a small pure-TypeScript hash inside it. Decided in M2. | `review` |
+| MUST-10.6 | When several things happen at the same moment and share storage, the simulation handles them in one fixed order. Examples: a Collector filling the barn, a Loop restart, a trough refill, an order slot refilling. The order is first by kind of event, then by facility, pen or plot index, then by queue slot. It is defined once in the simulation and never depends on the order of a map, a set or a request, so client and server always choose the same order. | `unit`, `prop` |
 
 ### MUST-11 Server authority
 
@@ -265,6 +266,7 @@ Randomly generated farms, action sequences and times, with a fixed seed in CI.
 | MUST-14.5 | Goods are conserved, except where the rules create or consume them: production, orders, planting, gift send and claim. | `prop` |
 | MUST-14.6 | A refused action leaves the farm unchanged. | `prop` |
 | MUST-14.7 | Time never runs backwards: no action's time is below the farm's last action time. | `prop` |
+| MUST-14.8 | Ties: generated farms include automated steps that finish at the same moment and compete for the last space in storage. Splitting `advance` exactly at that moment, or building the same farm in a different internal order, gives the same state hash (MUST-10.6). | `prop` |
 
 ### MUST-15 Protected acceptance tests
 
