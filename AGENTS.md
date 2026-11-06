@@ -15,8 +15,8 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - `apps/web/`: the Next.js app: UI, game API and persistence. `src/server/` is server-only.
 - `tests/acceptance/`: black-box tests over HTTP. Agent PRs must not modify them.
 - `tools/load/`, `tools/analysis/`: Python, used only for Locust load tests and data analysis.
-- `docs/`: `adr/`, `agents/`, `diagrams/`, `plans/`, `requirements/` (MoSCoW in `moscow.md`),
-  `retros/`, `spikes/`.
+- `docs/`: `adr/`, `agents/`, `diagrams/`, `plans/`, `requirements/` (MoSCoW in `moscow.md`,
+  the requirement specification in `spec.md`), `retros/`, `spikes/`.
 
 ## Rules
 
@@ -30,6 +30,17 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - When designing a module, name the design pattern(s) it uses and the alternatives considered, and
   record them in its ADR.
 - Never commit secrets: read them from env vars and keep placeholders in `.env.example`.
+- Never print secret values, and never hand the admin a command that does. The admin pastes
+  terminal output back into sessions, so every command you run or suggest must hide keys, tokens,
+  passwords and credentials in URLs: silence the output, mask the values or list only the names.
+  For the local stack, use `pnpm db:start` / `db:status` / `db:env`, never a bare `supabase start`
+  or `supabase status`.
+- Before running commands, read `docs/agents/sandbox.md`. It lists the sandbox pitfalls:
+  `supabase`, localhost services and `.git` writes have to run outside the sandbox.
+- Parallel sessions never share a branch. The main folder stays on `main` and belongs to the
+  coordinating session. Any session that changes files or needs another branch works in its own
+  git worktree under `.claude/worktrees/`, named `<N>-<slug>` after its issue (use the worktree
+  tool before the first edit). Never `git checkout` or `git switch` in the main folder.
 - A mistake that happens twice is a missing safeguard: mechanical mistakes become checks (lint
   rule, Fallow boundary, test, CI step), judgement calls become standards (this file or
   `CONSTRAINTS.md`). The weekly retro looks for them; see `docs/diagrams/workflow.md`,
@@ -39,7 +50,7 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 
 ### Issue tracker
 
-Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone and on the Sunny Pastures Project with a Priority (P0–P3). An issue moves from Backlog to Ready only when it meets the definition of ready. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone and on the Sunny Pastures Project with a Priority (P0–P3). Ready means the admin has chosen to focus on it now; only the admin moves an issue there, and only when it meets the definition of ready. Agents create issues in Backlog. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

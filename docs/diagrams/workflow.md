@@ -17,7 +17,7 @@ flowchart TB
     Q{"Settled in<br/>conversation?"}
     P["/prototype<br/>branch prototype/‹name›"]
     R["/research<br/>background agent → cited .md"]
-    S["/spec → SPEC.md"]
+    S["/spec → docs/requirements/spec.md"]
     PL["/plan → docs/plans/NN-‹slug›.md"]
     T["/to-tickets → GitHub issues<br/>milestone · Week · Track · Mode · Size"]
     G --> Q
@@ -82,7 +82,7 @@ Gold diamonds are your decisions. Every PR is merged by you, factory PRs include
 | Start of a milestone | `grill-with-docs` (+ `domain-modeling`, `codebase-design`) | `GLOSSARY.md`, ADRs (pattern + alternatives) | every design decision |
 | ↳ needs a runnable answer | `prototype` | `prototype/<name>` branch, never merged | what it taught |
 | ↳ needs facts | `research` (background) | cited `.md` | nothing: it feeds the grill |
-| | Addy `/spec` | `SPEC.md` (living, doubles as the requirements chapter) | edit and approve |
+| | Addy `/spec` | `docs/requirements/spec.md` (living, doubles as the requirements chapter) | edit and approve |
 | | Addy `/plan` | `docs/plans/NN-<slug>.md`, frozen once published | approve the plan |
 | | `to-tickets` | GitHub issues with native blocking edges, on the Project | nothing: it publishes |
 | Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`) | PR | review and merge |
@@ -116,7 +116,7 @@ as early as possible: the cheapest moment is the first repeat.
 | Property failures | fast-check's shrunk counterexample | a named regression test kept next to the property |
 | Repeated review findings | `code-review` flagging the same kind of issue twice | a check or a standard, via `retro` |
 | Playtests | tester feedback | `triage` → `ready` issues; the next grill may reopen a MoSCoW item |
-| Load tests | Locust latency and storage numbers | response-time limits in `SPEC.md`, so later runs check against measured numbers |
+| Load tests | Locust latency and storage numbers | response-time limits in `docs/requirements/spec.md`, so later runs check against measured numbers |
 | Repeated manual steps | daily routine, noted in retros | the next automation stage (`/today`, factory) |
 
 **Weekly retro convention.** Besides "what went well and what didn't", every weekly `retro` asks:
@@ -133,11 +133,13 @@ Each answer becomes an issue or a direct change in the same week, never only a n
 Morning, about 10 minutes:
 
 1. Read the handoff the session starts with.
-2. Open the **This week** board. Pick at most 3 outcomes: usually 1 design and 1–2 build.
+2. Open the **This week** board. Pick at most 3 outcomes (usually 1 design and 1–2 build) and
+   move them to **Ready**. Ready is your focus; everything else stays in Backlog.
 3. Launch Factory items first, so agents work while you design.
 4. For each Manual item, write a brief and open a fresh session in the repo:
 
    ```
+   Work in a worktree named <N>-<slug>.
    Work on #N: <one-line goal>.
    Read first: <files, ADRs, links>.
    Decided: <settled points, with links>.
@@ -148,11 +150,23 @@ Morning, about 10 minutes:
 During the day, at each phase boundary choose, in this order: continue · subagent · `/clear` ·
 `/compact` · `/handoff` (only for a new directory, harness or mid-phase side task).
 
+**Parallel sessions.** One folder can only have one branch checked out, so two sessions in the
+same folder change each other's files underneath them. The main folder stays on `main` for the
+coordinating session; every work session gets its own git worktree under `.claude/worktrees/`
+(the session's worktree tool creates one on a new branch from `origin/main`).
+
+- Each worktree needs its own `pnpm install` once the repo has dependencies. The pnpm store is
+  shared, so it's fast.
+- The local Supabase stack is one per machine and shared by every worktree.
+- `.git` writes (worktrees, commits, pushes) run outside the sandbox.
+
 Evening, about 10 minutes:
 
 1. Update the board: statuses, `blocked:*` labels with their reason.
 2. A light `/retro` if you built something. Note any step you repeated by hand.
-3. `remember` handoff with the top 3 next.
+3. Remove the worktrees whose PRs have merged: check `git worktree list`, then
+   `git worktree remove .claude/worktrees/<name>`.
+4. `remember` handoff with the top 3 next.
 
 ## Automation stages
 
