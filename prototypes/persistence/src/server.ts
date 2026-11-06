@@ -1,12 +1,13 @@
-// Spike server (ADR-0001 "Method"). Reads PORT and DATABASE_URL from the environment.
+// Spike server (ADR-0001 "Method"). Reads PORT, DATABASE_URL, STORE (A|B) and SNAPSHOT_N (1|25|100).
 //   GET  /farms/:id          → { seq, hash, state }, advanced to server time in memory, writes nothing
 //   POST /farms/:id/actions  ← { action, expectedSeq, idempotencyKey } → { seq, hash, rebased, retries }
+//   GET  /farms/:id/at/:t    → { at, hash, state }: the farm at server time t (ms); B only, 501 on A
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { handleAction, handleRead, type Clock } from "./handler.ts";
-import { newFarm } from "./sim.ts";
-import { connect, createStoreA } from "./store-a.ts";
+import { handleAction, handleRead, handleStateAt, type Clock } from "./handler.ts";
+import { connect } from "./store-a.ts";
 import { StoreError } from "./store.ts";
+import { createStore, storeConfig } from "./stores.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -17,8 +18,16 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
+let config;
+try {
+  config = storeConfig(process.env);
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e);
+  process.exit(1);
+}
+
 const sql = connect(databaseUrl);
-const store = await createStoreA(sql, { newFarm: (id) => newFarm(fnv1a(id)) });
+const store = await createStore(sql, config);
 const now: Clock = () => Date.now();
 
 const server = createServer(async (req, res) => {
@@ -26,8 +35,10 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://spike");
     const read = url.pathname.match(/^\/farms\/([\w-]{1,64})$/);
     const act = url.pathname.match(/^\/farms\/([\w-]{1,64})\/actions$/);
+    const audit = url.pathname.match(/^\/farms\/([\w-]{1,64})\/at\/([^/]{1,20})$/);
 
     if (read && req.method === "GET") return send(res, await handleRead(store, now, read[1]!));
+    if (audit && req.method === "GET") return send(res, await handleStateAt(store, audit[1]!, audit[2]!));
     if (act && req.method === "POST") {
       let body: unknown;
       try {
@@ -44,7 +55,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(port, () => console.log(`spike server (store A) on http://127.0.0.1:${port}`));
+server.listen(port, () => console.log(`spike server (store ${config.name}) on http://127.0.0.1:${port}`));
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
@@ -67,11 +78,4 @@ async function readBody(req: IncomingMessage): Promise<string> {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
-}
-
-/** FNV-1a over the farm id: a stable seed, so a farm's bonus rolls don't depend on the server. */
-function fnv1a(text: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
-  return h >>> 0;
 }

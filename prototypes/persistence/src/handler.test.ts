@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleAction, handleRead } from "./handler.ts";
+import { handleAction, handleRead, handleStateAt } from "./handler.ts";
 import { newFarm, stateHash } from "./sim.ts";
-import type { Answer, CommitEntry, CommitResult, FarmRecord, GameStore } from "./store.ts";
+import type { Answer, AuditableStore, CommitEntry, CommitResult, FarmRecord, GameStore } from "./store.ts";
 
 const MIN = 60_000;
 
@@ -135,4 +135,33 @@ test("reading a farm advances it in memory and writes nothing", async () => {
   assert.deepEqual(read.body.state.plots[0], { status: "ready" });
   assert.equal(read.body.hash, stateHash(read.body.state));
   assert.deepEqual((await store.load("f")).state.plots[0], { status: "growing", readyAt: 2 * MIN });
+});
+
+test("stateAt on a store without history is a 501", async () => {
+  const res = await handleStateAt(memoryStore(), "f", "0");
+  assert.equal(res.status, 501);
+});
+
+test("stateAt passes t to an auditable store and answers that farm with its hash", async () => {
+  const asked: number[] = [];
+  const then = { ...newFarm(1), wheat: 7 };
+  const store: AuditableStore = {
+    ...memoryStore(),
+    async stateAt(_id, t) {
+      asked.push(t);
+      return then;
+    },
+  };
+  const res = await handleStateAt(store, "f", "120000");
+  assert.deepStrictEqual(res, { status: 200, body: { at: 120_000, hash: stateHash(then), state: then } });
+  assert.deepStrictEqual(asked, [120_000]);
+});
+
+test("stateAt needs t as non-negative integer ms", async () => {
+  const asked: number[] = [];
+  const store: AuditableStore = { ...memoryStore(), async stateAt(_id, t) { asked.push(t); return newFarm(1); } };
+  for (const t of ["", "1.5", "-1", "abc", "1e3", "9007199254740992"]) {
+    assert.equal((await handleStateAt(store, "f", t)).status, 400, t);
+  }
+  assert.deepStrictEqual(asked, []);
 });

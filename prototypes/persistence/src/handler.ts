@@ -2,7 +2,7 @@
 // the sim stays pure and the store never runs it. Transport-free so it can be tested without HTTP.
 
 import { advance, apply, stateHash, type Action, type FarmState } from "./sim.ts";
-import type { Answer, GameStore } from "./store.ts";
+import type { Answer, AuditableStore, GameStore } from "./store.ts";
 
 /** Server time in integer ms. */
 export type Clock = () => number;
@@ -20,6 +20,23 @@ export async function handleRead(
   const record = await store.load(farmId);
   const state = advance(record.state, Math.max(now(), record.at));
   return { status: 200, body: { seq: record.seq, hash: stateHash(state), state } };
+}
+
+/** The audit read: the farm as it was at server time `t` (integer ms, from the URL). */
+export async function handleStateAt(
+  store: GameStore,
+  farmId: string,
+  t: string,
+): Promise<Reply<{ at: number; hash: string; state: FarmState }> | Reply<ErrorBody>> {
+  if (!isAuditable(store)) return { status: 501, body: { error: "this store keeps no history (stateAt is B only)" } };
+  const at = /^\d+$/.test(t) ? Number(t) : NaN;
+  if (!Number.isSafeInteger(at)) return { status: 400, body: { error: "t must be non-negative integer ms" } };
+  const state = await store.stateAt(farmId, at);
+  return { status: 200, body: { at, hash: stateHash(state), state } };
+}
+
+function isAuditable(store: GameStore): store is AuditableStore {
+  return typeof (store as Partial<AuditableStore>).stateAt === "function";
 }
 
 export async function handleAction(
