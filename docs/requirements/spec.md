@@ -41,8 +41,8 @@ Words in **bold** in the criteria, and the terms they use, are defined in [`GLOS
   how it connects and the bounds that tests rely on.
 - **Tuning content is a rules change.** A farm is rebuilt by replaying its log (ADR-0001), so a
   new grow time or price can make an old action replay differently, or be refused. #31 decides
-  how logs survive that, and it has to be settled **before the first tuning after playtest 1**
-  (MUST-13.6).
+  how logs survive that. It has to be settled **before M3 builds the log schema, and in any case
+  before the first tuning after playtest 1** (MUST-13.6).
 - **Farm history** (actions from before the farm's last action) exists because
   [ADR-0001](../adr/0001-persistence-model.md) chose store B100: an append-only action log per
   farm, with a snapshot after every 100th action. The criteria that rely on it are listed under
@@ -258,7 +258,7 @@ requests/s on the load VM), B100 is measured against A again, as the ADR's revis
 | MUST-13.3 | Concurrent actions on one farm never lose an update. A conflict is retried (at most 3 times). After that the request fails with a 503 and nothing is committed. | `accept`, `attack` (T4) |
 | MUST-13.4 | Sending a gift, and claiming one, is written in the same transaction as the farm. No gift is lost or claimed twice, even across a crash. | `accept`, `attack` (T4, T6) |
 | MUST-13.5 | The spike's concurrency check runs against the real store: 1,000 gift-and-harvest pairs fired at one farm at the same moment, with no lost update. | `accept` |
-| MUST-13.6 | Logs written under an earlier rules or content version still load after a release, including a release that only tunes content numbers. Each farm rebuilds to the same farm it had before the release. CI replays a set of recorded logs under the new version. How this is achieved is decided in #31, before the first tuning after playtest 1. | `ci` |
+| MUST-13.6 | Logs written under an earlier rules or content version still load after a release, including a release that only tunes content numbers. Each farm rebuilds to the same farm it had before the release. CI replays a set of recorded logs under the new version. How this is achieved is decided in #31, before M3 builds the log schema and in any case before the first tuning after playtest 1. | `ci` |
 | MUST-13.7 | Every query in a commit runs inside its transaction. A saturating stress run shows 0 `UNSAFE_TRANSACTION` errors and 0 lost updates (#28). | `accept`, `metric` |
 
 ### MUST-14 Property tests for the simulation
@@ -377,7 +377,7 @@ These apply to every requirement above. _Open_: whether they get MoSCoW IDs of t
 | COULD-01 | Two friends can trade goods for goods, and each side's goods move only when both accept. |
 | COULD-02 | Supabase Realtime pushes gift arrivals, and live changes during a visit, without a reload. |
 | COULD-03 | Skill mini-games earn **clovers**. The server verifies each result by replaying the player's inputs against the seed. |
-| COULD-04 | An event-store library replaces the hand-built action log, if ADR-0001 picks the log. The acceptance tests still pass unchanged. |
+| COULD-04 | An event-store library replaces the hand-built action log (ADR-0001). The acceptance tests still pass unchanged. |
 | COULD-05 | An admin dashboard shows the MUST-19 metrics and toggles feature flags (#1). A CLI script replays one farm's log up to a given sequence number, to reproduce a reported bug. |
 | COULD-06 | **Tractor**: equipment that lets a farmhand on crops work a whole field as one task. |
 | COULD-07 | Farmhands deliver orders, earning XP and coins and making room in storage while the player is away. |
@@ -419,6 +419,6 @@ The grill checked three more and kept them independent of the log:
 5. **The admin role** (MUST-16.5): how an account gets it. Anonymous sign-in gives every player a
    user, so the admin needs a role that only the admin can set.
 6. **Replaying old logs after a rules change** (MUST-13.6, MUST-16.3): decided in #31. That
-   includes content tuning, so #31 must be settled before the first tuning after playtest 1,
-   not later in M3.
+   includes content tuning. #31 must be settled before M3 builds the log schema, and in any
+   case before the first tuning after playtest 1.
 7. **Where the state hash lives** (MUST-10.5): an M2 decision taken over from ADR-0001.
