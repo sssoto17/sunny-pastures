@@ -29,24 +29,27 @@ advances the farm to server time in memory. Reads never write.
 The store persists; it never runs the simulation. The server handler owns the loop:
 
 ```
-load → advance(state, at) → apply(state, action, at) → commit → on conflict: retry (max 3)
+processed? → load → advance(state, at) → apply(state, action, at) → commit → on conflict: retry (max 3)
 ```
 
 ```ts
 type FarmRecord = { state: FarmState; seq: number; at: number }; // after action `seq`, not advanced
+type Answer = { seq: number; hash: string; rebased: boolean; retries: number }; // the POST response
 
 interface GameStore {
   load(playerId: string): Promise<FarmRecord>;
+  processed(playerId: string, idempotencyKey: string): Promise<Answer | null>;
   commit(playerId: string, entry: {
     expectedSeq: number;      // the seq that was loaded; the commit writes expectedSeq + 1
     action: Action;
     at: number;
     idempotencyKey: string;
     next: FarmState;          // A always writes it; B writes it only as a snapshot
+    answer: Answer;           // stored with the key, returned unchanged for a repeat
     inbox?: { send: Gift } | { claim: string };
   }): Promise<
     | { kind: "committed"; seq: number }
-    | { kind: "duplicate"; seq: number }
+    | { kind: "duplicate"; answer: Answer }
     | { kind: "conflict" }
   >;
 }
@@ -62,6 +65,18 @@ columns as strings by default, and a string `at` would otherwise reach the state
 like a simulation bug. The driver is also configured to parse `bigint` as a number, but the
 check at the boundary is the guard; the driver setting is only a convenience.
 
+A farm with no accepted action loads as `{ state: newFarm, seq: 0, at: 0 }`. The store is given a
+`newFarm(playerId)` function when it is created; that builds content, it doesn't run the
+simulation. The farm's PRNG seed comes from its id, so a new farm is the same on every server.
+
+A repeated idempotency key returns the first answer. The handler asks `processed` before it runs
+the simulation, because a resent action may no longer be valid (a resent "plant plot 0" finds the
+plot already growing) and would otherwise get a 422 instead of its first answer. The handler
+builds the full answer before it commits, and the commit stores it with the key in the same
+transaction, so a duplicate returns it unchanged: A keeps no history to rebuild an old hash from.
+The commit claims the key before it writes the farm and rolls the claim back on a conflict, so a
+lost race doesn't use up the key. (Amended 6 Nov after the tracer bullet, #5.)
+
 Gifts use a shared inbox table outside the comparison. Sending a gift is the sender's action and
 inserts the gift (id `<senderId>:<seq>`); claiming it is the recipient's action, whose payload the
 server fills with the gift's goods before `apply`, so a farm's replay never needs another farm's
@@ -75,7 +90,7 @@ data. Inbox writes run in the same transaction as the commit. No action ever wri
 | Strategy (+ factory) | A, B1, B25, B100 | Interchangeable stores chosen once from `STORE` and `SNAPSHOT_N`. |
 | Functional core, imperative shell | handler + sim | The sim stays pure; only the handler does I/O. |
 | Optimistic Offline Lock | `expectedSeq` | A conflict is detected at commit and retried, no lock held across the sim. |
-| Idempotent Receiver | `idempotencyKey` | A retried request returns the first answer instead of applying twice. |
+| Idempotent Receiver | `idempotencyKey`, `processed` | A retried request returns the stored first answer instead of applying twice. |
 | Event Sourcing + Snapshot | B | Actions are the source of truth; snapshots bound replay length. |
 | Interface Segregation | `AuditableStore` | A cannot audit, so it doesn't pretend to. |
 
@@ -94,6 +109,11 @@ data. Inbox writes run in the same transaction as the commit. No action ever wri
 - **The client resolves conflicts** (409 and resend). Rejected: two open tabs would keep failing
   each other's requests.
 - **An event-store library** instead of a hand-built log: deferred (COULD-04).
+- **Duplicate detection only inside `commit`, returning the first `seq`** (this ADR's first
+  draft). Rejected after #5: a resent action the rules now refuse never reaches `commit`, and A
+  can't rebuild the first answer's hash from a `seq`.
+- **`load(playerId, idempotencyKey)` returning any stored answer with the farm.** Rejected: one
+  round trip fewer, but `load` would do two jobs.
 
 ## Decision rule (fixed before measuring)
 
