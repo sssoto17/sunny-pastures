@@ -153,7 +153,9 @@ ever writes two farms. (Amended 6 Nov after #8.)
    strict deep-equal (types included) with the in-memory farm, so a type mismatch shows up as a
    store bug before any hash is compared. Then the same 500 scripted actions (including an 8-hour gap and some invalid actions)
    give an identical state hash in A, every B and the in-memory sim, and B's `stateAt` matches
-   the sim at 10 random times. A failure is a bug to fix, not an input to the decision.
+   the sim at 10 random times and at the middle of the script's 8-hour gap, so offline progress
+   is audited on every seed (amended 6 Nov after #9; the random times land in the gap only about
+   once in 50). A failure is a bug to fix, not an input to the decision.
 2. **B wins unless** either holds for a B variant:
    - at 200 players, its p95 action latency > max(2 × A's p95, A's p95 + 20 ms);
    - for B100, the worst-case load (snapshot plus a 99-action tail, read and replay, timed
@@ -203,7 +205,8 @@ from `--json-file`, because the stats CSV is a periodic snapshot. The server's k
 
 _To be filled from `docs/spikes/persistence/results.csv`._ The gate row is from
 `docs/spikes/persistence/gate.md` (#9): seed 42, every store ends on hash `e1925b02…` at seq 456
-with 456/456 strict round trips, and every B's `stateAt` matches the sim 10/10. Identical on the
+with 456/456 strict round trips, and every B's `stateAt` matches the sim 11/11 (10 random times
+plus the middle of the 8-hour gap, #15). Identical on the
 cloud container (Postgres 16) and the laptop (Postgres 17).
 
 | | A | B1 | B25 | B100 |
