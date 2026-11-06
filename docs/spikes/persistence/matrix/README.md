@@ -6,8 +6,11 @@ same VM** (ADR-0001 "Method"): a network hop would add the same delay to A and B
 2× term of the decision rule in B's favour. Every matrix run uses this one environment, and the
 runner checks that (below).
 
-This folder holds the matrix results: one folder per configuration (`r<run>-<store>-u<users>`)
-and `machine.json`, written by the first configuration that runs. The dry run that proved the
+This folder holds the matrix results: one folder per configuration (`r<run>-<store>-u<users>`,
+`stress-<store>-u<users>`) and `machine.json`, written by the first configuration that runs. The
+full matrix ran on 6 Nov 2026 on Postgres 17.11; the summary, the decision rule and the stress
+runs are in [`../results.md`](../results.md), one row per configuration in
+[`../results.csv`](../results.csv). The dry run that proved the
 runner is in [`../dry-run/`](../dry-run/README.md).
 
 ## The machine
@@ -22,7 +25,7 @@ machine that doesn't match it.
 | Cores | 4 vCPUs (1 socket, 4 cores, 1 thread per core) |
 | RAM | 15.7 GiB (16,472,088 kB) |
 | OS | Ubuntu 24.04.5 LTS, kernel 6.18.44 (a Firecracker microVM) |
-| Postgres | **16.15** (Ubuntu's) in this session; **17** once the environment allows `apt.postgresql.org` (see below) |
+| Postgres | **17.11** (PGDG) for the matrix (`machine.json`); 16.15 (Ubuntu's) in the session that built the runner |
 | Node | v24.22.2 (the image's `/opt/node24`) |
 | pnpm | 12.15.0 (Corepack) |
 | uv / Python | uv 0.13.6 (PyPI), Python 3.13.18 (uv-managed) |
