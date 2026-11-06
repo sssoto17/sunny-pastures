@@ -3,7 +3,7 @@
 // load/smoke.sh, so Locust, the spike server and Postgres all run on this machine. After each
 // configuration its folder is committed and pushed, so a paused or ended session loses at most the
 // configuration it was running. Started again, the runner skips every configuration whose folder
-// holds done.json and reruns any half-written one from scratch.
+// holds done.json and reruns any half-written one from scratch. A lock keeps a second runner out.
 //
 // Order is run-major (run 1 of every configuration, then run 2, …): if the timebox cuts the matrix
 // short, one run per configuration is what ADR-0001 counts, and that is what is done first.
@@ -20,7 +20,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import type { Sql } from "postgres";
 
 export type StoreName = "A" | "B1" | "B25" | "B100";
@@ -69,6 +69,39 @@ export function completed(root: string): Set<string> {
       .filter((d) => d.isDirectory() && existsSync(join(root, d.name, DONE)))
       .map((d) => d.name),
   );
+}
+
+/**
+ * Takes the runner's lock (a file holding its pid) and returns the release. Only one runner may
+ * run on a machine: two would share the server port, and the second would delete the first's
+ * half-written folder and drop its live schema. A lock whose pid is gone is a runner that died
+ * (a paused or ended session), so it is taken over.
+ */
+export function lock(path: string): () => void {
+  mkdirSync(dirname(path), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(path, `${process.pid}\n`, { flag: "wx" });
+      return () => rmSync(path, { force: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    const pid = Number(readFileSync(path, "utf8").trim());
+    if (Number.isSafeInteger(pid) && pid > 0 && alive(pid)) {
+      throw new Error(`another matrix runner (pid ${pid}) holds ${path}; wait for it, or stop it first`);
+    }
+    rmSync(path, { force: true }); // stale: its runner is gone
+  }
+  throw new Error(`could not take ${path}`);
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /** What has to stay the same for every run of the matrix (ADR-0001: one environment). */
@@ -158,6 +191,13 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  let release: () => void;
+  try {
+    release = lock(join(loadDir, "results", "matrix.lock")); // load/results is gitignored
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : e);
+    return 4;
+  }
   const { connect } = await import("./store-a.ts");
   const sql = connect(url);
   try {
@@ -224,6 +264,7 @@ async function main(): Promise<number> {
     return 0;
   } finally {
     await sql.end();
+    release();
   }
 }
 

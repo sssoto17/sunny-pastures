@@ -2,10 +2,10 @@
 // are already done, so a paused or ended session resumes where it stopped.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { completed, machineDiff, plan, type Configuration } from "./matrix.ts";
+import { completed, lock, machineDiff, plan, type Configuration } from "./matrix.ts";
 
 const ids = (configs: Configuration[]) => configs.map((c) => c.id);
 
@@ -57,4 +57,22 @@ test("resuming on a different machine is caught: the fields that differ are name
   const recorded = { cpu: "Intel Xeon @ 2.10GHz", cores: 4, ramGiB: 15, os: "Ubuntu 24.04.5 LTS", postgres: "16.15", node: "v24.22.2", locust: "2.47.0" };
   assert.deepStrictEqual(machineDiff(recorded, { ...recorded }), []);
   assert.deepStrictEqual(machineDiff(recorded, { ...recorded, cores: 8, postgres: "17.6" }), ["cores", "postgres"]);
+});
+
+test("only one runner at a time: a second one is refused while the first holds the lock", () => {
+  // Two runners would share port 4010, and the second would delete the first's half-written
+  // folder and drop its live schema (seen in the dry run).
+  const path = join(mkdtempSync(join(tmpdir(), "matrix-lock-")), "matrix.lock");
+  const release = lock(path);
+  assert.throws(() => lock(path), new RegExp(`another matrix runner \\(pid ${process.pid}\\)`));
+  release();
+  assert.equal(existsSync(path), false);
+  lock(path)();
+});
+
+test("a lock left by a runner that died (its pid is gone) is taken over", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "matrix-lock-")), "matrix.lock");
+  writeFileSync(path, "2147483646\n"); // no such process
+  const release = lock(path);
+  release();
 });
