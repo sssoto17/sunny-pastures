@@ -160,13 +160,20 @@ Upgrades for fields, facilities, pens and storage, and the first automation.
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-06.1 | **Fields**: extra plots can be bought. Each plot costs more than the one before, and the maximum number of plots depends on Level. | `unit`, `content` |
-| MUST-06.2 | **Facility tiers**: a tier upgrade costs coins and needs a minimum Level. Each tier shortens job times. Every 2nd tier adds a queue slot, up to a maximum. Facilities go up to tier 5, and tiers 4–5 bring only speed and slots. | `unit`, `content` |
+| MUST-06.2 | **Facility tiers**: a tier upgrade costs coins and needs a minimum Level. Each tier shortens job times. Every 2nd tier adds a queue slot, up to a maximum. Facilities go up to tier 3 here; tiers 4–5 are SHOULD-08. | `unit`, `content` |
 | MUST-06.3 | **Pens**: trough capacity and the number of animals per pen can be upgraded. | `unit`, `content` |
 | MUST-06.4 | **Storage**: the **silo** (crops) and the **barn** (all other goods) each have a capacity. Larger capacities unlock with Level and are bought with coins. | `unit`, `content` |
 | MUST-06.5 | **Loop** add-on: when the facility has a free slot and the inputs are in storage, it starts the facility's last recipe again. This includes while the player is away. It stops when inputs or space run out. | `unit`, `prop` |
-| MUST-06.6 | **Collector** add-on, for a facility or a pen: it moves finished goods (from a facility) or products (from a pen) into storage as soon as they're done, if they fit. If they don't fit, they wait where they are. | `unit`, `prop` |
+| MUST-06.6 | **Collector** add-on for a facility: it moves finished goods into storage as soon as they're done, if they fit. If they don't fit, they wait in the facility. The Collector for pens is SHOULD-08. | `unit`, `prop` |
 | MUST-06.7 | An upgrade applies only to jobs, crops and production started after it was bought. Anything already running keeps its finish time. | `unit`, `prop` |
 | MUST-06.8 | A new farm has no automation: troughs hold one portion, and there are no add-ons. | `unit` |
+
+If M2 planning shows the Musts don't fit by the hand-in, cut in this order, from the top, without
+another grill:
+
+1. Removing a friend (MUST-08): adding a friend by invite stays.
+2. Silo and barn capacity upgrades (MUST-06): the fixed capacities stay.
+3. Tiers 2–3 bring recipes only (MUST-06): no shorter job times and no extra queue slots.
 
 ### MUST-07 Offline progress
 
@@ -369,6 +376,7 @@ These apply to every requirement above. _Open_: whether they get MoSCoW IDs of t
 | SHOULD-05 | **Farmhands** on crops and animals:<br>• On crop duty, a farmhand harvests and replants (paying the seed price).<br>• On animal duty, a farmhand carries feed from the barn to the troughs and collects products from the pens into the barn.<br>• The player gives each farmhand a duty. It works by a fixed priority with fixed tie-breaks (lowest plot first), inside the simulation and with no randomness.<br>• Speed upgrades shorten a farmhand's working time. The **Foreman** upgrade lets farmhands choose their duty by a fixed priority across the farm.<br>• Farmhands are expensive and unlock late. Each further farmhand unlocks at a higher Level. |
 | SHOULD-06 | **Clovers**: a few at every level-up, plus a small seeded chance on each delivered order. A player spends them to skip an order-board refill delay or to finish a job or crop now. They are never sold and never gifted. |
 | SHOULD-07 | **Away summary since you last looked**: the browser keeps the server time of the farm it last showed. On return, the server compares the farm at that time (`stateAt`) with the farm now, and the summary lists the actions taken in between (in another tab, say) and what the farm produced. The kept time only decides what the summary shows, so trusting it is harmless. |
+| SHOULD-08 | Facility **tiers 4–5** (shorter job times and more queue slots only), and the **Collector** add-on for pens, which moves products from a pen into the barn as soon as they're done, if they fit. |
 
 ## Could have
 

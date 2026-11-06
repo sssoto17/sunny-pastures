@@ -8,7 +8,7 @@ Each item has a stable ID so requirements, issues and the report can refer to it
 requirement specification (acceptance criteria per item) comes out of the requirements grill and
 lands in `spec.md` next to this file; this file only ranks the scope.
 
-Last changed: 2026-11-06 (requirements grill, #2).
+Last changed: 2026-11-07 (requirements grill, #2).
 
 ## Must have
 
@@ -23,7 +23,7 @@ The game is not a valid answer to the research question without these.
 | MUST-03 | Production facilities with timed queues: feed mill, bakery, dairy                       |
 | MUST-04 | NPC order board: deliver goods for coins and XP                                         |
 | MUST-05 | Economy and progression: coins, XP and levels that unlock content                       |
-| MUST-06 | Upgrades for fields, facility tiers, animal pens, silo and barn; Loop and Collector add-ons (Collector for pens too) |
+| MUST-06 | Upgrades for fields, facility tiers 1–3, animal pens, silo and barn; Loop and Collector add-ons for facilities |
 | MUST-07 | Offline progress: the farm keeps producing while the player is away                     |
 | MUST-08 | Gifting: send goods to a friend (friend list, invite link)                              |
 | MUST-09 | Play without a sign-up form (Supabase anonymous sign-in)                               |
@@ -48,6 +48,15 @@ The game is not a valid answer to the research question without these.
 | MUST-18 | Two playtests: a think-aloud test of the vertical slice, then an offline-return test   |
 | MUST-19 | System metrics: latency, rollbacks between prediction and server, unlock curves         |
 
+**If the Musts don't fit**
+
+If M2 planning shows the Musts don't fit by the hand-in, cut in this order, from the top, without
+another grill:
+
+1. Removing a friend (MUST-08): adding a friend by invite stays.
+2. Silo and barn capacity upgrades (MUST-06): the fixed capacities stay.
+3. Tiers 2–3 bring recipes only (MUST-06): no shorter job times and no extra queue slots.
+
 ## Should have
 
 Clearly valuable; dropped only if the Musts are at risk.
@@ -61,6 +70,7 @@ Clearly valuable; dropped only if the Musts are at risk.
 | SHOULD-05 | Farmhands on crops and animals (feed and collect), with speed upgrades and the Foreman |
 | SHOULD-06 | Clovers: a rare currency earned in play, spent to skip waits                         |
 | SHOULD-07 | Away summary since the player last looked, across actions taken in between           |
+| SHOULD-08 | Facility tiers 4–5, and the Collector add-on for pens                                |
 
 ## Could have
 
