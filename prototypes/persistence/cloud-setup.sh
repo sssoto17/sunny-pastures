@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cloud-session setup for the persistence spike (#7, extended by #15). Safe to run twice.
-#   1. Node 24 (from nodejs.org, checksum-verified) if `node --version` isn't v24
+#   1. Node 24 if `node --version` isn't v24: the image's /opt/node24, else nodejs.org (checksum-verified)
 #   2. corepack + pnpm install
 #   3. uv 0.13.6 (from PyPI, in its own venv), Python 3.13 via uv, and the Locust project synced
 #   4. Postgres 17 from the PGDG apt repo (apt.postgresql.org); if the network refuses it, Ubuntu's
@@ -44,18 +44,22 @@ _sp_setup() (
   # 1. Node 24 ------------------------------------------------------------------------------
   if [[ $(node --version 2>/dev/null) != v${node_major}.* ]]; then
     local version dir
-    version=$(timeout "$net" curl -fsS https://nodejs.org/dist/index.json |
-      python3 -c "import json,sys; print(next(r['version'] for r in json.load(sys.stdin) if r['version'].startswith('v${node_major}.')))")
-    dir=/opt/node-$version
-    if [[ ! -x $dir/bin/node ]]; then
-      local tmp file=node-$version-linux-x64.tar.xz
-      tmp=$(mktemp -d)
-      timeout 300 curl -fsS -o "$tmp/$file" "https://nodejs.org/dist/$version/$file"
-      timeout "$net" curl -fsS -o "$tmp/SHASUMS256.txt" "https://nodejs.org/dist/$version/SHASUMS256.txt"
-      (cd "$tmp" && grep " $file\$" SHASUMS256.txt | sha256sum -c --quiet -)
-      mkdir -p "$dir"
-      tar -xJf "$tmp/$file" -C "$dir" --strip-components=1
-      rm -rf "$tmp"
+    if [[ $(/opt/node$node_major/bin/node --version 2> /dev/null) == v${node_major}.* ]]; then
+      dir=/opt/node$node_major # the cloud image ships it; no download needed
+    else
+      version=$(timeout "$net" curl -fsS https://nodejs.org/dist/index.json |
+        python3 -c "import json,sys; print(next(r['version'] for r in json.load(sys.stdin) if r['version'].startswith('v${node_major}.')))")
+      dir=/opt/node-$version
+      if [[ ! -x $dir/bin/node ]]; then
+        local tmp file=node-$version-linux-x64.tar.xz
+        tmp=$(mktemp -d)
+        timeout 300 curl -fsS -o "$tmp/$file" "https://nodejs.org/dist/$version/$file"
+        timeout "$net" curl -fsS -o "$tmp/SHASUMS256.txt" "https://nodejs.org/dist/$version/SHASUMS256.txt"
+        (cd "$tmp" && grep " $file\$" SHASUMS256.txt | sha256sum -c --quiet -)
+        mkdir -p "$dir"
+        tar -xJf "$tmp/$file" -C "$dir" --strip-components=1
+        rm -rf "$tmp"
+      fi
     fi
     for bin in node npm npx corepack; do first_on_path "$bin" "$dir/bin/$bin"; done
     [[ $(node --version) == v${node_major}.* ]] || { echo "node $node_major installed in $dir but not first on PATH" >&2; exit 1; }
