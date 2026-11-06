@@ -47,6 +47,12 @@ const server = createServer(
   }),
 );
 
+// Keep idle keep-alive connections longer than any client waits between requests (Locust's
+// returning players wait up to 30 s). With Node's 5 s default, the server closes a connection just
+// as the client reuses it, and the request fails with no status: a harness error, not a result.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
+
 server.listen(port, () => {
   console.log(`spike server (store ${config.name}) on http://127.0.0.1:${port}`);
   console.log(`timings → ${csvPath}${spikeClock ? "; SPIKE_CLOCK=1: clock offset, /spike/seed, /spike/storage" : ""}`);
