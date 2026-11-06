@@ -39,6 +39,7 @@ gate passed again in this session on Postgres 17.11: hash `e1925b02…` at seq 4
 | Bytes per player-hour at 50 / 200 | 146,364 / 139,264 | 209,715 / 201,114 | 226,645 / 208,350 | 216,269 / 200,704 |
 | Read / write share | 49.6% / 50.4% | 49.6% / 50.4% | 49.7% / 50.3% | 49.3% / 50.7% |
 | `stateAt` possible | no | yes | yes | yes |
+| Replay cost (µs per action; ×10 projection) | n/a (no replay) | n/a (tail always 0) | 3.7 (reads 3.4, actions 3.8); ×10: 2.37 ms | 3.3 (reads 3.4, actions 3.5); ×10: 4.72 ms |
 | Lines / moving parts | 94 code lines; `farms` + `processed_keys` | 129 code lines (B1, B25 and B100 share them); `actions` + `snapshots`, plus the injected `replay` | same | same |
 
 Every normal configuration: 0 Locust failures, 0 422s. At 200 players the matrix offers about
@@ -64,6 +65,31 @@ The run-to-run spread is much wider: B1's three runs range from 197,427 to 205,2
 from 195,379 to 210,125. So the tie-break comes down to page rounding and is within noise. Read
 mechanically, the rule picks B100. In practice, B1 and B100 are indistinguishable on storage at
 this run length, and B25 is about 4% larger.
+
+## Replay cost (ADR-0001 step 4, reported)
+
+An ordinary least-squares line through each request's `load` time against its tail, over every
+measured read and action in the six normal runs per store (3 runs × 50 and 200 players). The
+×10 column is the worst-case load (tail N − 1) if each replayed action cost 10× as much, the
+full sim's projection: intercept + 10 × slope × (N − 1).
+
+| Store | Requests | Slope (µs per action) | Intercept (ms) | ×10 worst case (ms) |
+| --- | --- | ---: | ---: | ---: |
+| B25 | reads (n = 20,930) | 3.39 | 1.336 | 2.15 |
+| B25 | actions (n = 21,205) | 3.83 | 1.629 | 2.55 |
+| B25 | **pooled** (n = 42,135) | **3.69** | 1.482 | **2.37** |
+| B100 | reads (n = 20,758) | 3.37 | 1.294 | 4.63 |
+| B100 | actions (n = 21,358) | 3.48 | 1.586 | 5.03 |
+| B100 | **pooled** (n = 42,116) | **3.30** | 1.448 | **4.72** |
+| B1 | n/a: its tail is always 0, so there is no slope | | | |
+
+- Even at 10× the cost per action, B100's worst-case load projects to about 4.7 ms, a tenth of
+  step 2's 50 ms limit.
+- Actions sit about 0.29 ms above reads at every tail, because a POST's `load` also includes the
+  idempotency lookup. In B100, actions are slightly more common at low tails (51.6% of requests
+  below tail 50, 49.8% above), so pooling tilts the line down: the pooled slope (3.30) is below
+  both the read and action slopes. B25's mix is flat (50.2% and 50.4%), and its pooled slope lies
+  between them. The per-route slopes are the cleaner reading: 3.4–3.8 µs per action.
 
 ## Stress runs (reported, not part of the rule)
 
@@ -103,6 +129,12 @@ The ADR doesn't define these; `results.py` uses:
 - **Bytes per player-hour:** schema growth (`pg_total_relation_size`: indexes, TOAST and unvacuumed
   space) from just before Locust starts to just after it stops, ÷ players ÷ real hours (6 min).
   Whole 8 kB pages, so one page is 410 bytes per player-hour at 200 players, 1,638 at 50.
+- **Replay cost (B25, B100):** the slope of an ordinary least-squares fit of `load` time
+  against tail (seq mod N, rebuilt as for the worst-case load), over every measured read and
+  action in the store's six normal runs. It is the time to load the farm per tail action, so it
+  includes **reading the action rows from Postgres as well as applying them**. That makes it an
+  upper bound on the sim's own apply cost. The ×10 projection is intercept + 10 × slope × (N − 1).
+  B1 is n/a: its tail is always 0.
 - **Lost updates:** accepted actions (200s) minus rows written (new log rows for B, new
   processed keys for A).
 
