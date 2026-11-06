@@ -80,3 +80,61 @@ test("state hash is SHA-256 over JSON with sorted keys", () => {
   assert.equal(stateHash({ b: 1, a: [{ d: 2, c: 3 }] }), expected);
   assert.equal(stateHash({ a: [{ c: 3, d: 2 }], b: 1 }), expected);
 });
+
+test("bread costs 3 wheat, takes 5 min and waits in the bakery until it is collected", () => {
+  const baking = ok(apply({ ...newFarm(1), wheat: 4 }, { type: "bake" }, 0));
+  assert.equal(baking.wheat, 1);
+
+  assert.equal(apply(baking, { type: "collect" }, 5 * MIN - 1).ok, false, "not baked yet");
+  const collected = ok(apply(baking, { type: "collect" }, 8 * 60 * MIN));
+  assert.equal(collected.bread, 1);
+  assert.equal(apply(collected, { type: "collect" }, 8 * 60 * MIN).ok, false, "nothing left to collect");
+});
+
+test("the bakery holds up to 3 jobs and bakes them one after another", () => {
+  let farm: FarmState = { ...newFarm(1), wheat: 12 };
+  for (let i = 0; i < 3; i++) farm = ok(apply(farm, { type: "bake" }, 0));
+  assert.equal(apply(farm, { type: "bake" }, 0).ok, false, "a fourth job is refused");
+  assert.equal(farm.wheat, 3, "three jobs cost 9 wheat");
+
+  // Ordered together at 0, ready at 5, 10 and 15 min: not all at 5.
+  assert.equal(ok(apply(farm, { type: "collect" }, 10 * MIN)).bread, 2);
+  // After an 8-hour gap all three are ready, each having started when the one before finished.
+  assert.equal(ok(apply(farm, { type: "collect" }, 8 * 60 * MIN)).bread, 3);
+});
+
+test("baked bread waiting to be collected keeps its slot, and a new job starts when ordered", () => {
+  let farm: FarmState = { ...newFarm(1), wheat: 12 };
+  farm = ok(apply(farm, { type: "bake" }, 0));
+  farm = ok(apply(farm, { type: "bake" }, 0)); // ready at 10 min
+  farm = ok(apply(farm, { type: "bake" }, 60 * MIN)); // bakery idle since 10 min: ready at 65, not 15
+  assert.equal(apply(farm, { type: "bake" }, 60 * MIN).ok, false, "two loaves waiting still fill two slots");
+
+  assert.equal(ok(apply(farm, { type: "collect" }, 65 * MIN - 1)).bread, 2);
+  const all = ok(apply(farm, { type: "collect" }, 65 * MIN));
+  assert.equal(all.bread, 3);
+  assert.deepEqual(all.bakery, []);
+});
+
+test("a gift's goods leave the sender's farm when it is sent", () => {
+  const farm: FarmState = { ...newFarm(1), wheat: 5, bread: 2 };
+  const sent = ok(apply(farm, { type: "sendGift", to: "bob", goods: { wheat: 4, bread: 1 } }, 0));
+  assert.equal(sent.wheat, 1);
+  assert.equal(sent.bread, 1);
+  assert.equal(apply(farm, { type: "sendGift", to: "bob", goods: { wheat: 6, bread: 0 } }, 0).ok, false, "more wheat than the farm has");
+  assert.equal(apply(farm, { type: "sendGift", to: "bob", goods: { wheat: 0, bread: 3 } }, 0).ok, false, "more bread than the farm has");
+});
+
+test("a claim adds the goods its payload carries, so no other farm is needed", () => {
+  const claimed = ok(apply(newFarm(1), { type: "claimGift", giftId: "alice:7", goods: { wheat: 4, bread: 1 } }, 0));
+  assert.equal(claimed.wheat, 4);
+  assert.equal(claimed.bread, 1);
+});
+
+test("a gift must hold some goods, in whole non-negative amounts", () => {
+  const farm: FarmState = { ...newFarm(1), wheat: 5, bread: 2 };
+  for (const goods of [{ wheat: 0, bread: 0 }, { wheat: -1, bread: 2 }, { wheat: 1.5, bread: 0 }]) {
+    assert.equal(apply(farm, { type: "sendGift", to: "bob", goods }, 0).ok, false, `send ${JSON.stringify(goods)}`);
+    assert.equal(apply(farm, { type: "claimGift", giftId: "alice:7", goods }, 0).ok, false, `claim ${JSON.stringify(goods)}`);
+  }
+});
