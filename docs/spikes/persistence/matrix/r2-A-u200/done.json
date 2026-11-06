@@ -1,0 +1,26 @@
+{
+  "id": "r2-A-u200",
+  "kind": "normal",
+  "run": 2,
+  "store": "A",
+  "users": 200,
+  "schema": "load_r2_a_u200",
+  "env": {
+    "STORE": "A"
+  },
+  "warmupS": 60,
+  "measureS": 300,
+  "noWait": false,
+  "startedAt": "2026-11-06T18:36:51.590Z",
+  "finishedAt": "2026-11-06T18:43:40.189Z",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "ramGiB": 16,
+    "os": "Ubuntu 24.04.5 LTS",
+    "postgres": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+    "node": "v24.22.1",
+    "python": "3.13.18",
+    "locust": "2.47.0"
+  }
+}
