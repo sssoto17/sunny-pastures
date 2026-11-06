@@ -54,7 +54,7 @@ Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone a
 
 ### Triage labels
 
-Work is manual by default and carries no label for it; readiness is the Project Status. `factory:ready` is the only label that says an issue can be worked without the admin. Other labels: `triage`, and `blocked:decision` / `blocked:external` / `blocked:admin` for why an issue can't move yet. See `docs/agents/triage-labels.md`.
+Every issue carries one type (`feature`, `bug`, `spike`, `design`, `chore`, `idea`) and one `area:*` label, or `triage` until it's evaluated; PRs carry only the areas they touch. Readiness is the Project Status, and manual work carries no label. `factory:ready` is the only label that says an issue can be worked without the admin; `blocked:*` says why an issue can't move yet. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
