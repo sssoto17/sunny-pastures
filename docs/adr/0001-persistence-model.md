@@ -46,12 +46,13 @@ interface GameStore {
     idempotencyKey: string;
     next: FarmState;          // A always writes it; B writes it only as a snapshot
     answer: Answer;           // stored with the key, returned unchanged for a repeat
-    inbox?: { send: Gift } | { claim: string };
   }): Promise<
     | { kind: "committed"; seq: number }
     | { kind: "duplicate"; answer: Answer }
     | { kind: "conflict" }
+    | { kind: "refused"; reason: string } // the inbox refused the gift write; nothing committed
   >;
+  gift(giftId: string): Promise<Gift | null>;
 }
 
 interface AuditableStore extends GameStore {
@@ -82,10 +83,20 @@ transaction, so a duplicate returns it unchanged: A keeps no history to rebuild 
 The commit claims the key before it writes the farm and rolls the claim back on a conflict, so a
 lost race doesn't use up the key. (Amended 6 Nov after the tracer bullet, #5.)
 
-Gifts use a shared inbox table outside the comparison. Sending a gift is the sender's action and
-inserts the gift (id `<senderId>:<seq>`); claiming it is the recipient's action, whose payload the
-server fills with the gift's goods before `apply`, so a farm's replay never needs another farm's
-data. Inbox writes run in the same transaction as the commit. No action ever writes two farms.
+`processed` can miss a resend that races its own first commit: it runs before that commit, and
+the load runs after it, so the rules refuse the action. Before any 422, the handler asks
+`processed` again and returns the first answer if one is there now. (Amended 6 Nov after #8.)
+
+Gifts use one inbox table shared by every store, in its own schema, outside the comparison. The
+factory hands each store the inbox when it is created, as it does `newFarm`. The store derives the
+inbox write from the committed action, so the two can't disagree: a `sendGift` inserts gift
+`<playerId>:<seq>`, and a `claimGift` marks its gift claimed only if it is the claimer's, unclaimed
+and holds the claimed goods. The write runs in the commit's transaction, after the farm write, so
+a race on one farm shows up as a conflict (and a retry) first. If the inbox refuses, the commit
+rolls back and returns `{ kind: "refused"; reason }`, and the handler answers 422 with no seq, key
+or gift row used. `GameStore` gains `gift(giftId)`, so the handler can fill a claim's goods before
+`apply`; the client never sends them. A farm's replay never needs another farm's data. No action
+ever writes two farms. (Amended 6 Nov after #8.)
 
 ### Patterns
 
@@ -98,6 +109,7 @@ data. Inbox writes run in the same transaction as the commit. No action ever wri
 | Idempotent Receiver | `idempotencyKey`, `processed` | A retried request returns the stored first answer instead of applying twice. |
 | Event Sourcing + Snapshot | B | Actions are the source of truth; snapshots bound replay length. |
 | Interface Segregation | `AuditableStore` | A cannot audit, so it doesn't pretend to. |
+| Shared gateway, injected | inbox | One table and its SQL for all stores, handed in by the factory so every store writes gifts the same way. |
 
 ### Alternatives considered
 
@@ -114,6 +126,10 @@ data. Inbox writes run in the same transaction as the commit. No action ever wri
 - **The client resolves conflicts** (409 and resend). Rejected: two open tabs would keep failing
   each other's requests.
 - **An event-store library** instead of a hand-built log: deferred (COULD-04).
+- **An `inbox` field on the commit entry** (this ADR's first draft). Rejected after #8: it is a
+  second description of the action that could disagree with it.
+- **Inbox writes outside the commit's transaction.** Rejected: a crash between the two writes
+  would lose a gift or claim one twice.
 - **Duplicate detection only inside `commit`, returning the first `seq`** (this ADR's first
   draft). Rejected after #5: a resent action the rules now refuse never reaches `commit`, and A
   can't rebuild the first answer's hash from a `seq`.
