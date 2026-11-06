@@ -1,0 +1,14 @@
+{
+  "name": "@sunny-pastures/persistence-spike",
+  "private": true,
+  "description": "Throwaway persistence spike (M1, ADR-0001). Lives on prototype/persistence only; never merged.",
+  "type": "module",
+  "scripts": {
+    "test": "node --env-file-if-exists=../../.env --test src/*.test.ts",
+    "test:unit": "node --test src/sim.test.ts src/handler.test.ts",
+    "start": "node --env-file-if-exists=../../.env src/server.ts"
+  },
+  "dependencies": {
+    "postgres": "3.4.9"
+  }
+}
