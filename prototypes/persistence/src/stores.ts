@@ -44,10 +44,15 @@ export function firstFarm(playerId: string): FarmState {
   return newFarm(fnv1a(playerId));
 }
 
-export function createStore(sql: Sql, config: StoreConfig): Promise<GameStore> {
+/** The Postgres schema a configuration's tables live in: one per store variant. */
+export function storeSchema(config: StoreConfig): string {
+  return `store_${config.name.toLowerCase()}`;
+}
+
+export function createStore(sql: Sql, config: StoreConfig, schema = storeSchema(config)): Promise<GameStore> {
   return config.name === "A"
-    ? createStoreA(sql, { newFarm: firstFarm })
-    : createStoreB(sql, { snapshotN: config.snapshotN, newFarm: firstFarm, replay });
+    ? createStoreA(sql, { schema, newFarm: firstFarm })
+    : createStoreB(sql, { schema, snapshotN: config.snapshotN, newFarm: firstFarm, replay });
 }
 
 /** FNV-1a over the farm id: a stable seed, so a farm's bonus rolls don't depend on the server. */
