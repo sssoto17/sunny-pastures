@@ -37,13 +37,13 @@ describe("equivalence gate", { skip: url ? false : "DATABASE_URL not set" }, () 
       if (run.store === "A") {
         assert.deepStrictEqual(run.stateAt, [], "A keeps no history");
       } else {
-        assert.equal(run.stateAt.length, 10, run.store);
+        assert.equal(run.stateAt.length, 11, `${run.store}: 10 random times plus the middle of the gap`);
         assert.ok(run.stateAt.every((c) => c.match), run.store);
       }
     }
     const times = result.stores.filter((s) => s.store !== "A").map((s) => s.stateAt.map((c) => c.t));
     assert.deepStrictEqual(times[1], times[0], "every B is asked at the same times");
-    assert.equal(new Set(times[0]).size, 10, "ten different times");
+    assert.equal(new Set(times[0]).size, 11, "eleven different times");
   });
 
   test("a store that writes something the sim didn't compute fails, labelled store", async () => {
@@ -93,6 +93,37 @@ describe("equivalence gate", { skip: url ? false : "DATABASE_URL not set" }, () 
     assert.equal(run!.pass, false);
     assert.ok(run!.stateAt.every((c) => !c.match));
     assert.deepStrictEqual(new Set(result.failures.map((f) => `${f.store} ${f.check} ${f.label}`)), new Set(["B25 stateAt store"]));
+  });
+
+  test("every B is also audited at the middle of the 8-hour gap, and matches the sim there", async () => {
+    // Seed 42's gap runs from 1,966,000 ms (step 250) to 30,766,000 ms (step 251), per #9.
+    const middle = 1_966_000 + 4 * 60 * 60_000;
+    const result = await runGate(sql, { script, tag: tag(), specs: DEFAULT_SPECS.slice(1) });
+
+    assert.deepStrictEqual(result.failures, []);
+    for (const run of result.stores) {
+      assert.equal(run.stateAt.length, 11, `${run.store}: 10 random times plus the gap`);
+      const gap = run.stateAt.filter((c) => c.gap);
+      assert.deepStrictEqual(gap.map((c) => [c.t, c.match]), [[middle, true]], run.store);
+    }
+  });
+
+  test("a B that gets offline progress wrong only inside the gap fails the gap check, labelled store", async () => {
+    // B100, except that inside the gap it answers with the farm as it was when the player left.
+    const frozen: StoreSpec = {
+      name: "B100",
+      async create(sql, options) {
+        const store = (await DEFAULT_SPECS[3]!.create(sql, options)) as AuditableStore;
+        return { ...store, stateAt: (id, t) => store.stateAt(id, t > 1_966_000 && t < 30_766_000 ? 1_966_000 : t) } satisfies AuditableStore;
+      },
+    };
+    const result = await runGate(sql, { script, tag: tag(), specs: [frozen] });
+
+    const [run] = result.stores;
+    assert.equal(run!.pass, false);
+    assert.deepStrictEqual(run!.stateAt.filter((c) => !c.match).map((c) => c.gap), [true], "only the gap check catches it");
+    assert.deepStrictEqual(result.failures.map((f) => `${f.store} ${f.check} ${f.label}`), ["B100 stateAt store"]);
+    assert.match(result.failures[0]!.detail, /gap/);
   });
 
   test("a store that throws fails that store only, labelled store", async () => {

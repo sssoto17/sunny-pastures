@@ -1,0 +1,25 @@
+{
+  "id": "r1-B100-u50",
+  "run": 1,
+  "store": "B100",
+  "users": 50,
+  "schema": "load_r1_b100_u50",
+  "env": {
+    "STORE": "B",
+    "SNAPSHOT_N": "100"
+  },
+  "warmupS": 10,
+  "measureS": 20,
+  "startedAt": "2026-11-06T17:13:10.408Z",
+  "finishedAt": "2026-11-06T17:13:51.148Z",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "ramGiB": 16,
+    "os": "Ubuntu 24.04.5 LTS",
+    "postgres": "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+    "node": "v24.22.2",
+    "python": "3.13.18",
+    "locust": "2.47.0"
+  }
+}

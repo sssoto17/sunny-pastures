@@ -10,8 +10,14 @@ users first (smoke.sh does). Two kinds of player, weighted 4:1:
   actions 2-8 s apart, then is away again for a short real-time while.
 
 Moves are a registry: each one picks an action from the player's view and updates the view after
-the server accepts it. Until #8 the server accepts only plant and harvest; to add bake, collect
-or gifts, write their move and name it in SPIKE_ACTIONS (e.g. SPIKE_ACTIONS=plant,harvest,bake).
+the server accepts it. SPIKE_ACTIONS names the enabled ones (default plant,harvest,bake,collect,
+per #11). Gifts stay out of the load mix: the concurrency script (#8) covers them, and a
+recipient has no inbox route to learn gift ids.
+
+Warm-up (ADR-0001: 1 min discarded): with WARMUP_S set, Locust's stats are reset that many seconds
+after the test starts, so --json-file and the CSVs hold only the measured window. WINDOW_FILE, if
+set, gets {"warmupS", "measuredFrom", "measuredTo"} in epoch ms, so the server's CSV (whose `t` is
+the same machine's clock) can be cut to the same window.
 
 Request names (Locust's CSV rows): "<verb> <route> [active|return]", so the offline return read is
 its own row ("GET /farms/:id [return]").
@@ -20,6 +26,7 @@ its own row ("GET /farms/:id [return]").
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import random
 import time
@@ -31,15 +38,25 @@ import gevent
 from locust import HttpUser, between, events, task
 
 GROW_MS = 2 * 60_000
+#: The sim's bakery (src/sim.ts): wheat per loaf, bake time, and jobs queued at once.
+BREAD_WHEAT = 3
+BAKE_MS = 5 * 60_000
+BAKERY_SLOTS = 3
 HOUR_MS = 60 * 60_000
 RETURN_AFTER_MS = 8 * HOUR_MS
 #: Harvest only this long after the plot should be ripe, so client/server clock jitter can't 422.
 RIPE_MARGIN_MS = 500
 
 FARM_PREFIX = os.environ.get("FARM_PREFIX", "load")
-ENABLED_MOVES = [m.strip() for m in os.environ.get("SPIKE_ACTIONS", "plant,harvest").split(",") if m.strip()]
+ENABLED_MOVES = [
+    m.strip() for m in os.environ.get("SPIKE_ACTIONS", "plant,harvest,bake,collect").split(",") if m.strip()
+]
+
+WARMUP_S = float(os.environ.get("WARMUP_S", "0"))
+WINDOW_FILE = os.environ.get("WINDOW_FILE")
 
 _farm_ids = itertools.count()
+_window: dict = {"warmupS": WARMUP_S}
 
 
 @dataclass
@@ -91,9 +108,33 @@ def _harvested(view: FarmView, action: dict, now: int) -> None:
     view.wheat += 2  # the seeded bonus is unknown to the player; a GET corrects it
 
 
+def _choose_bake(view: FarmView, now: int) -> dict | None:
+    return {"type": "bake"} if view.wheat >= BREAD_WHEAT and len(view.bakery) < BAKERY_SLOTS else None
+
+
+def _baked(view: FarmView, action: dict, now: int) -> None:
+    # One loaf at a time: it starts when ordered or when the loaf before it is done.
+    starts = max(now, view.bakery[-1]["readyAt"]) if view.bakery else now
+    view.wheat -= BREAD_WHEAT
+    view.bakery = [*view.bakery, {"readyAt": starts + BAKE_MS}]
+
+
+def _choose_collect(view: FarmView, now: int) -> dict | None:
+    return {"type": "collect"} if any(j["readyAt"] + RIPE_MARGIN_MS <= now for j in view.bakery) else None
+
+
+def _collected(view: FarmView, action: dict, now: int) -> None:
+    # The server collects every loaf ready at its own time, which is at or after `now`.
+    done = [j for j in view.bakery if j["readyAt"] <= now]
+    view.bread += len(done)
+    view.bakery = view.bakery[len(done):]
+
+
 MOVES: dict[str, Move] = {
     "plant": Move(_choose_plant, _planted),
     "harvest": Move(_choose_harvest, _harvested),
+    "bake": Move(_choose_bake, _baked),
+    "collect": Move(_choose_collect, _collected),
 }
 
 unknown = [m for m in ENABLED_MOVES if m not in MOVES]
@@ -189,4 +230,29 @@ class ReturningPlayer(Player):
 
 @events.init.add_listener
 def _describe(environment, **_kwargs) -> None:
-    print(f"farms {FARM_PREFIX}-<i>; moves: {', '.join(ENABLED_MOVES)}")
+    print(f"farms {FARM_PREFIX}-<i>; moves: {', '.join(ENABLED_MOVES)}; warm-up {WARMUP_S:g} s")
+
+
+def _write_window() -> None:
+    if WINDOW_FILE:
+        with open(WINDOW_FILE, "w") as f:
+            json.dump(_window, f)
+
+
+@events.test_start.add_listener
+def _start_warmup(environment, **_kwargs) -> None:
+    def end_warmup() -> None:
+        if WARMUP_S > 0:
+            gevent.sleep(WARMUP_S)
+            environment.stats.reset_all()
+        _window["measuredFrom"] = int(time.time() * 1000)
+        _write_window()
+        print(f"measuring from here (warm-up of {WARMUP_S:g} s discarded)")
+
+    gevent.spawn(end_warmup)
+
+
+@events.test_stop.add_listener
+def _end_window(environment, **_kwargs) -> None:
+    _window["measuredTo"] = int(time.time() * 1000)
+    _write_window()
