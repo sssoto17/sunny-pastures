@@ -135,6 +135,14 @@ _sp_setup() (
   if ! pg_lsclusters -h | grep -q "^$pg_major main "; then
     pg_createcluster "$pg_major" main --port "$port" > /dev/null
   fi
+  # Installing a new major while an older one holds the port makes apt create its cluster on the
+  # next free port (5433); move it to ours.
+  local cur_port
+  cur_port=$(pg_lsclusters -h | awk -v v="$pg_major" '$1 == v && $2 == "main" { print $3 }')
+  if [[ $cur_port != "$port" ]]; then
+    pg_ctlcluster "$pg_major" main stop > /dev/null 2>&1 || true
+    sed -i -E "s/^#?port = .*/port = $port/" "/etc/postgresql/$pg_major/main/postgresql.conf"
+  fi
   pg_ctlcluster "$pg_major" main start > /dev/null 2>&1 || true # already running is fine
   pg_isready -q -h 127.0.0.1 -p "$port"
   echo "postgres $pg_major ($(runuser -u postgres -- psql -p "$port" -tAc 'show server_version'))"
@@ -167,7 +175,11 @@ _sp_setup() (
   fi
 )
 
-if _sp_setup; then
+# Called on its own, not as an `if` condition: bash ignores `set -e` inside a condition, so a
+# failing step would otherwise run on and write a .env that can't connect.
+_sp_setup
+_sp_rc=$?
+if [[ $_sp_rc == 0 ]]; then
   # Sourced: export DATABASE_URL into the caller's shell without echoing it, and make sure the
   # shell finds the tools linked above.
   if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
@@ -181,4 +193,4 @@ else
   echo "cloud-setup failed" >&2
   [[ ${BASH_SOURCE[0]} != "$0" ]] && return 1 || exit 1
 fi
-unset -f _sp_setup
+unset -f _sp_setup; unset _sp_rc
