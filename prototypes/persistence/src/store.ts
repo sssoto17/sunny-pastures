@@ -43,8 +43,11 @@ export interface GameStore {
 
 /** A store that keeps history and can rebuild a farm at an earlier time (B only). */
 export interface AuditableStore extends GameStore {
-  /** The farm as it was at server time `t`: its actions up to `t`, then advanced to `t`. */
-  stateAt(playerId: string, t: number): Promise<FarmState>;
+  /**
+   * The farm as it was at server time `t`: its actions up to `t`, then advanced to `t`. `seq` is
+   * the last action at or before `t` (0 before the first), so an audit can say which one it saw.
+   */
+  stateAt(playerId: string, t: number): Promise<{ state: FarmState; seq: number }>;
 }
 
 /** The store loaded or met something it can't trust; never a simulation error. */

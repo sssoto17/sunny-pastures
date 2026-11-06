@@ -7,6 +7,7 @@
     "test": "node --env-file-if-exists=../../.env --test src/*.test.ts",
     "test:unit": "node --test src/sim.test.ts src/script.test.ts src/gate0.test.ts src/handler.test.ts src/stores.test.ts",
     "gate:0": "node src/gate0.ts",
+    "gate": "node --env-file-if-exists=../../.env src/gate.ts",
     "concurrency": "node --env-file-if-exists=../../.env src/concurrency.ts",
     "start": "node --env-file-if-exists=../../.env src/server.ts"
   },

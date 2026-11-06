@@ -1,7 +1,8 @@
 // Spike server (ADR-0001 "Method"). Reads PORT, DATABASE_URL, STORE (A|B) and SNAPSHOT_N (1|25|100).
 //   GET  /farms/:id          → { seq, hash, state }, advanced to server time in memory, writes nothing
 //   POST /farms/:id/actions  ← { action, expectedSeq, idempotencyKey } → { seq, hash, rebased, retries }
-//   GET  /farms/:id/at/:t    → { at, hash, state }: the farm at server time t (ms); B only, 501 on A
+//   GET  /farms/:id/at/:t    → { at, seq, hash, state }: the farm at server time t (ms); B only, 501
+//                              on A, 400 for a t later than server time
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { handleAction, handleRead, handleStateAt, type Clock } from "./handler.ts";
@@ -38,7 +39,7 @@ const server = createServer(async (req, res) => {
     const audit = url.pathname.match(/^\/farms\/([\w-]{1,64})\/at\/([^/]{1,20})$/);
 
     if (read && req.method === "GET") return send(res, await handleRead(store, now, read[1]!));
-    if (audit && req.method === "GET") return send(res, await handleStateAt(store, audit[1]!, audit[2]!));
+    if (audit && req.method === "GET") return send(res, await handleStateAt(store, now, audit[1]!, audit[2]!));
     if (act && req.method === "POST") {
       let body: unknown;
       try {

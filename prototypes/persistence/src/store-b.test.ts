@@ -132,25 +132,37 @@ for (const n of [1, 25, 100] as const satisfies readonly SnapshotN[]) {
       }
     });
 
-    test("stateAt an earlier time returns that time's farm; an action at exactly t counts", async () => {
+    test("stateAt an earlier time returns that time's farm and seq; an action at exactly t counts", async () => {
       const farms = await play(store, "audit", 30); // action i takes effect at (i - 1) * 2 min
       // Action 12 (a harvest) is at 22 min: just before it the farm is as after action 11.
-      assert.deepStrictEqual(await store.stateAt("audit", 22 * 60_000 - 1), farms[11]);
-      assert.deepStrictEqual(await store.stateAt("audit", 22 * 60_000), farms[12]);
+      assert.deepStrictEqual(await store.stateAt("audit", 22 * 60_000 - 1), { state: farms[11], seq: 11 });
+      assert.deepStrictEqual(await store.stateAt("audit", 22 * 60_000), { state: farms[12], seq: 12 });
       assert.equal(farms[12]!.wheat >= 12, true, "six harvests happened by then");
-      assert.deepStrictEqual(await store.stateAt("audit", 29 * GROW), farms[30], "at the last action: the current farm");
+      assert.deepStrictEqual(await store.stateAt("audit", 29 * GROW), { state: farms[30], seq: 30 }, "at the last action: the current farm");
     });
 
     test("stateAt advances to t after the last action before it", async () => {
       await store.commit("ripen", entry(newFarm(1), 0, plant(2), 60_000, "p"));
-      assert.deepStrictEqual((await store.stateAt("ripen", 60_000 + GROW - 1)).plots[2], { status: "growing", readyAt: 60_000 + GROW });
-      assert.deepStrictEqual((await store.stateAt("ripen", 60_000 + GROW)).plots[2], { status: "ready" });
+      const before = await store.stateAt("ripen", 60_000 + GROW - 1);
+      assert.deepStrictEqual(before.state.plots[2], { status: "growing", readyAt: 60_000 + GROW });
+      const after = await store.stateAt("ripen", 60_000 + GROW);
+      assert.deepStrictEqual(after.state.plots[2], { status: "ready" });
+      assert.equal(after.seq, 1, "ripening is not an action: seq stays");
     });
 
-    test("stateAt before a farm's first action is the new farm", async () => {
+    test("stateAt before a farm's first action is the new farm at seq 0", async () => {
       await store.commit("late", entry(newFarm(1), 0, plant(0), 10 * GROW, "p"));
-      assert.deepStrictEqual(await store.stateAt("late", 10 * GROW - 1), newFarm(1));
-      assert.deepStrictEqual(await store.stateAt("nobody-yet", 5), newFarm(1));
+      assert.deepStrictEqual(await store.stateAt("late", 10 * GROW - 1), { state: newFarm(1), seq: 0 });
+      assert.deepStrictEqual(await store.stateAt("nobody-yet", 5), { state: newFarm(1), seq: 0 });
+    });
+
+    test("stateAt between snapshots gives the seq of the last action at or before t", async () => {
+      await play(store, "audit-seq", 30);
+      // 27 min sits between action 14 (26 min) and action 15 (28 min). B25 starts from no
+      // snapshot here, B1 has only seq 30, so seq comes from the log tail, not the snapshot.
+      assert.equal((await store.stateAt("audit-seq", 27 * 60_000)).seq, 14);
+      // 50 min is after action 26: B25 starts from its seq-25 snapshot and replays one action.
+      assert.equal((await store.stateAt("audit-seq", 50 * 60_000 + 1)).seq, 26);
     });
 
     test("stateAt starts from the latest snapshot at or before t", async () => {

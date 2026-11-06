@@ -183,30 +183,39 @@ test("reading a farm advances it in memory and writes nothing", async () => {
 });
 
 test("stateAt on a store without history is a 501", async () => {
-  const res = await handleStateAt(memoryStore(), "f", "0");
+  const res = await handleStateAt(memoryStore(), () => 0, "f", "0");
   assert.equal(res.status, 501);
 });
 
-test("stateAt passes t to an auditable store and answers that farm with its hash", async () => {
+test("stateAt passes t to an auditable store and answers that farm with its seq and hash", async () => {
   const asked: number[] = [];
   const then = { ...newFarm(1), wheat: 7 };
   const store: AuditableStore = {
     ...memoryStore(),
     async stateAt(_id, t) {
       asked.push(t);
-      return then;
+      return { state: then, seq: 3 };
     },
   };
-  const res = await handleStateAt(store, "f", "120000");
-  assert.deepStrictEqual(res, { status: 200, body: { at: 120_000, hash: stateHash(then), state: then } });
+  const res = await handleStateAt(store, () => 10 * MIN, "f", "120000");
+  assert.deepStrictEqual(res, { status: 200, body: { at: 120_000, seq: 3, hash: stateHash(then), state: then } });
   assert.deepStrictEqual(asked, [120_000]);
 });
 
 test("stateAt needs t as non-negative integer ms", async () => {
   const asked: number[] = [];
-  const store: AuditableStore = { ...memoryStore(), async stateAt(_id, t) { asked.push(t); return newFarm(1); } };
+  const store: AuditableStore = { ...memoryStore(), async stateAt(_id, t) { asked.push(t); return { state: newFarm(1), seq: 0 }; } };
   for (const t of ["", "1.5", "-1", "abc", "1e3", "9007199254740992"]) {
-    assert.equal((await handleStateAt(store, "f", t)).status, 400, t);
+    assert.equal((await handleStateAt(store, () => Number.MAX_SAFE_INTEGER, "f", t)).status, 400, t);
   }
   assert.deepStrictEqual(asked, []);
+});
+
+test("stateAt refuses a t later than server time: it is history, not a forecast", async () => {
+  const asked: number[] = [];
+  const store: AuditableStore = { ...memoryStore(), async stateAt(_id, t) { asked.push(t); return { state: newFarm(1), seq: 0 }; } };
+  const now = () => 5 * MIN;
+  assert.equal((await handleStateAt(store, now, "f", String(5 * MIN + 1))).status, 400);
+  assert.equal((await handleStateAt(store, now, "f", String(5 * MIN))).status, 200, "now itself is history");
+  assert.deepStrictEqual(asked, [5 * MIN]);
 });
