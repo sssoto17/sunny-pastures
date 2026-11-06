@@ -32,6 +32,12 @@ export interface GameStore {
   commit(playerId: string, entry: CommitEntry): Promise<CommitResult>;
 }
 
+/** A store that keeps history and can rebuild a farm at an earlier time (B only). */
+export interface AuditableStore extends GameStore {
+  /** The farm as it was at server time `t`: its actions up to `t`, then advanced to `t`. */
+  stateAt(playerId: string, t: number): Promise<FarmState>;
+}
+
 /** The store loaded or met something it can't trust; never a simulation error. */
 export class StoreError extends Error {
   override name = "StoreError";
