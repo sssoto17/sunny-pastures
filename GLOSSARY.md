@@ -95,7 +95,7 @@ _Avoid_: warehouse, storage (for one store)
 
 **Farmhand**:
 A hired worker who does manual work on the farm without the player: harvesting and replanting,
-carrying feed to troughs, delivering orders.
+carrying feed to troughs, collecting from pens, delivering orders.
 _Avoid_: worker, helper, NPC, bot
 
 ### Progress

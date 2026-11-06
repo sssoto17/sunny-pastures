@@ -68,10 +68,10 @@ The commands, project structure, code style and boundaries (always / ask first /
 `AGENTS.md`, and in `CONSTRAINTS.md` once that exists. This spec doesn't repeat them. Architecture decisions are in
 `docs/adr/`.
 
-## Assumptions
+## Decisions from review
 
-These were not asked directly in the grill. They are the defaults this draft uses; correct any
-that are wrong.
+These were not asked directly in the grill. They were proposed as defaults in the draft and confirmed by
+the admin in review on 6 Nov.
 
 1. A facility, an animal pen or a farmhand becomes **unlocked** at a Level, then has to be bought
    with coins before it exists on the farm. It follows the same rule as tiers and storage.
@@ -354,7 +354,7 @@ These apply to every requirement above. _Open_: whether they get MoSCoW IDs of t
 | SHOULD-02 | Every Must crop, animal, good and facility has an asset instead of a placeholder. Every asset that ships is listed in `CREDITS.md` with its author, link and licence. No generative-AI art is used. |
 | SHOULD-03 | Locust runs against the **deployed** stack at 200 players and keeps p95 within BASE-04. The results are analysed in `tools/analysis`. |
 | SHOULD-04 | An anonymous player can link an email. Signing in with it in another browser opens the same farm. |
-| SHOULD-05 | **Farmhands** on crops and troughs:<br>• A farmhand harvests and replants (paying the seed price), and carries feed from the barn to the troughs.<br>• The player gives each farmhand a duty. It works by a fixed priority with fixed tie-breaks (lowest plot first), inside the simulation and with no randomness.<br>• Speed upgrades shorten a farmhand's working time. The **Foreman** upgrade lets farmhands choose their duty by a fixed priority across the farm.<br>• Farmhands are expensive and unlock late. Each further farmhand unlocks at a higher Level. |
+| SHOULD-05 | **Farmhands** on crops and animals:<br>• On crop duty, a farmhand harvests and replants (paying the seed price).<br>• On animal duty, a farmhand carries feed from the barn to the troughs and collects products from the pens into the barn.<br>• The player gives each farmhand a duty. It works by a fixed priority with fixed tie-breaks (lowest plot first), inside the simulation and with no randomness.<br>• Speed upgrades shorten a farmhand's working time. The **Foreman** upgrade lets farmhands choose their duty by a fixed priority across the farm.<br>• Farmhands are expensive and unlock late. Each further farmhand unlocks at a higher Level. |
 | SHOULD-06 | **Clovers**: a few at every level-up, plus a small seeded chance on each delivered order. A player spends them to skip an order-board refill delay or to finish a job or crop now. They are never sold and never gifted. |
 
 ## Could have
@@ -397,13 +397,12 @@ The grill checked these and kept them **untagged**, because each works under eit
 ## Open questions
 
 1. **ADR-0001 (#12)**: settles the four items above.
-2. **Collecting animal products automatically**: who does it? A farmhand on animal duty (proposed),
-   or a Collector-like add-on for pens? Until then, only the player collects from pens.
+2. **A pen upgrade that collects**: farmhands on animal duty collect (SHOULD-05). The admin
+   would also like a pen upgrade for this. Its shape and priority are still open.
 3. **The browser-test tool** behind `ui` is a new dependency to approve.
 4. **The rate limit for T7** (actions per farm per second), and whether it lives in config or in
    content.
 5. **The OWASP 2025 mapping** in MUST-16: check it against the published list before the report
    cites it.
 6. **Baseline IDs**: whether BASE-01–05 move into `moscow.md` as Musts.
-7. **The five assumptions** above, if any are wrong.
-8. **Where the state hash lives** (MUST-10.5): an M2 decision taken over from ADR-0001.
+7. **Where the state hash lives** (MUST-10.5): an M2 decision taken over from ADR-0001.

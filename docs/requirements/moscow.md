@@ -58,7 +58,7 @@ Clearly valuable; dropped only if the Musts are at risk.
 | SHOULD-02 | Free game assets instead of placeholder UI, with licences tracked in `CREDITS.md`    |
 | SHOULD-03 | Load tests with Locust, analysed in `tools/analysis`                                 |
 | SHOULD-04 | Link an email to an anonymous player, to keep the farm across browsers               |
-| SHOULD-05 | Farmhands on crops and troughs, with speed upgrades and the Foreman                  |
+| SHOULD-05 | Farmhands on crops and animals (feed and collect), with speed upgrades and the Foreman |
 | SHOULD-06 | Clovers: a rare currency earned in play, spent to skip waits                         |
 
 ## Could have
