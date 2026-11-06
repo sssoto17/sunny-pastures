@@ -1,0 +1,27 @@
+{
+  "id": "r3-B100-u200",
+  "kind": "normal",
+  "run": 3,
+  "store": "B100",
+  "users": 200,
+  "schema": "load_r3_b100_u200",
+  "env": {
+    "STORE": "B",
+    "SNAPSHOT_N": "100"
+  },
+  "warmupS": 60,
+  "measureS": 300,
+  "noWait": false,
+  "startedAt": "2026-11-06T20:08:02.735Z",
+  "finishedAt": "2026-11-06T20:14:44.146Z",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "ramGiB": 16,
+    "os": "Ubuntu 24.04.5 LTS",
+    "postgres": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+    "node": "v24.22.1",
+    "python": "3.13.18",
+    "locust": "2.47.0"
+  }
+}
