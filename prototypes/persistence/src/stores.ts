@@ -45,12 +45,17 @@ export function firstFarm(playerId: string): FarmState {
   return newFarm(fnv1a(playerId));
 }
 
+/** The Postgres schema a configuration's tables live in: one per store variant. */
+export function storeSchema(config: StoreConfig): string {
+  return `store_${config.name.toLowerCase()}`;
+}
+
 /** Every store shares one gift inbox (schema `inbox`), outside the comparison (#8). */
-export async function createStore(sql: Sql, config: StoreConfig): Promise<GameStore> {
+export async function createStore(sql: Sql, config: StoreConfig, schema = storeSchema(config)): Promise<GameStore> {
   const inbox = await createInbox(sql);
   return config.name === "A"
-    ? createStoreA(sql, { newFarm: firstFarm, inbox })
-    : createStoreB(sql, { snapshotN: config.snapshotN, newFarm: firstFarm, replay, inbox });
+    ? createStoreA(sql, { schema, newFarm: firstFarm, inbox })
+    : createStoreB(sql, { schema, snapshotN: config.snapshotN, newFarm: firstFarm, replay, inbox });
 }
 
 /** FNV-1a over the farm id: a stable seed, so a farm's bonus rolls don't depend on the server. */

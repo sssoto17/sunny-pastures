@@ -1,0 +1,15 @@
+# Load harness for the persistence spike (#10, ADR-0001 "Method"). Its own uv project and lockfile,
+# separate from the Node workspace. Run from this folder: `uv sync --locked`, then see smoke.sh.
+[project]
+name = "persistence-load"
+version = "0"
+description = "Locust load runs for the persistence spike (throwaway, prototype/persistence only)"
+requires-python = "==3.13.*"
+dependencies = ["locust==2.47.0"]
+
+[tool.uv]
+package = false
+required-version = "==0.13.6"
+# The Python twin of pnpm's minimumReleaseAge (7 days): nothing published after this date is
+# resolved. Move it forward deliberately, at least 7 days behind the day you re-lock.
+exclude-newer = "2026-10-30T00:00:00Z"
