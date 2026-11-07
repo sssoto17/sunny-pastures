@@ -97,7 +97,7 @@ git_switches_branch() {
 
 # --- Lexer ----------------------------------------------------------------------------------
 # Splits $command into tokens: kinds[k] is W (a word, quotes removed) or O (an operator: `&&`,
-# `;` for any other command separator, `(` or `)`). Quoted text, `$( … )`, backticks, comments, redirect targets
+# `||`, `;` for any other command separator, `(` or `)`). Quoted text, `$( … )`, backticks, comments, redirect targets
 # and heredoc bodies never become command words, so a commit message that mentions
 # `git checkout` passes.
 cmd=$command
@@ -223,7 +223,13 @@ while ((i < n)); do
   case $c in
     ' ' | $'\t') emit_word; i=$((i + 1)) ;;
     $'\n') emit_op ';'; i=$((i + 1)); skip_heredoc_bodies ;;
-    ';' | '|') emit_op ';'; i=$((i + 1)); [[ ${cmd:i:1} == [\;\|\&] ]] && i=$((i + 1)) ;;
+    ';' | '|')
+      if [[ ${cmd:i:2} == '||' ]]; then
+        emit_op '||'; i=$((i + 2))
+      else
+        emit_op ';'; i=$((i + 1)); [[ ${cmd:i:1} == [\;\|\&] ]] && i=$((i + 1))
+      fi
+      ;;
     '&')
       if [[ ${cmd:i+1:1} == '>' ]]; then # &> and &>> redirect stdout and stderr
         emit_word; next_is=redirect; i=$((i + 2)); [[ ${cmd:i:1} == '>' ]] && i=$((i + 1))
@@ -274,11 +280,12 @@ emit_word
 # --- Checks ---------------------------------------------------------------------------------
 # Check one simple command (its words in "$@").
 check_command() {
-  local words=("$@")
+  local words=("$@") negated=0
   # Skip what can precede the command name: grouping, keywords, assignments, wrappers.
   while ((${#words[@]})); do
     case ${words[0]} in
-      '{' | '}' | '!' | if | then | elif | else | do | while | until | command | builtin | \
+      '!') negated=1 words=("${words[@]:1}") ;;
+      '{' | '}' | if | then | elif | else | do | while | until | command | builtin | \
         exec | nohup | time | env) words=("${words[@]:1}") ;;
       *)
         if [[ ${words[0]} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then words=("${words[@]:1}"); else break; fi
@@ -291,7 +298,7 @@ check_command() {
       if ((!wt[depth])) && git_switches_branch "${words[@]:1}"; then deny_switch; fi
       ;;
     cd | pushd | popd)
-      local a target='' plain=1
+      local a target='' plain=$((!negated && !or_seen[depth]))
       for a in "${words[@]:1}"; do
         if [[ $a == -* ]]; then
           [[ $a =~ ^-[LPe@]+$|^--$ ]] || plain=0 # e.g. `pushd -n` doesn't change directory
@@ -329,10 +336,12 @@ EOF
 # Walk the simple commands. wt[d] says whether subshell depth d is inside a worktree: a
 # subshell starts where its parent is (base[d]), and a cd inside it ends with it. A cd's effect
 # lasts only through an `&&` chain: after `;`, `||`, `|` or a newline the cd may have failed, so
-# the flag goes back to base[d].
+# the flag goes back to base[d]. A cd that may be skipped (after `||` in the same list) or is
+# negated (`! cd`) never sets the flag.
 depth=0
 wt=(0)
 base=(0)
+or_seen=(0)
 cur=()
 for ((k = 0; k < ${#toks[@]}; k++)); do
   if [[ ${kinds[k]} == W ]]; then
@@ -342,9 +351,10 @@ for ((k = 0; k < ${#toks[@]}; k++)); do
   ((${#cur[@]})) && check_command "${cur[@]}"
   cur=()
   case ${toks[k]} in
-    '(') depth=$((depth + 1)); wt[depth]=${wt[depth - 1]} base[depth]=${wt[depth - 1]} ;;
+    '(') depth=$((depth + 1)); wt[depth]=${wt[depth - 1]} base[depth]=${wt[depth - 1]} or_seen[depth]=0 ;;
     ')') ((depth > 0)) && depth=$((depth - 1)) ;;
-    ';') wt[depth]=${base[depth]} ;;
+    ';') wt[depth]=${base[depth]} or_seen[depth]=0 ;;
+    '||') wt[depth]=${base[depth]} or_seen[depth]=1 ;;
   esac
 done
 ((${#cur[@]})) && check_command "${cur[@]}"

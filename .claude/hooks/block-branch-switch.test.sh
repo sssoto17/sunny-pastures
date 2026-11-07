@@ -143,6 +143,11 @@ deny "$MAIN" $'( cd .claude/worktrees/16-x\ngit switch feature )'
 allow "$MAIN" '( cd .claude/worktrees/16-x && git status && git switch feature )'
 allow "$MAIN" '( cd .claude/worktrees/16-x && ( cd docs; git switch feature ) )'
 
+deny "$MAIN" '( ! cd .claude/worktrees/16-x && git switch feature )'
+deny "$MAIN" '( true || cd .claude/worktrees/16-x && git switch feature )'
+deny "$MAIN" '( git fetch || true && cd .claude/worktrees/16-x && git switch feature )'
+allow "$MAIN" '( git fetch || true; cd .claude/worktrees/16-x && git switch feature )'
+
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
   err=$(bash "$hook" <<<"$2" 2>&1 >/dev/null)
