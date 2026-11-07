@@ -1500,6 +1500,7 @@ Closes #
 /docs/agents/           @sssoto17
 /docs/diagrams/workflow.md @sssoto17
 /skills-lock.json       @sssoto17
+/.gitattributes         @sssoto17
 **/package.json         @sssoto17
 /vercel.json            @sssoto17
 /pnpm-workspace.yaml    @sssoto17
