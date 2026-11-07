@@ -67,6 +67,20 @@ this project didn't write, so an agent can't make them pass with code that doesn
 coverage and mutation rows measure the project's own tests, and Stryker is the check on those
 tests.
 
+**Timing checks.** CI runners are shared, so one timing can swing by tens of percent between runs
+of the same code. A check that fails at random teaches everyone to rerun until it's green, so the
+timing rows (sim speed, page performance, action latency) never judge a single measurement:
+
+- The sim benchmark runs warm-up iterations, then at least 5 measured runs, and compares the
+  median with the budget.
+- Lighthouse runs at least 3 times against the preview and compares the median run with the
+  budget.
+- The latency smoke compares the p95 over the whole scripted run, never a single request.
+- If a median is over budget, the job measures once more and fails only if both medians are over.
+  Retrying by hand until the check is green counts as weakening the bar.
+- If a timing check still fails on unchanged code (a rerun of `main` goes red), that's a flaky
+  check. Fix the measurement in its own PR rather than moving the threshold.
+
 ## Measured, not yet enforced (ratchets)
 
 No honest number exists before the code does. Each ratchet records today's value, then refuses to
