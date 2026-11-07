@@ -4,7 +4,7 @@ The quality bar for Sunny Pastures: what "good enough to merge" means, with numb
 enforces each one. Agents write most of the code, so the bar lives in checks that run in the loop
 instead of in a reviewer's head.
 
-Last reviewed: 2026-11-07 by Soto (interview on #34, review of PR #45).
+Last reviewed: 2026-11-07 by Soto (interview on #34, review of PR #45, interview on #47).
 
 ## How to use this file
 
@@ -172,15 +172,74 @@ packages only. For binaries, container images and GitHub Actions, the 7-day rule
 hand, and Actions are pinned by commit SHA. `vitest bench` is built into Vitest, so the benchmark
 adds nothing.
 
-## Blast radius (auto-merge tiers)
+## Admin review (escalation and split size)
 
-ADR-0002 owns the mechanism: the `guard / tier` check and which tiers may auto-merge. This file owns
-the numbers. They aren't set yet and are decided in #47:
+ADR-0002 (area 2) owns the mechanism: the reviewer bot approves a PR, which then auto-merges, or
+requests changes, and the label `review:admin` holds a PR for the admin. The bot never approves a
+PR that carries it, and only the admin removes it. This file owns when a PR gets the label and when
+the bot asks for a split. Auto-merge stays off until this section is merged (ADR-0002, Q16).
 
-- the diff-size cap above which a PR escalates;
-- the tier-H paths, which must match CODEOWNERS;
-- what puts a PR in tier M;
-- what escalates a PR from M or L to H.
+### Escalation criteria
+
+A PR that meets any row carries `review:admin`. An agent that knows it adds the label at
+`gh pr create --label review:admin`. The reviewer bot checks every row on each review and adds the
+label when it's missing. Whoever adds it also posts a one-line comment that names every row the PR
+meets, for example "escalated: interface (sim exports)". Those comments are the tuning data
+(below). The bot checks these rows before the [split size](#split-size), so on a PR it escalates,
+the size is only a note.
+
+| Criterion | Applies when | Who adds the label | Why |
+|---|---|---|---|
+| Code-owned path | The diff touches a path in `.github/CODEOWNERS` (ADR-0002, appendix A3). That file is the canonical list of these paths. It covers a new dependency (`package.json`, `pnpm-lock.yaml`), an Exceptions row and any change to this file, and the configs that can weaken a check | the bot, matching the diff against CODEOWNERS; the agent when it knows | GitHub already holds these PRs for the code owner. The label makes `label:review:admin` the one queue of PRs waiting for the admin, which matters while the factory acts as the admin and GitHub can't request the admin's review on the admin's own PR (#37) |
+| Weakened bar, before `guard / floor` | Until `guard / floor` (#40) is a required check: the diff shows any of the five ways under [Guarding the bar](#guarding-the-bar), on any path. Besides the label, the bot submits Request changes, which blocks the merge, unless the same PR adds an [Exceptions](#exceptions) row | the bot; the agent when it knows | D1: a weakened bar is blocked unless the same PR adds an Exceptions row. Until the guard is required, the bot holds that line, and the label shows the admin every attempt. Once the guard is required, it blocks instead, and the Exceptions row is code-owned |
+| Feature slice | The PR closes (`Closes #N`) an issue labelled `feature`. The earlier parts of a split (`Part of #N`) don't meet this row, though another row may still apply | the agent; the bot from the linked issue's label | Each `feature` issue is a vertical slice the player can see, so the admin sees every change in behaviour once the slice is complete. Bugs, chores, tests and refactors stay with the bot. Mechanical: the bot reads the link and the label |
+| Interface change | The diff changes, adds or removes any of: what a `packages/*` entry point exports (`packages/*/src/index.ts`, and `exports` in its `package.json`); the request or response schemas of the game API; the sim's state or action types. The paths are where the code is expected to land; update them when it does | the agent; the bot | The admin keeps ownership of how a module turns out (ADR-0002). Additions count, because adding an export is when its shape gets fixed. The sim's state and action types are the persisted format (ADR-0001: action log plus snapshots), so a change can break saved farms |
+| Security-sensitive code | The diff touches a server-side mechanism a MUST-16 threat depends on: authentication and sessions; ownership and authorisation checks (T5, T6); the per-farm rate limit (T7); idempotency keys (T3); the action endpoint's input schema (T8); where server time is taken (T1); the farm's write path, its locking or transaction (T4). Rules in `packages/sim` are not this row (T2, T9): the interface, content and feature rows cover them. Migrations and RLS are code-owned already. At M3, once `apps/web/src/server/` exists, these become path globs here (for example `apps/web/src/server/auth/**`, the action route handler and its schema) | the agent; the bot | The bot feeds text the PR wrote to a model, so it is the reviewer most open to manipulation, and a miss here is a cheat or a leak |
+| Content change | The diff changes, adds or removes any content data: grow times, prices, yields, XP, Level thresholds, capacities and delays (spec, "How to read this spec"). Expected at `packages/sim/src/content/**`; update the path when it lands | the agent; the bot | The spec makes the admin the owner of content data, and tuning content is a rules change: a farm is rebuilt by replaying its log (ADR-0001), so a new value can make an old action replay differently or be refused. Until #31 settles how logs survive that, the bot can't judge the risk. A new entry usually rides in a `feature` PR, which escalates anyway |
+| PR doesn't match its issue | The diff does work outside the linked issue's scope. A `Closes #N` PR also escalates when it leaves one of the issue's acceptance criteria undone; a `Part of #N` PR is checked for scope only | the bot | Scope creep and silent gaps are what the admin would catch in the issue, not in the code. The criteria are checked once, on the PR that completes the issue, so a split isn't escalated part by part |
+| No linked issue | The PR links no issue: neither `Closes #N` nor `Part of #N`. Each part of a split says `Part of #N`, and the last part says `Closes #N` | the bot | The board moves an issue to In review only when its PR says `Closes #N` (`docs/agents/issue-tracker.md`). Without a link, the bot can't check scope and the board loses the PR |
+| Not converging | The bot has requested changes **3** times on the PR and its blocking findings still aren't fixed. It escalates instead of requesting changes a 4th time. A Request changes that only asks for a split doesn't count as a round | the bot | A fix-and-review loop costs a Claude run on every push (ADR-0002, Consequences). Three rounds is enough for a fix that's going to land |
+
+The bot may still escalate on its own judgement beyond these rows (ADR-0002). It names its reason
+the same way.
+
+### Split size
+
+The bot reviews a PR of at most **400 changed lines**. Above that, it submits Request changes that
+ask for a split, suggests where to cut, and doesn't review the lines.
+
+- **How a split links:** each part says `Part of #N`, and the part that completes the issue says
+  `Closes #N`. Only that last part is checked against the issue's acceptance criteria, and only it
+  meets the feature-slice row (see the rows above).
+- **What counts:** added plus deleted lines across all files, tests and Markdown included. Tests
+  count at full weight: the bot has to read them (the risk the mutation row exists for), and the
+  coverage rows stop an agent from trimming tests below the floor to fit. If retros show tests
+  trimmed on split PRs, revisit this as tuning. Not
+  counted: `pnpm-lock.yaml` and any file marked `linguist-generated` in any `.gitattributes`
+  (generated code, result data). A pure rename counts 0 lines. Every `.gitattributes` is
+  code-owned, so widening what they exclude needs the admin.
+- **Why 400:** an issue's PR aims at about 100–300 lines (ADR-0002, area 3), and 400 is the cap
+  above that target, not the target. SmartBear's study of about 2,500 reviews at Cisco found that
+  reviewers stop catching defects past roughly 200–400 lines. Google's small-CL guidance calls
+  about 100 lines reasonable and 1,000 usually too large. A model reviewer also loses detail on
+  long diffs. Measured on recent merged PRs, 400 would have passed #26 (155 lines), #45 (330) and
+  #52 (177), and asked for a split on #19 (473), #36 (636), #56 (703) and most spikes. All six
+  touched code-owned paths, so for them the size would only have been a note.
+- **No cap on file count.** Lines measure the review's size. A change across many files with few
+  lines each is still small.
+- **Can't be split:** when even expand–contract batches (`to-tickets`) can't stay green on their
+  own, the agent adds `review:admin` with a comment that names "split size" and says why, and the
+  admin decides.
+- **On an admin-review PR**, the size is a note, not a block. The bot flags it in its summary, and
+  the admin decides whether to ask for a split. ADRs and the spec are long by nature.
+
+### Tuning
+
+The tuning loop in ADR-0002 (area 2) applies to these rows: a bad bot approval that happens twice
+sharpens a row or moves paths to CODEOWNERS, and escalated PRs that keep coming back from the admin
+unchanged loosen a row. Only the admin loosens. The signal itself (a label rather than a review
+request) is ADR-0002's, and #37 checks whether a review request can replace it once every PR comes
+from an App identity.
 
 ## Guarding the bar
 
@@ -237,3 +296,32 @@ Decided in the review of PR #45 (7 Nov):
 - **D2:** this file owns the blast-radius numbers, ADR-0002 owns the mechanism (#47).
 - **D3:** `pnpm audit --audit-level=high` is the dependency check. osv-scanner stays only if #42
   shows it catches a known-vulnerable dev dependency in pnpm's lockfile.
+
+Decided in the interview on #47 (7 Nov), for
+[Admin review](#admin-review-escalation-and-split-size):
+
+- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS, so the
+  label is the one queue of PRs waiting for the admin. A new dependency, an Exceptions row and a
+  loosened tool config fall under that row. Until `guard / floor` reports, the bot escalates a
+  weakened bar on any path.
+- **Feature slice, interface, security:** a feature slice is a PR that closes a `feature` issue.
+  An interface change includes additions to `packages/*` exports, the game API's schemas and the
+  sim's state and action types. Security-sensitive code escalates.
+- **Content:** escalates. The first answer was "no, to avoid flooding the queue", reversed once
+  the spec showed that the admin owns content and that tuning is a rules change.
+- **The bot's triggers:** a PR that doesn't match its issue, that links no issue, or that hasn't
+  converged after 3 rounds of Request changes. Every escalation names its rows in a comment.
+- **Split size:** 400 changed lines, excluding `pnpm-lock.yaml` and files marked
+  `linguist-generated`. Above it the bot asks for a split. On an admin-review PR it's a note only.
+- **The label:** stays for now. #37 checks whether a review request can replace it once every PR
+  comes from an App identity.
+
+Decided in the coordinator's review of PR #57 (7 Nov):
+
+- **Splits:** a PR links its issue with `Closes #N` or `Part of #N`. Only the `Closes` PR is
+  checked against the acceptance criteria and meets the feature-slice row.
+- **Security signals:** the server-side mechanisms MUST-16's threats depend on (T1, T3–T8), not
+  the sim's rules. They become path globs at M3.
+- **Weakened bar before the guard:** the bot also requests changes unless an Exceptions row is
+  added (D1), until `guard / floor` is a required check.
+- **Test lines:** count at full weight toward the split size.

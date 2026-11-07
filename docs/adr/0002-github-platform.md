@@ -346,7 +346,8 @@ The flow:
   enforces these:
   without the admin's approval, the PR doesn't merge.
 - **Escalated PRs:** any agent, the factory or the reviewer bot, may add the label
-  **`review:admin`** to a PR outside those paths (the admin's choice, 7 Nov). Escalate when a PR
+  **`review:admin`** to any PR, code-owned ones included (the admin's choice, 7 Nov; widened in
+  #47). Escalate when a PR
   wraps up a feature slice, or changes a module's public interface (for example the exports of
   `packages/sim`, or an API contract), so the admin keeps ownership of how a module turns out.
   The reviewer bot may also escalate on its own judgement. **The bot never approves a PR that
@@ -422,7 +423,7 @@ so the PR then needs the admin's approval. One rule, with no commit-message esca
 - log every revert of a bot-approved PR, with its paths and cause, as data for the report,
   including PRs that merged before a late `review:admin`;
 - when a bad bot approval happens twice, move the paths to CODEOWNERS or sharpen the
-  escalation criteria (AGENTS.md);
+  escalation criteria (`CONSTRAINTS.md`, "Admin review");
 - when escalated PRs keep coming back unchanged from the admin, loosen the criteria.
 
 ### The factory's identity (Q2)
@@ -1461,8 +1462,9 @@ Closes #
 
 <!-- ADR-0002, area 2. The reviewer bot reviews every PR. -->
 
+- [ ] Meets a row of the escalation criteria (`CONSTRAINTS.md`, "Admin review"), code-owned paths
+  included: labelled `review:admin`, with a comment naming the rows <!-- which rows -->
 - [ ] Touches a path in CODEOWNERS, and the admin asked for it: <!-- which, and where they asked -->
-- [ ] Wraps up a feature slice or changes a module's interface: labelled `review:admin`
 
 ## Concerns
 
@@ -1500,6 +1502,7 @@ Closes #
 /docs/agents/           @sssoto17
 /docs/diagrams/workflow.md @sssoto17
 /skills-lock.json       @sssoto17
+.gitattributes          @sssoto17
 **/package.json         @sssoto17
 /vercel.json            @sssoto17
 /pnpm-workspace.yaml    @sssoto17

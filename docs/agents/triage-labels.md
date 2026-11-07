@@ -117,10 +117,11 @@ An issue blocked by another issue uses GitHub's native issue dependencies (see `
 ## Pull requests
 
 A PR carries area labels (see **Areas**), plus `review:admin` when it needs the admin.
-`review:admin` says a PR outside the code-owned paths needs the admin's approval: it wraps up a
-feature slice or changes a module's interface (criteria in `CONSTRAINTS.md`). Any agent may add
-it; the reviewer bot never approves a PR that carries it, and only the admin removes it
-(ADR-0002, area 2). Added 7 Nov by the admin.
+`review:admin` says a PR needs the admin's approval. When a PR gets it is set by the escalation
+criteria in `CONSTRAINTS.md` ("Admin review"). Code-owned PRs carry it too, so the label is the one
+queue of PRs waiting for the admin. Any agent may add it, and so may the reviewer bot. The bot
+never approves a PR that carries it, and only the admin removes it (ADR-0002, area 2). Added 7 Nov
+by the admin; widened to code-owned PRs in #47.
 
 A PR's type is its title's Conventional Commit prefix, which is also the squash-commit message:
 
