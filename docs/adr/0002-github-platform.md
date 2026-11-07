@@ -50,8 +50,8 @@ The current state below was read on 7 Nov 2026 from the repo, `git log`, and the
 - **Q9:** `area:tools` widens to cover all dev tooling (area 6).
 - **Approvals:** PRs are reviewed the way people on GitHub review each other. A reviewer bot,
   its own GitHub App, **approves** a PR, which then auto-merges, or **requests changes**. The
-  admin approves only sensitive paths (CODEOWNERS) and PRs an agent escalates by requesting the
-  admin's review, for example a finished feature slice or a changed module interface (area 2).
+  admin approves only sensitive paths (CODEOWNERS) and PRs an agent escalates with the label
+  `review:admin`, for example a finished feature slice or a changed module interface (area 2).
 - **Deploys:** once production is live, only a `v*` release tag ships to production, deployed by
   GitHub Actions; a merge to `main` reaches staging only. Bot-approved PRs keep auto-merging
   (area 4).
@@ -328,7 +328,7 @@ The flow:
 4. **Not OK:** the bot submits **Request changes**, with its blocking findings as line comments.
    The factory fixes them and pushes. The push dismisses any earlier approval, and the bot
    reviews again.
-5. **Needs the admin:** an agent requests the admin's review (below). The bot reviews but doesn't
+5. **Needs the admin:** an agent adds the label `review:admin` (below). The bot reviews but doesn't
    approve, and the PR waits for the admin.
 
 | Need | Native GitHub feature |
@@ -349,15 +349,24 @@ admin's approval.
   `docs/requirements/**`; every `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and
   `vercel.json`; the configs that can weaken a check; migrations and RLS. GitHub enforces these:
   without the admin's approval, the PR doesn't merge.
-- **Escalated PRs:** any agent, the factory or the reviewer bot, may **request the admin's
-  review** on a PR outside those paths. It's GitHub's own "review requested", shown on the PR and
-  in the admin's review queue. Escalate when a PR wraps up a feature slice, or changes a module's
-  public interface (for example the exports of `packages/sim`, or an API contract), so the admin
-  keeps ownership of how a module turns out. The reviewer bot may also escalate on its own
-  judgement. **The bot never approves a PR on which the admin's review is requested**, so with 1
-  required approval, the PR waits for the admin's. Only the admin removes an escalation. The
+- **Escalated PRs:** any agent, the factory or the reviewer bot, may add the label
+  **`review:admin`** to a PR outside those paths (the admin's choice, 7 Nov). Escalate when a PR
+  wraps up a feature slice, or changes a module's public interface (for example the exports of
+  `packages/sim`, or an API contract), so the admin keeps ownership of how a module turns out.
+  The reviewer bot may also escalate on its own judgement. **The bot never approves a PR that
+  carries `review:admin`**, so with 1 required approval, the PR waits for the admin's. If the
+  label arrives after the bot approved, the bot's review job runs again on the `labeled` event,
+  dismisses its own approval and turns auto-merge off. Only the admin removes the label. The
   exact criteria live in `CONSTRAINTS.md` (#47, whose scope changes from tier numbers to these
   criteria and the size at which the bot asks for a split).
+  - **Why a label and not "request review":** until #37, every agent acts as the admin, so the
+    admin is the PR's author, and GitHub doesn't request a review from a PR's own author. That's
+    widely reported as an API error; it isn't in the docs or tested here. The request would fail
+    quietly, the bot would see no request and approve. A label works the same before and after
+    #37. After #37, an agent may also request the admin's review, but the label stays the signal
+    the bot checks.
+  - Like the other safeguards before #37, nothing on GitHub stops an agent removing the label;
+    that's held by instructions.
 
 **The reviewer bot is its own GitHub App** (the admin's choice, 7 Nov), for example
 `sunny-reviewer[bot]`, used from Actions. It runs Claude with the repo's review skills
@@ -1051,8 +1060,8 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
     becomes "a `v*` release tag on `main` deploys to Vercel production on the hosted Supabase
     project; a merge to `main` deploys to staging" (area 4). `docs/requirements/` is tier H.
   - `AGENTS.md`: a short rule on reviews. Agents never merge, never turn on auto-merge by hand,
-    never bypass a ruleset, and request the admin's review when a PR wraps up a feature slice
-    or changes a module's interface; the admin merges tier H in the UI.
+    never bypass a ruleset, never remove `review:admin`, and add it when a PR wraps up a feature
+    slice or changes a module's interface; the admin merges tier H in the UI.
   - `CONSTRAINTS.md`: its line "ADR-0002 owns the mechanism: the `guard / tier` check and which
     tiers may auto-merge" follows the new model, and #47's scope changes to the escalation
     criteria and the split size.
@@ -1112,7 +1121,7 @@ Q12 for the CI/CD step and Q13 for go-public.
     check the names it uses on PRs before deciding on "Require deployments to succeed". Also
     check that Vercel accepts `production` as its production branch with no pushes, so `main`
     deploys as staging (area 4), and what it reports when it skips a preview build (area 2).
-11. **Q11, the escalation criteria.** *In #47.* When an agent requests the admin's review, and
+11. **Q11, the escalation criteria.** *In #47.* When an agent adds `review:admin`, and
     the size at which the bot asks for a split, in `CONSTRAINTS.md`. The sensitive paths are A3.
 12. **Q12, the reviewer bot.** *Decided 7 Nov:* its own GitHub App running Claude with the repo's
     review skills (area 2). Whether its approval counts with `contents: read` is tested once
@@ -1196,7 +1205,8 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     review workflow (area 2). Register the reviewer App (with #37's factory App): permissions
     `pull_requests: write`, `contents: read`; its key as an environment secret. **Test it once:**
     on a throwaway PR outside CODEOWNERS, check that its approval satisfies the required
-    approval. If it doesn't, raise it to `contents: write` and test again. Add the
+    approval. If it doesn't, raise it to `contents: write` and test again. Create the label
+    (`gh label create review:admin --color C5DEF5 --description "Needs the admin's review"`). Add the
     required checks to the `main` ruleset as they start reporting, each with GitHub Actions as
     its source (Settings → Rules → the ruleset → Require status checks; A8). At M4, the preview
     checks need Vercel's automation bypass secret as an Actions secret (area 2), set with
@@ -1360,7 +1370,7 @@ Closes #
 <!-- ADR-0002, area 2. The reviewer bot reviews every PR. -->
 
 - [ ] Touches a path in CODEOWNERS, and the admin asked for it: <!-- which, and where they asked -->
-- [ ] Wraps up a feature slice or changes a module's interface: the admin's review is requested
+- [ ] Wraps up a feature slice or changes a module's interface: labelled `review:admin`
 
 ## Concerns
 

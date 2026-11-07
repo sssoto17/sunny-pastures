@@ -25,6 +25,7 @@ Project field (Status, Track, Mode, Size, Priority, Week) stays a field and neve
 | `blocked:*` | `#B60205` |
 | `factory:*` | `#D93F0B` |
 | `wayfinder:*` | `#5319E7` |
+| `review:*` | `#C5DEF5` |
 
 ## Types
 
@@ -115,8 +116,13 @@ An issue blocked by another issue uses GitHub's native issue dependencies (see `
 
 ## Pull requests
 
-A PR carries area labels only (see **Areas**). Its type is its title's Conventional Commit
-prefix, which is also the squash-commit message:
+A PR carries area labels (see **Areas**), plus `review:admin` when it needs the admin.
+`review:admin` says a PR outside the code-owned paths needs the admin's approval: it wraps up a
+feature slice or changes a module's interface (criteria in `CONSTRAINTS.md`). Any agent may add
+it; the reviewer bot never approves a PR that carries it, and only the admin removes it
+(ADR-0002, area 2). Added 7 Nov by the admin.
+
+A PR's type is its title's Conventional Commit prefix, which is also the squash-commit message:
 
 | Issue type | PR title prefix |
 |---|---|
