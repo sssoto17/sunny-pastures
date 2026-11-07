@@ -50,8 +50,22 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `sssoto17`) and to one repo milestone (`M1 Persistence spike` … `M9 Hand-in`; list them with `gh api repos/sssoto17/sunny-pastures/milestones --jq '.[].title'`).
 
 - **Create with a milestone**: `gh issue create --milestone "<milestone title>" ...`
-- **Add to the Project**: `gh project item-add 3 --owner sssoto17 --url <issue-url> --format json --jq .id` returns the item id.
-- **Set a field**: `gh project item-edit --project-id PVT_kwHOCI1msM4BqXYM --id <item-id> --field-id <field-id> --single-select-option-id <option-id>` (or `--iteration-id <id>` for Week).
+- **Add to the Project and set its fields**: one command, with names, not ids:
+
+  ```bash
+  scripts/issue-fields.sh 47 --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
+  ```
+
+  It adds the issue to the Project if it's missing, sets each field you name, and prints the
+  fields as GitHub stored them: check that output. Every flag is optional. It looks the field and
+  option ids up from GitHub on each run. An unknown name (`--size XL`) fails with the valid names
+  before anything is written. Status: a new item, or one with no Status, gets `Backlog`, and a
+  Status already set is left alone unless you pass `--status`. `--status Ready` is refused (see
+  **Status rules**). `scripts/issue-fields.sh --help` lists the rest. Don't set fields with hand-written
+  `gh project item-add` / `item-edit` loops: on 7 Nov one silently left 5 of #47's fields unset
+  under zsh. Tests: `bash scripts/issue-fields.test.sh`.
+
+The ids, for reading raw `gh project` output (the script doesn't use this table):
 
 | Field  | Field id                         | Options (name = option id)                                                                 |
 | ------ | -------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -62,7 +76,7 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
 | Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
 | Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
 
-When a skill publishes tickets, give each one a milestone, add it to the Project, set Track, Mode, Size, Priority and Week, and add one type and one area label (see `triage-labels.md`). Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
+When a skill publishes tickets, give each one a milestone, add it to the Project and set Track, Mode, Size, Priority and Week (both with `scripts/issue-fields.sh`), and add one type and one area label (see `triage-labels.md`). Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
 
 ## Workstreams
 
