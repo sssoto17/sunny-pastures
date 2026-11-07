@@ -239,7 +239,7 @@ Target: the default branch. Enforcement: active.
 | Require linear history | **off** | Area 3 keeps merge commits for evidence PRs. |
 | Require signed commits | off | Cloud-session commits are signed, but local commits aren't. Checked 7 Nov (`verification.verified` on every commit of `main`, `prototype/persistence` and this PR's branch): all 54 cloud-session commits (author Claude, `Claude-Session:` trailer) and all 14 merges made on github.com are verified. All 43 local commits, the admin's and local sessions', are unsigned. The rule would block every local push until the admin sets up signing, for little gain in a solo repo. |
 | Require deployments to succeed | off; revisit at M4 | Could require the Vercel preview to deploy before merge. Decided together with the `preview / …` checks, which need a preview to measure (below). |
-| Bypass list | Repository admin, mode **"For pull requests only"** | The admin can merge a PR past a rule (an admin-review PR the factory opened as the admin, or a red check during an outage) but can't push straight to `main`. **Until the reviewer App exists (checklist step 12), nobody can give the required approval, so every merge is a bypass merge, and any session can make one.** Pending the admin's decision: start with 0 required approvals and raise it to 1 at step 12 (code-owner review applies either way; Consequences). Rulesets accept "Repository admins" as bypass actors with no organization condition; the "organization only" limit in the docs is for classic branch protection ([creating rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository#granting-bypass-permissions-for-your-branch-or-tag-ruleset), checked 7 Nov). |
+| Bypass list | Repository admin, mode **"For pull requests only"** | The admin can merge a PR past a rule (an admin-review PR the factory opened as the admin, or a red check during an outage) but can't push straight to `main`. **Until the reviewer App exists (checklist step 12), nobody can give the required approval, so every merge is a bypass merge, and any session can make one.** Decided (Q15): the ruleset starts with 0 required approvals and goes to 1 at step 12; code-owner review stays on throughout (Consequences). Rulesets accept "Repository admins" as bypass actors with no organization condition; the "organization only" limit in the docs is for classic branch protection ([creating rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository#granting-bypass-permissions-for-your-branch-or-tag-ruleset), checked 7 Nov). |
 
 **Placeholder required checks.** The names are a superset of the "Required check" column of
 `CONSTRAINTS.md`'s "Enforced with numbers" table (on `main` since #45), which owns every
@@ -327,7 +327,7 @@ The flow:
 
 | Need | Native GitHub feature |
 |---|---|
-| Nothing merges without an approval | `main` ruleset: **1** required approval |
+| Nothing merges without an approval | `main` ruleset: **1** required approval, from checklist step 12 (0 before, while nobody but the admin could approve; Q15) |
 | "Request changes" blocks the merge | Built in: "If someone chooses the **Request changes** option in a review, then that person must approve the pull request before the pull request can be merged" ([available rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-a-pull-request-before-merging), checked 7 Nov) |
 | A new push needs a new review | Dismiss stale approvals when new commits are pushed |
 | Sensitive paths need the admin | CODEOWNERS plus "Require review from Code Owners": the bot's approval meets the count, but only `@sssoto17` can meet code-owner review |
@@ -378,7 +378,7 @@ so its approval is not a self-approval, even while the factory still acts as the
 (until #37). Its private key is an environment secret, handed only to the review job. It's set up
 alongside the factory's App (#37), which also settles how Claude is billed in CI.
 
-- **The App's permissions (pending the admin's decision).** The App turns on auto-merge (step 3
+- **The App's permissions (decided 7 Nov, Q14).** The App turns on auto-merge (step 3
   of the flow), and GitHub's docs say "People with write permissions to a repository can enable
   auto-merge for a pull request"
   ([automatically merging a pull request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request),
@@ -386,9 +386,9 @@ alongside the factory's App (#37), which also settles how Claude is billed in CI
   ([about protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-pull-request-reviews-before-merging)),
   and a community report says an App's approval counts only with `contents: write`
   ([discussion #211598](https://github.com/orgs/community/discussions/211598)). So `contents:
-  read` would fail. **Recommended:** `contents: write` and `pull_requests: write`, plus
-  `require_last_push_approval: true` on the `main` ruleset (A8), so the App can never approve a
-  push it made itself. The blast radius: a prompt-injected reviewer could push commits to PR
+  read` would fail. **So the App gets `contents: write` and `pull_requests: write`, and the `main`
+  ruleset gets `require_last_push_approval: true`** (A8, from checklist step 12), so the App can
+  never approve a push it made itself. The blast radius: a prompt-injected reviewer could push commits to PR
   branches, but not to `main` or to tags, which the rulesets block. The checklist's test
   (step 12) confirms each step of the flow.
 - **What it reads is untrusted.** The bot feeds text that the PR wrote to a model, so a PR could
@@ -577,8 +577,9 @@ default.**
   body's `Closes #N`, verification and Changelog line land in git.
 - **Linear history** is not required, because of the merge-commit exception. `--first-parent` is
   the readable view.
-- **Auto-merge: turn on at repo level once the required checks exist and the reviewer App
-  reviews, not before.** On a private repo it needs Pro, which the account has
+- **Auto-merge: turn on at repo level only when the required checks report, the reviewer App
+  passes tests (a)–(f) (checklist step 12) and #47's escalation criteria are merged (Q16), not
+  before.** On a private repo it needs Pro, which the account has
   ([auto-merge](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-auto-merge-for-pull-requests-in-your-repository)).
   Bot-approved PRs merge this way (area 2). Without required checks, an approved PR would merge
   before CI had run.
@@ -1079,12 +1080,12 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   coordinating session's retros and rule edits, which were pushed directly until now (15 of 21
   commits). Retros merge on the reviewer bot's approval. Rule edits (`AGENTS.md`, `CLAUDE.md`)
   are code-owned PRs.
-- **The gap before the reviewer App (pending the admin's decision).** From the ruleset (checklist
-  step 3) until the reviewer App works (step 12), nobody can give the required approval: the
-  factory acts as the admin, and the admin can't approve their own PRs. So every merge is a
-  bypass merge, and any session can make one. **Recommended:** create the `main` ruleset with
-  `required_approving_review_count: 0` and raise it to 1 at step 12. Code-owner review applies
-  either way, so code-owned PRs still need the admin, by bypass.
+- **The gap before the reviewer App (decided 7 Nov, Q15).** From the ruleset (checklist step 3)
+  until the reviewer App works (step 12), nobody but the admin could give an approval, and the
+  admin can't approve their own PRs, which the factory's are. So the `main` ruleset starts with
+  `required_approving_review_count: 0` and goes to 1 at step 12, together with
+  `require_last_push_approval`. Code-owner review stays on throughout, so code-owned PRs still
+  need the admin, by bypass while the factory acts as the admin.
 - Required checks can't be added until CI reports them. Until the CI/CD step, the ruleset blocks
   direct pushes, force-pushes and deletion, and requires code-owner review on code-owned PRs.
   Auto-merge stays off.
@@ -1099,9 +1100,10 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   honest limit"). For any session on the admin's account, bypass merges, removing
   `review:admin`, tag pushes and ruleset edits stay instruction-only, before and after #37.
   PR #52 turns tag pushes and label removal into prompts.
-- **Rollout order** (checklist): rulesets now → the reviewer App and its test PR → auto-merge
-  only after the required checks exist, the App's test passes and #47's escalation criteria are
-  merged → unattended factory work only once #37 gives the factory its own identity, or shows
+- **Rollout order** (checklist): rulesets now, with 0 required approvals → the reviewer App,
+  then 1 required approval and `require_last_push_approval`, then tests (a)–(f) → auto-merge only
+  when the required checks report, the App passes (a)–(f) and #47's escalation criteria are
+  merged (Q16) → unattended factory work only once #37 gives the factory its own identity, or shows
   how to guard unattended sessions. Attended sessions are never blocked.
 - `CONSTRAINTS.md` owns the escalation criteria and the split size (#47) and the list of ways a
   bar gets lowered ("Guarding the bar"). This ADR owns the mechanism.
@@ -1148,7 +1150,7 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   - line 237, "D2: this file owns the blast-radius numbers".
 - #47: its scope becomes the escalation criteria and the split size. Its last criterion
   (auto-merge waits for #47 and `guard / tier`) becomes "auto-merge waits for #47's escalation
-  criteria" (pending the admin's decision; checklist step 12).
+  criteria" (decided 7 Nov, Q16; checklist step 12).
 - #37's body: "blast-radius gate" and "tier-H PRs" become the reviewer-bot model and
   admin-review PRs.
 - PR #52 (permission rules): cite it from `AGENTS.md` once merged.
@@ -1156,8 +1158,8 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
 ## Open questions for the admin
 
 Q1–Q6, Q8, Q9 and Q12 are answered or decided (see "How this was checked"). Q7 and Q13 are
-deferred to go-public (#38), Q10 waits for Vercel and Q11 for #47. Q14–Q16 are pending with the
-admin.
+deferred to go-public (#38), Q10 waits for Vercel and Q11 for #47. Q14–Q16 were decided on
+7 Nov.
 
 1. **Q1, plan and visibility.** *Decided 7 Nov:* GitHub Pro (GitHub Education); private until
    about M3–M4, then public (#38).
@@ -1194,14 +1196,15 @@ admin.
 13. **Q13, Semgrep or CodeQL as the required code scan.** *At go-public (#38).* Semgrep is
     required from the CI/CD step; when CodeQL becomes available, one of them stays required and
     the other runs as advice (area 8).
-14. **Q14, the reviewer App's permissions.** *Pending.* Recommended: `contents: write` and
-    `pull_requests: write`, with `require_last_push_approval: true` on `main` (area 2). With
-    `contents: read`, it can't turn on auto-merge.
-15. **Q15, the approval count before the reviewer App.** *Pending.* Recommended: 0 required
-    approvals from step 3, raised to 1 at step 12 (Consequences).
-16. **Q16, what auto-merge waits for.** *Pending.* Recommended: the required checks, the App's
-    test (step 12) and #47's escalation criteria. #47's last criterion still names
-    `guard / tier`.
+14. **Q14, the reviewer App's permissions.** *Decided 7 Nov:* `contents: write` and
+    `pull_requests: write`, with `require_last_push_approval: true` on `main` from step 12
+    (area 2). With `contents: read`, it couldn't turn on auto-merge. The blast radius: a
+    prompt-injected reviewer could push to PR branches, not to `main` or to tags.
+15. **Q15, the approval count before the reviewer App.** *Decided 7 Nov:* 0 required approvals
+    from step 3, 1 from step 12; code-owner review on throughout (Consequences).
+16. **Q16, what auto-merge waits for.** *Decided 7 Nov:* auto-merge turns on only when the
+    required checks report, the reviewer App passes tests (a)–(f) (step 12), and #47's
+    escalation criteria are merged. #47's last criterion still names `guard / tier` (follow-up).
 
 ## Admin checklist
 
@@ -1226,7 +1229,7 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
    ```
 3. **Ruleset `main`** (area 2), with code-owner review and stale-approval dismissal on. Until
    the reviewer App works (step 12), nobody can give the required approval, so every merge is a
-   bypass merge (Consequences); pending Q15, start at 0 required approvals. UI:
+   bypass merge (Consequences), so it starts at 0 required approvals (Q15). UI:
    Settings → Rules → Rulesets → New branch ruleset. The JSON is in appendix A8 (`actor_id: 5`
    is the Repository admin role *(not re-checked: the REST reference doesn't list role IDs;
    GitHub's own rulesets in `github/docs` use `actor_id: 5`, `RepositoryRole` for their bypass,
@@ -1279,8 +1282,10 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     sessions can't write. Attended sessions are never blocked.
 12. **CI/CD step:** **[.github]** `labeler.yml` and its workflow (A1); the CI workflows and the
     review workflow (area 2). **After #37 has settled how Claude is billed in CI** (Consequences),
-    register the reviewer App (with #37's factory App), with the permissions Q14 settles; its key
-    as an environment secret. Raise the required approvals to 1 (Q15). **Test the flow once**, on
+    register the reviewer App (with #37's factory App) with `contents: write` and
+    `pull_requests: write` (Q14); its key as an environment secret. Then update the `main`
+    ruleset: `required_approving_review_count` to 1 (Q15) and `require_last_push_approval` to
+    `true` (Q14). Code-owner review stays on. **Test the flow once**, on
     throwaway PRs, reading each result with
     `gh pr view N --json reviewDecision,mergeStateStatus`:
     - (a) the App's approval on a PR outside CODEOWNERS gives `reviewDecision: APPROVED`;
@@ -1293,8 +1298,8 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     - (f) an App-approved PR that changes one line of `AGENTS.md` still waits for the code
       owner's review (`BLOCKED`).
 
-    Close the throwaway PRs unmerged. If (a) or (b) fails with the permissions Q14 chose, raise
-    them and test again. Add the required checks to the `main` ruleset as they start reporting, each with GitHub Actions as
+    Close the throwaway PRs unmerged. If any test fails, fix the App or the workflow and run
+    that test again; auto-merge stays off until all six pass. Add the required checks to the `main` ruleset as they start reporting, each with GitHub Actions as
     its source (Settings → Rules → the ruleset → Require status checks; A8). At M4, the preview
     checks need Vercel's automation bypass secret as an Actions secret (area 2), set with
     `gh secret set` so it's never shown. Turn on auto-merge **only once** the required checks
@@ -1784,7 +1789,7 @@ updates:
     {
       "type": "pull_request",
       "parameters": {
-        "required_approving_review_count": 1,
+        "required_approving_review_count": 0,
         "dismiss_stale_reviews_on_push": true,
         "require_code_owner_review": true,
         "require_last_push_approval": false,
@@ -1840,10 +1845,13 @@ updates:
 }
 ```
 
-One approval is required: the reviewer App's, or the admin's on admin-review PRs (area 2).
-Neither App is in any bypass list (#37). Two values are pending with the admin: Q15 would create
-the ruleset with `"required_approving_review_count": 0` and raise it to 1 at checklist step 12,
-and Q14 would set `"require_last_push_approval": true`.
+This is the ruleset as created at checklist step 3 (Q15): 0 required approvals, because nobody
+but the admin could approve yet. At step 12, once the reviewer App works, two values change:
+`"required_approving_review_count": 1` and `"require_last_push_approval": true` (Q14). From then
+on, one approval is required: the reviewer App's, or the admin's on admin-review PRs (area 2).
+Code-owner review is on throughout. Neither App is in any bypass list (#37). GitHub's docs don't
+say how `require_last_push_approval` behaves with 0 required approvals, so it changes at step 12
+with the count.
 
 When the CI/CD step's checks report, it adds this rule to `ruleset-main.json`, with the names
 the step settles. Each check is pinned to GitHub Actions (`integration_id` 15368), so a commit
