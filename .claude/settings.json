@@ -68,6 +68,12 @@
 			"Bash(gh variable *)",
 			"Bash(gh ruleset *)",
 			"Bash(git push)",
+			"Bash(git push *--follow-tags*)",
+			"Bash(git push --follow-tags*)",
+			"Bash(git push *--tags*)",
+			"Bash(git push --tags*)",
+			"Bash(git push origin refs/tags/*)",
+			"Bash(git push origin v*)",
 			"Bash(git worktree remove *--force*)",
 			"Bash(git worktree remove -f*)",
 			"Bash(git worktree remove * -f*)",
@@ -77,7 +83,9 @@
 			"Edit(**/.claude/settings*.json)",
 			"Edit(**/.claude/hooks/**)",
 			"Edit(**/.claude/skills/**)",
-			"Edit(supabase/**)"
+			"Edit(supabase/**)",
+			"Bash(gh pr edit *--remove-label*review:admin*)",
+			"Bash(gh issue edit *--remove-label*review:admin*)"
 		],
 		"deny": [
 			"Read(.env)",
