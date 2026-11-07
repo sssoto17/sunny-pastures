@@ -10,7 +10,7 @@ deploy hooks. Until now each piece was set up when it was first needed, and noth
 agents work `factory:ready` issues without the admin. Before that, this ADR settles how the repo,
 the board and the platform are used, and in which order the admin turns things on.
 
-This is a proposal. Nothing in it has been applied. The admin applies only what he approves, using
+This is a proposal. Nothing in it has been applied. The admin applies only what they approve, using
 the checklist at the end. Files under `.github/` are a protected path, so their drafts sit in the
 appendix and land in a later PR.
 
@@ -27,6 +27,34 @@ The current state below was read on 7 Nov 2026 from the repo, `git log`, and the
   the docs' source, the `github/docs` repository (`data/reusables/gated-features/*.md` and the
   articles named in each citation). Links point at the published pages. A claim marked
   *(not re-checked)* comes from memory of the docs and must be confirmed before it's applied.
+
+**Checked locally on 7 Nov** (a second session on the admin's machine, `gh` with the `repo` and
+`project` scopes, read-only `GET` and GraphQL queries only):
+
+- Environments, Actions permissions, secrets, variables, Dependabot settings, webhooks,
+  deployments and commit signatures were read from the REST API. Secrets and variables were
+  listed by name and count only.
+- The Project's workflows, views and fields were read through GraphQL.
+- The account's plan couldn't be read by API: `gh api user --jq .plan.name` returns `null`,
+  because the token lacks the `user` scope. The admin answered Q1 instead (below).
+- docs.github.com, the `github/docs` source, GitHub's Terms of Service and Vercel's docs were
+  read. Each marker that was resolved now carries its source and "checked 7 Nov". The markers
+  left in place could not be confirmed from a primary source.
+
+**The admin's answers, 7 Nov:**
+
+- **Q1:** the account is on **GitHub Pro**, through a verified GitHub Education student account.
+  The repo stays **private until about M3–M4**, then goes public (#38).
+- **Q2:** the factory gets **its own identity**. How it reaches GitHub is spike #37 (area 2).
+- **Q7 and Q8** are decided together when the repo goes public (#38).
+- **Q9:** `area:tools` widens to cover all dev tooling (area 6).
+- **Approvals:** PRs below a blast-radius bar may **auto-merge without the admin's review**, so
+  the admin doesn't become the factory's bottleneck (area 2).
+
+**GitHub Marketplace**, researched on 7 Nov from the vendors' pricing, terms and docs pages,
+read-only. The summary is in area 9.
+
+Areas 2, 3, 4, 6, 7, 8 and 9 below were revised with these answers.
 
 ## The skill and AGENTS.md
 
@@ -178,9 +206,14 @@ CODEOWNERS work in private repos only on GitHub Pro, Team or Enterprise
 ([about rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets),
 [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches),
 [code owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)).
-On GitHub Free they work only in public repos. The account's plan couldn't be read. The GitHub
-Student Developer Pack includes Pro *(not re-checked)*. This is **open question Q1**, and it
-decides much of this ADR (see area 8 for what public visibility adds).
+On GitHub Free they work only in public repos (checked 7 Nov against `github/docs`
+`gated-features/repo-rules.md`, `protected-branches.md`, `code-owners.md`). The account's plan
+couldn't be read (the token lacks the `user` scope). GitHub Education's student page offers a
+"Free GitHub Pro account for verified learners"
+([github.com/education/students](https://github.com/education/students), checked 7 Nov). It
+lists Pro as a GitHub Education benefit, separately from the Student Developer Pack's partner
+offers, and docs.github.com's student page doesn't mention Pro. This is **open question Q1**,
+and it decides much of this ADR (see area 8 for what public visibility adds).
 
 **Recommendation: adopt now (if Q1 allows).** Rulesets, not classic branch protection: they can
 be read by anyone with read access, several can stack, and they can target tags too
@@ -200,7 +233,7 @@ Target: the default branch. Enforcement: active.
 | Require status checks to pass | **added later**, when CI reports them | Placeholders below. A required check that never reports blocks every merge, so none are added before the CI/CD step. |
 | ↳ Require branches to be up to date | off for now | With parallel factory PRs and no merge queue (area 3), strict mode means updating and rerunning CI after every merge. Turn on if a broken `main` from two green PRs happens twice (the self-improving rule). |
 | Require linear history | **off** | Area 3 keeps merge commits for evidence PRs. |
-| Require signed commits | off | Agent commits from cloud sessions may not be signed *(unread)*. It would block them for little gain in a solo repo. |
+| Require signed commits | off | Cloud-session commits are signed, but local commits aren't. Checked 7 Nov (`verification.verified` on every commit of `main`, `prototype/persistence` and this PR's branch): all 54 cloud-session commits (author Claude, `Claude-Session:` trailer) and all 14 merges made on github.com are verified. All 43 local commits, the admin's and local sessions', are unsigned. The rule would block every local push until the admin sets up signing, for little gain in a solo repo. |
 | Require deployments to succeed | off; revisit at M4 | Could require the Vercel preview to deploy before merge. |
 | Bypass list | Repository admin, mode **"For pull requests only"** | The admin can merge a PR past a rule (for example, a red check on a docs-only PR during an outage) but can't push straight to `main`. |
 
@@ -261,7 +294,11 @@ question Q2**. Two ways out:
   The admin's own PRs merge by bypass. MUST-15.1 and "only the admin merges" become real GitHub
   rules, and `guard / protected-paths` can test "is the author the factory?" instead of guessing
   from a branch name. Cost: a second account, its token as a secret in the factory's environment,
-  and setup time. GitHub's terms allow one free machine account per person *(not re-checked)*.
+  and setup time. GitHub's terms allow one free machine account per person: "You may maintain no
+  more than one free machine account in addition to your free Personal Account." The person who
+  sets it up accepts the terms for it and is responsible for its actions
+  ([Terms of Service, B. Account Terms](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#b-account-terms),
+  checked 7 Nov).
 - **(b) Keep one identity** and amend MUST-15.1 to "a CI check plus the admin's merge enforce it".
   `guard / protected-paths` then can't tell an agent from the admin by author, so it needs another
   signal: the `Co-Authored-By: Claude` / `Claude-Session:` trailers on the PR's commits, which
@@ -336,9 +373,12 @@ default.**
 
 ## 4. Environments
 
-**Current state.** **Unread** (the proxy refused `GET …/environments`). No workflows exist
-(`list_workflows` returns 0), so nothing deploys from Actions. Vercel and the hosted Supabase
-projects don't exist yet (`docs/requirements/spec.md`, MUST-17).
+**Current state.** No environments, no secrets and no variables (checked 7 Nov: `GET
+…/environments`, `…/actions/secrets`, `…/dependabot/secrets` and `…/actions/variables` each
+return a count of 0). No workflows exist (`list_workflows` returns 0), so nothing deploys from
+Actions. Vercel isn't connected yet: the repo has no deployments and no webhooks, and no PR has a
+commit status or check run (checked 7 Nov on #19, #26, #30 and #35). Vercel and the hosted
+Supabase projects don't exist yet (`docs/requirements/spec.md`, MUST-17).
 
 **What GitHub offers on this plan.** Environments, environment secrets and deployment branches in
 a private repo need Pro, Team or Enterprise. On Free, Pro and Team, required reviewers and wait
@@ -346,15 +386,22 @@ timers work **only in public repos**
 ([managing environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments);
 gating text in `github/docs` `data/reusables/gated-features/environments.md`).
 
-**Vercel covers most of MUST-17 by itself** *(not re-checked: Vercel's docs weren't read here)*.
-Its Git integration builds a preview for every PR and deploys `main` to production, and it keeps
-its own environment variables per scope (Production, Preview, Development). So:
+**Vercel covers most of MUST-17 by itself.** Its Git integration deploys every push, including
+pushes to PR branches, as a preview, and deploys the production branch (usually `main`) to
+production. It keeps its own environment variables per environment (Production, Preview,
+Development), and a Preview variable can be limited to one branch
+([Vercel for GitHub](https://vercel.com/docs/git/vercel-for-github),
+[environment variables](https://vercel.com/docs/environment-variables), checked 7 Nov). So:
 
 - **MUST-17.2** (merge to `main` deploys production) and **MUST-17.3** (each PR gets a preview
   on the staging Supabase project) are Vercel settings: production variables point at the
   production Supabase project, preview variables at staging. No GitHub Environment is needed.
-- Vercel reports its deployments back to GitHub as deployments named after its environments, so
-  they show on the PR without any GitHub-side setup *(not re-checked)*.
+- Vercel reports back to GitHub without any GitHub-side setup. It uses GitHub's Deployments API,
+  so its production and preview deployments show in GitHub. By default each deployed commit also
+  gets a commit status, and each PR gets a comment with its preview URL
+  ([Vercel for GitHub](https://vercel.com/docs/git/vercel-for-github), checked 7 Nov). The docs
+  don't give the names of the GitHub environments those deployments use. Check them once Vercel
+  is connected (Q10).
 
 **Recommendation.**
 
@@ -387,29 +434,40 @@ its own environment variables per scope (Production, Preview, Development). So:
 ## 5. The Project board and status automation
 
 **Current state.** The Project (user project 3) has the fields in `issue-tracker.md`: Status,
-Track, Mode, Size, Priority, Week. The built-in workflows, views and their filters are **unread**
-(GraphQL is blocked here). On 6 Nov a new issue was already on the Project when an agent tried to
-add it, which suggests the auto-add workflow is on. A new Project starts with "Item closed → Done"
-and "Pull request merged → Done" turned on
+Track, Mode, Size, Priority, Week. A new Project starts with "Item closed → Done" and "Pull
+request merged → Done" turned on
 ([built-in automations](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-built-in-automations)).
+Read through GraphQL on 7 Nov (`viewer.projectV2(number: 3) { workflows { name enabled } views
+{ name layout filter … } }`):
+
+- **All 8 workflows the API lists are on:** Auto-add sub-issues to project, Auto-add to project,
+  Auto-archive items, Auto-close issue, Item added to project, Item closed, Pull request linked to
+  issue, Pull request merged. The API doesn't expose a workflow's filter or the Status it sets.
+- **Auto-add also adds PRs today.** All 12 closed and 8 open issues are on the Project, and so
+  are 9 PRs. Eight of them (#23, #24, #25, #26, #27, #29, #30, #35) became items in the same
+  minute they were opened.
+- **No item is archived yet**, although Auto-archive is on.
+- Views: see "Views" below.
 
 ### Built-in workflows
 
-The workflow names below are from memory of the Project's Workflows page *(not re-checked)*;
-only the two defaults, auto-add and auto-archive were checked against the docs.
+The workflow names below are the ones the API returns for this Project (checked 7 Nov). The docs
+page doesn't name the workflows. Two rows (Item reopened, Code changes requested / Code review
+approved) are names the API didn't return. If the Workflows page doesn't offer them, skip those
+rows *(not re-checked in the UI)*.
 
 | Workflow | Recommendation | Why |
 |---|---|---|
-| Auto-add to project | **On**, filter `is:issue` | Every issue belongs on the Project (`issue-tracker.md`). Issues only: the issue is the work item, and a PR card would duplicate it. Free allows 1 auto-add workflow, Pro 5 ([adding items automatically](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/adding-items-automatically)). Agents still add the item explicitly, and #32's script should treat "already on the Project" as success. |
-| Item added to project | **On**, Status = Backlog | Matches "agents create issues in Backlog". |
-| Item reopened | **On**, Status = Backlog | A reopened issue isn't automatically the focus. |
-| Item closed | **On**, Status = Done | "In review → Done: the admin merged the PR, the issue closes, and the Project moves it." |
-| Pull request merged | On (harmless) | PRs aren't added, so it rarely fires. |
-| Pull request linked to issue | **Off for now** | It would set In review when the PR opens, but In review means "PR open *and* checks green". Revisit with #17. *(Workflow name not re-checked.)* |
-| Code changes requested / Code review approved | Off | No reviews in a solo repo (area 2). |
-| Auto-close issue (Status set to Done closes the issue) | Off | Done must come from a merge or an explicit close, not a drag. |
-| Auto-add sub-issues to project | On, if offered | Workstream sub-issues belong on the board. *(Not re-checked.)* |
-| Auto-archive items | **Off** | Closed items are the history the report draws on. Views filter them out instead ([archiving](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/archiving-items-automatically) archives existing matches immediately). |
+| Auto-add to project | **On**, filter `is:issue` | On today, and it adds PRs too (above), so the filter changes. Every issue belongs on the Project (`issue-tracker.md`). Issues only: the issue is the work item, and a PR card would duplicate it. Free allows 1 auto-add workflow, Pro 5 ([adding items automatically](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/adding-items-automatically)). Agents still add the item explicitly, and #32's script should treat "already on the Project" as success. |
+| Item added to project | **On**, Status = Backlog | Matches "agents create issues in Backlog". On today; check in the UI that it sets Backlog. |
+| Item reopened | **On**, Status = Backlog | A reopened issue isn't automatically the focus. Not in the API's list for this Project. |
+| Item closed | **On**, Status = Done | "In review → Done: the admin merged the PR, the issue closes, and the Project moves it." On today. |
+| Pull request merged | On (harmless) | Once auto-add takes issues only, PRs aren't added, so it rarely fires. |
+| Pull request linked to issue | **Off for now** (on today) | It would set In review when the PR opens, but In review means "PR open *and* checks green". Revisit with #17. |
+| Code changes requested / Code review approved | Off | No reviews in a solo repo (area 2). Not in the API's list for this Project. |
+| Auto-close issue (Status set to Done closes the issue) | **Off** (on today) | Done must come from a merge or an explicit close, not a drag. |
+| Auto-add sub-issues to project | On (on today) | Workstream sub-issues belong on the board. |
+| Auto-archive items | **Off** (on today) | Closed items are the history the report draws on. Views filter them out instead ([archiving](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/archiving-items-automatically) archives existing matches immediately). |
 
 ### Who sets each Status
 
@@ -436,7 +494,19 @@ in `triage-labels.md` reaches 3 repetitions.
 | Blocked | Table | `label:blocked:*` |
 | Triage | Table | `label:triage` |
 
-The workflow doc already refers to the "This week" board, so that view probably exists **(unread)**.
+**Views today** (read 7 Nov). Three of the six above already exist:
+
+| View today | Layout | Filter / grouping | Matches |
+|---|---|---|---|
+| This week 📥 | Board, columns by Status | `week:@current`, sorted by Week then Priority | This week. The filter doesn't limit Done to the last 7 days yet. |
+| Milestones 🎯 | Table | `has:milestone state:open`, grouped by Milestone | — |
+| Roadmap ✈️ | Roadmap | `has:milestone is:issue is:open`, grouped by Milestone | Roadmap |
+| Prioritized backlog ⚡ | Table | `state:open status:Backlog is:issue has:priority -label:triage`, grouped by Priority | — |
+| Upcoming ➡️ | Board, columns by Status | `week:@next` | — |
+| Triage 🔨 | Table | `label:triage` | Triage |
+| Bugs 🐛 | Table | `label:bug is:open`, grouped by Priority, sorted by Size | — |
+
+Week, Factory and Blocked don't exist yet.
 
 ### Milestones and Project fields
 
@@ -473,10 +543,11 @@ maps paths to `area:*` exactly as `triage-labels.md` defines them. The action is
 Checked on 7 Nov: tag `v7.0.0` (and the moving `v7`) points at commit
 `bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13`, committed on 16 Jul 2026, 114 days ago. v7 changes
 nothing in inputs or behaviour from v6 ("Migrated to ESM internally"), runs on `node24`, and uses
-the v5+ config format (`changed-files` with `any-glob-to-any-file`). The Release page's publish
-date couldn't be read (the API and github.com pages were refused here), so **Q6** asks the admin
-to confirm it's older than 7 days. The previous release, `v6.2.0`, is commit `b8dd2d9…`
-(6 Jul 2026).
+the v5+ config format (`changed-files` with `any-glob-to-any-file`). The Release was published on
+21 Jul 2026, 109 days before 7 Nov, so it passes the 7-day rule (Q6, checked 7 Nov:
+`gh api repos/actions/labeler/releases/tags/v7.0.0 --jq .published_at`; `git/ref/tags/v7.0.0`
+and `git/ref/tags/v7` both still point at `bf12e9b…`). The previous release, `v6.2.0`, is commit
+`b8dd2d9…` (6 Jul 2026, published 9 Jul 2026).
 
 The labeler's limits:
 - `tests/acceptance/` and `prototypes/<name>/` take the area of what they test, which a path
@@ -517,16 +588,19 @@ CONTRIBUTING, no issue or PR template, no licence.
 | LICENSE | **Open question Q7** | Needed only if the repo goes public. With none, all rights are reserved. |
 | CODE_OF_CONDUCT.md, FUNDING.yml | Skip | No community and no funding. |
 | `CITATION.cff` | Skip; reconsider at M8 | Only if the report wants the repo cited in a standard form. |
-| Issue types | Skip | An organization feature; labels carry the type here *(not re-checked)*. |
+| Issue types | Skip | An organization feature; labels carry the type here. The docs describe issue types only per organization, set by organization owners ([managing issue types](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/managing-issue-types-in-an-organization)), and GraphQL returns `issueTypes: null` for this repo (checked 7 Nov). |
 | Autolinks | Skip | Nothing external to link to (and Pro-only on private repos). |
 
 ## 8. Security and dependencies
 
 **Current state.** Code scanning is off (`GET …/code-scanning/default-setup`: "not enabled").
-Private vulnerability reporting returns 404. Dependabot alerts, security updates and secret
-scanning settings are **unread** (403 or absent from the repo API).
+Private vulnerability reporting returns 404. Checked 7 Nov: Dependabot alerts are off
+(`GET …/vulnerability-alerts` returns 404), Dependabot security updates are off
+(`…/automated-security-fixes`: `enabled: false`), and the repo's `security_and_analysis` field is
+`null`, so no secret scanning setting exists for it.
 
-What each feature needs, from `github/docs` `data/reusables/gated-features/`:
+What each feature needs, from `github/docs` `data/reusables/gated-features/` (re-read 7 Nov; every
+row below matches the source):
 
 | Feature | Private repo, user-owned | Public repo |
 |---|---|---|
@@ -550,37 +624,56 @@ setup for free. History would need a secret scan before the switch (Q1).
   the safeguards stay local: the `UserPromptSubmit` hook, `.gitignore` for `.env*`, and the
   count-only staged-diff check (C5). A CI secret scanner (for example gitleaks) is a new
   dependency, so it's for the admin to approve in the CI/CD step.
+- **The pnpm 12 lockfile limits Dependabot here** (checked 7 Nov). "When pnpm writes
+  `pnpm-lock.yaml` as two YAML documents, the dependency graph does not detect the dependencies in
+  that file. This is the default format for pnpm 12 projects that pin a pnpm version. Dependabot
+  version updates still work, but Dependabot alerts and Dependabot security updates are not
+  created for those dependencies"
+  ([supported ecosystems, "pnpm"](https://docs.github.com/en/code-security/dependabot/ecosystems-supported-by-dependabot/supported-ecosystems-and-repositories#pnpm)).
+  This repo pins `pnpm@12.15.0` in `package.json`, and its `pnpm-lock.yaml` already has two
+  documents (two `---` separators; the first holds the pinned pnpm itself). So alerts and
+  security updates below won't cover the npm dependencies while that format holds. Version
+  updates will.
 - **Dependabot alerts: adopt now.** Free on private repos. No noise until there are dependencies.
+  For npm dependencies, see the pnpm 12 limit above.
 - **Dependabot security updates: adopt at M2**, when `packages/sim` brings dev dependencies.
   Security updates ignore cooldowns
   ([options reference](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#cooldown)),
   so a fix can be younger than 7 days, and `pnpm install` will refuse it under
   `minimumReleaseAge`. That's intended: the PR shows the alert, and the admin decides. The
-  setting is never lowered (AGENTS.md).
+  setting is never lowered (AGENTS.md). For npm dependencies, see the pnpm 12 limit above.
 - **Dependabot version updates: adopt at M3**, only with `cooldown: default-days: 7` (matching
   `minimumReleaseAge`), `versioning-strategy: increase` (exact pins stay exact), weekly, grouped,
-  for the `npm` ecosystem (pnpm; v12 support is listed for pnpm *(version gate not re-checked)*)
-  and `github-actions` (it keeps SHA pins with their version comments up to date *(not
-  re-checked)*). Dependabot's PRs come from `dependabot[bot]`, a separate identity, and pass the
+  for the `npm` ecosystem (pnpm v7–v12 are listed; support for pnpm 11 and 12 arrived on 20 Oct
+  2026) and `github-actions` (it updates the version comment of a SHA-pinned action when the
+  comment is on the same line)
+  ([supported ecosystems](https://docs.github.com/en/code-security/dependabot/ecosystems-supported-by-dependabot/supported-ecosystems-and-repositories),
+  checked 7 Nov). Dependabot's PRs come from `dependabot[bot]`, a separate identity, and pass the
   same required checks; the admin merges them. Dependabot never adds a dependency, so the "ask
   before adding" rule isn't touched. Draft in appendix A7.
 - **Code scanning (CodeQL default setup): adopt at M2 if public**, when TypeScript lands in
   `packages/sim`; it becomes a required check then. Skip if private (not available).
 - **Private vulnerability reporting: adopt if public**; SECURITY.md points to it. If private,
   SECURITY.md points to a contact address (Q8).
-- **Actions permissions** (all **unread**; set before the first workflow lands):
-  - Default `GITHUB_TOKEN` permissions: **read** repository contents. Each workflow raises only
-    what it needs per job (`pull-requests: write` for the labeler).
-  - "Allow GitHub Actions to create and approve pull requests": **off**. It's off by default for a
-    personal repo
+- **Actions permissions** (set before the first workflow lands). Read on 7 Nov:
+  `GET …/actions/permissions` returns `enabled: true`, `allowed_actions: local_only`,
+  `sha_pinning_required: false`; `GET …/actions/permissions/workflow` returns
+  `default_workflow_permissions: read`, `can_approve_pull_request_reviews: false`.
+  - Default `GITHUB_TOKEN` permissions: **read** repository contents. Already set. Each workflow
+    raises only what it needs per job (`pull-requests: write` for the labeler).
+  - "Allow GitHub Actions to create and approve pull requests": **off**. Already off. It's off by
+    default for a personal repo
     ([Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)).
-    Check it's still off.
   - Allowed actions: **"Allow sssoto17, and select non-sssoto17, actions and reusable
     workflows"**, with GitHub-created actions allowed and an explicit list for the rest (for
-    example `supabase/setup-cli@*`, `pnpm/action-setup@*`) as the CI/CD step adds them.
-  - **Every action pinned to a full commit SHA with a version comment**, as above. If the
-    settings page offers "Require actions to be pinned to a full-length commit SHA", turn it on
-    *(not re-checked)*. The 7-day rule applies to actions too: pin a release at least 7 days old.
+    example `supabase/setup-cli@*`, `pnpm/action-setup@*`) as the CI/CD step adds them. Today
+    it's "local only", which blocks GitHub-authored actions such as `actions/checkout` and
+    `actions/labeler`, so this must change before the first workflow runs.
+  - **Every action pinned to a full commit SHA with a version comment**, as above. Turn on
+    "Require actions to be pinned to a full-length commit SHA". The setting exists (the REST
+    field `sha_pinning_required`, off today;
+    [REST: Actions permissions](https://docs.github.com/en/rest/actions/permissions), checked
+    7 Nov). The 7-day rule applies to actions too: pin a release at least 7 days old.
   - `pull_request_target` only for the labeler, which never checks out PR code.
 
 **Alternatives considered.**
@@ -595,7 +688,7 @@ setup for free. History would need a secret scan before the switch (Q1).
 
 | Feature | Decision | Reason |
 |---|---|---|
-| **Actions** in general | **Adopt** with the CI/CD step | MUST-17.1. The pipeline's design is that step's job, not this ADR's. This ADR sets the permissions it runs under (area 8) and the checks' names (area 2). Minutes: private repos have a monthly quota by plan; public repos don't use it on standard runners *(not re-checked)*. |
+| **Actions** in general | **Adopt** with the CI/CD step | MUST-17.1. The pipeline's design is that step's job, not this ADR's. This ADR sets the permissions it runs under (area 8) and the checks' names (area 2). Cost: a private repo draws on a monthly included compute amount, now given in US dollars, not minutes ($12 on Free, $18 on Pro). Standard GitHub-hosted runners are free in public repos ([Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions), checked 7 Nov). |
 | **Releases** | **Adopt** at M4 | Area 1: one per shipped milestone tag. |
 | **Insights** | **Use**, read-only | Pulse, commit and PR graphs feed the report's process chapter. On a private repo the graphs need Pro (`gated-features/repository-insights.md`). |
 | **Pages** | Skip | Vercel hosts the game; the docs live in the repo. Off today. |
@@ -646,28 +739,45 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
 
 ## Open questions for the admin
 
-1. **Q1, plan and visibility.** Is the account on GitHub Pro (for example through the Student
-   Developer Pack)? May the repo be public during the project and the assessment? Without Pro or
-   public visibility, rulesets, CODEOWNERS, environments and auto-merge don't work at all. If it
-   goes public: scan the history for secrets first (secret scanning will also run on push).
-2. **Q2, factory identity.** One account for everyone (MUST-15.1 reworded), or a machine user /
-   GitHub App with the Write role for the factory (MUST-15.1 met with required code-owner review)?
-3. **Q3, Project state.** Which built-in workflows and views are on today? Is auto-add on, with
-   which filter? (Not readable here.)
-4. **Q4, Actions and Dependabot settings.** Current default token permissions, allowed actions,
-   the PR-approval setting, Dependabot alerts and security updates. (Not readable here.)
-5. **Q5, environments and secrets.** Do any environments, repo secrets or variables exist? (Not
-   readable here.) Does the agents' cloud environment sign commits?
-6. **Q6, labeler release date.** Confirm on github.com/actions/labeler/releases that v7.0.0 was
-   published at least 7 days ago (its commit is from 16 Jul 2026).
-7. **Q7, licence** if the repo goes public.
-8. **Q8, security contact** for SECURITY.md if the repo stays private.
-9. **Q9, `.agents/`.** `triage-labels.md` gives `area:ci-cd` to `.github/`, `.claude/` and root
-   config, but doesn't name `.agents/` (the vendored skills). Add it there? The labeler config
-   follows the doc, so it leaves `.agents/` unlabelled until then.
-10. **Q10, Vercel's GitHub deployments.** Once Vercel is connected, check that previews and
-    production show as deployments on PRs (area 4), before deciding on "Require deployments to
-    succeed".
+Q3–Q6 were answered on 7 Nov from the API (see "How this was checked"). Q1's plan half, Q2, Q7,
+Q8 and Q9 are the admin's, and Q10 waits for Vercel.
+
+1. **Q1, plan and visibility.** *Still open.* Is the account on GitHub Pro (for example through
+   GitHub Education)? May the repo be public during the project and the assessment? Without Pro
+   or public visibility, rulesets, CODEOWNERS, environments and auto-merge don't work at all. If
+   it goes public: scan the history for secrets first (secret scanning will also run on push).
+   *Checked 7 Nov:* the availability claims match `github/docs` (area 2). GitHub Education offers
+   "Free GitHub Pro account for verified learners" (area 2). The plan itself needs the `user`
+   scope, which the session's token lacks. The admin reads it at github.com → Settings → Billing
+   and plans. A hint, not proof: `GET …/branches/main/protection` answers "Branch not protected"
+   rather than a plan error, and the repo's traffic and autolinks endpoints answer normally,
+   although the docs gate both on Pro for private repos.
+2. **Q2, factory identity.** *Admin decides.* One account for everyone (MUST-15.1 reworded), or a
+   machine user / GitHub App with the Write role for the factory (MUST-15.1 met with required
+   code-owner review)? *Fact for the decision:* the terms allow one free machine account besides
+   the admin's own free account, and the admin is responsible for its actions (area 2).
+3. **Q3, Project state.** *Answered.* All 8 built-in workflows the API lists are on, including
+   Auto-archive, Auto-close issue and Pull request linked to issue, which this ADR turns off.
+   Auto-add is on and adds PRs as well as issues; its filter isn't readable through the API.
+   Seven views exist; This week, Roadmap and Triage match this ADR (area 5).
+4. **Q4, Actions and Dependabot settings.** *Answered.* Actions enabled, allowed actions "local
+   only", SHA pinning not required, default token permissions read, Actions can't create or
+   approve PRs. Dependabot alerts off, security updates off. Note the pnpm 12 lockfile limit on
+   alerts and security updates (area 8).
+5. **Q5, environments and secrets.** *Answered.* No environments, no repo or Dependabot secrets,
+   no Actions variables. Cloud-session commits are signed (verified); local commits aren't
+   (area 2).
+6. **Q6, labeler release date.** *Answered.* v7.0.0 was published on 21 Jul 2026, 109 days ago,
+   and the tag still points at `bf12e9b…` (area 6).
+7. **Q7, licence** if the repo goes public. *Admin decides.*
+8. **Q8, security contact** for SECURITY.md if the repo stays private. *Admin decides.*
+9. **Q9, `.agents/`.** *Admin decides.* `triage-labels.md` gives `area:ci-cd` to `.github/`,
+   `.claude/` and root config, but doesn't name `.agents/` (the vendored skills). Add it there?
+   The labeler config follows the doc, so it leaves `.agents/` unlabelled until then.
+10. **Q10, Vercel's GitHub deployments.** *Open until Vercel is connected.* Vercel isn't connected
+    yet (no deployments, webhooks, statuses or checks on 7 Nov). Vercel's docs confirm it uses
+    GitHub's Deployments API and posts a commit status per deployment (area 4). Once connected,
+    check the names it uses on PRs before deciding on "Require deployments to succeed".
 
 ## Admin checklist
 
@@ -692,23 +802,33 @@ outside the sandbox (`docs/agents/sandbox.md`), after Q1 is settled.
      -f 'names[]=supabase' -f 'names[]=deterministic-simulation' -f 'names[]=bachelor-project'
    ```
 4. **Ruleset `main`** (area 2). UI: Settings → Rules → Rulesets → New branch ruleset. The JSON
-   is in appendix A8 (`actor_id: 5` is the Repository admin role *(not re-checked)*; check the
-   bypass list in the UI after creating it).
+   is in appendix A8 (`actor_id: 5` is the Repository admin role *(not re-checked: the REST
+   reference doesn't list role IDs; GitHub's own rulesets in `github/docs` use `actor_id: 5`,
+   `RepositoryRole` for their bypass, checked 7 Nov)*; check the bypass list in the UI after
+   creating it).
    ```sh
    gh api -X POST repos/sssoto17/sunny-pastures/rulesets --input ruleset-main.json --jq '.id'
    ```
 5. **Ruleset `prototype/*`** and **ruleset `v*` tags** (appendix A8), same call with their files.
-6. **Project workflows** (area 5). UI only: the Project → ⋯ → Workflows. Turn on or off as in the
-   table; set auto-add's filter to `is:issue`.
-7. **Project views** (area 5). UI only: the Project → New view.
-8. **Dependabot alerts** now (area 8). UI: Settings → Code security → Dependabot alerts.
+6. **Project workflows** (area 5). UI only: the Project → ⋯ → Workflows. All 8 are on today
+   (7 Nov). Turn off Auto-archive items, Auto-close issue and Pull request linked to issue; set
+   auto-add's filter to `is:issue` (it adds PRs today); check that Item added to project sets
+   Backlog. Turn on Item reopened only if the page offers it.
+7. **Project views** (area 5). UI only: the Project → New view. This week, Roadmap and Triage
+   exist; add Week, Factory and Blocked, and the 7-day limit on Done in This week.
+8. **Dependabot alerts** now (area 8); off today. They won't cover npm dependencies while the
+   lockfile uses pnpm 12's two-document format (area 8). UI: Settings → Code security →
+   Dependabot alerts.
    ```sh
    gh api -X PUT repos/sssoto17/sunny-pastures/vulnerability-alerts --silent
    ```
 9. **Actions permissions** (area 8), before the first workflow. UI: Settings → Actions → General.
+   Today (7 Nov) allowed actions is "local only" and SHA pinning isn't required; the token
+   default (read) and the PR-approval setting (off) already match, so the third call only
+   confirms them.
    ```sh
    gh api -X PUT repos/sssoto17/sunny-pastures/actions/permissions --silent \
-     -F enabled=true -f allowed_actions=selected
+     -F enabled=true -f allowed_actions=selected -F sha_pinning_required=true
    gh api -X PUT repos/sssoto17/sunny-pastures/actions/permissions/selected-actions --silent \
      -F github_owned_allowed=true -F verified_allowed=false
    gh api -X PUT repos/sssoto17/sunny-pastures/actions/permissions/workflow --silent \
@@ -724,7 +844,8 @@ outside the sandbox (`docs/agents/sandbox.md`), after Q1 is settled.
     ```
 11. **[.github] The templates PR** (M2): `ISSUE_TEMPLATE/*.yml` and `config.yml` (A4),
     `pull_request_template.md` (A2), `CODEOWNERS` (A3). The admin's PR, not an agent's.
-12. **M2: Dependabot security updates** (area 8). UI: Settings → Code security.
+12. **M2: Dependabot security updates** (area 8); off today. Same pnpm 12 limit as alerts.
+    UI: Settings → Code security.
     ```sh
     gh api -X PUT repos/sssoto17/sunny-pastures/automated-security-fixes --silent
     ```
