@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# PreToolUse hook on Bash: keep the main folder on `main` and keep the session's working
-# directory in it. In the main folder (any cwd not under .claude/worktrees/) it denies branch
-# switches. Exit 2 blocks the command and stderr goes back to the session. Reads the raw hook
-# JSON on stdin, so it needs no jq. Tests: block-branch-switch.test.sh next to this file.
+# PreToolUse hook on Bash: keep the main folder on `main` and keep the coordinating session's
+# working directory in it. Denies a branch switch (`git checkout <branch>`, `git switch`,
+# `gh pr checkout`) whose directory is not inside .claude/worktrees/<name>, whatever the session's
+# cwd, and a top-level `cd`/`pushd` into .claude/worktrees/ from the main folder. Exit 2 blocks the
+# command and stderr goes back to the session. Reads the raw hook JSON on stdin, so it needs no
+# jq. Tests: block-branch-switch.test.sh next to this file.
 set -uo pipefail
 export LC_ALL=C
+# bash 5.2+ expands `&` in a ${s//pat/rep} replacement to the match; a decoded `&` must stay `&`.
+shopt -u patsub_replacement 2>/dev/null || true
 
 input=$(cat)
 
@@ -15,7 +19,7 @@ json_field() {
   [[ $input =~ $re ]] || return 1
   # Whole-string expansions, not a char loop (a char loop takes ~30 s on a 150 KB command).
   # A raw JSON string holds no control characters, so \1 and \2 are free as placeholders.
-  local s=${BASH_REMATCH[1]} hex
+  local s=${BASH_REMATCH[1]} hex ch
   s=${s//\\\\/$'\1'}  # \\ -> \1
   s=${s//\\\"/$'\2'}  # \" -> \2
   [[ $s =~ ^([^\"]*) ]] && s=${BASH_REMATCH[1]} # the value ends at the first bare quote
@@ -27,11 +31,14 @@ json_field() {
   s=${s//\\f/ }
   while [[ $s =~ \\u([0-9a-fA-F]{4}) ]]; do
     hex=${BASH_REMATCH[1]}
-    if ((16#$hex >= 32 && 16#$hex < 127)); then
-      s=${s//\\u$hex/$(printf '%b' "\\x${hex:2:2}")}
+    if [[ ${hex,,} == 005c ]]; then
+      ch=$'\1' # a backslash, restored below with the others
+    elif ((16#$hex >= 32 && 16#$hex < 127)); then
+      printf -v ch '%b' "\\x${hex:2:2}"
     else
-      s=${s//\\u$hex/?}
+      ch='?'
     fi
+    s=${s//\\u$hex/"$ch"}
   done
   s=${s//$'\2'/\"}
   s=${s//$'\1'/\\}
@@ -43,29 +50,56 @@ in_worktree() {
   [[ $1 =~ (^|/)\.claude/worktrees/[^/.][^/]* && ! $1 =~ \.claude/worktrees/(.*/)?\.\.(/|$) ]]
 }
 
+# Set REPLY to $2 resolved against directory $1 and normalised (no `.` or `..`), or to `?` when
+# it can't be known from the text: an unknown base, `~`, a variable, a substitution, `+N`.
+# `?` never counts as a worktree.
+resolve_path() {
+  local base=$1 target=$2 p part parts out=()
+  REPLY='?'
+  [[ $target =~ ^[A-Za-z0-9._/][A-Za-z0-9._/@,:=+-]*$ ]] || return
+  if [[ $target == /* ]]; then
+    p=$target
+  elif [[ $base == '?' ]]; then
+    return
+  else
+    p=$base/$target
+  fi
+  IFS=/ read -ra parts <<<"$p"
+  for part in "${parts[@]}"; do
+    case $part in
+      '' | .) ;;
+      ..) ((${#out[@]})) && out=("${out[@]:0:${#out[@]}-1}") ;;
+      *) out+=("$part") ;;
+    esac
+  done
+  local IFS=/
+  REPLY=/${out[*]}
+}
+
 cwd=$(json_field cwd) || exit 0
 command=$(json_field command) || exit 0
-
-in_worktree "$cwd" && exit 0
+[[ $command =~ (git|gh|cd|pushd) ]] || exit 0 # nothing to check: skip the lexer
 
 deny_switch() {
   cat >&2 <<'EOF'
-Blocked: this switches branches in the main folder. The main folder stays on main and belongs to
-the coordinating session (AGENTS.md, parallel sessions). Work in a worktree instead:
-`git worktree add .claude/worktrees/<N>-<slug> -b <branch> main`, then reach it with
+Blocked: this switches branches outside a worktree, in the main folder. The main folder stays on
+main and belongs to the coordinating session (AGENTS.md, parallel sessions). Work in a worktree
+instead: `git worktree add .claude/worktrees/<N>-<slug> -b <branch> main`, then reach it with
 `git -C <worktree> …`, a subshell `( cd <worktree> && … )` or absolute paths
 (docs/agents/sandbox.md, "Working directory"). To restore a file, use `git checkout -- <path>`.
 EOF
   exit 2
 }
 
-# Is `git <args>` (words after `git`) a branch switch? `git -C <worktree>` is not.
+# Is `git <args>` (words after `git`) a branch switch? Each `-C <dir>` moves gdir, the
+# directory the command acts on; the caller sets gdir first.
 git_switches_branch() {
   local i=0 n=$# args=("$@") sub
   while ((i < n)); do
     case ${args[i]} in
       -C)
-        in_worktree "${args[i + 1]:-}" && return 1
+        resolve_path "$gdir" "${args[i + 1]:-}"
+        gdir=$REPLY
         i=$((i + 2))
         ;;
       -c | --git-dir | --work-tree | --namespace) i=$((i + 2)) ;;
@@ -87,7 +121,7 @@ git_switches_branch() {
   done
   for a in "${opts[@]}"; do
     case $a in
-      -b | -B | --orphan | --detach | -) return 0 ;;
+      -b* | -B* | --orphan | --orphan=* | --detach | -) return 0 ;;
       -*) ;;
       *) return 0 ;;
     esac
@@ -278,7 +312,7 @@ done
 emit_word
 
 # --- Checks ---------------------------------------------------------------------------------
-# Check one simple command (its words in "$@").
+# Check one simple command (its words in "$@") run in directory dir[depth].
 check_command() {
   local words=("$@") negated=0
   # Skip what can precede the command name: grouping, keywords, assignments, wrappers.
@@ -293,9 +327,17 @@ check_command() {
     esac
   done
   ((${#words[@]})) || return 0
-  case ${words[0]##*/} in
+  local here=${dir[depth]} name=${words[0]##*/}
+  case $name in
     git)
-      if ((!wt[depth])) && git_switches_branch "${words[@]:1}"; then deny_switch; fi
+      gdir=$here
+      if git_switches_branch "${words[@]:1}" && ! in_worktree "$gdir"; then deny_switch; fi
+      ;;
+    gh)
+      if [[ ${words[1]:-} == co || "${words[1]:-} ${words[2]:-}" == 'pr checkout' ]] &&
+        ! in_worktree "$here"; then
+        deny_switch
+      fi
       ;;
     cd | pushd | popd)
       local a target='' plain=$((!negated && !or_seen[depth]))
@@ -307,17 +349,20 @@ check_command() {
         target=$a
         break
       done
+      if [[ $name == popd || -z $target ]]; then
+        REPLY='?' # popd, a bare cd (home) or `cd -`
+      else
+        resolve_path "$here" "$target"
+      fi
       # A top-level cd persists into the session's later commands; a subshell's does not.
-      if [[ $target =~ (^|/)\.claude/worktrees(/|$) ]] && ((depth == 0 && !wt[0])); then
+      if ((depth == 0)) && ! in_worktree "$here" &&
+        { [[ $target =~ (^|/)\.claude/worktrees(/|$) ]] || in_worktree "$REPLY"; }; then
         deny_cd
       fi
-      # Fail closed: only a worktree path sets the flag, and only a plain relative path without
-      # `..` keeps it. popd, `+N`, `-`, home, absolute paths, variables and substitutions reset it.
-      if ((plain)) && [[ ${words[0]##*/} != popd ]] && in_worktree "$target"; then
-        wt[depth]=1
-      elif ((!plain)) || [[ ${words[0]##*/} == popd || ! $target =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ||
-        $target =~ (^|/)\.\.(/|$) ]]; then
-        wt[depth]=0
+      if ((plain)); then
+        dir[depth]=$REPLY
+      elif [[ $REPLY != "$here" ]]; then
+        dir[depth]='?' # it may or may not have moved: negated, skippable or an odd option
       fi
       ;;
   esac
@@ -333,14 +378,26 @@ EOF
   exit 2
 }
 
-# Walk the simple commands. wt[d] says whether subshell depth d is inside a worktree: a
-# subshell starts where its parent is (base[d]), and a cd inside it ends with it. A cd's effect
-# lasts only through an `&&` chain: after `;`, `||`, `|` or a newline the cd may have failed, so
-# the flag goes back to base[d]. A cd that may be skipped (after `||` in the same list) or is
-# negated (`! cd`) never sets the flag.
+# After `;`, `||`, `|` or a newline, an earlier cd at this depth may have failed: the directory
+# is base[d] or dir[d]. Keep a worktree only when both are worktrees (the shorter path, so a later
+# `..` leaves it sooner); otherwise it's unknown, which counts as the main folder.
+settle() {
+  local d=${dir[depth]} b=${base[depth]}
+  [[ $d == "$b" ]] && return
+  if in_worktree "$d" && in_worktree "$b"; then
+    ((${#b} < ${#d})) && dir[depth]=$b
+  else
+    dir[depth]='?'
+  fi
+}
+
+# Walk the simple commands. dir[d] is the directory at subshell depth d: a subshell starts where
+# its parent is (base[d]), and a cd inside it ends with it. A cd counts only through an `&&`
+# chain; one that may be skipped (after `||` in the same list) or is negated (`! cd`) makes the
+# directory unknown.
 depth=0
-wt=(0)
-base=(0)
+dir=("$cwd")
+base=("$cwd")
 or_seen=(0)
 cur=()
 for ((k = 0; k < ${#toks[@]}; k++)); do
@@ -351,10 +408,13 @@ for ((k = 0; k < ${#toks[@]}; k++)); do
   ((${#cur[@]})) && check_command "${cur[@]}"
   cur=()
   case ${toks[k]} in
-    '(') depth=$((depth + 1)); wt[depth]=${wt[depth - 1]} base[depth]=${wt[depth - 1]} or_seen[depth]=0 ;;
+    '(')
+      depth=$((depth + 1))
+      dir[depth]=${dir[depth - 1]} base[depth]=${dir[depth - 1]} or_seen[depth]=0
+      ;;
     ')') ((depth > 0)) && depth=$((depth - 1)) ;;
-    ';') wt[depth]=${base[depth]} or_seen[depth]=0 ;;
-    '||') wt[depth]=${base[depth]} or_seen[depth]=1 ;;
+    ';') settle; or_seen[depth]=0 ;;
+    '||') settle; or_seen[depth]=1 ;;
   esac
 done
 ((${#cur[@]})) && check_command "${cur[@]}"

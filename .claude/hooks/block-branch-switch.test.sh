@@ -24,7 +24,7 @@ run_hook() { # cwd command -> sets code, err
   local input
   input=$(printf '{"session_id":"t","cwd":%s,"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":%s,"description":"test"}}' \
     "$(json_str "$1")" "$(json_str "$2")")
-  err=$(bash "$hook" <<<"$input" 2>&1 >/dev/null)
+  err=$(timeout 5 bash "$hook" <<<"$input" 2>&1 >/dev/null)
   code=$?
 }
 
@@ -148,16 +148,44 @@ deny "$MAIN" '( true || cd .claude/worktrees/16-x && git switch feature )'
 deny "$MAIN" '( git fetch || true && cd .claude/worktrees/16-x && git switch feature )'
 allow "$MAIN" '( git fetch || true; cd .claude/worktrees/16-x && git switch feature )'
 
+# --- review of PR #36 -----------------------------------------------------------------------
+# 1. gh pr checkout switches branches too
+deny "$MAIN" 'gh pr checkout 36'
+deny "$MAIN" 'gh co 36'
+deny "$MAIN" 'git fetch && gh pr checkout 36'
+allow "$WT" 'gh pr checkout 36'
+allow "$MAIN" '( cd .claude/worktrees/16-x && gh pr checkout 36 )'
+allow "$MAIN" 'gh pr view 36 --json title'
+# 2. attached option values
+deny "$MAIN" 'git checkout -bfeat'
+deny "$MAIN" 'git checkout -Bfeat'
+deny "$MAIN" 'git checkout --orphan=x'
+# 3. a worktree session must not switch the main folder's branch
+deny "$WT" "git -C $MAIN checkout main"
+deny "$WT" 'git -C ../.. switch main'
+deny "$WT" "cd $MAIN && git checkout main"
+deny "$WT" '( cd ../.. && git switch main )'
+deny "$WT" "cd $MAIN; git checkout main"
+deny "$WT" "( cd $MAIN && gh pr checkout 36 )"
+deny "$WT/docs" 'git -C ../../../.. checkout main'
+allow "$WT" 'git -C . switch feature'
+allow "$WT" 'cd docs && git checkout -b feature'
+allow "$WT" "git -C $WT checkout -b feature"
+allow "$WT/docs" 'git -C .. switch feature'
+
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
-  err=$(bash "$hook" <<<"$2" 2>&1 >/dev/null)
+  err=$(timeout 5 bash "$hook" <<<"$2" 2>&1 >/dev/null)
   code=$?
   if [[ $code -eq $1 ]]; then pass=$((pass + 1)); else
     fail=$((fail + 1))
     printf 'FAIL: expected exit %s, got %s (%s)\n  stderr: %s\n' "$1" "$code" "$3" "$err"
   fi
 }
-check_raw 2 '{ "cwd": "/home/dev/sunny-pastures", "tool_input": { "command": "git fetch && git switch x" } }' 'unicode escapes, spaced keys'
+bs=$'\x5c' # a backslash; typing the escape literally gets it decoded on the way into this file
+check_raw 2 "{ \"cwd\": \"$MAIN\", \"tool_input\": { \"command\": \"git fetch ${bs}u0026${bs}u0026 git switch x\" } }" 'unicode escapes, spaced keys'
+check_raw 2 "{\"cwd\":\"$MAIN\",\"tool_input\":{\"command\":\"echo ${bs}u0026a; git switch x\"}}" 'escaped & decodes without hanging (patsub_replacement)'
+check_raw 2 "{\"cwd\":\"$MAIN\",\"tool_input\":{\"command\":\"echo &a; git switch x\"}}" 'literal &'
 check_raw 0 '{"cwd":"/home/dev/sunny-pastures","tool_input":{"description":"x\",\"command\":\"git switch y","command":"git status"}}' 'decoy key inside a string'
 check_raw 0 '{"cwd":"/home/dev/sunny-pastures","tool_name":"Bash","tool_input":{}}' 'no command'
 check_raw 0 'not json' 'malformed input'
