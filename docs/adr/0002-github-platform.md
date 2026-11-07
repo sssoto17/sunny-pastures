@@ -48,13 +48,25 @@ The current state below was read on 7 Nov 2026 from the repo, `git log`, and the
 - **Q2:** the factory gets **its own identity**. How it reaches GitHub is spike #37 (area 2).
 - **Q7 and Q8** are decided together when the repo goes public (#38).
 - **Q9:** `area:tools` widens to cover all dev tooling (area 6).
-- **Approvals:** PRs below a blast-radius bar may **auto-merge without the admin's review**, so
-  the admin doesn't become the factory's bottleneck (area 2).
+- **Approvals:** PRs are reviewed the way people on GitHub review each other. A reviewer bot,
+  its own GitHub App, **approves** a PR, which then auto-merges, or **requests changes**. The
+  admin approves only sensitive paths (CODEOWNERS) and PRs an agent escalates by requesting the
+  admin's review, for example a finished feature slice or a changed module interface (area 2).
+- **Deploys:** once production is live, only a `v*` release tag ships to production, deployed by
+  GitHub Actions; a merge to `main` reaches staging only. Bot-approved PRs keep auto-merging
+  (area 4).
+- **The merge guard** is for unattended sessions only, once #37 shows how to detect them;
+  attended sessions are never blocked (area 2).
+
+**The approval mechanics** were checked on 7 Nov against the `github/docs` source, the REST API
+description (`github/rest-api-description`) and two community reports, each cited where it's
+used in area 2. Whether a GitHub App's approval counts toward a required approval is not stated
+in GitHub's docs; the checklist tests it once.
 
 **GitHub Marketplace**, researched on 7 Nov from the vendors' pricing, terms and docs pages,
 read-only. The summary is in area 9.
 
-Areas 2, 3, 4, 6, 7, 8 and 9 below were revised with these answers.
+Areas 2–9 below were revised with these answers.
 
 ## The skill and AGENTS.md
 
@@ -69,7 +81,7 @@ cited below as "skill, *section*"). Where the skill and `AGENTS.md` disagree, `A
 | C3 | Merge every branch within 1–3 days and delete it (skill, *Trunk-Based Development*, *Feature Branches*) | `prototype/*` branches are never merged | `prototype/*` is exempt from the lifetime and is kept as evidence. It is protected from deletion (area 2). |
 | C4 | Pre-commit hygiene runs `npm test`, `npx tsc` and suggests husky with lint-staged (skill, *Pre-Commit Hygiene*) | pnpm only; ask before adding a dependency | `pnpm` equivalents. No husky or lint-staged unless the admin approves them as dependencies. CI is the gate. |
 | C5 | The secret check is `git diff --staged \| grep -i "password\|secret\|api_key\|token"` (skill, *Pre-Commit Hygiene*) | Never print secret values | That grep prints the matching line, value and all. Use `git diff --staged \| grep -c -i -E '…'`: it prints a count, never the line. |
-| C6 | "Only the admin merges" isn't in the skill; it assumes a reviewer approves | Only the admin merges PRs to `main` | The admin's merge is the review gate (area 2). |
+| C6 | The skill assumes a human reviewer approves every PR | `docs/diagrams/workflow.md`: "Every PR is merged by you, factory PRs included" | Superseded (area 2): a reviewer bot approves or requests changes, and the PR auto-merges on its approval; the admin approves sensitive paths and escalated PRs. `workflow.md` and `AGENTS.md` follow in a later PR (Consequences). |
 
 One more departure is not an AGENTS.md conflict, but a repo decision that predates this ADR. The
 skill warns that "squashing destroys the development narrative" (skill, *Common
@@ -86,8 +98,8 @@ Of the 21 first-parent commits on `main`, 15 were pushed directly with no PR (fo
 spike PRs (#20–#25, #27, #29) merged into `prototype/persistence`, which is never merged.
 
 **Recommendation: adopt now. Trunk-based development with short-lived issue branches, and every
-change to `main` through a PR.** `main` stays deployable (MUST-17.2 deploys every merge to
-production). A branch lives for one issue, which "fits one session" by the definition of ready,
+change to `main` through a PR.** `main` stays deployable: every merge deploys to staging, and
+any commit on `main` can be tagged and shipped (area 4). A branch lives for one issue, which "fits one session" by the definition of ready,
 so it lives hours to a day or two. This is the skill's recommended default (skill, *Trunk-Based
 Development*). Incomplete player-facing work hides behind a flag rather than a long branch (skill,
 same section), when it comes to that.
@@ -173,7 +185,8 @@ outside the project, there is no consumer, and the skill ties versions to consum
   `v1.0.0` (M9 hand-in). A fix during a playtest is a patch (`v0.5.1`). The minor number matches
   the milestone, so the tag says which milestone a build belongs to.
 - **Annotated tags on `main`**, created by the admin at the milestone gate after `/ship` says go
-  (`git tag -a v0.4.0 -m "…"`; skill, *Tag the release*). Tags are protected (area 2).
+  (`git tag -a v0.4.0 -m "…"`; skill, *Tag the release*). Tags are protected (area 2). **Pushing
+  the tag is what ships it:** the `deploy` workflow sends a `v*` tag to production (area 4).
 - **The tag is the source of truth** (skill, same section). `package.json` stays `private` with no
   hand-edited version. The app shows the version from the deploy's git ref.
 - **A GitHub Release per tag**, with notes generated from `.github/release.yml` (appendix A6) and
@@ -201,21 +214,17 @@ outside the project, there is no consumer, and the skill ties versions to consum
 …/rules/branches/main` returns `[]`. Anyone with write access, which includes every agent session,
 can push to `main`, force-push it or delete it.
 
-**First: the plan and the visibility.** The repo is **private**. Rulesets, protected branches and
-CODEOWNERS work in private repos only on GitHub Pro, Team or Enterprise
+**The plan and the visibility (Q1, decided).** The account is on GitHub Pro (GitHub Education),
+and the repo stays private until about M3–M4 (#38). Rulesets, protected branches and CODEOWNERS
+work in private repos on GitHub Pro, Team or Enterprise
 ([about rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets),
 [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches),
-[code owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)).
-On GitHub Free they work only in public repos (checked 7 Nov against `github/docs`
-`gated-features/repo-rules.md`, `protected-branches.md`, `code-owners.md`). The account's plan
-couldn't be read (the token lacks the `user` scope). GitHub Education's student page offers a
-"Free GitHub Pro account for verified learners"
-([github.com/education/students](https://github.com/education/students), checked 7 Nov). It
-lists Pro as a GitHub Education benefit, separately from the Student Developer Pack's partner
-offers, and docs.github.com's student page doesn't mention Pro. This is **open question Q1**,
-and it decides much of this ADR (see area 8 for what public visibility adds).
+[code owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners);
+checked 7 Nov against `github/docs` `gated-features/repo-rules.md`, `protected-branches.md`,
+`code-owners.md`). So everything in this area works now. What only public visibility adds is in
+areas 4 and 8.
 
-**Recommendation: adopt now (if Q1 allows).** Rulesets, not classic branch protection: they can
+**Recommendation: adopt now.** Rulesets, not classic branch protection: they can
 be read by anyone with read access, several can stack, and they can target tags too
 ([about rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)).
 
@@ -227,28 +236,61 @@ Target: the default branch. Enforcement: active.
 |---|---|---|
 | Restrict deletions | on | `main` can't be deleted. |
 | Block force pushes | on | History on `main` is never rewritten (skill, *Red Flags*). |
-| Require a pull request before merging | on, **0** required approvals | Every change goes through a PR, so CI runs on it (MUST-17.1). Approvals: see below. |
+| Require a pull request before merging | on, **1** required approval | Every change goes through a PR, so CI runs on it (MUST-17.1). The approval comes from the reviewer bot, or from the admin on sensitive and escalated PRs (below). |
+| ↳ Require review from Code Owners | **on** | A PR that touches a path in CODEOWNERS also needs the admin's approval (MUST-15.1); the bot's approval can't stand in for it. |
+| ↳ Dismiss stale approvals when new commits are pushed | **on** | A push that changes the diff after an approval, the bot's or the admin's, needs a fresh one, so nothing unreviewed rides on an approval ([available rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-a-pull-request-before-merging)). The admin's decision, 7 Nov. |
 | ↳ Require conversation resolution | on | An open review thread blocks the merge. It turns `code-review` findings left as comments into a gate. |
 | ↳ Allowed merge methods | merge, squash | Area 3. |
-| Require status checks to pass | **added later**, when CI reports them | Placeholders below. A required check that never reports blocks every merge, so none are added before the CI/CD step. |
-| ↳ Require branches to be up to date | off for now | With parallel factory PRs and no merge queue (area 3), strict mode means updating and rerunning CI after every merge. Turn on if a broken `main` from two green PRs happens twice (the self-improving rule). |
+| Require status checks to pass | **added later**, when CI reports them | Placeholders below. A required check that never reports blocks every merge, so none are added before the CI/CD step. Each is pinned to GitHub Actions as its source (`integration_id` 15368), so no session can satisfy it with a hand-made commit status ([REST: `StatusCheckConfiguration.integration_id`](https://docs.github.com/en/rest/repos/rules), schema checked 7 Nov; `gh api apps/github-actions --jq .id` returns 15368). |
+| ↳ Require branches to be up to date | off for now | With parallel factory PRs and no merge queue (area 3), strict mode means updating and rerunning CI after every merge. Auto-merge of bot-approved PRs makes two green PRs that break `main` together more likely. **Ratchets too:** two PRs can each pass the bundle or coverage ratchet and together go past it. Accepted: the next PR's ratchet run measures `main` as it is and fails, which shows the drift a PR later. Turn on if either happens twice (the self-improving rule). |
 | Require linear history | **off** | Area 3 keeps merge commits for evidence PRs. |
 | Require signed commits | off | Cloud-session commits are signed, but local commits aren't. Checked 7 Nov (`verification.verified` on every commit of `main`, `prototype/persistence` and this PR's branch): all 54 cloud-session commits (author Claude, `Claude-Session:` trailer) and all 14 merges made on github.com are verified. All 43 local commits, the admin's and local sessions', are unsigned. The rule would block every local push until the admin sets up signing, for little gain in a solo repo. |
-| Require deployments to succeed | off; revisit at M4 | Could require the Vercel preview to deploy before merge. |
-| Bypass list | Repository admin, mode **"For pull requests only"** | The admin can merge a PR past a rule (for example, a red check on a docs-only PR during an outage) but can't push straight to `main`. |
+| Require deployments to succeed | off; revisit at M4 | Could require the Vercel preview to deploy before merge. Decided together with the `preview / …` checks, which need a preview to measure (below). |
+| Bypass list | Repository admin, mode **"For pull requests only"** | The admin can merge a PR past a rule (a tier-H PR the admin wrote, or a red check during an outage) but can't push straight to `main`. Rulesets accept "Repository admins" as bypass actors with no organization condition; the "organization only" limit in the docs is for classic branch protection ([creating rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository#granting-bypass-permissions-for-your-branch-or-tag-ruleset), checked 7 Nov). |
 
-**Placeholder required checks** (names fixed by the CI/CD step; thresholds from `CONSTRAINTS.md`, #34):
+**Placeholder required checks.** The names match the "Required check" column of
+`CONSTRAINTS.md`'s "Enforced with numbers" table (on `main` since #45), which owns every
+threshold. The bundle ratchet has no row in that table yet; it reports as `preview / bundle`.
+The CI/CD step builds the checks (#40, #42).
 
-| Placeholder | Covers |
+| Check | Covers |
 |---|---|
+| `guard / floor` | the floor guard: a weakened bar (CONSTRAINTS.md, "Guarding the bar") fails unless the same PR adds an Exceptions row (below) |
 | `ci / typecheck` | MUST-17.1 |
-| `ci / lint` | MUST-17.1, plus any lint thresholds in `CONSTRAINTS.md` |
-| `ci / test` | unit and property tests, coverage threshold (MUST-17.1) |
+| `ci / lint` | MUST-17.1, plus the lint rules in `CONSTRAINTS.md` |
+| `ci / test` | unit and property tests, including changed-line coverage (MUST-17.1) |
+| `ci / boundaries` | MUST-10.1: `packages/sim` imports nothing outside itself, and client code never imports `src/server/` |
+| `ci / bench` | sim speed: `advance()` and `apply()` medians, inside BASE-04's budget |
+| `ci / ui` | BASE-02 (browsers and widths) and BASE-05 (prediction within 100 ms), tool chosen in #44 |
 | `ci / determinism` | the determinism gate (MUST-17.1) |
 | `ci / acceptance` | acceptance tests on a throwaway stack (MUST-15.3, MUST-17.1) |
-| `guard / protected-paths` | fails an agent PR that touches `tests/acceptance/**` (MUST-15.2) or another protected path |
-| `guard / pr-title` | the Conventional Commit prefix (`triage-labels.md`, automation candidate) |
+| `ci / audit` | `pnpm audit --audit-level=high`, the required dependency check (area 8) |
+| `guard / secrets` | the gitleaks CLI over the PR's commits (area 8) |
+| `guard / code-scan` | Semgrep (area 8) |
+| `preview / lighthouse`, `preview / axe`, `preview / bundle`, `preview / latency` | page performance, BASE-03 (axe), the bundle ratchet and BASE-04 (latency smoke), measured on the Vercel preview (below; #43) |
+| `guard / pr-title` | the Conventional Commit prefix (`triage-labels.md`, automation candidate): a few lines of bash, no third-party action (area 9) |
+| `guard / protected-paths` | fails an agent PR that touches `tests/acceptance/**` (MUST-15.2) |
 | `guard / no-prototype` | fails a PR into `main` whose head is `prototype/*` (rulesets can't block a head branch) |
+
+`ci / mutation` (Stryker) also runs and reports, but it is **not required**.
+
+**Preview checks.** The `preview / …` checks measure the Vercel preview, so they start from
+Vercel's deployment events. A PR that Vercel doesn't build would then never report, and a
+required check that never reports blocks the merge. So each preview check also runs on the PR
+itself. When no preview exists for the head commit (nothing deployable changed, or Vercel skipped
+the build), it reports success and says "no preview, nothing to measure". The signal Vercel sends
+for a skipped build is unverified until Vercel is connected (Q10). Previews sit behind Vercel's
+Deployment Protection, so the checks send Vercel's automation bypass secret in the
+`x-vercel-protection-bypass` header
+([Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation),
+checked 7 Nov). It's an Actions secret, set without echoing it (area 4). The preview checks
+become required together with "Require deployments to succeed", at M4 (ruleset table above).
+
+Every required check must report on **every** PR, so none of them may use a path filter: a check
+that doesn't apply reports success and says why. A required check is matched by its **job name**,
+not "workflow / job", so each job is named exactly as above, and no two jobs in any workflow share
+a name ([troubleshooting rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/troubleshooting-rules),
+checked 7 Nov).
 
 ### Ruleset `prototype/*`
 
@@ -261,51 +303,167 @@ Merging it into `main` is blocked by `guard / no-prototype`.
 
 Target: tags matching `v*`. Rules: restrict creations, restrict updates, restrict deletions,
 block force pushes. Bypass: Repository admin, **always**. Only the admin cuts a release; a tag
-never moves once it exists (skill, *Tag the release*).
+never moves once it exists (skill, *Tag the release*). A `v*` tag deploys to production (area 4),
+so this ruleset guards production too. Until #37, every session holds this bypass (below).
 
-### Gating factory PRs without approvals
+### Ruleset `production`
 
-Required approvals can't work here. **Every PR so far was opened by `sssoto17`**, including the
-ones agents wrote, because agents act through the admin's account. GitHub doesn't let an author
-approve their own PR, so one required approval would block every PR, and the admin would bypass
-every time.
+Target: `refs/heads/production`, the branch Vercel treats as production so that `main` deploys
+as staging (area 4). Rules: restrict creations, restrict updates, restrict deletions. No bypass:
+nobody pushes it, and production ships only through the `deploy` workflow.
 
-So a factory PR is gated by:
+### Approvals: a reviewer bot, and the admin where it counts
 
-1. **Required checks** (when CI exists): the five `ci / …` checks and the `guard / …` checks.
-2. **The admin's merge.** Only the admin merges. Auto-merge stays off at repo level (area 3), so
-   no session can queue a merge for later.
-3. **Conversation resolution.** Review findings left as threads block the merge until resolved.
+The admin's decision (7 Nov): PRs are reviewed **the way people on GitHub review each other**. A
+reviewer bot reads every PR and either **approves** it, after which it auto-merges, or **requests
+changes**, after which the factory fixes and pushes. The admin approves only what is sensitive or
+what an agent sends up. The admin is not the bottleneck, and every review lands on the PR.
 
-**The honest limit.** On GitHub, an agent *is* the admin: same account, same token rights. A ruleset
-can't tell them apart. "Only the admin merges" and "agents don't bypass" are enforced by the
-agents' instructions and the permission classifier, not by GitHub. The ruleset still stops the
-mechanical mistakes: a direct push, a force-push, a merge with a red check.
+The flow:
 
-**Does CODEOWNERS add anything?** Not with one account. "Require review from Code Owners" would
-need an approval the author can't give. MUST-15.1 asks for exactly that ("CODEOWNERS entry and a
-ruleset on `main` requiring code-owner review"), which can't be met as written. This is **open
-question Q2**. Two ways out:
+1. The factory opens a PR.
+2. The reviewer bot reviews it (Actions, on every push).
+3. **OK:** the bot submits an **Approve** review and turns on auto-merge. The PR merges once the
+   required checks are green.
+4. **Not OK:** the bot submits **Request changes**, with its blocking findings as line comments.
+   The factory fixes them and pushes. The push dismisses any earlier approval, and the bot
+   reviews again.
+5. **Needs the admin:** an agent requests the admin's review (below). The bot reviews but doesn't
+   approve, and the PR waits for the admin.
 
-- **(a) A separate factory identity** *(recommended at M2 if the admin accepts a second account)*.
-  The factory works as a machine user (or a GitHub App) with the Write role. Then the `main`
-  ruleset can require 1 approval and code-owner review, with the admin role in the bypass list
-  "for pull requests only". A factory PR can't merge until the admin approves or bypasses it.
-  The admin's own PRs merge by bypass. MUST-15.1 and "only the admin merges" become real GitHub
-  rules, and `guard / protected-paths` can test "is the author the factory?" instead of guessing
-  from a branch name. Cost: a second account, its token as a secret in the factory's environment,
-  and setup time. GitHub's terms allow one free machine account per person: "You may maintain no
-  more than one free machine account in addition to your free Personal Account." The person who
-  sets it up accepts the terms for it and is responsible for its actions
-  ([Terms of Service, B. Account Terms](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#b-account-terms),
-  checked 7 Nov).
-- **(b) Keep one identity** and amend MUST-15.1 to "a CI check plus the admin's merge enforce it".
-  `guard / protected-paths` then can't tell an agent from the admin by author, so it needs another
-  signal: the `Co-Authored-By: Claude` / `Claude-Session:` trailers on the PR's commits, which
-  agents add by instruction. Weaker, but no new account.
+| Need | Native GitHub feature |
+|---|---|
+| Nothing merges without an approval | `main` ruleset: **1** required approval |
+| "Request changes" blocks the merge | Built in: "If someone chooses the **Request changes** option in a review, then that person must approve the pull request before the pull request can be merged" ([available rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-a-pull-request-before-merging), checked 7 Nov) |
+| A new push needs a new review | Dismiss stale approvals when new commits are pushed |
+| Sensitive paths need the admin | CODEOWNERS plus "Require review from Code Owners": the bot's approval meets the count, but only `@sssoto17` can meet code-owner review |
+| Findings block until handled | Required conversation resolution: open line comments hold the merge |
+| Reviews go somewhere | They *are* the PR's reviews: verdicts, summaries and line comments stay on the PR as the record, and as report data |
+| Merge without a human | Auto-merge, turned on by the bot when it approves (area 3) |
 
-Either way, CODEOWNERS is still worth adding as a file (appendix A3): it documents the protected
-paths in the place GitHub reads, and it starts enforcing the moment option (a) is chosen.
+**Two kinds of PR need the admin.** Below, "tier H" means either kind: a PR that waits for the
+admin's approval.
+
+- **Sensitive paths (CODEOWNERS, appendix A3):** `tests/acceptance/**` (MUST-15.1); `.github/**`,
+  `.claude/**`, `.agents/**`; `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`; `docs/adr/**`,
+  `docs/requirements/**`; every `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and
+  `vercel.json`; the configs that can weaken a check; migrations and RLS. GitHub enforces these:
+  without the admin's approval, the PR doesn't merge.
+- **Escalated PRs:** any agent, the factory or the reviewer bot, may **request the admin's
+  review** on a PR outside those paths. It's GitHub's own "review requested", shown on the PR and
+  in the admin's review queue. Escalate when a PR wraps up a feature slice, or changes a module's
+  public interface (for example the exports of `packages/sim`, or an API contract), so the admin
+  keeps ownership of how a module turns out. The reviewer bot may also escalate on its own
+  judgement. **The bot never approves a PR on which the admin's review is requested**, so with 1
+  required approval, the PR waits for the admin's. Only the admin removes an escalation. The
+  exact criteria live in `CONSTRAINTS.md` (#47, whose scope changes from tier numbers to these
+  criteria and the size at which the bot asks for a split).
+
+**The reviewer bot is its own GitHub App** (the admin's choice, 7 Nov), for example
+`sunny-reviewer[bot]`, used from Actions. It runs Claude with the repo's review skills
+(`code-review`, the standards and spec axes). It is a separate identity from the PR's author,
+so its approval is not a self-approval, even while the factory still acts as the admin
+(until #37). Its private key is an environment secret, handed only to the review job. It's set up
+alongside the factory's App (#37), which also settles how Claude is billed in CI.
+
+- **Does an App's approval count?** GitHub's docs say required approvals come from "reviewers
+  with write permissions"
+  ([about protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-pull-request-reviews-before-merging),
+  checked 7 Nov). They don't say so for Apps outright, and a community report says an App's
+  approval counts only when it has `contents: write`
+  ([discussion #211598](https://github.com/orgs/community/discussions/211598); unverified). So
+  the App gets `pull_requests: write`, `contents: read` first, and the checklist's test PR shows
+  whether its approval counts. If it doesn't, `contents: write` is the next step.
+- **What it reads is untrusted.** The bot feeds text that the PR wrote to a model, so a PR could
+  try to talk it into approving. It runs on `pull_request_target`, from `main`'s copy of the
+  workflow, never runs PR code, and can't approve tier-H paths away. The required checks still
+  run whatever it says.
+- **Blocking and non-blocking findings.** Blocking findings are line comments plus Request
+  changes. Suggestions go in the review's summary, so they don't hold the merge through
+  conversation resolution.
+- **Only this App approves.** Every other app keeps auto-approve off: CodeRabbit's
+  `@coderabbitai approve`, Greptile's auto-approve, Renovate's `autoApprove`, "Copilot approvals".
+  "Allow GitHub Actions to create and approve pull requests" stays off (area 8), so no other
+  workflow can approve. Only `@sssoto17` is a code owner. This supersedes the Marketplace
+  research's catch-all `* @sssoto17`, which would have sent every PR to the admin.
+
+**A weakened bar is blocked, or goes to the admin (decided 7 Nov).** The ways a bar gets lowered
+are listed once, in `CONSTRAINTS.md`, "Guarding the bar". `guard / floor` fails a PR that weakens
+the bar, unless the same PR adds an Exceptions row to `CONSTRAINTS.md`. That file is code-owned,
+so the PR then needs the admin's approval. One rule, with no commit-message escape hatch.
+
+**Tuning** (the self-improving loop, `docs/diagrams/workflow.md`):
+
+- log every revert of a bot-approved PR, with its paths and cause, as data for the report;
+- when a bad bot approval happens twice, move the paths to CODEOWNERS or sharpen the
+  escalation criteria (AGENTS.md);
+- when escalated PRs keep coming back unchanged from the admin, loosen the criteria.
+
+### The factory's identity (Q2)
+
+**Decided:** the factory gets its own identity, so code-owner review and the tiers see a factory
+PR as someone else's. How that identity reaches GitHub is spike #37. What's already known, from
+the admin's earlier research (summarised in #37):
+
+- A cloud session always acts as its owner. The cloud GitHub proxy swaps every credential for the
+  owner's token, so a machine user's or an App's token set in a cloud session is ignored.
+- GraphQL is closed in cloud sessions.
+
+So the identity has to be a **GitHub App used from Actions**, on GitHub-hosted runners (minutes
+cost money while the repo is private and are free once it's public, area 9) or on a self-hosted
+runner. #37 decides which. An App needs no seat and no second account. It doesn't need to be a
+code owner, since its PRs are what the admin approves. Its PRs start CI normally. A PR opened with
+`GITHUB_TOKEN` would not: its runs wait for someone to approve them
+([triggering a workflow from a workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow),
+`data/reusables/actions/actions-do-not-trigger-workflows.md`, checked 7 Nov).
+
+**Until #37 lands, every session acts as `sssoto17`.** Cloud and local sessions alike, factory
+or not, use the admin's account, so they hold the admin's "For pull requests only" bypass too.
+
+- **Tier H is then held by instructions only.** GitHub doesn't let an author approve their own
+  PR, so a tier-H PR merges only by bypass, and any session can use that bypass. An agent could
+  merge its own change to `tests/acceptance/`, `.claude/` or the dependencies. GitHub can't tell
+  that merge from the admin's.
+- **Still better than today.** With the rulesets on, a direct push, a force-push and a merge with
+  a red check are all blocked. The hole left is a deliberate bypass merge. Auto-merge doesn't use
+  the bypass list, so a tier-H PR with auto-merge on waits for an approval and never merges by
+  itself. A public reproduction shows this: a Repository admin in the bypass list turned on
+  auto-merge, and the PR stayed at "Review required" until approved, while a direct merge went
+  through ([community discussion #208718](https://github.com/orgs/community/discussions/208718),
+  24 Sep 2026, read 7 Nov). Not stated in GitHub's docs.
+- **The reviewer bot works unchanged:** it's a separate identity from the author, so its approval
+  counts (area 2). Only the admin's own approval is blocked, on sensitive and escalated PRs.
+- `guard / protected-paths` can't tell an agent from the admin by author, so it reads the
+  `Co-Authored-By: Claude` / `Claude-Session:` trailers that agents add by instruction. With the
+  App, it checks the author.
+
+**A merge guard for unattended sessions only, once #37 shows how to detect them** (the admin's
+decision, 7 Nov). A blanket guard is not wanted: attended sessions are never blocked, because
+the admin already meets enough stops and prompts. If a guard exists, it is a `PreToolUse` hook in
+the style of `block-branch-switch.sh` (#16) that applies only to unattended (factory) sessions and
+denies:
+
+- `gh pr merge`, including `--admin` and `--auto`;
+- `gh api` calls to `…/pulls/N/merge`;
+- turning on auto-merge (`gh api graphql` with `enablePullRequestAutoMerge`);
+- the GitHub MCP server's merge tool, through a matcher on the tool's name;
+- pushing a `v*` tag, which now ships to production (area 4).
+
+Bot-approved PRs merge through auto-merge, which the reviewer App turns on in Actions, where the
+hook doesn't apply. Like #16, it stops the honest mistake, not a determined workaround: a raw
+`curl` or a script would get past a command pattern. **Unverified:** how a hook tells an
+unattended session from an attended one (`permission_mode` in the hook input, an environment
+variable such as `CLAUDE_CODE_REMOTE`, a routine against an interactive session), and whether
+project hooks run in cloud sessions at all. Both are being researched and belong to #37. No issue
+is filed for the guard now.
+
+**The honest limit, until #37.** On GitHub an agent *is* the admin: same account,
+same rights. A session could bypass-merge a tier-H PR or edit a ruleset. Only the agents'
+instructions and the permission classifier stop that, not GitHub. Once the App lands, only the
+admin's account can approve or bypass.
+
+**MUST-15.1** ("CODEOWNERS entry and a ruleset on `main` requiring code-owner review") is met as
+written once A3 and the `main` ruleset are in place.
 
 **Alternatives considered.**
 - **Classic branch protection.** Rejected: one rule per branch pattern, no tag targets, and
@@ -314,6 +472,30 @@ paths in the place GitHub reads, and it starts enforcing the moment option (a) i
   straight to `main`, which is what happened 15 times so far.
 - **No protection, rely on discipline.** Rejected: the factory removes the admin from the loop
   until merge, and a mistake that happens twice must become a check (AGENTS.md).
+- **The admin approves every PR** (this ADR's first draft). Rejected by the admin: the admin
+  becomes the factory's bottleneck.
+- **Two tiers: the admin's paths, and auto-merge for everything else.** Rejected by the admin:
+  too much would merge with no review at all.
+- **Three tiers, with the agent's verdict as a required check** (this ADR's second draft: a
+  `review / agent` check, a `guard / tier` check sorting PRs, and a no-review lane for small
+  docs and CSS changes). Replaced by the admin: it removed the approval step. A real approval and
+  Request changes are native, read like a conversation between teammates, and need neither
+  custom check.
+- **Copilot code review as the approving bot.** "Copilot approvals" is documented to count toward
+  required approvals, but it needs a Copilot plan, spends AI credits and Actions minutes, and
+  gives less control over what it checks. The admin chose an own App running the repo's skills.
+- **`github-actions[bot]` as the approving bot** (`GITHUB_TOKEN`, with "Allow GitHub Actions to
+  create and approve pull requests" on). No App to register, but then any workflow could
+  approve, which GitHub's docs flag as a risk.
+- **A reviewer machine user.** Native approvals, but it uses up the one free machine account the
+  terms allow and needs a long-lived token. An App does the same without either.
+- **A catch-all `* @sssoto17` in CODEOWNERS** (the Marketplace research). Superseded: it sends
+  every PR to the admin.
+- **A machine user for the factory** (the first draft's option a). The terms allow one, but a
+  cloud session swaps its token for the owner's (#37), so an App from Actions does the same job
+  without a second account
+  ([Terms of Service, B. Account Terms](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#b-account-terms),
+  checked 7 Nov).
 
 ## 3. Merge methods
 
@@ -354,27 +536,21 @@ default.**
   body's `Closes #N`, verification and Changelog line land in git.
 - **Linear history** is not required, because of the merge-commit exception. `--first-parent` is
   the readable view.
-- **Auto-merge: turn on at repo level once the required checks exist, not before.** On a private
-  repo it needs Pro, which the account has
+- **Auto-merge: turn on at repo level once the required checks exist and the reviewer App
+  reviews, not before.** On a private repo it needs Pro, which the account has
   ([auto-merge](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-auto-merge-for-pull-requests-in-your-repository)).
-  Tiers M and L merge this way (area 2). With no required checks, nothing would hold a tier-L
-  PR, so it would merge before CI had run.
-  - **Who turns it on per PR: a workflow.** Turning on auto-merge is GraphQL-only
-    (`enablePullRequestAutoMerge`; the REST description has no endpoint for it, checked 7 Nov),
-    and GraphQL is closed in cloud sessions (#37). So a small `pull_request_target` workflow runs
-    `gh pr merge --auto --squash` with `GITHUB_TOKEN` for tier M and L PRs that aren't drafts, and
-    turns it off if a push moves the PR to tier H. GitHub documents this pattern for Dependabot
-    PRs, with `contents: write` and `pull-requests: write`
-    ([automating Dependabot with Actions](https://docs.github.com/en/code-security/tutorials/secure-your-dependencies/automate-dependabot-with-actions),
-    checked 7 Nov). `pull_request_target` runs the workflow from `main`, so a PR can't rewrite
-    the workflow that judges it, and the job never checks out PR code. The required checks and
-    code-owner review do the gating: the workflow only says "merge when allowed".
-  - Tier H never gets auto-merge, so the admin keeps the choice of squash or merge commit.
-  - Auto-merge ignores the bypass list (area 2), so it can't merge a tier-H PR early.
-  - *Not verified:* a merge that auto-merge makes after `GITHUB_TOKEN` turned it on may not start
-    `push` workflows on `main`, since events from `GITHUB_TOKEN` don't create workflow runs.
-    Vercel deploys from its own webhook, so nothing depends on it today. If the CI/CD step adds a
-    `push` workflow on `main`, use the factory App's token here instead (#37).
+  Bot-approved PRs merge this way (area 2). Without required checks, an approved PR would merge
+  before CI had run.
+  - **Who turns it on: the reviewer App, when it approves.** Turning on auto-merge is GraphQL-only
+    (`enablePullRequestAutoMerge`; the REST description has no endpoint for it, checked 7 Nov).
+    GraphQL is closed in cloud sessions (#37), but not in Actions, where the App runs. The method
+    is the one the PR template's "Merge method" line names: squash by default, a merge commit for
+    evidence PRs.
+  - **Sensitive and escalated PRs:** the admin approves, then merges or turns on auto-merge,
+    keeping the choice of method. While the factory acts as the admin (until #37), the admin
+    can't approve its PRs and merges them by bypass.
+  - Auto-merge ignores the bypass list (area 2), so it never merges a PR that still lacks the
+    admin's approval.
 - **Merge queue: not available.** It exists only for organization-owned repos (public, or private
   on Enterprise Cloud)
   ([merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)).
@@ -411,31 +587,71 @@ Development), and a Preview variable can be limited to one branch
 ([Vercel for GitHub](https://vercel.com/docs/git/vercel-for-github),
 [environment variables](https://vercel.com/docs/environment-variables), checked 7 Nov). So:
 
-- **MUST-17.2** (merge to `main` deploys production) and **MUST-17.3** (each PR gets a preview
-  on the staging Supabase project) are Vercel settings: production variables point at the
-  production Supabase project, preview variables at staging. No GitHub Environment is needed.
+- **MUST-17.3** (each PR gets a preview on the staging Supabase project) stays a Vercel setting:
+  preview variables point at staging.
 - Vercel reports back to GitHub without any GitHub-side setup. It uses GitHub's Deployments API,
-  so its production and preview deployments show in GitHub. By default each deployed commit also
-  gets a commit status, and each PR gets a comment with its preview URL
+  so its preview deployments show in GitHub. By default each deployed commit also gets a commit
+  status, and each PR gets a comment with its preview URL
   ([Vercel for GitHub](https://vercel.com/docs/git/vercel-for-github), checked 7 Nov). The docs
   don't give the names of the GitHub environments those deployments use. Check them once Vercel
   is connected (Q10).
 
+### Only a release tag ships to production (decided 7 Nov)
+
+The admin's decision: once production is live, **a merge to `main` no longer deploys to
+production. Only a `v*` release tag does, and GitHub Actions deploys it.** Tier-M PRs auto-merge
+on an agent's review (area 2), so with deploy-on-merge, playtesters could get a change no human
+had looked at. With deploy-on-tag, the admin's look at staging before tagging is the gate to
+production. MUST-17.2 changes to match, in a later PR (Consequences).
+
+| Where | Deployed by | Data |
+|---|---|---|
+| Each PR | Vercel's Git integration, as a preview (MUST-17.3) | staging Supabase |
+| `main` | Vercel's Git integration, as a preview branch with its own fixed staging domain | staging Supabase |
+| A `v*` tag on `main` | The `deploy` workflow in Actions | production Supabase |
+
+- **`main` becomes staging.** Vercel lets a branch be a "preview phase" with its own domain and
+  its own variables ([Git deployments, "Multiple preview phases"](https://vercel.com/docs/git),
+  checked 7 Nov). For `main` to deploy as a preview, Vercel's production branch must be another
+  branch: `production`, which nobody pushes (a ruleset blocks it, A8), with
+  `"git": { "deploymentEnabled": { "production": false } }` in `vercel.json` as a backstop.
+  That option takes branch names and turns off Vercel's deployments for them
+  ([Git configuration](https://vercel.com/docs/project-configuration/git-configuration), checked
+  7 Nov). *Not verified:* that Vercel accepts a production branch that never receives a push.
+  Check when Vercel is connected (Q10). If it doesn't, set `deploymentEnabled` to false for
+  `main` and have Actions deploy staging too. A merge that auto-merge makes may not start
+  workflows (area 3), so that fallback needs the factory App's token.
+- **Production deploys from a tag, in Actions.** The `deploy` workflow runs on `push` of tags
+  `v*`, in the GitHub environment `production`, whose deployment policy admits only tags
+  matching `v*` (the REST API takes `"type": "tag"` in a deployment policy, checked 7 Nov). It:
+  1. checks out the tag, and fails unless the tagged commit is on `main`;
+  2. runs the production migrations (the tool is settled at M3), so the schema ships with its
+     code;
+  3. runs `vercel pull --environment=production`, `vercel build --prod` and
+     `vercel deploy --prebuilt --prod`, Vercel's documented pattern for Actions
+     ([Using GitHub Actions with Vercel](https://vercel.com/kb/guide/how-can-i-use-github-actions-with-vercel),
+     checked 7 Nov).
+- **Who can ship.** Only the admin creates `v*` tags (the tag ruleset, area 2). Until #37, every
+  session acts as the admin, so that holds by instructions only, like tier H. A guard for
+  unattended sessions (area 2) should cover tag pushes too.
+- **Rollback** is Vercel's Instant Rollback in the dashboard. A fix ships as a patch tag
+  (`v0.5.1`, area 1).
+
 **Recommendation.**
 
-- **Skip GitHub Environments while only Vercel deploys.** Duplicating Vercel's variables in GitHub
-  would be two copies of each secret.
-- **Adopt at M3** (first migrations against a hosted Supabase project), *if* Actions runs the
-  migrations or anything else that needs deploy credentials:
-  - `staging`: deployment branches = any branch; holds the staging project's credentials.
-  - `production`: deployment branches = `main` only; holds the production project's credentials.
-  - Required reviewers and wait timers: not available on a private repo on Pro (above). When the
-    repo goes public (#38), add the admin as required reviewer on `production`, with "prevent
-    self-review" off, since the admin's own merges trigger the deploy too.
+- **GitHub environment `production`: adopt at M4**, before the first tag deploys (checklist).
+  Deployment policy: tags `v*` only. It holds `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
+  `VERCEL_PROJECT_ID` and the production Supabase credentials. Vercel's guide stores them as
+  repository secrets; environment secrets are stricter (below).
+- **No `staging` GitHub environment** while Vercel deploys staging and holds its variables.
+  Adopt one only if Actions runs staging migrations or deploys (the fallback above).
+- **Required reviewers and wait timers** aren't available on a private repo on Pro (above). When
+  the repo goes public (#38), add the admin as required reviewer on `production`, with "prevent
+  self-review" off, since the admin pushes the tag that starts the deploy.
 - **Environment secrets, not repo secrets, for anything that can reach production.** A repo
   secret is readable by any workflow run in the repo, including a run on an agent's PR branch,
   whose workflow file the PR itself can change. An environment secret is handed only to a job that
-  names the environment, and the deployment branch policy limits `production` to `main`
+  names the environment, and the deployment policy limits `production` to `v*` tags
   ([deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
 - **CI needs no secrets for MUST-17.1.** The acceptance tests run on a throwaway Supabase stack
   inside the runner.
@@ -444,9 +660,17 @@ Development), and a Preview variable can be limited to one branch
   `.env.example` lists every name with a placeholder (MUST-17.4).
 
 **Alternatives considered.**
-- **GitHub Actions deploys to Vercel** (Vercel CLI with a token) instead of Vercel's Git
-  integration. Rejected for now: more secrets and more pipeline for the same result. Left to the
-  CI/CD step if Actions must deploy in a fixed order (migrate, then deploy).
+- **Every merge to `main` deploys production** (MUST-17.2 as written, and this ADR's first draft,
+  through Vercel's Git integration). Rejected by the admin: with bot-approved PRs auto-merging, nothing
+  would stand between an agent-reviewed change and the players.
+- **A `production` branch that Vercel deploys, moved to each tag by the admin.** No token in
+  GitHub, but migrations would need their own trigger on that branch, and the order (migrate,
+  then deploy) would rest on two systems. The admin chose Actions for control over that order.
+- **A staged production build, promoted by hand.** Vercel builds `main` as production without
+  serving it, and the admin promotes it
+  ([promoting deployments](https://vercel.com/docs/deployments/promoting-a-deployment), checked
+  7 Nov). Rejected: a staged build runs with production variables, so it can only be checked
+  against production data, and migrations run before anyone has looked.
 - **A `preview` GitHub Environment.** Skipped: Vercel's Preview scope is the preview environment.
 
 ## 5. The Project board and status automation
@@ -482,7 +706,7 @@ rows *(not re-checked in the UI)*.
 | Item closed | **On**, Status = Done | `issue-tracker.md`: "In review → Done: the admin merged the PR, the issue closes, and the Project moves it." With the tiers, the merge may be the admin's or auto-merge's; the move is the same. On today. |
 | Pull request merged | On (harmless) | Once auto-add takes issues only, PRs aren't added, so it rarely fires. |
 | Pull request linked to issue | **Off for now** (on today) | It would set In review when the PR opens, but In review means "PR open *and* checks green". Revisit with #17. |
-| Code changes requested / Code review approved | Off | Only tier-H PRs get a GitHub review, and their Status is In review either way (area 2). Not in the API's list for this Project. |
+| Code changes requested / Code review approved | Off | Every PR now gets reviews from the reviewer bot; a review is not a Status change, and In review already means "PR open and checks green" (area 2). Not in the API's list for this Project. |
 | Auto-close issue (Status set to Done closes the issue) | **Off** (on today) | Done must come from a merge or an explicit close, not a drag. |
 | Auto-add sub-issues to project | On (on today) | Workstream sub-issues belong on the board. |
 | Auto-archive items | **Off** (on today) | Closed items are the history the report draws on. Views filter them out instead ([archiving](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/archiving-items-automatically) archives existing matches immediately). |
@@ -495,7 +719,7 @@ rows *(not re-checked in the UI)*.
 | Backlog → Ready | **The admin**, always | Yes. Ready is the admin's chosen focus (`issue-tracker.md`). No automation ever sets Ready. |
 | Ready → In progress | The session that starts the work, through #32's script, when it creates the branch | Automatable later with #17 (a `create` event Action; it needs a token with the `project` scope, because `GITHUB_TOKEN` can't edit a user-owned Project). |
 | In progress → In review | The session, when the PR is open with `Closes #N` and checks are green | Later: an Action on `check_suite` completion, same token. Not before CI exists. |
-| In review → Done | The built-in "Item closed" workflow, after the merge (the admin's for tier H, auto-merge for M and L) closes the issue | — |
+| In review → Done | The built-in "Item closed" workflow, after the merge (auto-merge on the bot's approval, or the admin's merge for tier H) closes the issue | — |
 | Any → Backlog | The admin, or an agent that finds the issue isn't ready (with a `blocked:*` label) | Yes. |
 
 Mode stays in step with `factory:ready` by hand until the "Mode ↔ `factory:ready` sync" candidate
@@ -647,9 +871,14 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
 - **Secret scanning and push protection: adopt at go-public (#38).** Until then: the local
   safeguards (the `UserPromptSubmit` hook, `.gitignore` for `.env*`, the count-only staged-diff
   check in C5), plus **the gitleaks CLI as the required check `guard / secrets`**, adopted with
-  the CI/CD step. The CLI is MIT-licensed and is downloaded from its release and checked against
-  the published checksums, with no third-party action (Marketplace research, area 9). Before the
-  switch, the same CLI scans the full history (#38).
+  the CI/CD step (#42). It runs `gitleaks git --redact --no-banner` over the PR's commit range
+  (`--log-opts="<base>..<head>"`), in a checkout with the full history fetched. `detect` and
+  `protect` have been deprecated since v8.19.0
+  ([gitleaks README](https://github.com/gitleaks/gitleaks/blob/v8.30.1/README.md), v8.30.1,
+  checked 7 Nov). `--redact` keeps any secret it finds out of the log. The CLI is MIT-licensed
+  and is downloaded from its release and checked against the published checksums, with no
+  third-party action (Marketplace research, area 9). Before the switch, the same CLI scans the
+  full history (#38).
 - **The pnpm 12 lockfile limits Dependabot here** (checked 7 Nov). "When pnpm writes
   `pnpm-lock.yaml` as two YAML documents, the dependency graph does not detect the dependencies in
   that file. This is the default format for pnpm 12 projects that pin a pnpm version. Dependabot
@@ -660,10 +889,15 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
   documents (two `---` separators; the first holds the pinned pnpm itself). So alerts and
   security updates below won't cover the npm dependencies while that format holds. Version
   updates will.
-- **`pnpm audit` as the required check `ci / audit`: adopt with the CI/CD step.** It reads pnpm's
-  own lockfile, so it covers what the dependency graph can't. It's part of pnpm, so it adds no
-  dependency and no action. No `--fix` in CI. Its advisory source isn't named in its help text
-  (not verified).
+- **`pnpm audit --audit-level=high` as the required check `ci / audit`: adopt with the CI/CD step
+  (decided 7 Nov).** It reads pnpm's own lockfile, so it covers what the dependency graph can't.
+  It's part of pnpm, so it adds no dependency and no action. No `--fix` in CI. Its advisory
+  source isn't named in its help text (not verified). **osv-scanner** stays only if #42 proves it
+  reads the lockfile's second document, which holds the dependencies. The first holds only pnpm
+  itself.
+- **Semgrep as the required check `guard / code-scan`: adopt with the CI/CD step (#42).** Like
+  gitleaks, it needs an "Allowed actions" entry or a checksum-verified download, and so does
+  osv-scanner if it's kept.
 - **Dependabot alerts: adopt now.** Free on private repos. No noise until there are dependencies.
   For npm dependencies, see the pnpm 12 limit above.
 - **Dependabot security updates: adopt at M2**, when `packages/sim` brings dev dependencies.
@@ -682,8 +916,9 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
   same required checks. They change `package.json` or the lockfile, so they're tier H, and the
   admin approves them (area 2). Dependabot never adds a dependency, so the "ask
   before adding" rule isn't touched. Draft in appendix A7.
-- **Code scanning (CodeQL default setup): adopt at go-public (#38)**; it becomes a required check
-  then. Not available while private.
+- **Code scanning (CodeQL default setup): adopt at go-public (#38).** Not available while
+  private. Whether Semgrep stays the required code scan and CodeQL runs as advice, or the other
+  way round, is decided at go-public (Q13).
 - **Private vulnerability reporting: adopt at go-public (#38)**; `SECURITY.md` points to it, so
   no contact address is needed (Q8).
 - **Dependency review: skip while the lockfile is pnpm 12's two-document format**, even once
@@ -695,8 +930,8 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
   `sha_pinning_required: false`; `GET …/actions/permissions/workflow` returns
   `default_workflow_permissions: read`, `can_approve_pull_request_reviews: false`.
   - Default `GITHUB_TOKEN` permissions: **read** repository contents. Already set. Each workflow
-    raises only what it needs per job: `pull-requests: write` for the labeler, `contents: write`
-    and `pull-requests: write` for the auto-merge workflow (area 3).
+    raises only what it needs per job: `pull-requests: write` for the labeler. The reviewer App
+    brings its own token with its own permissions (area 2).
   - "Allow GitHub Actions to create and approve pull requests": **off**. Already off. It's off by
     default for a personal repo
     ([Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)).
@@ -710,9 +945,9 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
     field `sha_pinning_required`, off today;
     [REST: Actions permissions](https://docs.github.com/en/rest/actions/permissions), checked
     7 Nov). The 7-day rule applies to actions too: pin a release at least 7 days old.
-  - `pull_request_target` only for jobs that never check out or run PR code: the labeler and
-    the auto-merge workflow. `review / agent` needs a secret and feeds text the PR wrote to a
-    model, so its trigger and its guard against prompt injection are designed in the CI/CD step.
+  - `pull_request_target` only for jobs that never run PR code: the labeler and the reviewer
+    App's review job. The review job holds the App's key and feeds text the PR wrote to a model,
+    so its guard against prompt injection is designed with it (area 2).
 
 **Alternatives considered.**
 - **Go public now**, for free scanning from M2. Rejected by the admin (Q1): the repo stays
@@ -726,7 +961,7 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
 
 | Feature | Decision | Reason |
 |---|---|---|
-| **Actions** in general | **Adopt** with the CI/CD step | MUST-17.1. The pipeline's design is that step's job, not this ADR's. This ADR sets the permissions it runs under (area 8) and the checks' names (area 2). Cost: a private repo draws on a monthly included compute amount, now given in US dollars, not minutes ($12 on Free, $18 on Pro). Standard GitHub-hosted runners are free in public repos ([Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions), checked 7 Nov). |
+| **Actions** in general | **Adopt** with the CI/CD step | MUST-17.1. The pipeline's design is that step's job, not this ADR's. This ADR sets the permissions it runs under (area 8) and the checks' names (area 2). Cost: a private repo draws on a monthly included compute amount, now given in US dollars, not minutes ($12 on Free, $18 on Pro). Standard GitHub-hosted runners are free in public repos ([Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions), checked 7 Nov). **Until go-public, the factory spends that $18 a month.** Stryker, the Lighthouse runs, Semgrep and the acceptance stack on every factory PR need an estimate or a cap before unattended factory work starts. `CONSTRAINTS.md` adds a cost criterion to #40. |
 | **Releases** | **Adopt** at M4 | Area 1: one per shipped milestone tag. |
 | **Insights** | **Use**, read-only | Pulse, commit and PR graphs feed the report's process chapter. On a private repo the graphs need Pro (`gated-features/repository-insights.md`). |
 | **Pages** | Skip | Vercel hosts the game; the docs live in the repo. Off today. |
@@ -734,7 +969,7 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
 | **Discussions** | Skip (off today) | Solo project. Playtest feedback goes through forms into `triage` (`docs/diagrams/workflow.md`). |
 | **Codespaces / dev container** | Defer; reconsider if the examiners need to run the project | Local WSL plus cloud sessions cover the admin. A dev container would pin Node 24, pnpm and the Supabase CLI for a reader. |
 | **GitHub Packages** | Skip | Nothing is published; `packages/sim` is a workspace package. |
-| **Copilot code review** | A candidate reviewer for `review / agent`, chosen in the CI/CD step | Area 2. If chosen, "Copilot approvals" stays off: an approval from it would count toward the required approvals ([Copilot code review](https://docs.github.com/en/copilot/concepts/agent-capabilities/agent-powered-workflows-and-operations/code-review), checked 7 Nov). Not alongside a second AI reviewer: two would duplicate findings. |
+| **Copilot code review** | Skip | The reviewer is an own App running the repo's skills (area 2). "Copilot approvals" stays off: an approval from it would count toward the required approval ([Copilot code review](https://docs.github.com/en/copilot/concepts/agent-capabilities/agent-powered-workflows-and-operations/code-review), checked 7 Nov). |
 | **Copilot cloud agent** | Skip | The factory is Claude Code (#37). |
 | **Notifications** | Adopt | Watch the repo as "Participating and @mentions" plus Actions failures, so CI failures on factory PRs reach the admin. A user setting. |
 | **Topics** | Adopt now | None set. Suggested: `idle-game`, `typescript`, `nextjs`, `supabase`, `deterministic-simulation`, `bachelor-project`. |
@@ -750,14 +985,15 @@ Researched on 7 Nov from each vendor's pricing, terms and docs pages, and each a
 
 | Candidate | Decision | Reason |
 |---|---|---|
-| `pnpm audit` (not Marketplace) | **Adopt** with the CI/CD step, as `ci / audit` | Covers the pnpm 12 lockfile that Dependabot alerts can't read (area 8). No dependency, no action. |
+| `pnpm audit` (not Marketplace) | **Adopt** with the CI/CD step, as `ci / audit` (`--audit-level=high`) | Covers the pnpm 12 lockfile that Dependabot alerts can't read (area 8). No dependency, no action. |
+| Semgrep, osv-scanner | **Adopt** with the CI/CD step (#42): Semgrep as `guard / code-scan`; osv-scanner only if it reads pnpm 12's lockfile | Chosen in `CONSTRAINTS.md` (#45). Each needs an Allowed-actions entry or a checksum-verified download (area 8). |
 | gitleaks **CLI** | **Adopt** with the CI/CD step, as `guard / secrets`; full-history scan before go-public | MIT; v8.30.1, published 21 Mar 2026, ships checksums. Runs in the runner; nothing leaves it. |
 | `gitleaks/gitleaks-action` | Skip | Not open source: its licence is an end-user agreement that forbids modifications and needs a key for organization accounts. The CLI does the job. |
 | PR-title check | **Adopt** with the CI/CD step, as `guard / pr-title` | A few lines of bash reading the title from an env var, never interpolated into the script. `amannn/action-semantic-pull-request` only if the rules grow (pin v6.1.1 until v6.1.2 is 7 days old on 12 Nov). |
 | CodeRabbit | Skip | Reviews are paid while private ($24–30 per developer per month), and manual-only for public repos under 10 stars. It asks for write on code and workflows. `allow_author_approval` defaults to on, so an author could ask it to approve its own PR. |
 | Mergify | Skip | Its merge queue needs a bypass actor in "Exempt" mode with write on code and workflows. Not worth it for one person; branches-up-to-date stays off (area 2). |
-| Greptile | Later: a candidate reviewer for `review / agent` | Starter is free (1 developer, 50 reviews a month). Opt out of training, keep auto-approve off. |
-| Copilot code review | Later: a candidate reviewer | First-party; approvals off by default. Needs a Copilot plan. |
+| Greptile | Skip | The reviewer is an own App (area 2). If installed later, keep auto-approve off. |
+| Copilot code review | Skip | The own reviewer App does the job (area 2). |
 | `davelosert/vitest-coverage-report-action` | Later, if Vitest is chosen | Coverage as a PR comment. The threshold itself belongs in `ci / test`. |
 | Renovate | Later, only if Dependabot version updates fail on the pnpm 12 lockfile | Its own `minimumReleaseAge`; keep `autoApprove` off. |
 | Socket | Later, at go-public, if it supports pnpm 12 | Its docs list pnpm 5–11. |
@@ -770,16 +1006,24 @@ Researched on 7 Nov from each vendor's pricing, terms and docs pages, and each a
 |---|---|---|
 | Trunk-based development | Area 1 | `main` always deployable; short branches limit merge risk (skill). |
 | Policy as code | Rulesets, CODEOWNERS, `labeler.yml`, `dependabot.yml`, `release.yml` | The rules live in versioned config that the platform enforces, instead of in memory. |
-| Quality gate | Required checks + the admin's merge | A change reaches `main` only through named checks and one human decision. |
+| Peer review by a bot | The reviewer App approves or requests changes; code-owner review and escalation bring in the admin (area 2) | Reviews read like a conversation on the PR, and the admin's attention goes where it counts. |
+| Quality gate | Required checks pinned to Actions (area 2) | A change reaches `main` only through named checks, whoever approved it. |
 | Least privilege | Read-only `GITHUB_TOKEN`, environment secrets scoped to `main`, admin bypass for PRs only | Each actor gets only the rights its job needs. |
 | Convention over configuration | `<N>-<slug>` branches, Conventional Commit titles | Tools (#17's parser, the PR-title check, release notes) can rely on the shape. |
 | Single source of truth | Tags for versions, `triage-labels.md` for labels, the issue for Status | One place to change; the others read from it. |
+| Release gate | A `v*` tag deploys production; `main` deploys staging (area 4) | Merging and shipping are separate decisions, so auto-merge can't reach the players. |
 
 The main alternatives are recorded per area. The ones that shaped the whole proposal:
 
-- **One GitHub identity for everyone** (today) against **a separate factory identity** (area 2,
-  Q2). It decides whether "only the admin merges" is a GitHub rule or an instruction.
-- **Private on Pro** against **public on Free** (Q1). It decides whether scanning exists.
+- **Who gates a PR:** the admin on every PR, auto-merge on everything outside the admin's paths,
+  three tiers with the agent's verdict as a check, or **a reviewer bot that approves or requests
+  changes, with the admin on sensitive and escalated PRs** (area 2). The admin chose the last.
+- **One GitHub identity for everyone** (today) against **a factory App from Actions** (area 2, Q2,
+  #37). Until #37 lands, tier H rests on the admin's bypass and the agents' instructions.
+- **Deploy on merge** against **deploy on a release tag** (area 4). The admin chose the tag, so
+  bot-approved PRs can auto-merge to `main` without reaching the players.
+- **Private on Pro now, public at M3–M4** (Q1, #38) against **public now**. It decides when
+  GitHub's scanning arrives; CI checks cover the gap.
 - **Squash-only with linear history** against **squash plus merge commits** (area 3). The
   evidence trail tipped it.
 
@@ -787,37 +1031,63 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
 
 - Once the `main` ruleset is on, **nothing reaches `main` without a PR**, including the
   coordinating session's retros and rule edits, which were pushed directly until now (15 of 21
-  commits). They become small docs PRs that the admin merges. That's more steps per day, and the
-  price of a protected `main`.
+  commits). Retros merge on the reviewer bot's approval. Rule edits (`AGENTS.md`, `CLAUDE.md`)
+  are tier H.
 - Required checks can't be added until CI reports them. Until the CI/CD step, the ruleset blocks
-  direct pushes, force-pushes and deletion, and nothing else.
-- If Q2 stays at one identity, "only the admin merges" remains an instruction, and MUST-15.1 must
-  be reworded in `docs/requirements/spec.md`.
-- `.github/` files (templates, CODEOWNERS, labeler, Dependabot, release notes) land in one later
-  PR by the admin, because `.github/` is a protected path for agents.
+  direct pushes, force-pushes and deletion and requires code-owner review on tier H, and
+  auto-merge stays off.
+- **The admin is no longer the merge gate for every PR, but is the gate to production.**
+  Bot-approved PRs merge without the admin and reach staging only. Production changes only when the
+  admin pushes a `v*` tag (area 4). Bad auto-merges are caught on staging and by the tuning loop
+  (area 2), and their reverts are report data.
+- **Production deploys need a token in GitHub:** `VERCEL_TOKEN` and the production Supabase
+  credentials live in the `production` environment, which only `v*` tags can use (area 4).
+- **Knock-on edits, for later PRs (not made here):**
+  - `docs/diagrams/workflow.md`: "Every PR is merged by you, factory PRs included" and the
+    "review and merge" step become the tiers (C6).
+  - `docs/agents/issue-tracker.md`: "In review → Done: the admin merged the PR" becomes "the PR
+    merged".
+  - `docs/requirements/spec.md`, MUST-17.2: "A merge to `main` deploys to Vercel production"
+    becomes "a `v*` release tag on `main` deploys to Vercel production on the hosted Supabase
+    project; a merge to `main` deploys to staging" (area 4). `docs/requirements/` is tier H.
+  - `AGENTS.md`: a short rule on reviews. Agents never merge, never turn on auto-merge by hand,
+    never bypass a ruleset, and request the admin's review when a PR wraps up a feature slice
+    or changes a module's interface; the admin merges tier H in the UI.
+  - `CONSTRAINTS.md`: its line "ADR-0002 owns the mechanism: the `guard / tier` check and which
+    tiers may auto-merge" follows the new model, and #47's scope changes to the escalation
+    criteria and the split size.
+- MUST-15.1 is met as written once CODEOWNERS (A3) and the `main` ruleset are in place. **Until
+  #37, tier H is held by instructions only:** every session acts as `sssoto17` and holds the
+  bypass (area 2). The App closes that gap; a guard for unattended sessions only would narrow it
+  once #37 shows how to detect them.
+- **Rollout order** (checklist): rulesets now, with the bypass → the reviewer App, and its test
+  PR → auto-merge only after the required checks exist and the App reviews → unattended factory work only once #37 gives the
+  factory its own identity, or shows how to guard unattended sessions. Attended sessions are
+  never blocked.
+- `CONSTRAINTS.md` owns the escalation criteria and the split size (#47) and the list of ways a
+  bar gets lowered ("Guarding the bar"). This ADR owns the mechanism.
+- **Actions cost.** While private, the checks draw on Pro's included compute, about $18 a month
+  (area 9). The heavy checks (Stryker, Lighthouse, Semgrep, the acceptance stack) need an
+  estimate or a cap before the factory runs unattended; `CONSTRAINTS.md` adds the criterion to
+  #40.
+- **Ratchets can drift** while "branches up to date" is off: two PRs can each pass the bundle or
+  coverage ratchet and together go past it. Accepted: the next PR's run catches it (area 2).
+- `.github/` files (templates, CODEOWNERS, labeler, the review workflow, Dependabot, release
+  notes) land in later PRs by the admin, because `.github/` is tier H.
 - #32's script must treat "already on the Project" as success while auto-add is on.
 - The PR template's Changelog line is the input for `CHANGELOG.md` at each tag from M4.
-- If the repo goes public, the history should be scanned for secrets first, and a licence chosen.
+- Go-public (#38) brings scanning, CodeQL, private vulnerability reporting, `SECURITY.md`, the
+  licence and the environment reviewer, after a full-history secret scan.
 
 ## Open questions for the admin
 
-Q3–Q6 were answered on 7 Nov from the API (see "How this was checked"). Q1's plan half, Q2, Q7,
-Q8 and Q9 are the admin's, and Q10 waits for Vercel.
+Q1–Q9 are answered or decided (see "How this was checked"). Q10 waits for Vercel, Q11 for #47,
+Q12 for the CI/CD step and Q13 for go-public.
 
-1. **Q1, plan and visibility.** *Still open.* Is the account on GitHub Pro (for example through
-   GitHub Education)? May the repo be public during the project and the assessment? Without Pro
-   or public visibility, rulesets, CODEOWNERS, environments and auto-merge don't work at all. If
-   it goes public: scan the history for secrets first (secret scanning will also run on push).
-   *Checked 7 Nov:* the availability claims match `github/docs` (area 2). GitHub Education offers
-   "Free GitHub Pro account for verified learners" (area 2). The plan itself needs the `user`
-   scope, which the session's token lacks. The admin reads it at github.com → Settings → Billing
-   and plans. A hint, not proof: `GET …/branches/main/protection` answers "Branch not protected"
-   rather than a plan error, and the repo's traffic and autolinks endpoints answer normally,
-   although the docs gate both on Pro for private repos.
-2. **Q2, factory identity.** *Admin decides.* One account for everyone (MUST-15.1 reworded), or a
-   machine user / GitHub App with the Write role for the factory (MUST-15.1 met with required
-   code-owner review)? *Fact for the decision:* the terms allow one free machine account besides
-   the admin's own free account, and the admin is responsible for its actions (area 2).
+1. **Q1, plan and visibility.** *Decided 7 Nov:* GitHub Pro (GitHub Education); private until
+   about M3–M4, then public (#38).
+2. **Q2, factory identity.** *Decided 7 Nov:* its own identity, a GitHub App used from Actions.
+   Where it runs is spike #37 (area 2).
 3. **Q3, Project state.** *Answered.* All 8 built-in workflows the API lists are on, including
    Auto-archive, Auto-close issue and Pull request linked to issue, which this ADR turns off.
    Auto-add is on and adds PRs as well as issues; its filter isn't readable through the API.
@@ -831,25 +1101,34 @@ Q8 and Q9 are the admin's, and Q10 waits for Vercel.
    (area 2).
 6. **Q6, labeler release date.** *Answered.* v7.0.0 was published on 21 Jul 2026, 109 days ago,
    and the tag still points at `bf12e9b…` (area 6).
-7. **Q7, licence** if the repo goes public. *Admin decides.*
-8. **Q8, security contact** for SECURITY.md if the repo stays private. *Admin decides.*
-9. **Q9, `.agents/`.** *Admin decides.* `triage-labels.md` gives `area:ci-cd` to `.github/`,
-   `.claude/` and root config, but doesn't name `.agents/` (the vendored skills). Add it there?
-   The labeler config follows the doc, so it leaves `.agents/` unlabelled until then.
+7. **Q7, licence.** *Decided at go-public (#38)*, after checking EK's rules on student work.
+8. **Q8, security contact.** *Decided:* none needed. At go-public, `SECURITY.md` points to
+   private vulnerability reporting (#38).
+9. **Q9, `.agents/` and dev tooling.** *Decided 7 Nov:* `area:tools` covers `tools/`,
+   `scripts/`, `.claude/` and `.agents/` (area 6; updated in `triage-labels.md` and A1).
 10. **Q10, Vercel's GitHub deployments.** *Open until Vercel is connected.* Vercel isn't connected
     yet (no deployments, webhooks, statuses or checks on 7 Nov). Vercel's docs confirm it uses
     GitHub's Deployments API and posts a commit status per deployment (area 4). Once connected,
-    check the names it uses on PRs before deciding on "Require deployments to succeed".
+    check the names it uses on PRs before deciding on "Require deployments to succeed". Also
+    check that Vercel accepts `production` as its production branch with no pushes, so `main`
+    deploys as staging (area 4), and what it reports when it skips a preview build (area 2).
+11. **Q11, the escalation criteria.** *In #47.* When an agent requests the admin's review, and
+    the size at which the bot asks for a split, in `CONSTRAINTS.md`. The sensitive paths are A3.
+12. **Q12, the reviewer bot.** *Decided 7 Nov:* its own GitHub App running Claude with the repo's
+    review skills (area 2). Whether its approval counts with `contents: read` is tested once
+    (checklist); how Claude is billed in CI is #37.
+13. **Q13, Semgrep or CodeQL as the required code scan.** *At go-public (#38).* Semgrep is
+    required from the CI/CD step; when CodeQL becomes available, one of them stays required and
+    the other runs as advice (area 8).
 
 ## Admin checklist
 
-In order. **[.github]** marks a change that is a file under `.github/`, for the later PR, not this
+In order. **[.github]** marks a change that is a file under `.github/`, for a later PR, not this
 one. Every `gh api` call below writes a setting and prints no secret. Run them from the main folder
-outside the sandbox (`docs/agents/sandbox.md`), after Q1 is settled.
+outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothing waits on them.
 
-1. **Decide Q1 and Q2.** Plan: github.com → Settings → Billing and plans. Visibility: repo →
-   Settings → General → Danger Zone → Change visibility.
-2. **Merge settings** (area 3). UI: Settings → General → Pull Requests.
+1. **Merge settings** (area 3). UI: Settings → General → Pull Requests. Auto-merge stays off
+   until step 12.
    ```sh
    gh api -X PATCH repos/sssoto17/sunny-pastures --silent \
      -F allow_squash_merge=true -F allow_merge_commit=true -F allow_rebase_merge=false \
@@ -857,34 +1136,36 @@ outside the sandbox (`docs/agents/sandbox.md`), after Q1 is settled.
      -f merge_commit_title=PR_TITLE -f merge_commit_message=PR_BODY \
      -F allow_auto_merge=false -F allow_update_branch=true -F delete_branch_on_merge=true
    ```
-3. **Topics** (area 9). UI: repo home → About → gear.
+2. **Topics** (area 9). UI: repo home → About → gear.
    ```sh
    gh api -X PUT repos/sssoto17/sunny-pastures/topics --silent \
      -f 'names[]=idle-game' -f 'names[]=typescript' -f 'names[]=nextjs' \
      -f 'names[]=supabase' -f 'names[]=deterministic-simulation' -f 'names[]=bachelor-project'
    ```
-4. **Ruleset `main`** (area 2). UI: Settings → Rules → Rulesets → New branch ruleset. The JSON
-   is in appendix A8 (`actor_id: 5` is the Repository admin role *(not re-checked: the REST
-   reference doesn't list role IDs; GitHub's own rulesets in `github/docs` use `actor_id: 5`,
-   `RepositoryRole` for their bypass, checked 7 Nov)*; check the bypass list in the UI after
-   creating it).
+3. **Ruleset `main`** (area 2), with code-owner review and stale-approval dismissal on. UI:
+   Settings → Rules → Rulesets → New branch ruleset. The JSON is in appendix A8 (`actor_id: 5`
+   is the Repository admin role *(not re-checked: the REST reference doesn't list role IDs;
+   GitHub's own rulesets in `github/docs` use `actor_id: 5`, `RepositoryRole` for their bypass,
+   checked 7 Nov)*; check the bypass list in the UI after creating it).
    ```sh
    gh api -X POST repos/sssoto17/sunny-pastures/rulesets --input ruleset-main.json --jq '.id'
    ```
-5. **Ruleset `prototype/*`** and **ruleset `v*` tags** (appendix A8), same call with their files.
-6. **Project workflows** (area 5). UI only: the Project → ⋯ → Workflows. All 8 are on today
+4. **Ruleset `prototype/*`** and **ruleset `v*` tags** (appendix A8), same call with their files.
+   From here until #37, every session holds the bypass the `main` ruleset gives the admin
+   (area 2).
+5. **Project workflows** (area 5). UI only: the Project → ⋯ → Workflows. All 8 are on today
    (7 Nov). Turn off Auto-archive items, Auto-close issue and Pull request linked to issue; set
    auto-add's filter to `is:issue` (it adds PRs today); check that Item added to project sets
    Backlog. Turn on Item reopened only if the page offers it.
-7. **Project views** (area 5). UI only: the Project → New view. This week, Roadmap and Triage
+6. **Project views** (area 5). UI only: the Project → New view. This week, Roadmap and Triage
    exist; add Week, Factory and Blocked, and the 7-day limit on Done in This week.
-8. **Dependabot alerts** now (area 8); off today. They won't cover npm dependencies while the
+7. **Dependabot alerts** now (area 8); off today. They won't cover npm dependencies while the
    lockfile uses pnpm 12's two-document format (area 8). UI: Settings → Code security →
    Dependabot alerts.
    ```sh
    gh api -X PUT repos/sssoto17/sunny-pastures/vulnerability-alerts --silent
    ```
-9. **Actions permissions** (area 8), before the first workflow. UI: Settings → Actions → General.
+8. **Actions permissions** (area 8), before the first workflow. UI: Settings → Actions → General.
    Today (7 Nov) allowed actions is "local only" and SHA pinning isn't required; the token
    default (read) and the PR-approval setting (off) already match, so the third call only
    confirms them.
@@ -896,46 +1177,75 @@ outside the sandbox (`docs/agents/sandbox.md`), after Q1 is settled.
    gh api -X PUT repos/sssoto17/sunny-pastures/actions/permissions/workflow --silent \
      -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
    ```
-10. **If public:** secret scanning and push protection, private vulnerability reporting.
+9. **[.github] The templates PR** (M2): `ISSUE_TEMPLATE/*.yml` and `config.yml` (A4),
+   `pull_request_template.md` (A2), `CODEOWNERS` (A3), with the tier-H list from #34. The admin's
+   PR, not an agent's. Then **test tier H once**: open a throwaway PR that changes one line of
+   `AGENTS.md`, check that the merge box asks for the code owner's review, and close the PR
+   unmerged. That confirms code-owner review on this repo (area 2).
+10. **M2: Dependabot security updates** (area 8); off today. Same pnpm 12 limit as alerts.
     UI: Settings → Code security.
+    ```sh
+    gh api -X PUT repos/sssoto17/sunny-pastures/automated-security-fixes --silent
+    ```
+11. **No unattended factory work until #37** (area 2). Until #37 gives the factory its own
+    identity, or shows how a hook can tell an unattended session from an attended one, the
+    factory runs only with the admin watching. If a guard for unattended sessions follows, the
+    admin adds it under `.claude/hooks/` and registers it in `.claude/settings.json`, which
+    sessions can't write. Attended sessions are never blocked.
+12. **CI/CD step:** **[.github]** `labeler.yml` and its workflow (A1); the CI workflows and the
+    review workflow (area 2). Register the reviewer App (with #37's factory App): permissions
+    `pull_requests: write`, `contents: read`; its key as an environment secret. **Test it once:**
+    on a throwaway PR outside CODEOWNERS, check that its approval satisfies the required
+    approval. If it doesn't, raise it to `contents: write` and test again. Add the
+    required checks to the `main` ruleset as they start reporting, each with GitHub Actions as
+    its source (Settings → Rules → the ruleset → Require status checks; A8). At M4, the preview
+    checks need Vercel's automation bypass secret as an Actions secret (area 2), set with
+    `gh secret set` so it's never shown. Turn on auto-merge **only once** the required checks
+    report and the reviewer App's approval is shown to count:
+    ```sh
+    gh api -X PATCH repos/sssoto17/sunny-pastures --silent -F allow_auto_merge=true
+    ```
+13. **M3:** **[.github]** `dependabot.yml` (A7). The `production` environment waits for step 15.
+    A `staging` environment only if Actions runs staging migrations or deploys (area 4).
+14. **Go-public (#38, about M3–M4):** the full-history gitleaks scan first; then the licence (Q7),
+    `SECURITY.md` (A5), the visibility switch, secret scanning, push protection, private
+    vulnerability reporting, CodeQL default setup, and the admin as required reviewer on
+    `production` (area 4). UI: Settings → Code security.
     ```sh
     gh api -X PATCH repos/sssoto17/sunny-pastures --silent \
       -f 'security_and_analysis[secret_scanning][status]=enabled' \
       -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'
     gh api -X PUT repos/sssoto17/sunny-pastures/private-vulnerability-reporting --silent
-    ```
-11. **[.github] The templates PR** (M2): `ISSUE_TEMPLATE/*.yml` and `config.yml` (A4),
-    `pull_request_template.md` (A2), `CODEOWNERS` (A3). The admin's PR, not an agent's.
-12. **M2: Dependabot security updates** (area 8); off today. Same pnpm 12 limit as alerts.
-    UI: Settings → Code security.
-    ```sh
-    gh api -X PUT repos/sssoto17/sunny-pastures/automated-security-fixes --silent
-    ```
-13. **M2, if public: CodeQL default setup.** UI: Settings → Code security → Code scanning.
-    ```sh
     gh api -X PATCH repos/sssoto17/sunny-pastures/code-scanning/default-setup --silent -f state=configured
     ```
-14. **CI/CD step:** **[.github]** `labeler.yml` and its workflow (A1); the CI workflows; then add
-    the required checks to the `main` ruleset as they start reporting (Settings → Rules → the
-    ruleset → Require status checks).
-15. **M3:** **[.github]** `dependabot.yml` (A7). Environments `staging` and `production`, if
-    Actions needs deploy credentials (area 4). UI: Settings → Environments.
+15. **M4, before the first tag:** the deploy setup (area 4).
+    - In Vercel: the production branch set to `production`, `main` given the staging domain and
+      the staging variables. UI: the Vercel project → Settings → Environments.
+    - `vercel.json` with `deploymentEnabled` off for `production`, in a PR of the admin's
+      (`vercel.json` is tier H, A3).
+    - Ruleset `production` (appendix A8), same call as step 3 with its file.
+    - **[.github]** the `deploy` workflow (area 4) and `release.yml` (A6).
+    - The `production` environment, admitting only tags `v*`, and its secrets, set without echoing
+      them:
     ```sh
     gh api -X PUT repos/sssoto17/sunny-pastures/environments/production --silent \
       -F 'deployment_branch_policy[protected_branches]=false' \
       -F 'deployment_branch_policy[custom_branch_policies]=true'
     gh api -X POST repos/sssoto17/sunny-pastures/environments/production/deployment-branch-policies \
-      --silent -f name=main
-    gh secret set SUPABASE_ACCESS_TOKEN --env production   # prompts; the value is never shown
+      --silent -f name='v*' -f type=tag
+    gh secret set VERCEL_TOKEN --env production            # prompts; the value is never shown
+    gh secret set VERCEL_ORG_ID --env production
+    gh secret set VERCEL_PROJECT_ID --env production
+    gh secret set SUPABASE_ACCESS_TOKEN --env production
     ```
-16. **M4:** **[.github]** `release.yml` (A6); `SECURITY.md` (A5); the first tag `v0.4.0` and its
-    Release; `CHANGELOG.md`.
+    Then the first tag `v0.4.0`, which deploys; its Release; `CHANGELOG.md`.
 
 ---
 
 # Appendix: drafts
 
-Drafts only. They land under `.github/` in the admin's PR (checklist 11, 14–16).
+Drafts only. They land under `.github/` in the admin's PRs (checklist 9, 12, 13 and 15), except
+`SECURITY.md`, which lands at the repo root at go-public (checklist 14).
 
 ## A1. `.github/labeler.yml` and its workflow
 
@@ -1045,10 +1355,12 @@ Closes #
 
 - [ ] `pnpm …`
 
-## Protected paths
+## Review
 
-- [ ] This PR touches none of: `tests/acceptance/`, `.github/`, config files, `AGENTS.md`, `CONSTRAINTS.md`
-- [ ] It touches one, and the admin asked for it: <!-- which, and where he asked -->
+<!-- ADR-0002, area 2. The reviewer bot reviews every PR. -->
+
+- [ ] Touches a path in CODEOWNERS, and the admin asked for it: <!-- which, and where they asked -->
+- [ ] Wraps up a feature slice or changes a module's interface: the admin's review is requested
 
 ## Concerns
 
@@ -1071,19 +1383,50 @@ Closes #
 ## A3. `.github/CODEOWNERS`
 
 ```
-# Protected paths (docs/agents/issue-tracker.md, "factory:ready"). Enforced only if the
-# main ruleset requires code-owner review (ADR-0002, area 2, option a).
+# Tier H (ADR-0002, area 2): a PR that touches any of these needs the admin's approval,
+# because the main ruleset requires code-owner review. Tuned with CONSTRAINTS.md (#34).
+# Only @sssoto17 is a code owner; never add a bot or an app.
 /tests/acceptance/      @sssoto17
 /.github/               @sssoto17
 /.claude/               @sssoto17
+/.agents/               @sssoto17
 /AGENTS.md              @sssoto17
 /CLAUDE.md              @sssoto17
 /CONSTRAINTS.md         @sssoto17
-/package.json           @sssoto17
+/docs/adr/              @sssoto17
+/docs/requirements/     @sssoto17
+**/package.json         @sssoto17
+/vercel.json            @sssoto17
 /pnpm-workspace.yaml    @sssoto17
 /pnpm-lock.yaml         @sssoto17
 /supabase/config.toml   @sssoto17
+/supabase/migrations/   @sssoto17
+# Drizzle migrations and RLS: add the folder at M3, when it exists.
+
+# Configs that can weaken a check (CONSTRAINTS.md, "Guarding the bar"), in any directory.
+eslint.config.*         @sssoto17
+tsconfig*.json          @sssoto17
+vitest.config.*         @sssoto17
+stryker.conf*           @sssoto17
+stryker.config.*        @sssoto17
+.gitleaks.toml          @sssoto17
+.gitleaksignore         @sssoto17
+osv-scanner.toml        @sssoto17
+.semgrepignore          @sssoto17
+lighthouserc.*          @sssoto17
+.lighthouserc.*         @sssoto17
+.fallowrc.json          @sssoto17
+.fallowrc.jsonc         @sssoto17
+fallow.toml             @sssoto17
+.fallow.toml            @sssoto17
 ```
+
+A pattern with no slash matches in any directory, as in `.gitignore`. The Stryker, Lighthouse and
+Fallow names cover their usual config files. Check them against the files that land, since a
+config under another name would go to the reviewer bot only.
+
+GitHub reads CODEOWNERS from the PR's base branch, so a PR can't remove its own paths from tier H
+([about code owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)).
 
 ## A4. Issue forms
 
@@ -1341,9 +1684,9 @@ updates:
     {
       "type": "pull_request",
       "parameters": {
-        "required_approving_review_count": 0,
-        "dismiss_stale_reviews_on_push": false,
-        "require_code_owner_review": false,
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": true,
         "require_last_push_approval": false,
         "required_review_thread_resolution": true,
         "allowed_merge_methods": ["merge", "squash"]
@@ -1362,6 +1705,18 @@ updates:
   "enforcement": "active",
   "conditions": { "ref_name": { "include": ["refs/heads/prototype/*"], "exclude": [] } },
   "rules": [{ "type": "deletion" }, { "type": "non_fast_forward" }]
+}
+```
+
+`ruleset-production.json`:
+
+```json
+{
+  "name": "production",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/heads/production"], "exclude": [] } },
+  "rules": [{ "type": "creation" }, { "type": "update" }, { "type": "deletion" }]
 }
 ```
 
@@ -1385,5 +1740,25 @@ updates:
 }
 ```
 
-With option (a) in area 2, `ruleset-main.json` changes to `"required_approving_review_count": 1`
-and `"require_code_owner_review": true`, and the factory's account stays out of the bypass list.
+One approval is required: the reviewer App's, or the admin's on sensitive and escalated PRs
+(area 2). Neither App is in any bypass list (#37).
+
+When the CI/CD step's checks report, it adds this rule to `ruleset-main.json`, with the names
+the step settles. Each check is pinned to GitHub Actions (`integration_id` 15368), so a commit
+status made by hand can't satisfy it:
+
+```json
+{
+  "type": "required_status_checks",
+  "parameters": {
+    "strict_required_status_checks_policy": false,
+    "required_status_checks": [
+      { "context": "ci / typecheck", "integration_id": 15368 },
+      { "context": "guard / floor", "integration_id": 15368 },
+      { "context": "ci / test", "integration_id": 15368 }
+    ]
+  }
+}
+```
+
+(Three of the placeholders in area 2 are shown; the step lists all of them.)
