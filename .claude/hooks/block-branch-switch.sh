@@ -38,7 +38,10 @@ json_field() {
   printf '%s' "$s"
 }
 
-in_worktree() { [[ $1 =~ (^|/)\.claude/worktrees/[^/]+ ]]; }
+# A path in a worktree: under .claude/worktrees/<name>, with no `..` stepping back out.
+in_worktree() {
+  [[ $1 =~ (^|/)\.claude/worktrees/[^/]+ && ! $1 =~ \.claude/worktrees/(.*/)?\.\.(/|$) ]]
+}
 
 cwd=$(json_field cwd) || exit 0
 command=$(json_field command) || exit 0
@@ -73,9 +76,15 @@ git_switches_branch() {
   sub=${args[i]:-}
   [[ $sub == switch ]] && return 0
   [[ $sub == checkout ]] || return 1
-  # checkout: `--` means it restores paths. Otherwise a ref or a branch option switches.
+  # checkout: `-- <path>` restores files. Otherwise a ref or a branch option switches.
   local a opts=("${args[@]:i+1}")
-  for a in "${opts[@]}"; do [[ $a == -- ]] && return 1; done
+  local k
+  for ((k = 0; k < ${#opts[@]}; k++)); do
+    [[ ${opts[k]} == -- ]] || continue
+    ((k + 1 < ${#opts[@]})) && return 1 # `checkout [<ref>] -- <path>` restores files
+    opts=("${opts[@]:0:k}")             # a bare trailing `--` changes nothing
+    break
+  done
   for a in "${opts[@]}"; do
     case $a in
       -b | -B | --orphan | --detach | -) return 0 ;;
@@ -277,7 +286,7 @@ check_command() {
     esac
   done
   ((${#words[@]})) || return 0
-  case ${words[0]} in
+  case ${words[0]##*/} in
     git)
       if ((!wt[depth])) && git_switches_branch "${words[@]:1}"; then deny_switch; fi
       ;;
@@ -292,6 +301,8 @@ check_command() {
         # A top-level cd persists into the session's later commands; a subshell's does not.
         ((depth == 0 && !wt[0])) && deny_cd
         wt[depth]=1
+      elif [[ -z $target || $target == [/~\$-]* || $target =~ (^|/)\.\.(/|$) ]]; then
+        wt[depth]=0 # it may leave the worktree: absolute, home, a variable, `-` or `..`
       fi
       ;;
   esac

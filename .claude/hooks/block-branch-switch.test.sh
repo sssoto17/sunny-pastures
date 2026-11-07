@@ -119,6 +119,15 @@ deny "$MAIN" '( cd .claude/worktrees/16-x ) && git switch feature'
 deny "$MAIN" '( cd .claude/worktrees/16-x && ls ); git checkout feature'
 deny "$MAIN" '( ( cd .claude/worktrees/16-x ) && git switch feature )'
 
+# --- security review of 7 Nov: accidental near-misses ----------------------------------------
+deny "$MAIN" 'git checkout feature --'
+deny "$MAIN" 'git -C .claude/worktrees/16-x/../.. checkout feature'
+deny "$MAIN" '/usr/bin/git switch feature'
+deny "$MAIN" '( cd .claude/worktrees/16-x && cd .. && git checkout feature )'
+deny "$MAIN" '( cd .claude/worktrees/16-x && cd /home/dev/sunny-pastures && git switch feature )'
+deny "$MAIN" '( cd .claude/worktrees/16-x; cd; git switch feature )'
+allow "$MAIN" '( cd .claude/worktrees/16-x && cd docs && git checkout -b feature )'
+
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
   err=$(bash "$hook" <<<"$2" 2>&1 >/dev/null)
