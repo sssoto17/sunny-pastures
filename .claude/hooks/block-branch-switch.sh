@@ -40,7 +40,7 @@ json_field() {
 
 # A path in a worktree: under .claude/worktrees/<name>, with no `..` stepping back out.
 in_worktree() {
-  [[ $1 =~ (^|/)\.claude/worktrees/[^/]+ && ! $1 =~ \.claude/worktrees/(.*/)?\.\.(/|$) ]]
+  [[ $1 =~ (^|/)\.claude/worktrees/[^/.][^/]* && ! $1 =~ \.claude/worktrees/(.*/)?\.\.(/|$) ]]
 }
 
 cwd=$(json_field cwd) || exit 0
@@ -96,8 +96,8 @@ git_switches_branch() {
 }
 
 # --- Lexer ----------------------------------------------------------------------------------
-# Splits $command into tokens: kinds[k] is W (a word, quotes removed) or O (an operator: `;` for
-# any command separator, `(` or `)`). Quoted text, `$( … )`, backticks, comments, redirect targets
+# Splits $command into tokens: kinds[k] is W (a word, quotes removed) or O (an operator: `&&`,
+# `;` for any other command separator, `(` or `)`). Quoted text, `$( … )`, backticks, comments, redirect targets
 # and heredoc bodies never become command words, so a commit message that mentions
 # `git checkout` passes.
 cmd=$command
@@ -228,7 +228,7 @@ while ((i < n)); do
       if [[ ${cmd:i+1:1} == '>' ]]; then # &> and &>> redirect stdout and stderr
         emit_word; next_is=redirect; i=$((i + 2)); [[ ${cmd:i:1} == '>' ]] && i=$((i + 1))
       else
-        emit_op ';'; i=$((i + 1)); [[ ${cmd:i:1} == '&' ]] && i=$((i + 1))
+        if [[ ${cmd:i+1:1} == '&' ]]; then emit_op '&&'; i=$((i + 2)); else emit_op ';'; i=$((i + 1)); fi
       fi
       ;;
     '(' | ')') emit_op "$c"; i=$((i + 1)) ;;
@@ -291,9 +291,12 @@ check_command() {
       if ((!wt[depth])) && git_switches_branch "${words[@]:1}"; then deny_switch; fi
       ;;
     cd | pushd | popd)
-      local a target=''
+      local a target='' plain=1
       for a in "${words[@]:1}"; do
-        [[ $a == -* ]] && continue
+        if [[ $a == -* ]]; then
+          [[ $a =~ ^-[LPe@]+$|^--$ ]] || plain=0 # e.g. `pushd -n` doesn't change directory
+          continue
+        fi
         target=$a
         break
       done
@@ -303,9 +306,9 @@ check_command() {
       fi
       # Fail closed: only a worktree path sets the flag, and only a plain relative path without
       # `..` keeps it. popd, `+N`, `-`, home, absolute paths, variables and substitutions reset it.
-      if [[ ${words[0]##*/} != popd ]] && in_worktree "$target"; then
+      if ((plain)) && [[ ${words[0]##*/} != popd ]] && in_worktree "$target"; then
         wt[depth]=1
-      elif [[ ${words[0]##*/} == popd || ! $target =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ||
+      elif ((!plain)) || [[ ${words[0]##*/} == popd || ! $target =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ||
         $target =~ (^|/)\.\.(/|$) ]]; then
         wt[depth]=0
       fi
@@ -324,9 +327,12 @@ EOF
 }
 
 # Walk the simple commands. wt[d] says whether subshell depth d is inside a worktree: a
-# subshell starts where its parent is, and a cd inside it ends with it.
+# subshell starts where its parent is (base[d]), and a cd inside it ends with it. A cd's effect
+# lasts only through an `&&` chain: after `;`, `||`, `|` or a newline the cd may have failed, so
+# the flag goes back to base[d].
 depth=0
 wt=(0)
+base=(0)
 cur=()
 for ((k = 0; k < ${#toks[@]}; k++)); do
   if [[ ${kinds[k]} == W ]]; then
@@ -336,8 +342,9 @@ for ((k = 0; k < ${#toks[@]}; k++)); do
   ((${#cur[@]})) && check_command "${cur[@]}"
   cur=()
   case ${toks[k]} in
-    '(') depth=$((depth + 1)); wt[depth]=${wt[depth - 1]} ;;
+    '(') depth=$((depth + 1)); wt[depth]=${wt[depth - 1]} base[depth]=${wt[depth - 1]} ;;
     ')') ((depth > 0)) && depth=$((depth - 1)) ;;
+    ';') wt[depth]=${base[depth]} ;;
   esac
 done
 ((${#cur[@]})) && check_command "${cur[@]}"

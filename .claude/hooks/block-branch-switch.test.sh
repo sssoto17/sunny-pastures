@@ -113,7 +113,7 @@ allow "$WT" "cd $WT/docs"
 
 # --- a subshell's cd decides where its git runs ---------------------------------------------
 allow "$MAIN" '( cd .claude/worktrees/16-x && git checkout -b chore/16-x )'
-allow "$MAIN" '( cd .claude/worktrees/16-x; git switch feature )'
+deny "$MAIN" '( cd .claude/worktrees/16-x; git switch feature )' # cd may have failed
 deny "$MAIN" '( cd docs && git checkout feature )'
 deny "$MAIN" '( cd .claude/worktrees/16-x ) && git switch feature'
 deny "$MAIN" '( cd .claude/worktrees/16-x && ls ); git checkout feature'
@@ -134,6 +134,14 @@ deny "$MAIN" '( pushd .claude/worktrees/16-x && popd && git switch feature )'
 deny "$MAIN" '( cd .claude/worktrees/16-x && pushd +1 && git switch feature )'
 deny "$MAIN" '( cd .claude/worktrees/16-x && cd `echo /` && git switch feature )'
 allow "$MAIN" '( pushd .claude/worktrees/16-x && git switch feature )'
+
+deny "$MAIN" '( pushd -n .claude/worktrees/16-x && git switch feature )'
+deny "$MAIN" '( cd .claude/worktrees/. && git switch feature )'
+deny "$MAIN" '( cd .claude/worktrees/16-typo || git switch feature )'
+deny "$MAIN" '( cd .claude/worktrees/16-x && git status; git switch feature )'
+deny "$MAIN" $'( cd .claude/worktrees/16-x\ngit switch feature )'
+allow "$MAIN" '( cd .claude/worktrees/16-x && git status && git switch feature )'
+allow "$MAIN" '( cd .claude/worktrees/16-x && ( cd docs; git switch feature ) )'
 
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
