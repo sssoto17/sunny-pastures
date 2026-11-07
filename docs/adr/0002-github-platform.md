@@ -354,9 +354,27 @@ default.**
   body's `Closes #N`, verification and Changelog line land in git.
 - **Linear history** is not required, because of the merge-commit exception. `--first-parent` is
   the readable view.
-- **Auto-merge: keep off.** On a private repo it needs Pro
+- **Auto-merge: turn on at repo level once the required checks exist, not before.** On a private
+  repo it needs Pro, which the account has
   ([auto-merge](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-auto-merge-for-pull-requests-in-your-repository)).
-  More to the point, any session could enable it on a PR, and the PR would merge without the admin.
+  Tiers M and L merge this way (area 2). With no required checks, nothing would hold a tier-L
+  PR, so it would merge before CI had run.
+  - **Who turns it on per PR: a workflow.** Turning on auto-merge is GraphQL-only
+    (`enablePullRequestAutoMerge`; the REST description has no endpoint for it, checked 7 Nov),
+    and GraphQL is closed in cloud sessions (#37). So a small `pull_request_target` workflow runs
+    `gh pr merge --auto --squash` with `GITHUB_TOKEN` for tier M and L PRs that aren't drafts, and
+    turns it off if a push moves the PR to tier H. GitHub documents this pattern for Dependabot
+    PRs, with `contents: write` and `pull-requests: write`
+    ([automating Dependabot with Actions](https://docs.github.com/en/code-security/tutorials/secure-your-dependencies/automate-dependabot-with-actions),
+    checked 7 Nov). `pull_request_target` runs the workflow from `main`, so a PR can't rewrite
+    the workflow that judges it, and the job never checks out PR code. The required checks and
+    code-owner review do the gating: the workflow only says "merge when allowed".
+  - Tier H never gets auto-merge, so the admin keeps the choice of squash or merge commit.
+  - Auto-merge ignores the bypass list (area 2), so it can't merge a tier-H PR early.
+  - *Not verified:* a merge that auto-merge makes after `GITHUB_TOKEN` turned it on may not start
+    `push` workflows on `main`, since events from `GITHUB_TOKEN` don't create workflow runs.
+    Vercel deploys from its own webhook, so nothing depends on it today. If the CI/CD step adds a
+    `push` workflow on `main`, use the factory App's token here instead (#37).
 - **Merge queue: not available.** It exists only for organization-owned repos (public, or private
   on Enterprise Cloud)
   ([merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)).
@@ -411,9 +429,9 @@ Development), and a Preview variable can be limited to one branch
   migrations or anything else that needs deploy credentials:
   - `staging`: deployment branches = any branch; holds the staging project's credentials.
   - `production`: deployment branches = `main` only; holds the production project's credentials.
-  - Required reviewers and wait timers: not available on a private repo (above). If the repo goes
-    public (Q1), add the admin as required reviewer on `production`, with "prevent
-    self-review" off, since he triggers the merge himself.
+  - Required reviewers and wait timers: not available on a private repo on Pro (above). When the
+    repo goes public (#38), add the admin as required reviewer on `production`, with "prevent
+    self-review" off, since the admin's own merges trigger the deploy too.
 - **Environment secrets, not repo secrets, for anything that can reach production.** A repo
   secret is readable by any workflow run in the repo, including a run on an agent's PR branch,
   whose workflow file the PR itself can change. An environment secret is handed only to a job that
@@ -461,10 +479,10 @@ rows *(not re-checked in the UI)*.
 | Auto-add to project | **On**, filter `is:issue` | On today, and it adds PRs too (above), so the filter changes. Every issue belongs on the Project (`issue-tracker.md`). Issues only: the issue is the work item, and a PR card would duplicate it. Free allows 1 auto-add workflow, Pro 5 ([adding items automatically](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/adding-items-automatically)). Agents still add the item explicitly, and #32's script should treat "already on the Project" as success. |
 | Item added to project | **On**, Status = Backlog | Matches "agents create issues in Backlog". On today; check in the UI that it sets Backlog. |
 | Item reopened | **On**, Status = Backlog | A reopened issue isn't automatically the focus. Not in the API's list for this Project. |
-| Item closed | **On**, Status = Done | "In review → Done: the admin merged the PR, the issue closes, and the Project moves it." On today. |
+| Item closed | **On**, Status = Done | `issue-tracker.md`: "In review → Done: the admin merged the PR, the issue closes, and the Project moves it." With the tiers, the merge may be the admin's or auto-merge's; the move is the same. On today. |
 | Pull request merged | On (harmless) | Once auto-add takes issues only, PRs aren't added, so it rarely fires. |
 | Pull request linked to issue | **Off for now** (on today) | It would set In review when the PR opens, but In review means "PR open *and* checks green". Revisit with #17. |
-| Code changes requested / Code review approved | Off | No reviews in a solo repo (area 2). Not in the API's list for this Project. |
+| Code changes requested / Code review approved | Off | Only tier-H PRs get a GitHub review, and their Status is In review either way (area 2). Not in the API's list for this Project. |
 | Auto-close issue (Status set to Done closes the issue) | **Off** (on today) | Done must come from a merge or an explicit close, not a drag. |
 | Auto-add sub-issues to project | On (on today) | Workstream sub-issues belong on the board. |
 | Auto-archive items | **Off** (on today) | Closed items are the history the report draws on. Views filter them out instead ([archiving](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/archiving-items-automatically) archives existing matches immediately). |
@@ -477,7 +495,7 @@ rows *(not re-checked in the UI)*.
 | Backlog → Ready | **The admin**, always | Yes. Ready is the admin's chosen focus (`issue-tracker.md`). No automation ever sets Ready. |
 | Ready → In progress | The session that starts the work, through #32's script, when it creates the branch | Automatable later with #17 (a `create` event Action; it needs a token with the `project` scope, because `GITHUB_TOKEN` can't edit a user-owned Project). |
 | In progress → In review | The session, when the PR is open with `Closes #N` and checks are green | Later: an Action on `check_suite` completion, same token. Not before CI exists. |
-| In review → Done | The built-in "Item closed" workflow, after the admin's merge closes the issue | — |
+| In review → Done | The built-in "Item closed" workflow, after the merge (the admin's for tier H, auto-merge for M and L) closes the issue | — |
 | Any → Backlog | The admin, or an agent that finds the issue isn't ready (with a `blocked:*` label) | Yes. |
 
 Mode stays in step with `factory:ready` by hand until the "Mode ↔ `factory:ready` sync" candidate
@@ -559,9 +577,16 @@ The labeler's limits:
 - `sync-labels` stays off, so the labeler adds and never removes. A label the admin removed by
   hand comes back only if new matching files are pushed.
 
+**Q9, decided 7 Nov:** `area:tools` widens to all dev tooling: `tools/`, `scripts/`, `.claude/`
+and `.agents/`. `area:ci-cd` keeps `.github/`, deploy config and root config. This PR updates the
+table in `triage-labels.md` and the labeler config (A1) to match.
+
 The globs were checked with `minimatch` 9.0.9 (the matcher the action uses, with `dot: true`)
-against sample paths: a route handler `apps/web/src/app/api/action/route.ts` gets only `area:api`,
-`apps/web/src/app/page.tsx` only `area:ui`, `.claude/settings.json` `area:ci-cd`, and
+against sample paths, re-run on 7 Nov after Q9: a route handler
+`apps/web/src/app/api/action/route.ts` gets only `area:api`, `apps/web/src/app/page.tsx` only
+`area:ui`; `.claude/settings.json`, `.claude/hooks/*.sh`, `.agents/skills/*/SKILL.md`,
+`scripts/*.sh` and `tools/load/*` only `area:tools`; `.github/workflows/*.yml`, `vercel.json`,
+`package.json` and `skills-lock.json` only `area:ci-cd`; `supabase/db.sh` `area:db`; and
 `tests/acceptance/*.ts` nothing.
 
 **Alternatives considered.**
@@ -578,14 +603,14 @@ CONTRIBUTING, no issue or PR template, no licence.
 | Issue forms per type (`.github/ISSUE_TEMPLATE/*.yml`) | **Adopt** at M2 (appendix A4) | Each form asks for a goal and "Acceptance criteria", rule 2 of the definition of ready. It sets the type label and `triage`. Agents file through `gh issue create --body`, which bypasses forms, so the forms help the admin's web filing and show agents the expected body ([issue forms syntax](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms)). |
 | `ISSUE_TEMPLATE/config.yml` | **Adopt**, blank issues **off** | Every issue needs a type. The setting affects only the web UI, not the API or `gh`. |
 | PR template | **Adopt** at M2 (appendix A2) | Matches the skill's change summary (skill, *Change Summaries*: changes made, things not touched, concerns) and adds `Closes #N`, verification, protected paths, screenshots and the Changelog line (area 1). |
-| CODEOWNERS | **Adopt** (appendix A3) | Documents protected paths. Enforces only with option (a) in area 2. Needs Pro on a private repo. |
-| SECURITY.md | **Adopt** at M4 (appendix A5) | From M4 the game is public on Vercel. Players and testers need a way to report a hole that isn't a public issue. |
+| CODEOWNERS | **Adopt** at M2 (appendix A3) | Defines tier H: the `main` ruleset requires the code owner's approval on these paths (area 2, MUST-15.1). Works on a private repo on Pro. |
+| SECURITY.md | **Adopt** at go-public (#38, appendix A5) | From M4 the game is public on Vercel, and players and testers need a way to report a hole that isn't a public issue. While the repo is private, nobody outside can read the file. Once public, it points to private vulnerability reporting, so no email address is needed (Q8). |
 | CONTRIBUTING.md | **Skip** | `AGENTS.md` and `docs/agents/` are the contributor guide, and they're the ones agents read. A second guide would drift. |
 | README.md | **Adopt now**, as a separate docs issue | No README exists; the repo page is blank for examiners. Not a `.github/` file and not protected, so it doesn't wait for the `.github/` PR. Out of scope here. |
 | `.github/release.yml` | **Adopt** at M4 (appendix A6) | Groups generated release notes by area label and leaves out chores ([generated release notes](https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes)). |
 | Discussions category forms | **Skip** | Discussions stay off (area 9). |
 | Saved replies | **Skip** | They're per user account, not per repo, and solo review replies are rare ([saved replies](https://docs.github.com/en/get-started/writing-on-github/working-with-saved-replies/about-saved-replies)). |
-| LICENSE | **Open question Q7** | Needed only if the repo goes public. With none, all rights are reserved. |
+| LICENSE | **At go-public (#38), Q7** | Chosen when the repo goes public, after checking EK's rules on student work. With none, all rights are reserved. |
 | CODE_OF_CONDUCT.md, FUNDING.yml | Skip | No community and no funding. |
 | `CITATION.cff` | Skip; reconsider at M8 | Only if the report wants the repo cited in a standard form. |
 | Issue types | Skip | An organization feature; labels carry the type here. The docs describe issue types only per organization, set by organization owners ([managing issue types](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/managing-issue-types-in-an-organization)), and GraphQL returns `issueTypes: null` for this repo (checked 7 Nov). |
@@ -612,18 +637,19 @@ row below matches the source):
 | Dependency review | Not available | Free |
 | Private vulnerability reporting | **Not available** | Free |
 
-Pro doesn't change the private column for these features. Only visibility does. So Q1 is really
-two choices: **(A) public**, which unlocks every row above plus rulesets and CODEOWNERS on Free;
-or **(B) private on Pro**, which gets rulesets, CODEOWNERS and environments but none of the
-scanning. If the school's rules allow a public repo during assessment, (A) gives the stronger
-setup for free. History would need a secret scan before the switch (Q1).
+Pro doesn't change the private column for these features. Only visibility does. **Q1 is
+decided:** private on Pro until about M3–M4, then public (#38). So rulesets, CODEOWNERS and
+environments work now, and every row above that says "not available" arrives at go-public. Until
+then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
 
 **Recommendations.**
 
-- **Secret scanning and push protection: adopt the moment the repo is public.** While private,
-  the safeguards stay local: the `UserPromptSubmit` hook, `.gitignore` for `.env*`, and the
-  count-only staged-diff check (C5). A CI secret scanner (for example gitleaks) is a new
-  dependency, so it's for the admin to approve in the CI/CD step.
+- **Secret scanning and push protection: adopt at go-public (#38).** Until then: the local
+  safeguards (the `UserPromptSubmit` hook, `.gitignore` for `.env*`, the count-only staged-diff
+  check in C5), plus **the gitleaks CLI as the required check `guard / secrets`**, adopted with
+  the CI/CD step. The CLI is MIT-licensed and is downloaded from its release and checked against
+  the published checksums, with no third-party action (Marketplace research, area 9). Before the
+  switch, the same CLI scans the full history (#38).
 - **The pnpm 12 lockfile limits Dependabot here** (checked 7 Nov). "When pnpm writes
   `pnpm-lock.yaml` as two YAML documents, the dependency graph does not detect the dependencies in
   that file. This is the default format for pnpm 12 projects that pin a pnpm version. Dependabot
@@ -634,6 +660,10 @@ setup for free. History would need a secret scan before the switch (Q1).
   documents (two `---` separators; the first holds the pinned pnpm itself). So alerts and
   security updates below won't cover the npm dependencies while that format holds. Version
   updates will.
+- **`pnpm audit` as the required check `ci / audit`: adopt with the CI/CD step.** It reads pnpm's
+  own lockfile, so it covers what the dependency graph can't. It's part of pnpm, so it adds no
+  dependency and no action. No `--fix` in CI. Its advisory source isn't named in its help text
+  (not verified).
 - **Dependabot alerts: adopt now.** Free on private repos. No noise until there are dependencies.
   For npm dependencies, see the pnpm 12 limit above.
 - **Dependabot security updates: adopt at M2**, when `packages/sim` brings dev dependencies.
@@ -649,18 +679,24 @@ setup for free. History would need a secret scan before the switch (Q1).
   comment is on the same line)
   ([supported ecosystems](https://docs.github.com/en/code-security/dependabot/ecosystems-supported-by-dependabot/supported-ecosystems-and-repositories),
   checked 7 Nov). Dependabot's PRs come from `dependabot[bot]`, a separate identity, and pass the
-  same required checks; the admin merges them. Dependabot never adds a dependency, so the "ask
+  same required checks. They change `package.json` or the lockfile, so they're tier H, and the
+  admin approves them (area 2). Dependabot never adds a dependency, so the "ask
   before adding" rule isn't touched. Draft in appendix A7.
-- **Code scanning (CodeQL default setup): adopt at M2 if public**, when TypeScript lands in
-  `packages/sim`; it becomes a required check then. Skip if private (not available).
-- **Private vulnerability reporting: adopt if public**; SECURITY.md points to it. If private,
-  SECURITY.md points to a contact address (Q8).
+- **Code scanning (CodeQL default setup): adopt at go-public (#38)**; it becomes a required check
+  then. Not available while private.
+- **Private vulnerability reporting: adopt at go-public (#38)**; `SECURITY.md` points to it, so
+  no contact address is needed (Q8).
+- **Dependency review: skip while the lockfile is pnpm 12's two-document format**, even once
+  public. It reads the same dependency graph that can't see that lockfile, so it would miss the
+  npm dependencies (an inference from the dependency-graph limit, not tested). #38 lists it; drop
+  it there or revisit if the format changes.
 - **Actions permissions** (set before the first workflow lands). Read on 7 Nov:
   `GET …/actions/permissions` returns `enabled: true`, `allowed_actions: local_only`,
   `sha_pinning_required: false`; `GET …/actions/permissions/workflow` returns
   `default_workflow_permissions: read`, `can_approve_pull_request_reviews: false`.
   - Default `GITHUB_TOKEN` permissions: **read** repository contents. Already set. Each workflow
-    raises only what it needs per job (`pull-requests: write` for the labeler).
+    raises only what it needs per job: `pull-requests: write` for the labeler, `contents: write`
+    and `pull-requests: write` for the auto-merge workflow (area 3).
   - "Allow GitHub Actions to create and approve pull requests": **off**. Already off. It's off by
     default for a personal repo
     ([Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)).
@@ -674,11 +710,13 @@ setup for free. History would need a secret scan before the switch (Q1).
     field `sha_pinning_required`, off today;
     [REST: Actions permissions](https://docs.github.com/en/rest/actions/permissions), checked
     7 Nov). The 7-day rule applies to actions too: pin a release at least 7 days old.
-  - `pull_request_target` only for the labeler, which never checks out PR code.
+  - `pull_request_target` only for jobs that never check out or run PR code: the labeler and
+    the auto-merge workflow. `review / agent` needs a secret and feeds text the PR wrote to a
+    model, so its trigger and its guard against prompt injection are designed in the CI/CD step.
 
 **Alternatives considered.**
-- **Stay private with no scanning and no plan.** Rejected only if Q1 allows something better. The
-  local safeguards are real, but nothing on GitHub catches a pushed secret.
+- **Go public now**, for free scanning from M2. Rejected by the admin (Q1): the repo stays
+  private until about M3–M4. The CI checks above cover the gap until then.
 - **Renovate** instead of Dependabot. Rejected: a GitHub App with its own config and permissions,
   for the same job. Dependabot is built in and has the cooldown option.
 - **Disabling Dependabot security updates** to respect the 7 days strictly. Rejected: the admin
@@ -696,11 +734,35 @@ setup for free. History would need a secret scan before the switch (Q1).
 | **Discussions** | Skip (off today) | Solo project. Playtest feedback goes through forms into `triage` (`docs/diagrams/workflow.md`). |
 | **Codespaces / dev container** | Defer; reconsider if the examiners need to run the project | Local WSL plus cloud sessions cover the admin. A dev container would pin Node 24, pnpm and the Supabase CLI for a reader. |
 | **GitHub Packages** | Skip | Nothing is published; `packages/sim` is a workspace package. |
-| **Copilot code review, Copilot agent** | Skip | The workflow uses Claude Code skills for review; two reviewers would duplicate findings. |
+| **Copilot code review** | A candidate reviewer for `review / agent`, chosen in the CI/CD step | Area 2. If chosen, "Copilot approvals" stays off: an approval from it would count toward the required approvals ([Copilot code review](https://docs.github.com/en/copilot/concepts/agent-capabilities/agent-powered-workflows-and-operations/code-review), checked 7 Nov). Not alongside a second AI reviewer: two would duplicate findings. |
+| **Copilot cloud agent** | Skip | The factory is Claude Code (#37). |
 | **Notifications** | Adopt | Watch the repo as "Participating and @mentions" plus Actions failures, so CI failures on factory PRs reach the admin. A user setting. |
 | **Topics** | Adopt now | None set. Suggested: `idle-game`, `typescript`, `nextjs`, `supabase`, `deterministic-simulation`, `bachelor-project`. |
 | **Description** | Keep | Already set and accurate. |
-| **Social preview** | Skip while private | Only shown for public repos. Reconsider with Q1. |
+| **Social preview** | At go-public (#38) | Only shown for public repos. |
+| **A container for the load test and CI** | Out of scope | Not a GitHub feature. Design issue #39 (M3). |
+
+### GitHub Marketplace
+
+Researched on 7 Nov from each vendor's pricing, terms and docs pages, and each action's releases
+(read-only; nothing installed). Every third-party action also needs "Allowed actions" widened
+(area 8) and a SHA pin at least 7 days old.
+
+| Candidate | Decision | Reason |
+|---|---|---|
+| `pnpm audit` (not Marketplace) | **Adopt** with the CI/CD step, as `ci / audit` | Covers the pnpm 12 lockfile that Dependabot alerts can't read (area 8). No dependency, no action. |
+| gitleaks **CLI** | **Adopt** with the CI/CD step, as `guard / secrets`; full-history scan before go-public | MIT; v8.30.1, published 21 Mar 2026, ships checksums. Runs in the runner; nothing leaves it. |
+| `gitleaks/gitleaks-action` | Skip | Not open source: its licence is an end-user agreement that forbids modifications and needs a key for organization accounts. The CLI does the job. |
+| PR-title check | **Adopt** with the CI/CD step, as `guard / pr-title` | A few lines of bash reading the title from an env var, never interpolated into the script. `amannn/action-semantic-pull-request` only if the rules grow (pin v6.1.1 until v6.1.2 is 7 days old on 12 Nov). |
+| CodeRabbit | Skip | Reviews are paid while private ($24–30 per developer per month), and manual-only for public repos under 10 stars. It asks for write on code and workflows. `allow_author_approval` defaults to on, so an author could ask it to approve its own PR. |
+| Mergify | Skip | Its merge queue needs a bypass actor in "Exempt" mode with write on code and workflows. Not worth it for one person; branches-up-to-date stays off (area 2). |
+| Greptile | Later: a candidate reviewer for `review / agent` | Starter is free (1 developer, 50 reviews a month). Opt out of training, keep auto-approve off. |
+| Copilot code review | Later: a candidate reviewer | First-party; approvals off by default. Needs a Copilot plan. |
+| `davelosert/vitest-coverage-report-action` | Later, if Vitest is chosen | Coverage as a PR comment. The threshold itself belongs in `ci / test`. |
+| Renovate | Later, only if Dependabot version updates fail on the pnpm 12 lockfile | Its own `minimumReleaseAge`; keep `autoApprove` off. |
+| Socket | Later, at go-public, if it supports pnpm 12 | Its docs list pnpm 5–11. |
+| Codecov, release-please / Changesets, `codelytv/pr-size-labeler`, `actions/stale` | Skip | A third party for one person's coverage; release automation area 1 rejects; Size is a Project field, not a label; `stale` would close parked `idea` issues. |
+| `actions/dependency-review-action` | Skip | Blind to the pnpm 12 lockfile (area 8). |
 
 ## Patterns and alternatives considered
 
@@ -909,11 +971,11 @@ Paths exactly as `triage-labels.md` defines each area. `sync-labels` is left off
           - "apps/web/src/server/db/**"
           - "**/drizzle.config.*"
 
-"area:ci-cd":     # .github/, .claude/, root config
+"area:ci-cd":     # .github/, deploy config, root config
   - changed-files:
       - any-glob-to-any-file:
           - ".github/**"
-          - ".claude/**"
+          - "vercel.json"
           - "package.json"
           - "pnpm-workspace.yaml"
           - "pnpm-lock.yaml"
@@ -922,9 +984,13 @@ Paths exactly as `triage-labels.md` defines each area. `sync-labels` is left off
           - ".gitignore"
           - ".env.example"
 
-"area:tools":
+"area:tools":     # all dev tooling: tools/, scripts/, .claude/, .agents/
   - changed-files:
-      - any-glob-to-any-file: "tools/**"
+      - any-glob-to-any-file:
+          - "tools/**"
+          - "scripts/**"
+          - ".claude/**"
+          - ".agents/**"
 
 "area:docs":
   - changed-files:
@@ -1195,7 +1261,7 @@ body:
       description: Optional for an idea. Filled in when it's retyped or a design issue shapes it.
 ```
 
-## A5. `SECURITY.md` (M4)
+## A5. `SECURITY.md` (go-public, #38)
 
 ```markdown
 # Security
@@ -1205,9 +1271,8 @@ version is supported.
 
 ## Reporting a vulnerability
 
-Please don't open a public issue. Report it privately:
-<!-- public repo: --> use "Report a vulnerability" on the repository's Security tab.
-<!-- private repo: --> write to <security contact address, Q8>.
+Please don't open a public issue. Report it privately with "Report a vulnerability" on the
+repository's Security tab.
 
 Expect a reply within a few days. Cheating that works against the server (forged time, replayed
 or invented actions) counts as a vulnerability.

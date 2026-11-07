@@ -56,8 +56,8 @@ see at a glance what it changes. Set them by hand (a labeler is an automation ca
 | `area:api` | `apps/web/src/server/`, route handlers |
 | `area:sim` | `packages/sim/` |
 | `area:db` | `supabase/`, the Drizzle schema, migrations, RLS |
-| `area:ci-cd` | `.github/`, `.claude/`, root config (`package.json`, `pnpm-workspace.yaml`, lockfile…) |
-| `area:tools` | `tools/load/`, `tools/analysis/` |
+| `area:ci-cd` | `.github/`, deploy config, root config (`package.json`, `pnpm-workspace.yaml`, lockfile…) |
+| `area:tools` | All dev tooling: `tools/` (`load/`, `analysis/`), `scripts/`, `.claude/` (hooks, skills, agents, settings), `.agents/` (vendored skills) |
 | `area:docs` | `docs/`, `GLOSSARY.md`, `AGENTS.md`, `CLAUDE.md`, `README.md` |
 
 - `tests/acceptance/` and `prototypes/<name>/` take the area of what they test or prototype (a
