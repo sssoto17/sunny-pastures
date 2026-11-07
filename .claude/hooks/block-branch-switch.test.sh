@@ -128,6 +128,13 @@ deny "$MAIN" '( cd .claude/worktrees/16-x && cd /home/dev/sunny-pastures && git 
 deny "$MAIN" '( cd .claude/worktrees/16-x; cd; git switch feature )'
 allow "$MAIN" '( cd .claude/worktrees/16-x && cd docs && git checkout -b feature )'
 
+deny "$MAIN" '( cd .claude/worktrees/16-x/../.. && git switch feature )'
+deny "$MAIN" '( cd .claude/worktrees && git switch feature )'
+deny "$MAIN" '( pushd .claude/worktrees/16-x && popd && git switch feature )'
+deny "$MAIN" '( cd .claude/worktrees/16-x && pushd +1 && git switch feature )'
+deny "$MAIN" '( cd .claude/worktrees/16-x && cd `echo /` && git switch feature )'
+allow "$MAIN" '( pushd .claude/worktrees/16-x && git switch feature )'
+
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
   err=$(bash "$hook" <<<"$2" 2>&1 >/dev/null)

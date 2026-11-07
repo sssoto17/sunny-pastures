@@ -290,19 +290,24 @@ check_command() {
     git)
       if ((!wt[depth])) && git_switches_branch "${words[@]:1}"; then deny_switch; fi
       ;;
-    cd | pushd)
+    cd | pushd | popd)
       local a target=''
       for a in "${words[@]:1}"; do
         [[ $a == -* ]] && continue
         target=$a
         break
       done
-      if [[ $target =~ (^|/)\.claude/worktrees(/|$) ]]; then
-        # A top-level cd persists into the session's later commands; a subshell's does not.
-        ((depth == 0 && !wt[0])) && deny_cd
+      # A top-level cd persists into the session's later commands; a subshell's does not.
+      if [[ $target =~ (^|/)\.claude/worktrees(/|$) ]] && ((depth == 0 && !wt[0])); then
+        deny_cd
+      fi
+      # Fail closed: only a worktree path sets the flag, and only a plain relative path without
+      # `..` keeps it. popd, `+N`, `-`, home, absolute paths, variables and substitutions reset it.
+      if [[ ${words[0]##*/} != popd ]] && in_worktree "$target"; then
         wt[depth]=1
-      elif [[ -z $target || $target == [/~\$-]* || $target =~ (^|/)\.\.(/|$) ]]; then
-        wt[depth]=0 # it may leave the worktree: absolute, home, a variable, `-` or `..`
+      elif [[ ${words[0]##*/} == popd || ! $target =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ||
+        $target =~ (^|/)\.\.(/|$) ]]; then
+        wt[depth]=0
       fi
       ;;
   esac
