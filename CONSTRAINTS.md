@@ -31,7 +31,7 @@ Checked in the diff against the merge base by the floor guard (#40), adapted fro
 reports the rule and the location, never a matched value.
 
 - No new suppression comments: `@ts-ignore`, `@ts-expect-error` without a reason, `eslint-disable`,
-  `biome-ignore`, `istanbul ignore`, `c8 ignore`, `Stryker disable`, `nosemgrep`,
+  `istanbul ignore`, `c8 ignore`, `Stryker disable`, `nosemgrep`,
   `gitleaks:allow`, `# noqa`, `# type: ignore`.
 - No unimplemented stubs: `throw new Error("Not implemented")`, an empty `catch {}`, a `TODO`
   standing in for the implementation.
@@ -47,7 +47,7 @@ All rows block, except where _warn_ is noted. "Runs at" uses the stages under [S
 | Dimension | Rule | Why this number | Checked by | Runs at | Enforced by |
 |---|---|---|---|---|---|
 | Types | 0 type errors | Any error is a bug or a lie | `tsc --noEmit` | edit, CI | #40 |
-| Lint | 0 errors from the project config | The config is the standard; a warning nobody fixes is noise | ESLint or Biome (decided in #40) | edit, CI | #40 |
+| Lint | 0 errors from the project config | The config is the standard; a warning nobody fixes is noise | `eslint .` | edit, CI | #40 |
 | Coverage: `packages/sim` | Changed lines ≥ 90% covered | The sim is the research contribution, and a pure module with no I/O is cheap to cover | Vitest coverage lcov ∩ `git diff` | task end, CI | #40 |
 | Coverage: everything else | Changed lines ≥ 80% covered | High enough to force a test, low enough to allow a config line | Vitest coverage lcov ∩ `git diff` | task end, CI | #40 |
 | Boundaries (MUST-10.1) | 0 violations: `packages/sim` imports nothing outside itself and no `node:*`, and calls no `Date.now()` or `Math.random()`; client code never imports `apps/web/src/server/` | The determinism claim depends on it, and the spec asks for a check, not review | Fallow boundaries | edit, CI | #41 |
