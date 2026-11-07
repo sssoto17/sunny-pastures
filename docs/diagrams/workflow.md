@@ -57,7 +57,7 @@ flowchart TB
 
   subgraph GATE["Milestone gate: slice 29 Nov · freeze 20 Dec · hand-in 5 Jan"]
     direction TB
-    RV["code-review-and-quality + security-and-hardening<br/>test-driven-development + browser-testing-with-devtools:<br/>browser smoke test"]
+    RV["code-review-and-quality + security-and-hardening<br/>browser-testing-with-devtools: browser smoke test"]
     SH{"shipping-and-launch<br/>go or no-go"}
     RV --> SH
   end
@@ -98,14 +98,14 @@ Gold diamonds are your decisions. Every PR is merged by you, factory PRs include
 | ↳ only the admin can do it | `wizard` | setup script; issue gets `blocked:admin` until done | |
 | Weekly | `improve-codebase-architecture` | deepening candidates | which one to pick |
 | | `retro` (see **Weekly retro convention**) | `docs/retros/YYYY-MM-DD.md`, new checks and standards | which fixes to adopt |
-| Milestone gate | Addy `code-review-and-quality` + `security-and-hardening`, `test-driven-development` + `browser-testing-with-devtools`, `shipping-and-launch` | go/no-go with rollback plan | go or no-go |
+| Milestone gate | Addy `code-review-and-quality` + `security-and-hardening`, `browser-testing-with-devtools`, `shipping-and-launch` | go/no-go with rollback plan | go or no-go |
 | After playtests | `triage` | feedback turned into ready issues | what's worth doing |
 | End of day | `remember:remember` (plugin) | handoff with the top 3 next | |
 
 Not used, because another skill owns the job: Addy `interview-me` and `idea-refine`
-(`grill-with-docs`), Matt `to-spec` (`spec-driven-development`), Addy `incremental-implementation` (`implement`), Addy
-`documentation-and-adrs` (`domain-modeling`). `wayfinder` stays in reserve for an effort too foggy
-for one grill.
+(`grill-with-docs`), Matt `to-spec` (`spec-driven-development`), Addy `incremental-implementation`
+(`implement`), Addy `documentation-and-adrs` (`domain-modeling`). `wayfinder` stays in reserve for
+an effort too foggy for one grill.
 
 ## Self-improving loops
 

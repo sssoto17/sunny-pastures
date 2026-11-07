@@ -364,8 +364,8 @@ are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
 | --- | --- | --- |
 | BASE-01 | The UI is in English. | `review` |
 | BASE-02 | It works in the latest two versions of Chrome, Firefox and Safari, at desktop and phone widths (≥ 360 px). | `ui` |
-| BASE-03 | The DOM UI meets WCAG 2.2 AA. | `ui`, `review` |
-| BASE-04 | Action latency on the deployed stack has p95 < 300 ms. | `metric` |
+| BASE-03 | The DOM UI meets WCAG 2.2 AA. | `ui`, `ci`, `review` |
+| BASE-04 | Action latency on the deployed stack has p95 < 300 ms. | `metric`, `ci` |
 | BASE-05 | A prediction shows within 100 ms of a tap (MUST-12.1). | `ui` |
 
 ## Should have
@@ -421,7 +421,7 @@ The grill checked three more and kept them independent of the log:
 
 ## Open questions
 
-1. **The browser-test tool** behind `ui` is a new dependency to approve. Decided in #44.
+1. **The browser-test tool** behind `ui` is a new dependency to approve. To be decided in #44.
 2. **The rate limit for T7** (actions per farm per second), and whether it lives in config or in
    content.
 3. **The OWASP 2025 mapping** in MUST-16: check it against the published list before the report
