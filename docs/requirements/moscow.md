@@ -8,7 +8,7 @@ Each item has a stable ID so requirements, issues and the report can refer to it
 requirement specification (acceptance criteria per item) comes out of the requirements grill and
 lands in `spec.md` next to this file; this file only ranks the scope.
 
-Last changed: 2026-11-07 (requirements grill, #2).
+Last changed: 2026-11-07 (baseline qualities as Musts, #34; requirements grill, #2).
 
 ## Must have
 
@@ -48,10 +48,23 @@ The game is not a valid answer to the research question without these.
 | MUST-18 | Two playtests: a think-aloud test of the vertical slice, then an offline-return test   |
 | MUST-19 | System metrics: latency, rollbacks between prediction and server, unlock curves         |
 
+**Baseline qualities**
+
+These apply to every item above and are never cut. Their criteria are in `spec.md`; their thresholds
+and the checks that enforce them are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
+
+| ID      | Item                                                                                   |
+| ------- | -------------------------------------------------------------------------------------- |
+| BASE-01 | The UI is in English                                                                   |
+| BASE-02 | Works in the latest two Chrome, Firefox and Safari, at desktop and phone widths (≥ 360 px) |
+| BASE-03 | The DOM UI meets WCAG 2.2 AA                                                           |
+| BASE-04 | Action latency on the deployed stack has p95 < 300 ms                                  |
+| BASE-05 | A prediction shows within 100 ms of a tap                                              |
+
 **If the Musts don't fit**
 
 If M2 planning shows the Musts don't fit by the hand-in, cut in this order, from the top, without
-another grill:
+another grill. The baseline qualities are never cut:
 
 1. Removing a friend (MUST-08): adding a friend by invite stays.
 2. Silo and barn capacity upgrades (MUST-06): the fixed capacities stay.

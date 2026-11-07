@@ -7,7 +7,7 @@ starting point for the report's requirements chapter and for planning M2–M4.
 Status: **ready for review**. The few points still open are marked _Open_ and listed under
 [Open questions](#open-questions). The grill behind it is on issue #2.
 
-Last changed: 2026-11-06.
+Last changed: 2026-11-07 (baseline qualities settled as Musts, #34).
 
 ## Objective
 
@@ -61,7 +61,7 @@ Words in **bold** in the criteria, and the terms they use, are defined in [`GLOS
 | `content` | Validation test over the content data |
 | `accept` | Black-box acceptance test over HTTP in `tests/acceptance/` (MUST-15) |
 | `attack` | Cheat-attack test for a threat in the threat model (MUST-16) |
-| `ui` | Test in a real browser. _Open_: the tool, which is a new dependency |
+| `ui` | Test in a real browser. _Open_: the tool, which is a new dependency (#44) |
 | `ci` | A CI step, ruleset or repo setting that enforces it |
 | `playtest` | Observed in playtest 1 or 2 (MUST-18) |
 | `metric` | Measured and reported (MUST-19) |
@@ -70,7 +70,8 @@ Words in **bold** in the criteria, and the terms they use, are defined in [`GLOS
 ### Where the rest of the spec lives
 
 The commands, project structure, code style and boundaries (always / ask first / never) are in
-`AGENTS.md`, and in `CONSTRAINTS.md` once that exists. This spec doesn't repeat them. Architecture decisions are in
+`AGENTS.md`, and the quality bar (thresholds and the check behind each) is in
+[`CONSTRAINTS.md`](../../CONSTRAINTS.md). This spec doesn't repeat them. Architecture decisions are in
 `docs/adr/`.
 
 ## Decisions from review
@@ -355,14 +356,16 @@ CI runs the checks on every PR. The game is deployed on Vercel with Supabase Pos
 
 ## Baseline qualities
 
-These apply to every requirement above. _Open_: whether they get MoSCoW IDs of their own.
+These are Musts that apply to every requirement above (settled in #34). They keep their BASE IDs
+in `moscow.md` and are never on the cut list. Their thresholds and the checks that enforce them
+are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
 
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | BASE-01 | The UI is in English. | `review` |
 | BASE-02 | It works in the latest two versions of Chrome, Firefox and Safari, at desktop and phone widths (≥ 360 px). | `ui` |
-| BASE-03 | The DOM UI meets WCAG 2.2 AA. | `ui`, `review` |
-| BASE-04 | Action latency on the deployed stack has p95 < 300 ms. | `metric` |
+| BASE-03 | The DOM UI meets WCAG 2.2 AA. | `ui`, `ci`, `review` |
+| BASE-04 | Action latency on the deployed stack has p95 < 300 ms. | `metric`, `ci` |
 | BASE-05 | A prediction shows within 100 ms of a tap (MUST-12.1). | `ui` |
 
 ## Should have
@@ -418,12 +421,13 @@ The grill checked three more and kept them independent of the log:
 
 ## Open questions
 
-1. **The browser-test tool** behind `ui` is a new dependency to approve.
+1. **The browser-test tool** behind `ui` is a new dependency to approve. To be decided in #44.
 2. **The rate limit for T7** (actions per farm per second), and whether it lives in config or in
    content.
 3. **The OWASP 2025 mapping** in MUST-16: check it against the published list before the report
    cites it.
-4. **Baseline IDs**: whether BASE-01–05 move into `moscow.md` as Musts.
+4. ~~**Baseline IDs**~~ Settled 7 Nov (#34): BASE-01–05 are Musts in `moscow.md`, keep their
+   BASE IDs and are never cut. `CONSTRAINTS.md` holds their thresholds and checks.
 5. **The admin role** (MUST-16.5): how an account gets it. Anonymous sign-in gives every player a
    user, so the admin needs a role that only the admin can set.
 6. **Replaying old logs after a rules change** (MUST-13.6, MUST-16.3): decided in #31. That

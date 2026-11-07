@@ -35,12 +35,15 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   passwords and credentials in URLs: silence the output, mask the values or list only the names.
   For the local stack, use `pnpm db:start` / `db:status` / `db:env`, never a bare `supabase start`
   or `supabase status`.
+- Read `CONSTRAINTS.md` before writing code. Do not weaken it to make a change pass.
 - Before running commands, read `docs/agents/sandbox.md`. It lists the sandbox pitfalls:
   `supabase`, localhost services and `.git` writes have to run outside the sandbox.
 - Parallel sessions never share a branch. The main folder stays on `main` and belongs to the
   coordinating session. Any session that changes files or needs another branch works in its own
   git worktree under `.claude/worktrees/`, named `<N>-<slug>` after its issue (use the worktree
-  tool before the first edit). Never `git checkout` or `git switch` in the main folder.
+  tool before the first edit). Never `git checkout` or `git switch` in the main folder. A
+  `PreToolUse` hook (`.claude/hooks/block-branch-switch.sh`) enforces this: in the main folder it
+  denies branch switches and a top-level `cd` into a worktree.
 - Check before you state. Verify a claim about the board, the repo or the tools (an issue's
   blockers, a skill's name, what a doc or rule requires) with a command first, not from memory.
   Review a results PR against every step of the rule or criteria it reports on.
