@@ -78,7 +78,9 @@ resolve_path() {
 
 cwd=$(json_field cwd) || exit 0
 command=$(json_field command) || exit 0
-[[ $command =~ (git|gh|cd|pushd) ]] || exit 0 # nothing to check: skip the lexer
+# Nothing to check: skip the lexer. Only for unquoted text, since quotes or a backslash can
+# split a command name (`g'i't`, `g\it`) and hide it from this test.
+if [[ ! $command =~ [\'\"\\] && ! $command =~ (git|gh|cd|pushd) ]]; then exit 0; fi
 
 deny_switch() {
   cat >&2 <<'EOF'

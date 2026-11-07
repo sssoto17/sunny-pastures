@@ -173,6 +173,12 @@ allow "$WT" 'cd docs && git checkout -b feature'
 allow "$WT" "git -C $WT checkout -b feature"
 allow "$WT/docs" 'git -C .. switch feature'
 
+# 5. the early exit must not skip a git hidden by quoting
+deny "$MAIN" "g'i't switch feature"
+deny "$MAIN" 'g\it switch feature'
+deny "$MAIN" '"g"it checkout feature'
+deny "$MAIN" "c'd' .claude/worktrees/16-x"
+
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
   err=$(timeout 5 bash "$hook" <<<"$2" 2>&1 >/dev/null)
