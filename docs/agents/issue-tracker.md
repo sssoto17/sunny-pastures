@@ -56,14 +56,20 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
   scripts/issue-fields.sh 47 --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
   ```
 
-  It adds the issue to the Project if it's missing, sets each field you name, and prints the
-  fields as GitHub stored them: check that output. Every flag is optional. It looks the field and
-  option ids up from GitHub on each run. An unknown name (`--size XL`) fails with the valid names
-  before anything is written. Status: a new item, or one with no Status, gets `Backlog`, and a
-  Status already set is left alone unless you pass `--status`. `--status Ready` is refused (see
-  **Status rules**). `scripts/issue-fields.sh --help` lists the rest. Don't set fields with hand-written
-  `gh project item-add` / `item-edit` loops: on 7 Nov one silently left 5 of #47's fields unset
-  under zsh. Tests: `bash scripts/issue-fields.test.sh`.
+  It adds the issue to the Project if it's missing, sets each field you name, then reads the
+  item back, prints the fields and exits 1 if one doesn't show the value it set. Every flag is
+  optional. It looks the field and option ids up from GitHub on each run. An unknown name
+  (`--size XL`) fails with the valid names before anything is written. `scripts/issue-fields.sh --help`
+  lists the rest. Don't set fields with hand-written `gh project item-add` / `item-edit` loops: on
+  7 Nov one silently left 5 of #47's fields unset under zsh. Tests: `bash scripts/issue-fields.test.sh`
+  (needs zsh).
+
+  - **Status**: a new item, or one with no Status, gets `Backlog`. A Status already set is left
+    alone unless you pass `--status`, so fixing a field never undoes the admin's move to Ready.
+    `--status Backlog` moves an issue back, as the **Any → Backlog** move in **Status rules**
+    allows. Decided by the admin on 7 Nov (#56).
+  - **Admin-only values are refused**: `--status Ready` (see **Status rules**) and `--mode Factory`
+    (it goes with `factory:ready`, see `triage-labels.md`).
 
 The ids, for reading raw `gh project` output (the script doesn't use this table):
 

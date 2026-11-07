@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Tests for issue-fields.sh through its command line, with `gh` replaced by a stub on PATH.
-# The stub logs every call, answers the GraphQL lookup from a fixture shaped like the real
-# response (applying the script's own --jq filter with jq), and never reaches GitHub.
+# Tests for issue-fields.sh through its command line, with `gh` replaced by a fake on PATH.
+# The fake logs every call and never reaches GitHub. It holds the issue's Project item as the
+# tab-separated rows the script's --jq filter produces, applies each item-add / item-edit to
+# them, and serves them to the next lookup, so the read-back sees what was written.
+# The --jq filter itself runs only against the real API (see the PR's dry run): gh evaluates it,
+# and these tests don't depend on jq.
 # Run: bash scripts/issue-fields.test.sh
 set -uo pipefail
 
@@ -13,82 +16,102 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/issue-fields-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
 
-# --- gh stub ----------------------------------------------------------------------------------
+# --- fake gh ----------------------------------------------------------------------------------
 # Each call appends its arguments to $work/calls, one per line, then a "--" line.
-# `gh api graphql` answers with fixture.N.json (N = how many lookups so far), else fixture.json.
-cat >"$work/bin/gh" <<'STUB'
+# Lookup N serves $work/state, unless $work/fail-lookup.N exists: then it prints that file to
+# stderr and exits 1, as gh does on a GraphQL error.
+# item-add adds an item row. item-edit replaces the field's value row with the option's name,
+# unless $work/drop-edit exists (the edit "succeeds" but GitHub doesn't show it yet). If
+# $work/fail-edit exists, edit number N (its content, default 1) and later ones exit 1.
+cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
+state=$dir/state
 for a in "$@"; do printf '%s\n' "$a"; done >>"$dir/calls"
 printf -- '--\n' >>"$dir/calls"
 if [[ $1 == api && $2 == graphql ]]; then
   n=$(($(cat "$dir/lookups" 2>/dev/null || echo 0) + 1))
   echo "$n" >"$dir/lookups"
-  fixture=$dir/fixture.$n.json
-  [[ -f $fixture ]] || fixture=$dir/fixture.json
-  filter=.
-  while (($#)); do
-    if [[ $1 == --jq ]]; then filter=$2; fi
-    shift
-  done
-  jq -r "$filter" "$fixture"
+  if [[ -f $dir/fail-lookup.$n ]]; then
+    cat "$dir/fail-lookup.$n" >&2
+    exit 1
+  fi
+  cat "$state"
   exit
 fi
 if [[ $1 == project && $2 == item-add ]]; then
-  [[ -f $dir/fail-add ]] && { echo "stub: item-add failed" >&2; exit 1; }
+  [[ -f $dir/fail-add ]] && { echo "fake: item-add failed" >&2; exit 1; }
+  printf 'item\tPVTI_new\n' >>"$state"
   echo PVTI_new
   exit
 fi
 if [[ $1 == project && $2 == item-edit ]]; then
-  [[ -f $dir/fail-edit ]] && { echo "stub: item-edit failed" >&2; exit 1; }
+  edits=$(($(cat "$dir/edits" 2>/dev/null || echo 0) + 1))
+  echo "$edits" >"$dir/edits"
+  if [[ -f $dir/fail-edit ]]; then # holds the number of the edit that fails; empty means the 1st
+    fail_at=$(cat "$dir/fail-edit")
+    if ((edits >= ${fail_at:-1})); then
+      echo "fake: item-edit failed" >&2
+      exit 1
+    fi
+  fi
+  shift 2
+  while (($#)); do
+    case $1 in
+      --field-id) field_id=$2 ;;
+      --single-select-option-id | --iteration-id) option_id=$2 ;;
+    esac
+    shift 2
+  done
+  [[ -f $dir/drop-edit ]] && exit
+  row=$(awk -F'\t' -v f="$field_id" -v o="$option_id" \
+    '$1 == "option" && $3 == f && $5 == o { print $2 "\t" $6 }' "$state")
+  [[ -n $row ]] || { echo "fake: no option $option_id on field $field_id" >&2; exit 1; }
+  awk -F'\t' -v f="${row%%$'\t'*}" '!($1 == "value" && $2 == f)' "$state" >"$state.new"
+  printf 'value\t%s\n' "$row" >>"$state.new"
+  mv "$state.new" "$state"
   echo "Edited item"
   exit
 fi
-echo "stub: unexpected gh call: $*" >&2
+echo "fake: unexpected gh call: $*" >&2
 exit 99
-STUB
+FAKE
 chmod +x "$work/bin/gh"
 
 # --- fixtures ---------------------------------------------------------------------------------
-# The Project's fields as GitHub returns them (ids copied from the live Project on 7 Nov), and an
-# issue whose project item, if any, is given as JSON.
-fixture() { # item-json-or-null -> stdout
-  cat <<JSON
-{"data":{
- "user":{"projectV2":{"id":"PVT_kwHOCI1msM4BqXYM","fields":{"nodes":[
-  {},
-  {"id":"PVTSSF_status","name":"Status","options":[{"id":"97a20eba","name":"Backlog"},{"id":"eb23e874","name":"Ready"},{"id":"03b81b61","name":"In progress"},{"id":"e763de54","name":"In review"},{"id":"04fb4a2b","name":"Done"}]},
-  {"id":"PVTSSF_mode","name":"Mode","options":[{"id":"ca9bd7b8","name":"Manual"},{"id":"f92520e5","name":"Factory"}]},
-  {"id":"PVTSSF_track","name":"Track","options":[{"id":"60e95dc9","name":"Build"},{"id":"df832856","name":"Design"},{"id":"d064f0c0","name":"Report"},{"id":"3200c1d7","name":"Infra"},{"id":"145afb58","name":"Evaluation"}]},
-  {"id":"PVTSSF_size","name":"Size","options":[{"id":"7a7f9f73","name":"S"},{"id":"e0e2efb6","name":"M"},{"id":"c7dede81","name":"L"}]},
-  {"id":"PVTIF_week","name":"Week","configuration":{
-    "iterations":[{"id":"7f9c9b7a","title":"Wk 2 · 9–15 Nov"},{"id":"b40f9349","title":"Wk 3 · 16–22 Nov"}],
-    "completedIterations":[{"id":"f9409a73","title":"Wk 1 · 2–8 Nov"}]}},
-  {"id":"PVTSSF_priority","name":"Priority","options":[{"id":"598fd74b","name":"P0"},{"id":"ad39d061","name":"P1"},{"id":"a38a49d8","name":"P2"},{"id":"cad16246","name":"P3"}]}
- ]}}},
- "repository":{"issue":{"url":"https://github.com/sssoto17/sunny-pastures/issues/47","title":"Some issue","projectItems":{"nodes":[
-  {"id":"PVTI_other","project":{"id":"PVT_someone_else"},"fieldValues":{"nodes":[]}}
-  $( [[ $1 != null ]] && printf ',%s' "$1" )
- ]}}}
-}}
-JSON
+# The Project's fields as the --jq filter emits them, one row per option (ids copied from the
+# live Project on 7 Nov): option, field name, field id, select/iteration, option id, option name.
+T=$'\t'
+project_rows() {
+  local field id kind rest opt
+  printf 'project%sPVT_kwHOCI1msM4BqXYM\n' "$T"
+  while read -r field id kind rest; do
+    IFS=, read -ra opts <<<"$rest"
+    for opt in "${opts[@]}"; do
+      printf 'option%s%s%s%s%s%s%s%s%s%s\n' "$T" "$field" "$T" "$id" "$T" "$kind" "$T" "${opt%%=*}" "$T" "${opt#*=}"
+    done
+  done <<'ROWS'
+Status PVTSSF_status select 97a20eba=Backlog,eb23e874=Ready,03b81b61=In progress,e763de54=In review,04fb4a2b=Done
+Mode PVTSSF_mode select ca9bd7b8=Manual,f92520e5=Factory
+Track PVTSSF_track select 60e95dc9=Build,df832856=Design,d064f0c0=Report,3200c1d7=Infra,145afb58=Evaluation
+Size PVTSSF_size select 7a7f9f73=S,e0e2efb6=M,c7dede81=L
+Week PVTIF_week iteration 7f9c9b7a=Wk 2 · 9–15 Nov,b40f9349=Wk 3 · 16–22 Nov,f9409a73=Wk 1 · 2–8 Nov
+Priority PVTSSF_priority select 598fd74b=P0,ad39d061=P1,a38a49d8=P2,cad16246=P3
+ROWS
 }
-item() { # status track... as "Field=Value" pairs -> item JSON on the Sunny Pastures Project
-  local values="" pair
+issue_row() { printf 'issue%shttps://github.com/sssoto17/sunny-pastures/issues/47\n' "$T"; }
+# The issue's item on the Project, with "Field=Value" pairs; "null" means not on the Project.
+item() {
+  local pair
+  printf 'item%sPVTI_existing\n' "$T"
   for pair in "$@"; do
-    local field=${pair%%=*} value=${pair#*=} key=name
-    [[ $field == Week ]] && key=title
-    values+="${values:+,}{\"$key\":\"$value\",\"field\":{\"name\":\"$field\"}}"
+    printf 'value%s%s%s%s\n' "$T" "${pair%%=*}" "$T" "${pair#*=}"
   done
-  printf '{"id":"PVTI_existing","project":{"id":"PVT_kwHOCI1msM4BqXYM"},"fieldValues":{"nodes":[{},%s]}}' "$values"
 }
 
-reset() { # item-json-or-null for every lookup
-  rm -f "$work"/calls "$work"/lookups "$work"/fixture*.json "$work"/fail-*
-  fixture "$1" >"$work/fixture.json"
-}
-after() { # item-json for the lookup after the writes (the second lookup)
-  fixture "$1" >"$work/fixture.2.json"
+reset() { # item rows, or "null" -> a fresh state: the Project, the issue and its item
+  rm -f "$work"/calls "$work"/lookups "$work"/edits "$work"/state "$work"/fail-* "$work"/drop-edit
+  { project_rows; issue_row; [[ $1 == null ]] || printf '%s\n' "$1"; } >"$work/state"
 }
 
 run() { # args... -> sets code, out, err, calls
@@ -195,7 +218,7 @@ expect_call "$edit --field-id PVTSSF_size --single-select-option-id 7a7f9f73"
 expect_call "$edit --field-id PVTIF_week --iteration-id b40f9349"
 
 # --- adding to the Project, and Status --------------------------------------------------------
-# Not on the Project yet (only on someone else's): add it, then set Backlog and the fields.
+# Not on the Project yet: add it, then set Backlog and the fields.
 reset null
 case_ 47 --size S
 expect_code 0
@@ -203,7 +226,6 @@ expect_call "project item-add 3 --owner sssoto17 --url https://github.com/sssoto
 new="project item-edit --project-id PVT_kwHOCI1msM4BqXYM --id PVTI_new"
 expect_call "$new --field-id PVTSSF_status --single-select-option-id 97a20eba"
 expect_call "$new --field-id PVTSSF_size --single-select-option-id 7a7f9f73"
-expect_no_call "PVTI_other"
 
 # On the Project with no Status (added by hand): Backlog.
 reset "$(item Size=S)"
@@ -240,7 +262,6 @@ expect_no_call "item-edit"
 
 # --- the result is read back and printed ------------------------------------------------------
 reset null
-after "$(item Status=Backlog Track=Infra Size=S Priority=P1 "Week=Wk 2 · 9–15 Nov")"
 case_ 47 --track Infra --size S --priority P1 --week "Wk 2"
 expect_code 0
 expect_out "https://github.com/sssoto17/sunny-pastures/issues/47"
@@ -253,15 +274,16 @@ expect_out "Week:     Wk 2 · 9–15 Nov"
 assert "expected a second lookup after the writes" test "$(count '^api$')" -eq 2
 
 # --- lookup failures stop before any write -----------------------------------------------------
+# A lookup with no issue row (the filter emits none when the issue is null).
 reset null
-fixture null | jq '.data.repository.issue = null' >"$work/fixture.json"
+project_rows >"$work/state"
 case_ 9999 --size S
 expect_code 1
 expect_err "issue #9999 not found"
 expect_no_writes
 
 reset null
-fixture null | jq '.data.user.projectV2 = null' >"$work/fixture.json"
+issue_row >"$work/state"
 case_ 47 --size S
 expect_code 1
 expect_err "Project 3 of sssoto17 not found"
@@ -275,11 +297,62 @@ expect_code 1
 expect_err "could not set Size"
 assert "expected to stop after the failed edit" test "$(count '^item-edit$')" -eq 1
 
+
+# The real API's answer to a missing issue: a GraphQL error, and gh exits 1.
 reset null
-printf 'not json' >"$work/fixture.json"
+echo "GraphQL: Could not resolve to an Issue with the number of 9999. (repository.issue)" \
+  >"$work/fail-lookup.1"
+case_ 9999 --size S
+expect_code 1
+expect_err "Could not resolve to an Issue"
+expect_err "nothing was changed"
+expect_no_writes
+
+# --- read-back failures after the writes -------------------------------------------------------
+# The writes went through but the second lookup failed: don't claim nothing changed.
+reset "$(item Status=Backlog)"
+echo "fake: lookup failed" >"$work/fail-lookup.2"
 case_ 47 --size S
 expect_code 1
-expect_no_writes
+expect_err "fields were written but couldn't be read back; re-run to check"
+assert 'expected no "nothing was changed" after writes' test "${err/nothing was changed/}" == "$err"
+
+# The edit "succeeded" but the read-back doesn't show it: fail and name the field.
+reset "$(item Status=Backlog Size=M)"
+touch "$work/drop-edit"
+case_ 47 --size S --priority P1
+expect_code 1
+expect_out "Size:     M"
+expect_err "Size is M, expected S"
+expect_err "Priority is -, expected P1"
+expect_err "re-run to check"
+
+# A part-way failure names what was set and what wasn't.
+reset "$(item Status=Backlog)"
+printf '2\n' >"$work/fail-edit"
+case_ 47 --size S --priority P1 --mode Manual
+expect_code 1
+expect_err "could not set Priority"
+expect_err "set: Size; not set: Priority, Mode"
+
+# --- admin-only values ---------------------------------------------------------------------------
+for factory in Factory factory "--mode=Factory"; do
+  reset "$(item Status=Backlog)"
+  if [[ $factory == --* ]]; then case_ 47 "$factory"; else case_ 47 --size S --mode "$factory"; fi
+  expect_code 2
+  expect_err "only the admin sets Mode to Factory"
+  expect_no_gh
+done
+
+# The valid-names lists don't offer what the script refuses.
+reset "$(item Status=Backlog)"
+case_ 47 --status Blocked
+expect_code 2
+expect_err "Valid names: Backlog, In progress, In review, Done."
+reset "$(item Status=Backlog)"
+case_ 47 --mode Robot
+expect_code 2
+expect_err "Valid names: Manual."
 
 # --- unknown names fail loudly and change nothing ---------------------------------------------
 reset "$(item Status=Backlog)"
@@ -305,9 +378,13 @@ expect_no_writes
 # --- called from zsh ---------------------------------------------------------------------------
 # zsh doesn't split unquoted $var, which silently dropped 5 of #47's fields on 7 Nov. The script
 # runs under bash whatever the caller's shell, so a zsh caller gets the same calls.
-if command -v zsh >/dev/null; then
+# A missing zsh is a failure, not a skip (CONSTRAINTS.md, "Guarding the bar").
+args=(zsh -c "...")
+if ! command -v zsh >/dev/null; then
+  code="" out="" err="" calls=""
+  bad "zsh is not installed: install it to run the zsh caller case"
+else
   reset "$(item Status=Backlog)"
-  args=(zsh -c "...")
   out=$(PATH="$work/bin:$PATH" zsh -fc '"$1" 47 --size M --week "Wk 2"' zsh "$script" 2>"$work/err")
   code=$?
   err=$(cat "$work/err")
@@ -315,8 +392,6 @@ if command -v zsh >/dev/null; then
   expect_code 0
   expect_call "$edit --field-id PVTSSF_size --single-select-option-id e0e2efb6"
   expect_call "$edit --field-id PVTIF_week --iteration-id 7f9c9b7a"
-else
-  echo "skip: zsh not installed, the zsh caller case did not run"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
