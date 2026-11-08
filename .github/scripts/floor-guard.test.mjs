@@ -21,6 +21,8 @@ const CONSTRAINTS = `# Constraints
 | Speed | \`advance()\` ≤ 50 ms | task end, CI | \`ci / bench\` |
 | Mutation | Score ≥ 60% | CI | \`ci / mutation\` |
 
+## Exceptions
+
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
 | _none_ | | | | | |
@@ -303,6 +305,19 @@ describe('floor guard, end to end', () => {
     const r = guard();
     expect(r.code).toBe(0);
     expect(r.out).toContain('waived by E1');
+  });
+
+  it.each([
+    ['in a code fence', (r) => CONSTRAINTS.replace('## Floor\n', `## Floor\n\n\`\`\`\n${r}\n\`\`\`\n`)],
+    ['in another section', (r) => CONSTRAINTS.replace('- Secrets in source: blocked.\n', `- Secrets in source: blocked.\n\n| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n${r}\n`)],
+    ['in an HTML comment', (r) => `${CONSTRAINTS}\n<!--\n${r}\n-->\n`],
+  ])('does not waive with a row-shaped line %s', (_, place) => {
+    setup();
+    repo.write({
+      'packages/sim/src/a.ts': '// @ts-expect-error legacy\n',
+      'CONSTRAINTS.md': place(row('E1', 'packages/sim/src/a.ts', '2026-11-30')),
+    });
+    expect(guard().out).toContain('[silenced-checker] packages/sim/src/a.ts');
   });
 
   it('does not waive a finding outside the row\'s path', () => {

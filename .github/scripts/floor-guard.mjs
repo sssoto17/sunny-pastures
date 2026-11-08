@@ -132,12 +132,19 @@ export const parseRules = (lines) => {
   let headers = null;
   let cur = null;
   let fence = false;
+  let comment = false;
   const flush = () => {
     if (cur) rules.push(cur);
     cur = null;
   };
   lines.forEach((line = '', i) => {
     const n = i + 1;
+    // HTML comments hold no rules (and no exceptions).
+    if (comment || /^\s*<!--/.test(line)) {
+      flush();
+      comment = !line.includes('-->');
+      return;
+    }
     if (/^\s*```/.test(line)) {
       flush();
       fence = !fence;
@@ -220,7 +227,6 @@ const similarity = (a, b) => {
   for (const w of A) if (B.has(w)) shared++;
   return shared / Math.max(1, A.size + B.size - shared);
 };
-const EXCEPTION_ROW = /^\|\s*E\d+\s*\|/;
 const MIN_BEFORE = /(>=|>|≥|at least|minimum|\bmin\b|no less than|not fall|not drop)\s*$/;
 const MAX_BEFORE = /(<=|<|≤|at most|maximum|\bmax\b|no more than|under|below|not grow|not exceed|within)\s*$/;
 const MIN_AFTER = /^\s*\S*\s*(or more|or higher|must not fall|must not drop)/;
@@ -394,8 +400,13 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   }
 
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.
+  // Rows come from the parsed Exceptions table only, never from raw diff lines, so a row-shaped
+  // line in a code fence, a comment or another table can't waive anything.
+  const exceptionRows = (lines) => parseRules(lines).filter((r) => r.kind === 'row' && r.section === 'Exceptions' && /^E\d+$/.test(r.key));
   const constraints = changes.find((f) => isConstraints(f.path));
-  const addedRows = (constraints?.added ?? []).filter((a) => EXCEPTION_ROW.test(a.text.trim()));
+  const rowsNow = exceptionRows(constraintsNow.split('\n'));
+  const rowsBefore = new Set(constraints ? exceptionRows(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? []).map((r) => r.text.trim()) : rowsNow.map((r) => r.text.trim()));
+  const addedRows = rowsNow.filter((r) => !rowsBefore.has(r.text.trim()));
   const waivers = [];
   const latest = Math.min(today + MAX_EXCEPTION_DAYS * 864e5, Date.parse(FREEZE));
   for (const a of addedRows) {
@@ -407,11 +418,10 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       notices.push(`new exception ${e.id} on ${e.path}`);
     }
   }
-  constraintsNow.split('\n').forEach((text, i) => {
-    if (!EXCEPTION_ROW.test(text.trim())) return;
-    const e = parseException(text);
-    if (e.expires !== null && e.expires < today) always('exception-expired', 'CONSTRAINTS.md', i + 1, e.id);
-  });
+  for (const r of rowsNow) {
+    const e = parseException(r.text);
+    if (e.expires !== null && e.expires < today) always('exception-expired', 'CONSTRAINTS.md', r.line, e.id);
+  }
   const blocking = [];
   for (const f of findings) {
     const w = f.waivable && waivers.find((x) => x.re.test(f.file));
