@@ -80,6 +80,7 @@
 			"Bash(rm -fr *)",
 			"Bash(rm -Rf *)",
 			"Bash(rm --recursive *)",
+			"Bash(rm -rf *)",
 			"Edit(**/.claude/settings*.json)",
 			"Edit(**/.claude/hooks/**)",
 			"Edit(**/.claude/skills/**)",
