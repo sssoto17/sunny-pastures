@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: npm            # pnpm uses the npm ecosystem
+    directory: /
+    schedule: { interval: weekly }
+    versioning-strategy: increase     # exact pins stay exact
+    cooldown:
+      default-days: 7                 # matches minimumReleaseAge in pnpm-workspace.yaml
+    groups:
+      all-dev:
+        dependency-type: development
+    open-pull-requests-limit: 3
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    cooldown:
+      default-days: 7
