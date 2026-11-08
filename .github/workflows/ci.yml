@@ -44,9 +44,12 @@ jobs:
     env:
       # CONSTRAINTS.md, Stages: CI runs larger property runs. Local runs leave it unset (100).
       SIM_PROPERTY_RUNS: '1000'
+      BASE_REF: ${{ github.base_ref }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # the coverage gate diffs against the merge base
       - uses: ./.github/actions/setup
       - run: pnpm test
+      - run: node .github/scripts/coverage-gate.mjs --base "origin/$BASE_REF"
