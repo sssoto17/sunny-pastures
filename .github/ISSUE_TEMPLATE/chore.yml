@@ -1,0 +1,17 @@
+name: Chore
+description: Upkeep with no new behaviour (tooling, config, hooks, dependencies, docs-only work)
+labels: [chore, triage]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What changes and why it's worth doing now.
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] 
+    validations: { required: true }
