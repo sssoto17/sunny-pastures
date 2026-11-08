@@ -44,9 +44,9 @@ Project workflow names (area 5) and the Repository admin role's ID (checklist st
 - **Approvals:** PRs are reviewed the way people on GitHub review each other. A reviewer bot,
   its own GitHub App, **approves** a PR, which then auto-merges, or **requests changes**. The
   admin approves only sensitive paths (CODEOWNERS) and PRs that are escalated, for example a
-  finished feature slice or a changed module interface (area 2). Escalation was the label
-  `review:admin`; on 8 Nov (#37) a review thread from the bot replaced it, and the label goes
-  with #104.
+  finished feature slice or a changed module interface (area 2). Escalation is the label
+  `review:admin`. #37 decided on 8 Nov that a review thread from the bot will replace it once
+  #104 lands.
 - **Deploys:** once production is live, only a `v*` release tag ships to production, deployed by
   GitHub Actions; a merge to `main` reaches staging only. Bot-approved PRs keep auto-merging
   (area 4).
@@ -431,7 +431,7 @@ opens. Claude is billed through the admin's employer seat (#37; "The factory's i
   itself (`resolveReviewThread`, from Actions, where GraphQL is open). A thread it still
   considers open stays open, and the PR doesn't merge. The factory may reply on a thread, but
   doesn't resolve the bot's threads.
-- **Each run costs.** The bot runs on every push, every `labeled` event and every "Update
+- **Each run costs.** The bot runs on every push, every `labeled` event (until #104) and every "Update
   branch", since each of those dismisses the approval. One `concurrency` group per PR with
   `cancel-in-progress` keeps only the newest run (Consequences).
 - **Only this App approves.** Every other app keeps auto-approve off: CodeRabbit's
@@ -511,23 +511,33 @@ from the admin's employer seat (Team or Enterprise), stored as `CLAUDE_CODE_OAUT
 Enterprise seats fall under Anthropic's Commercial Terms, so the Consumer Terms' clause on
 "automated or non-human means" (#60) doesn't apply. The admin's statement, recorded here: the
 employer knows the seat is used for school work, and the project only uses allowance the employer
-already pays for, which the admin's 60 hours a month of paid work leave unused. A billed API key is
-the fallback, only if it becomes necessary. The factory and the reviewer share the seat's weekly
+already pays for, which the admin's 60 hours a month of paid work leave unused. The employer is the
+contracting customer for the seat, so its organisation's policies, and its admins' view of the
+seat's usage, apply to these runs too. A billed API key is the fallback, only if it becomes
+necessary, for example if the employer's policy ever rules this out. The factory and the reviewer share the seat's weekly
 limit with the admin's paid work, hence the caps below.
 
 **How a factory job starts (decided 8 Nov).** The factory is a `workflow_dispatch` workflow that
 takes an issue number. It refuses an issue that lacks `factory:ready` or isn't in Ready. Three
 things dispatch it:
 
-- **a scheduled sweep** at 07:00, 12:00 and 17:00 CET. It dispatches every item that is Ready,
-  has Mode Factory and carries `factory:ready`, and has no open PR or branch yet;
-- **a chain:** when a factory job finishes (`workflow_run`), the sweep runs again, so a queue
-  drains without waiting for the next slot;
+- **a scheduled sweep** at 07:00, 12:00 and 17:00 CET. It dispatches **one** item that is
+  Ready, has Mode Factory and carries `factory:ready`, and has no open PR or branch yet, and
+  none while a factory job is running or waiting;
+- **a chain:** when a factory job finishes (`workflow_run`), the sweep runs again and dispatches
+  the next item, so a queue drains one job at a time without waiting for the next slot;
 - **`/today`** (stage 2, #73): it reports what the factory did since the admin's last workday,
-  which issues are ready for it and a suggested queue, and dispatches the queue on the admin's
+  which issues are ready for it and a suggested queue, and starts the queue on the admin's
   go-ahead.
 
-Concurrency is 1: one factory job at a time. Moving an issue to Ready can't start a workflow
+Concurrency is 1: one factory job at a time. One item per dispatch is deliberate. A concurrency
+group keeps one run going and one waiting, and a newly queued run cancels the one already waiting
+(GitHub's concurrency docs), so dispatching a whole queue at once would cancel all but two. A
+cancelled run still completes, so it would fire `workflow_run` and start more sweeps; the chain
+acts only on a run that wasn't cancelled. **Open for the build issue:** how `/today`'s agreed
+order reaches the sweep, which otherwise picks by Priority, then board order; and whether
+`workflow_run`'s limit of three chained levels resets when a `workflow_dispatch` sits between
+the sweep and the factory job (inference, untested). Moving an issue to Ready can't start a workflow
 itself, because Project field changes aren't an Actions trigger. `GITHUB_TOKEN` can't read a
 user-owned Project (area 5), so the sweep reads the board with a read-only token of the admin's.
 Which token is #102. It is never a classic PAT with `repo`, which would reach every private
@@ -776,8 +786,9 @@ production. MUST-17.2 changes to match, in a later PR (Consequences).
      checked 7 Nov).
 - **Who can ship.** Only the admin creates `v*` tags (the tag ruleset, area 2). Until #37, every
   session acts as the admin, so that holds by instructions only (area 2, "The honest limit";
-  PR #52 asks before tag pushes). A guard for
-  unattended sessions (area 2) should cover tag pushes too.
+  PR #52 asks before tag pushes). No guard for unattended sessions is built (#37): the factory
+  App can't create a `v*` tag, because only the Repository admin role bypasses the tag ruleset
+  (area 2, "The factory's identity"), and the cloud GitHub proxy refuses tag pushes (#60).
 - **Rollback** is Vercel's Instant Rollback in the dashboard. A fix ships as a patch tag
   (`v0.5.1`, area 1).
 
@@ -1213,7 +1224,7 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   estimate or a cap before the factory runs unattended; `CONSTRAINTS.md` has the criterion
   (CI runner time per PR, enforced by #40).
 - **Claude cost per review.** Each run of the reviewer bot is a Claude run: on every push, every
-  `labeled` event and every "Update branch", since each of those dismisses the approval. That is
+  `labeled` event (until #104) and every "Update branch", since each of those dismisses the approval. That is
   separate from Actions compute. #37 decided how it's billed: a `setup-token` from the admin's
   employer seat, under the Commercial Terms, which the factory shares (area 2, "The factory's
   identity"). It costs no money, but it draws on the seat's weekly limit, which the admin's paid
@@ -1294,7 +1305,8 @@ deferred to go-public (#38), Q10 waits for Vercel and Q11 for #47. Q14–Q16 wer
     check the names it uses on PRs before deciding on "Require deployments to succeed". Also
     check that Vercel accepts `production` as its production branch with no pushes, so `main`
     deploys as staging (area 4), and what it reports when it skips a preview build (area 2).
-11. **Q11, the escalation criteria.** *In #47.* When an agent adds `review:admin`, and
+11. **Q11, the escalation criteria.** *In #47.* When an agent adds `review:admin` (the bot's
+    escalation thread after #104), and
     the size at which the bot asks for a split, in `CONSTRAINTS.md`. The sensitive paths are A3.
 12. **Q12, the reviewer bot.** *Decided 7 Nov:* its own GitHub App running Claude with the repo's
     review skills (area 2). Its permissions are Q14; how Claude is billed in CI is #37, which
@@ -1572,6 +1584,7 @@ Closes #
 
 - [ ] Meets a row of the escalation criteria (`CONSTRAINTS.md`, "Admin review"), code-owned paths
   included: labelled `review:admin`, with a comment naming the rows <!-- which rows -->
+  <!-- #104 replaces this line: the reviewer's escalation thread takes the label's place. -->
 - [ ] Touches a path in CODEOWNERS, and the admin asked for it: <!-- which, and where they asked -->
 
 ## Concerns
