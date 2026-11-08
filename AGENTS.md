@@ -12,6 +12,8 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - `packages/sim/`: the game rules as pure TypeScript with zero runtime dependencies: state types,
   content as data, `apply(state, action, at)` and `advance(state, to)`. No I/O, no `Date.now()`,
   no `Math.random()`: time arrives as an argument and randomness comes from a seed in the state.
+  The rules take content as a value (`createSim(content)`) and never import it as constants; the
+  state is plain JSON data; design in ADR-0003.
 - `apps/web/`: the Next.js app: UI, game API and persistence. `src/server/` is server-only.
 - `tests/acceptance/`: black-box tests over HTTP. Agent PRs must not modify them.
 - `tools/load/`, `tools/analysis/`: Python, used only for Locust load tests and data analysis.

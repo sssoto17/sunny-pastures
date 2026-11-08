@@ -7,7 +7,7 @@ starting point for the report's requirements chapter and for planning M2–M4.
 Status: **ready for review**. The few points still open are marked _Open_ and listed under
 [Open questions](#open-questions). The grill behind it is on issue #2.
 
-Last changed: 2026-11-07 (baseline qualities settled as Musts, #34).
+Last changed: 2026-11-08 (MUST-10.5 decided, MUST-07.4 set to 30 days, ADR-0003, #80).
 
 ## Objective
 
@@ -185,7 +185,7 @@ The farm keeps producing while the player is away.
 | MUST-07.1 | While the player is away, the farm does what it would have done if they had watched: crops ripen, jobs finish in order, animals eat from troughs, Loop and Collector work and order slots refill. Advancing in one step or in many gives the same farm (MUST-14, invariant 1). | `prop` |
 | MUST-07.2 | Automated production stops when its output wouldn't fit in storage, or when inputs or coins run out. Storage capacity is the only bound: there is no time-based cap on offline progress. | `unit`, `prop` |
 | MUST-07.3 | **Away summary since the last action**: on return, the client shows what changed since the farm's last accepted action. It lists counts per good and a timeline of what happened, with server times ("03:12 the bakery finished 3 cookies"). The summary comes from advancing the farm, so client and server produce the same one. | `unit`, `ui`, `playtest` |
-| MUST-07.4 | Advancing the most-automated farm the content allows by 7 days takes < 50 ms on the server. That farm has max tiers, every add-on, full troughs and farmhands (if SHOULD-05 ships). | `bench` |
+| MUST-07.4 | Advancing the most-automated farm the content allows by 30 days takes ≤ 50 ms on the server, as in `CONSTRAINTS.md` (sim speed; [ADR-0003](../adr/0003-simulation-design.md), section 8). That farm has max tiers, every add-on, full troughs and farmhands (if SHOULD-05 ships). | `bench` |
 
 ### MUST-08 Gifting
 
@@ -224,7 +224,7 @@ Supabase anonymous sign-in.
 | MUST-10.2 | Client and server run the same simulation code. Given the same farm, actions and times, both reach the same state hash. | `prop` |
 | MUST-10.3 | All randomness comes from the farm's seeded PRNG, and the seed comes from the farm's id. | `prop`, `review` |
 | MUST-10.4 | Content is data inside the simulation. A content test checks it:<br>• every timer is a whole number of seconds between 10 s and 24 h;<br>• every recipe input can be produced by some unlocked route;<br>• every unlock refers to content that exists;<br>• Level thresholds rise strictly. | `content` |
-| MUST-10.5 | _Open (from ADR-0001):_ where the state hash is computed: outside the simulation in server and client code, or as a small pure-TypeScript hash inside it. Decided in M2. | `review` |
+| MUST-10.5 | The state hash is computed inside the simulation: canonical JSON hashed with a pure-TypeScript SHA-256, exported as `stateHash`. _Decided 8 Nov in [ADR-0003](../adr/0003-simulation-design.md), section 6 (open in ADR-0001)._ | `review` |
 | MUST-10.6 | When several things happen at the same moment and share storage, the simulation handles them in one fixed order. Examples: a Collector filling the barn, a Loop restart, a trough refill, an order slot refilling. The order is first by kind of event, then by facility, pen or plot index, then by queue slot. It is defined once in the simulation and never depends on the order of a map, a set or a request, so client and server always choose the same order. | `unit`, `prop` |
 
 ### MUST-11 Server authority
@@ -433,4 +433,5 @@ The grill checked three more and kept them independent of the log:
 6. **Replaying old logs after a rules change** (MUST-13.6, MUST-16.3): decided in #31. That
    includes content tuning. #31 must be settled before M3 builds the log schema, and in any
    case before the first tuning after playtest 1.
-7. **Where the state hash lives** (MUST-10.5): an M2 decision taken over from ADR-0001.
+7. ~~**Where the state hash lives**~~ Settled 8 Nov (#72): inside the simulation, as a
+   pure-TypeScript SHA-256 ([ADR-0003](../adr/0003-simulation-design.md), MUST-10.5).
