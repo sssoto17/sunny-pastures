@@ -24,7 +24,7 @@ Across commands, run both outside.
 Sandboxed commands can write `.git`: objects, refs, the index and `.git/worktrees`, including a
 worktree's shared `.git`. Only `.git/config` and `.git/hooks` are protected (checked 7 Nov with
 `test -w`, and by `git worktree add` run inside the sandbox). So `git add`, `commit`, `fetch`,
-`switch`, `merge`, `worktree add/remove` and `push` all run sandboxed. Don't add
+`switch`, `merge`, `worktree add` and `push` all run sandboxed. Don't add
 `dangerouslyDisableSandbox` to `git` or `gh`, except for the cases under "When git does need the
 host" below. These habits keep `.git/config` out of it:
 
@@ -37,7 +37,7 @@ host" below. These habits keep `.git/config` out of it:
 
 ### When git does need the host
 
-Each case below was hit on 7 or 8 Nov. #77 (the post-merge script) handles the same cases.
+Each case below was hit on 7 or 8 Nov. #77 (the post-merge script, still open) will handle the same cases.
 
 - **Updating the main folder when the change touches `.claude/settings.json`, hooks or skills**
   (`git merge --ff-only`, `git pull`). Those paths are write-denied in the main folder, so git

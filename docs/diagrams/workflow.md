@@ -176,7 +176,8 @@ coordinating session; every work session gets its own git worktree under `.claud
 - Each worktree needs its own `pnpm install` once the repo has dependencies. The pnpm store is
   shared, so it's fast.
 - The local Supabase stack is one per machine and shared by every worktree.
-- `.git` writes (worktrees, commits, pushes) run outside the sandbox.
+- Most git commands (worktrees, commits, pushes) run inside the sandbox. The exceptions are in
+  `docs/agents/sandbox.md`, "Git inside the sandbox" and "When git does need the host".
 
 Evening, about 10 minutes. This routine stays manual, with no schedule: it needs local state (the
 worktrees, the handoff), which a cloud routine can't see.
@@ -185,7 +186,7 @@ worktrees, the handoff), which a cloud routine can't see.
 2. A light `retro` if you built something. Note any step you repeated by hand.
 3. Remove the worktrees whose PRs have merged: check `git worktree list`, then
    `git worktree remove .claude/worktrees/<name>`. If it refuses or the folder won't delete, see
-   `docs/agents/sandbox.md`, "Git inside the sandbox".
+   `docs/agents/sandbox.md`, "When git does need the host".
 4. `remember:remember` handoff with the top 3 next.
 
 ## Automation stages

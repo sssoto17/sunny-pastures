@@ -37,7 +37,8 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   or `supabase status`.
 - Read `CONSTRAINTS.md` before writing code. Do not weaken it to make a change pass.
 - Before running commands, read `docs/agents/sandbox.md`. It lists the sandbox pitfalls:
-  `supabase`, localhost services and `.git` writes have to run outside the sandbox.
+  `supabase` and localhost services have to run outside the sandbox. Most git commands run
+  inside it; the exceptions are under "Git inside the sandbox" and "When git does need the host".
 - Parallel sessions never share a branch. The main folder stays on `main` and belongs to the
   coordinating session. Any session that changes files or needs another branch works in its own
   git worktree under `.claude/worktrees/`, named `<N>-<slug>` after its issue (use the worktree
