@@ -53,3 +53,34 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm test
       - run: node .github/scripts/coverage-gate.mjs --base "origin/$BASE_REF"
+
+  floor:
+    name: guard / floor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the guard diffs against the merge base
+      - uses: ./.github/actions/setup
+        with:
+          install: 'false' # the guard uses only Node and git
+      # Run the base branch's guard, not the PR's, so a PR can't weaken the guard that judges it.
+      # The PR's own copy is used only while the base has no guard yet (the PR that adds it).
+      - name: Take the guard from the base branch
+        run: |
+          dir="$RUNNER_TEMP/floor-guard"
+          mkdir -p "$dir"
+          if git cat-file -e "origin/$BASE_REF:.github/scripts/floor-guard.mjs" 2>/dev/null; then
+            for f in floor-guard.mjs diff.mjs; do
+              git show "origin/$BASE_REF:.github/scripts/$f" > "$dir/$f"
+            done
+            echo "Using the floor guard from origin/$BASE_REF"
+          else
+            cp .github/scripts/floor-guard.mjs .github/scripts/diff.mjs "$dir/"
+            echo "::warning::origin/$BASE_REF has no floor guard yet; using this PR's copy"
+          fi
+      - run: node "$RUNNER_TEMP/floor-guard/floor-guard.mjs" --base "origin/$BASE_REF"
