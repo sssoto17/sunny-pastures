@@ -128,7 +128,10 @@ const configLoosening = (f, mergeBase) => {
 // paragraph in the same section. Numbers carry a direction read from the words around them.
 export const parseRules = (lines) => {
   const rules = [];
+  // Every heading in order, so a caller can tell the first `## Exceptions` from a later one.
+  const headings = [];
   let section = '';
+  let sectionNo = 0;
   let headers = null;
   let cur = null;
   let fence = false;
@@ -155,6 +158,7 @@ export const parseRules = (lines) => {
       flush();
       headers = null;
       section = line.replace(/^#+\s*/, '').trim();
+      sectionNo = headings.push({ no: headings.length + 1, level: /^#+/.exec(line)[0].length, title: section });
       return;
     }
     if (!line.trim()) {
@@ -167,21 +171,25 @@ export const parseRules = (lines) => {
       const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
       if (cells.every((c) => /^:?-+:?$/.test(c))) return;
       if (!headers) headers = cells;
-      else rules.push({ kind: 'row', section, key: cells[0], line: n, text: line, cells, headers });
+      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, text: line, cells, headers });
       return;
     }
     const item = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
     if (item) {
       flush();
-      cur = { kind: 'item', section, key: item[1].replace(/\*\*/g, '').split(':')[0].trim(), line: n, text: item[1] };
+      // A label before a colon ("**Split size:** …") keys the item; without one it pairs by
+      // similarity, like a paragraph, so a comma edit isn't a removed rule.
+      const label = /^([^:\n]{1,60}):/.exec(item[1].replace(/\*\*/g, ''));
+      cur = { kind: 'item', section, sectionNo, key: label ? label[1].trim() : null, line: n, text: item[1] };
     } else if (cur && (cur.kind === 'para' || /^\s+\S/.test(line))) {
       cur.text += `\n${line}`;
     } else {
       flush();
-      cur = { kind: 'para', section, key: null, line: n, text: line };
+      cur = { kind: 'para', section, sectionNo, key: null, line: n, text: line };
     }
   });
   flush();
+  rules.headings = headings;
   return rules;
 };
 // Tokens that contain digits but aren't thresholds: issue refs, dates, versions, IDs such as
@@ -199,7 +207,18 @@ export const numbersOf = (text) => {
   for (const re of NOT_NUMBERS) t = t.replace(re, ' ');
   return thresholds(t);
 };
-const PROSE_HEADER = /why|reason|covers|what is checked|notes?/i;
+// A rule's numbers. In a table row each cell is read on its own, takes its column's direction
+// when its own words give none, and the ratchet "Today" cell is left to compareRule.
+const ruleNumbers = (r) => {
+  if (r.kind !== 'row') return numbersOf(r.text);
+  return r.cells.flatMap((c, i) => {
+    const h = r.headers[i] ?? '';
+    if (/^today$/i.test(h)) return [];
+    const dir = MAX_HEADER.test(h) ? 'max' : null;
+    return numbersOf(c).map((x) => ({ ...x, dir: x.dir ?? dir }));
+  });
+};
+const PROSE_HEADER =/why|reason|covers|what is checked|notes?/i;
 // Numbers are judged by direction (compareNumbers), so list items compare with them masked.
 const norm = (s) => s.replace(/[`*]/g, '').replace(/\d+(\.\d+)*/g, 'N').replace(/\s+/g, ' ').replace(/[.:]+$/, '').trim().toLowerCase();
 const ticks = (t) => new Set([...t.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
@@ -230,7 +249,10 @@ const similarity = (a, b) => {
 const MIN_BEFORE = /(>=|>|≥|at least|minimum|\bmin\b|no less than|not fall|not drop)\s*$/;
 const MAX_BEFORE = /(<=|<|≤|at most|maximum|\bmax\b|no more than|under|below|not grow|not exceed|within)\s*$/;
 const MIN_AFTER = /^\s*\S*\s*(or more|or higher|must not fall|must not drop)/;
-const MAX_AFTER = /^\s*\S*\s*(or less|or lower|must not grow|must not exceed)/;
+// "400 changed lines" (the split size) and "0.5 points" (a ratchet's tolerance) are caps.
+const MAX_AFTER = /^\s*\S*\s*(or less|or lower|must not grow|must not exceed|changed lines|points?\b)/;
+// A table column whose numbers are caps even without direction words.
+const MAX_HEADER = /^(tolerance|budget|limit)$/i;
 const thresholds = (t) => {
   const out = [];
   const re = /\d+(?:\.\d+)?/g;
@@ -264,9 +286,8 @@ const compareNumbers = (was, now) => {
 // The verdict for one rule that changed, or null when it only got stricter or was reworded
 // without dropping a number, a listed item, a stage or a severity.
 const compareRule = (old, now) => {
-  // A ratchet's "Today" cell: "not yet" → a number is its first value; after that it holds.
-  const textOf = (r) => (r.kind === 'row' && cellOf(r, 'today') !== null ? r.cells.filter((_, i) => !/^today$/i.test(r.headers[i] ?? '')).join(' | ') : r.text);
-  const verdict = compareNumbers(numbersOf(textOf(old)), numbersOf(textOf(now)));
+  // A ratchet's "Today" cell is judged on its own below: "not yet" → a number is its first value.
+  const verdict = compareNumbers(ruleNumbers(old), ruleNumbers(now));
   if (verdict) return verdict;
   if (old.kind === 'row' && cellOf(old, 'today') !== null) {
     const was = numbersOf(cellOf(old, 'today'))[0];
@@ -288,23 +309,28 @@ const constraintsFindings = (f, mergeBase) => {
   const before = parseRules(oldContent(mergeBase, f.oldPath ?? f.path) ?? []);
   const after = parseRules(readFileSync(f.path, 'utf8').split('\n'));
   const isException = (r) => r.kind === 'row' && (/^E\d+$/.test(r.key) || r.key === '_none_');
-  const unchanged = new Set(after.map((r) => `${r.section}\0${r.text}`));
   const taken = new Set();
-  for (const old of before) {
+  // Pair unchanged rules first, so a changed rule can't pair with one of them.
+  const pending = before.filter((old) => {
+    const same = after.find((r) => !taken.has(r) && r.section === old.section && r.text === old.text);
+    if (same) taken.add(same);
+    return !same;
+  });
+  for (const old of pending) {
     // Dropping an exception, or the table's `_none_` placeholder, tightens: silent.
-    if (isException(old) || unchanged.has(`${old.section}\0${old.text}`)) continue;
-    let now;
-    if (old.kind === 'para') {
+    if (isException(old)) continue;
+    const candidates = after.filter((r) => !taken.has(r) && r.kind === old.kind && r.section === old.section);
+    // Same key first; otherwise the most similar rule of the same kind (a reworded paragraph, an
+    // item without a label, or one whose label changed).
+    let now = old.key === null ? undefined : candidates.find((r) => r.key === old.key);
+    if (!now) {
       let best = 0.5;
-      for (const r of after) {
-        if (r.kind !== 'para' || r.section !== old.section || taken.has(r)) continue;
+      for (const r of candidates) {
         const s = similarity(old.text, r.text);
         if (s >= best) [best, now] = [s, r];
       }
-    } else {
-      now = after.find((r) => r.kind === old.kind && r.section === old.section && r.key === old.key && !taken.has(r));
     }
-    const key = old.key ?? `paragraph in "${old.section}"`;
+    const key = old.key ?? `${old.kind === 'item' ? 'list item' : 'paragraph'} in "${old.section}"`;
     if (!now) {
       out.push({ rule: 'rule-removed', line: `${old.line} (old)`, key });
       continue;
@@ -402,7 +428,12 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.
   // Rows come from the parsed Exceptions table only, never from raw diff lines, so a row-shaped
   // line in a code fence, a comment or another table can't waive anything.
-  const exceptionRows = (lines) => parseRules(lines).filter((r) => r.kind === 'row' && r.section === 'Exceptions' && /^E\d+$/.test(r.key));
+  // Only the first level-2 `## Exceptions` heading counts; a later or deeper one is ignored.
+  const exceptionRows = (lines) => {
+    const rules = parseRules(lines);
+    const no = rules.headings.find((h) => h.level === 2 && h.title === 'Exceptions')?.no;
+    return no ? rules.filter((r) => r.kind === 'row' && r.sectionNo === no && /^E\d+$/.test(r.key)) : [];
+  };
   const constraints = changes.find((f) => isConstraints(f.path));
   const rowsNow = exceptionRows(constraintsNow.split('\n'));
   const rowsBefore = new Set(constraints ? exceptionRows(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? []).map((r) => r.text.trim()) : rowsNow.map((r) => r.text.trim()));

@@ -254,6 +254,48 @@ describe('floor guard, end to end', () => {
       expect(r.out).toContain(`[${rule}] CONSTRAINTS.md`);
     });
 
+    // Re-review of #97: tightenings with no direction words, and a comma-only edit.
+    it.each([
+      ['the split size lowered in the interview record', '- **Split size:** 400 changed lines', '- **Split size:** 300 changed lines'],
+      ['the ratchet tolerance lowered', '| must not fall | 0.5 points |', '| must not fall | 0.2 points |'],
+      ['a comma removed from an unlabelled list item', '- **Every failing check blocks the merge**, except', '- **Every failing check blocks the merge** except'],
+    ])('stays silent for %s', (_, from, to) => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, from, to) });
+      expect(guard()).toMatchObject({ code: 0 });
+    });
+
+    it.each([
+      ['the split size raised in the interview record', '- **Split size:** 400 changed lines', '- **Split size:** 500 changed lines'],
+      ['the ratchet tolerance raised', '| must not fall | 0.5 points |', '| must not fall | 1 points |'],
+    ])('blocks %s', (_, from, to) => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, from, to) });
+      expect(guard().out).toContain('[threshold-loosened] CONSTRAINTS.md');
+    });
+
+    // Re-review of #97: a second Exceptions table smuggled in under another heading.
+    it.each([
+      ['a level-3 Exceptions heading', '###'],
+      ['a second level-2 Exceptions heading', '##'],
+    ])('ignores an exception row under %s', (_, hashes) => {
+      realRepo();
+      repo.write({
+        'packages/sim/src/a.ts': '// @ts-ignore\n',
+        'CONSTRAINTS.md': `${REAL}\n${hashes} Exceptions\n\n| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n${row('E1', 'packages/sim/src/a.ts', '2026-11-30')}\n`,
+      });
+      const r = guard();
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('[silenced-checker] packages/sim/src/a.ts');
+      expect(r.out).not.toContain('waived by');
+    });
+
+    it('waives through the real Exceptions table', () => {
+      realRepo();
+      repo.write({ 'packages/sim/src/a.ts': '// @ts-ignore\n', 'CONSTRAINTS.md': edit(REAL, '| _none_ | | | | | |', row('E1', 'packages/sim/src/a.ts', '2026-11-30')) });
+      expect(guard().out).toContain('waived by E1');
+    });
+
     it('is clean when unchanged, and when only an issue reference changes', () => {
       realRepo();
       expect(guard().code).toBe(0);
