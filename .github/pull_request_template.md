@@ -1,7 +1,7 @@
 <!-- Title: <type>(<scope>): <summary>, e.g. feat(sim): ripen crops by elapsed time.
      The title and this body become the commit on main. -->
 
-Closes #
+Closes # <!-- or "Part of #N" for an earlier part of a split; the last part says Closes -->
 
 ## What and why
 

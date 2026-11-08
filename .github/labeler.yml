@@ -39,6 +39,24 @@
           - ".nvmrc"
           - ".gitignore"
           - ".env.example"
+          # Root tool configs that CODEOWNERS owns (admin, 8 Nov). The same names inside
+          # apps/web/ or packages/<name>/ take that package's area.
+          - "**/.gitattributes"
+          - "tsconfig*.json"
+          - "eslint.config.*"
+          - "vitest.config.*"
+          - "stryker.conf*"
+          - "stryker.config.*"
+          - "lighthouserc.*"
+          - ".lighthouserc.*"
+          - ".gitleaks.toml"
+          - ".gitleaksignore"
+          - "osv-scanner.toml"
+          - ".semgrepignore"
+          - ".fallowrc.json"
+          - ".fallowrc.jsonc"
+          - "fallow.toml"
+          - ".fallow.toml"
 
 "area:tools":     # all dev tooling: tools/, scripts/, .claude/, .agents/
   - changed-files:
