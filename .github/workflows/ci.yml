@@ -53,3 +53,19 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm test
       - run: node .github/scripts/coverage-gate.mjs --base "origin/$BASE_REF"
+
+  floor:
+    name: guard / floor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the guard diffs against the merge base
+      - uses: ./.github/actions/setup
+        with:
+          install: 'false' # the guard uses only Node and git
+      - run: node .github/scripts/floor-guard.mjs --base "origin/$BASE_REF"

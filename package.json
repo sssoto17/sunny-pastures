@@ -16,10 +16,11 @@
     "lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
     "test": "vitest run --coverage",
     "test:related": "vitest run --changed origin/main --coverage",
+    "guard:floor": "node .github/scripts/floor-guard.mjs",
     "coverage:gate": "node .github/scripts/coverage-gate.mjs",
-    "check:fast": "pnpm typecheck && pnpm lint:changed",
+    "check:fast": "pnpm typecheck && pnpm lint:changed && pnpm guard:floor",
     "check:task": "pnpm check:fast && pnpm test:related && pnpm coverage:gate",
-    "check:full": "pnpm typecheck && pnpm lint && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate"
+    "check:full": "pnpm typecheck && pnpm lint && pnpm guard:floor && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
