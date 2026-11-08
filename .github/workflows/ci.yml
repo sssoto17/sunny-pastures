@@ -1,0 +1,52 @@
+# The checks every PR runs (CONSTRAINTS.md, "Enforced with numbers" and "Floor"; #40).
+# Required checks are matched by job name, so each `name:` is exactly the check name in
+# ADR-0002, area 2. No path filters: a required check must report on every PR.
+# Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
+name: ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: ci / typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm typecheck
+
+  lint:
+    name: ci / lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm lint
+
+  test:
+    name: ci / test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # CONSTRAINTS.md, Stages: CI runs larger property runs. Local runs leave it unset (100).
+      SIM_PROPERTY_RUNS: '1000'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm test

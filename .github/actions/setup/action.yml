@@ -1,0 +1,21 @@
+name: setup
+description: Node from .nvmrc, pnpm through Corepack (pinned in package.json), and a frozen install.
+inputs:
+  install:
+    description: Run pnpm install --frozen-lockfile.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+    - name: Enable Corepack
+      shell: bash
+      run: corepack enable
+    - name: Install
+      if: inputs.install == 'true'
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+      run: pnpm install --frozen-lockfile

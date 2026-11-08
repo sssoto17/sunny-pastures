@@ -1,0 +1,10 @@
+{
+  "//": "Typechecks the root tool configs, so `tsc -b` has work before the first package exists.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "emitDeclarationOnly": true,
+    "sourceMap": false,
+    "outDir": "node_modules/.cache/tsc/tools"
+  },
+  "include": ["vitest.config.mts"]
+}

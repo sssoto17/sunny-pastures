@@ -10,6 +10,22 @@
     "supabase:check": "v=$(supabase --version 2>/dev/null); [ \"$v\" = 2.122.0 ] || { echo \"Supabase CLI 2.122.0 required, found: ${v:-none}\" >&2; exit 1; }",
     "db:start": "supabase/db.sh start",
     "db:status": "supabase/db.sh status",
-    "db:env": "supabase/db.sh env"
+    "db:env": "supabase/db.sh env",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
+    "test": "vitest run --coverage",
+    "test:related": "vitest run --changed origin/main --coverage",
+    "check:fast": "pnpm typecheck && pnpm lint:changed",
+    "check:task": "pnpm check:fast && pnpm test:related",
+    "check:full": "pnpm typecheck && pnpm lint && SIM_PROPERTY_RUNS=1000 pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@vitest/coverage-v8": "5.0.5",
+    "eslint": "10.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.0.5"
   }
 }
