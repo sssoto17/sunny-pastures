@@ -8,9 +8,11 @@
 //   - tightening is silent, loosening is loud.
 //
 // Usage: node .github/scripts/floor-guard.mjs [--base <ref>]   (default base: origin/main)
+// FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date (tests only).
 //
-// This part scans the changed lines. Changes to CONSTRAINTS.md itself, and the Exceptions rows
-// that let a weakened bar through, come in the next part of #40.
+// A weakened bar (silenced checker, easier test, moved threshold, loosened tool config) passes
+// only when the same PR adds an Exceptions row to CONSTRAINTS.md whose Path covers the file.
+// Unfinished work and invalid or expired exceptions always fail.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -19,6 +21,8 @@ import { CannotRun, baseArg, enterRepo, oldContent, readChange } from './diff.mj
 // This file and its tests spell out every pattern they look for, so the line scans skip them.
 // Both sit under .github/, which is code-owned (ADR-0002, appendix A3).
 const SELF = new Set(['.github/scripts/floor-guard.mjs', '.github/scripts/floor-guard.test.mjs']);
+const FREEZE = '2026-12-20'; // CONSTRAINTS.md, Exceptions: never past the feature freeze
+const MAX_EXCEPTION_DAYS = 30;
 
 // CONSTRAINTS.md, Floor: the suppression comments.
 const SUPPRESSIONS =
@@ -36,6 +40,7 @@ const STRICT_KEYS =
 
 const isTest = (f) => /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests)\//.test(f);
 const isProse = (f) => /\.(md|mdx|txt)$/i.test(f);
+const isConstraints = (f) => f === 'CONSTRAINTS.md';
 
 // The key of the array a line sits in (`exclude: [`, `"exclude": [`), or null.
 export const enclosingKey = (lines, n) => {
@@ -102,8 +107,99 @@ const configLoosening = (f, mergeBase) => {
   return hits;
 };
 
-export const guard = (changes, { mergeBase }) => {
-  const findings = []; // { rule, file, line, waivable }
+// CONSTRAINTS.md rules. A rule is a floor bullet (its text before the first colon) or a table row
+// (its first cell). Numbers carry a direction read from the words around them; see the reference.
+const ruleKey = (t) => {
+  const s = t.trim();
+  if (s.startsWith('|')) return s.split('|').map((c) => c.trim()).filter(Boolean)[0] ?? null;
+  if (/^[-*] /.test(s)) return s.slice(2).split(':')[0].trim();
+  return null;
+};
+const EXCEPTION_ROW = /^\|\s*E\d+\s*\|/;
+const MIN_BEFORE = /(>=|>|≥|at least|minimum|\bmin\b|no less than|not fall|not drop)\s*$/;
+const MAX_BEFORE = /(<=|<|≤|at most|maximum|\bmax\b|no more than|under|below|not grow|not exceed|within)\s*$/;
+const MIN_AFTER = /^\s*\S*\s*(or more|or higher|must not fall|must not drop)/;
+const MAX_AFTER = /^\s*\S*\s*(or less|or lower|must not grow|must not exceed)/;
+const thresholds = (t) => {
+  const out = [];
+  const re = /\d+(?:\.\d+)?/g;
+  let m;
+  while ((m = re.exec(t))) {
+    const before = t.slice(Math.max(0, m.index - 24), m.index).toLowerCase();
+    const after = t.slice(m.index + m[0].length, m.index + m[0].length + 40).toLowerCase();
+    const dir = MIN_BEFORE.test(before) || MIN_AFTER.test(after) ? 'min' : MAX_BEFORE.test(before) || MAX_AFTER.test(after) ? 'max' : null;
+    out.push({ n: Number(m[0]), dir });
+  }
+  return out;
+};
+const STAGE_CELL = /^(edit|task end|ci|preview|gate)(\s*,\s*(edit|task end|ci|preview|gate))*$/i;
+const stages = (t) =>
+  new Set(t.split('|').map((c) => c.trim()).filter((c) => STAGE_CELL.test(c)).flatMap((c) => c.toLowerCase().split(/\s*,\s*/)));
+const WEAKER_SEVERITY = /_\(warn\)_|\(not required\)/;
+
+const constraintsFindings = (f) => {
+  const out = [];
+  const removed = f.removed.filter((l) => ruleKey(l.text) !== null);
+  const added = f.added.filter((l) => ruleKey(l.text) !== null);
+  for (const r of removed) {
+    const key = ruleKey(r.text);
+    const a = added.find((x) => ruleKey(x.text) === key);
+    if (!a) {
+      // Dropping an exception, or the table's `_none_` placeholder, tightens: silent.
+      if (!EXCEPTION_ROW.test(r.text.trim()) && key !== '_none_') out.push({ rule: 'rule-removed', line: `${r.line} (old)`, key });
+      continue;
+    }
+    const before = thresholds(r.text);
+    const after = thresholds(a.text);
+    let verdict = null;
+    for (const dir of ['min', 'max', null]) {
+      const was = before.filter((x) => x.dir === dir);
+      const now = after.filter((x) => x.dir === dir);
+      was.forEach((b, i) => {
+        const n = now[i];
+        if (verdict) return;
+        if (!n) verdict = 'threshold-removed';
+        else if (n.n === b.n) return;
+        else if (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : true) verdict = dir ? 'threshold-loosened' : 'threshold-changed';
+      });
+    }
+    if (!verdict && WEAKER_SEVERITY.test(a.text) && !WEAKER_SEVERITY.test(r.text)) verdict = 'severity-dropped';
+    const nowStages = stages(a.text);
+    if (!verdict && [...stages(r.text)].some((s) => !nowStages.has(s))) verdict = 'stage-moved';
+    if (verdict) out.push({ rule: verdict, line: a.line, key });
+  }
+  return out;
+};
+
+// Exceptions rows: | ID | Rule | Path | Reason | Owner | Expires |
+const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+export const parseDate = (s) => {
+  const t = s.replace(/[`*_]/g, '').trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  if (m) return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  m = /^(\d{1,2}) ([A-Za-z]{3})[a-z]* (\d{4})$/.exec(t);
+  const month = m ? MONTHS[m[2].toLowerCase()] : undefined;
+  if (m && month !== undefined) return Date.UTC(Number(m[3]), month, Number(m[1]));
+  return null;
+};
+export const parseException = (text) => {
+  const cells = text.trim().split('|').slice(1, -1).map((c) => c.trim());
+  return { id: cells[0], path: (cells[2] ?? '').replace(/`/g, ''), expires: parseDate(cells[5] ?? '') };
+};
+export const globToRegExp = (glob) =>
+  new RegExp(
+    '^' +
+      glob
+        .split(/(\*\*\/?|\*)/)
+        .map((p) => (p.startsWith('**') ? '.*' : p === '*' ? '[^/]*' : p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')))
+        .join('') +
+      (glob.endsWith('/') ? '.*' : '') +
+      '$',
+  );
+
+export const guard = (changes, { mergeBase, today, constraintsNow }) => {
+  const findings = []; // { rule, file, line, key?, waivable }
+  const notices = [];
   const push = (waivable) => (rule, file, line, key) => findings.push({ rule, file, line, key, waivable });
   const weak = push(true);
   const always = push(false);
@@ -134,19 +230,58 @@ export const guard = (changes, { mergeBase }) => {
       if (now && Number(now[2]) < Number(was[2])) weak('property-runs-cut', f.path, `${r.line} (old)`);
     }
     for (const line of configLoosening(f, mergeBase)) weak('config-loosened', f.path, line);
+    if (isConstraints(f.path)) {
+      for (const c of constraintsFindings(f)) weak(c.rule, f.path, c.line, c.key);
+    }
   }
 
-  return { blocking: findings, notices: [] };
+  // Exceptions: added rows waive weak findings on their path; every row must still be valid.
+  const constraints = changes.find((f) => isConstraints(f.path));
+  const addedRows = (constraints?.added ?? []).filter((a) => EXCEPTION_ROW.test(a.text.trim()));
+  const waivers = [];
+  const latest = Math.min(today + MAX_EXCEPTION_DAYS * 864e5, Date.parse(FREEZE));
+  for (const a of addedRows) {
+    const e = parseException(a.text);
+    if (e.expires === null || !e.path) always('exception-invalid', 'CONSTRAINTS.md', a.line, e.id);
+    else if (e.expires > latest) always('exception-too-long', 'CONSTRAINTS.md', a.line, e.id);
+    else {
+      waivers.push({ ...e, re: globToRegExp(e.path) });
+      notices.push(`new exception ${e.id} on ${e.path}`);
+    }
+  }
+  constraintsNow.split('\n').forEach((text, i) => {
+    if (!EXCEPTION_ROW.test(text.trim())) return;
+    const e = parseException(text);
+    if (e.expires !== null && e.expires < today) always('exception-expired', 'CONSTRAINTS.md', i + 1, e.id);
+  });
+  const blocking = [];
+  for (const f of findings) {
+    const w = f.waivable && waivers.find((x) => x.re.test(f.file));
+    if (w) notices.push(`${f.rule} at ${f.file}:${f.line} waived by ${w.id}`);
+    else blocking.push(f);
+  }
+  return { blocking, notices };
 };
 
 const HINTS = {
+  'rule-removed': "A rule-removed finding can also mean the rule's label changed: rename a rule in one commit and change its thresholds in another.",
+  'threshold-removed': 'A threshold-removed finding can also mean a number lost its direction words (">= 80%" becoming "80%"): compare the two lines.',
   'config-loosened': 'A tool config was loosened (CONSTRAINTS.md, Floor, last bullet).',
 };
 
 const main = () => {
   const mergeBase = enterRepo(baseArg(process.argv));
   const changes = readChange(mergeBase);
-  const { blocking, notices } = guard(changes, { mergeBase });
+  const todayEnv = process.env.FLOOR_GUARD_TODAY;
+  const today = todayEnv ? parseDate(todayEnv) : Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
+  if (today === null) throw new CannotRun('FLOOR_GUARD_TODAY is not a YYYY-MM-DD date');
+  let constraintsNow;
+  try {
+    constraintsNow = readFileSync('CONSTRAINTS.md', 'utf8');
+  } catch {
+    throw new CannotRun('CONSTRAINTS.md is missing');
+  }
+  const { blocking, notices } = guard(changes, { mergeBase, today, constraintsNow });
   for (const n of notices) console.log(`floor-guard: note: ${n}`);
   if (blocking.length === 0) {
     console.log('floor-guard: clean');
@@ -155,7 +290,8 @@ const main = () => {
   console.error(`floor-guard: ${blocking.length} floor violation(s):`);
   for (const f of blocking) console.error(`  [${f.rule}] ${f.file}:${f.line}${f.key ? ` (rule "${f.key}")` : ''}`);
   for (const rule of new Set(blocking.map((f) => f.rule))) if (HINTS[rule]) console.error(`\n${HINTS[rule]}`);
-  console.error('\nEach lowers the bar. Fix the code.');
+  console.error('\nEach lowers the bar. Fix the code, or add an Exceptions row to CONSTRAINTS.md in this PR (admin approval).');
+  console.error('Unfinished work and invalid or expired exceptions can never be waived.');
   return 1;
 };
 

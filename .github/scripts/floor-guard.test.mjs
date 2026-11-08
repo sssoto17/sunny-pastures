@@ -2,7 +2,7 @@ import { rmSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { enclosingKey } from './floor-guard.mjs';
+import { enclosingKey, globToRegExp, parseDate } from './floor-guard.mjs';
 import { makeRepo } from './test-repo.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./floor-guard.mjs', import.meta.url));
@@ -31,6 +31,8 @@ const BASE = {
   'tsconfig.base.json': '{\n  "compilerOptions": {\n    "strict": true\n  }\n}\n',
   'vitest.config.mts': "export default {\n  test: {\n    coverage: {\n      exclude: [\n        '**/*.test.ts',\n      ],\n    },\n  },\n};\n",
 };
+const row = (id, path, expires) => `| ${id} | silenced checker | \`${path}\` | reason | Soto | ${expires} |`;
+const withException = (r) => CONSTRAINTS.replace('| _none_ | | | | | |', r);
 
 let repo;
 afterEach(() => repo?.cleanup());
@@ -116,8 +118,28 @@ describe('floor guard, end to end', () => {
     ['an empty multi-line catch', 'try {\n  f();\n} catch (e) {\n}\n'],
   ])('always blocks %s', (_, code) => {
     setup();
-    repo.write({ 'packages/sim/src/s.ts': code });
+    repo.write({ 'packages/sim/src/s.ts': code, 'CONSTRAINTS.md': withException(row('E1', 'packages/sim/**', '2026-11-20')) });
     expect(guard().out).toContain('[unfinished-work]');
+  });
+
+  it.each([
+    ['a lowered minimum', ['≥ 90%', '≥ 80%'], 'threshold-loosened'],
+    ['a raised maximum', ['≤ 50 ms', '≤ 80 ms'], 'threshold-loosened'],
+    ['a removed rule', ['| Mutation | Score ≥ 60% | CI | `ci / mutation` |\n', ''], 'rule-removed'],
+    ['a dropped severity', ['Score ≥ 60% |', 'Score ≥ 60% _(warn)_ |'], 'severity-dropped'],
+    ['a check moved to a later stage', ['≤ 50 ms | task end, CI', '≤ 50 ms | CI'], 'stage-moved'],
+  ])('blocks %s in CONSTRAINTS.md', (_, [from, to], rule) => {
+    setup();
+    repo.write({ 'CONSTRAINTS.md': CONSTRAINTS.replace(from, to) });
+    const r = guard();
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`[${rule}] CONSTRAINTS.md`);
+  });
+
+  it('stays silent when CONSTRAINTS.md is tightened', () => {
+    setup();
+    repo.write({ 'CONSTRAINTS.md': CONSTRAINTS.replace('≥ 90%', '≥ 95%').replace('≤ 50 ms', '≤ 40 ms') });
+    expect(guard().code).toBe(0);
   });
 
   it.each([
@@ -142,6 +164,43 @@ describe('floor guard, end to end', () => {
     expect(guard().code).toBe(0);
   });
 
+  it('waives a weakened bar when the same change adds an Exceptions row for its path', () => {
+    setup();
+    repo.write({
+      'packages/sim/src/a.ts': '// @ts-expect-error legacy\n',
+      'CONSTRAINTS.md': withException(row('E1', 'packages/sim/src/a.ts', '2026-11-30')),
+    });
+    const r = guard();
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('waived by E1');
+  });
+
+  it('does not waive a finding outside the row\'s path', () => {
+    setup();
+    repo.write({
+      'packages/sim/src/a.ts': '// @ts-expect-error legacy\n',
+      'CONSTRAINTS.md': withException(row('E1', 'apps/web/**', '2026-11-30')),
+    });
+    expect(guard().code).toBe(1);
+  });
+
+  it('blocks an exception that runs too long or past the freeze, or has no date', () => {
+    setup();
+    repo.write({ 'CONSTRAINTS.md': withException(row('E1', 'x', '2026-12-15')) });
+    expect(guard().out).toContain('[exception-too-long]'); // more than 30 days after 10 Nov
+    repo.write({ 'CONSTRAINTS.md': withException(row('E1', 'x', '2026-12-21')) });
+    expect(guard({ FLOOR_GUARD_TODAY: '2026-12-01' }).out).toContain('[exception-too-long]');
+    repo.write({ 'CONSTRAINTS.md': withException(row('E1', 'x', 'soon')) });
+    expect(guard().out).toContain('[exception-invalid]');
+  });
+
+  it('fails every change once an Exceptions row has expired', () => {
+    repo = makeRepo({ ...BASE, 'CONSTRAINTS.md': withException(row('E1', 'x', '20 Nov 2026')) });
+    expect(guard().code).toBe(0);
+    const r = guard({ FLOOR_GUARD_TODAY: '2026-11-21' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('[exception-expired] CONSTRAINTS.md');
+  });
 });
 
 describe('floor guard helpers', () => {
@@ -153,4 +212,17 @@ describe('floor guard helpers', () => {
     expect(enclosingKey(lines, 8)).toBe(null);
   });
 
+  it('matches exception paths as globs', () => {
+    expect(globToRegExp('packages/sim/**').test('packages/sim/src/a.ts')).toBe(true);
+    expect(globToRegExp('packages/*/src/a.ts').test('packages/sim/src/a.ts')).toBe(true);
+    expect(globToRegExp('packages/*/a.ts').test('packages/sim/src/a.ts')).toBe(false);
+    expect(globToRegExp('packages/sim/').test('packages/sim/src/a.ts')).toBe(true);
+    expect(globToRegExp('a.ts').test('b/a.ts')).toBe(false);
+  });
+
+  it('reads ISO and written dates', () => {
+    expect(parseDate('2026-12-20')).toBe(Date.UTC(2026, 11, 20));
+    expect(parseDate('20 Dec 2026')).toBe(Date.UTC(2026, 11, 20));
+    expect(parseDate('next week')).toBe(null);
+  });
 });
