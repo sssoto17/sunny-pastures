@@ -230,6 +230,48 @@ describe('floor guard, end to end', () => {
     expect(guard().code).toBe(0);
   });
 
+  // The cases the stack review of #94–#97 found passing clean, run against the real file.
+  describe('the real CONSTRAINTS.md', () => {
+    const REAL = readFileSync(fileURLToPath(new URL('../../CONSTRAINTS.md', import.meta.url)), 'utf8');
+    const edit = (text, from, to) => {
+      if (!text.includes(from)) throw new Error(`CONSTRAINTS.md no longer contains: ${from}`);
+      return text.replace(from, to);
+    };
+    const realRepo = (text = REAL) => (repo = makeRepo({ 'CONSTRAINTS.md': text }));
+
+    it.each([
+      ['the split size raised in a paragraph', 'at most **400 changed lines**', 'at most **800 changed lines**', 'threshold-loosened'],
+      ['the exception limit raised in a paragraph', 'no more than 30 days out', 'no more than 90 days out', 'threshold-loosened'],
+      ['a suppression dropped from a continuation line', '`fallow-ignore-next-line`, `fallow-ignore-file`, ', '', 'rule-narrowed'],
+      ['the floor guard dropped from a stage', 'lint on changed files, floor guard, boundaries', 'lint on changed files, boundaries', 'rule-narrowed'],
+    ])('blocks %s', (_, from, to, rule) => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, from, to) });
+      const r = guard();
+      expect(r.code).toBe(1);
+      expect(r.out).toContain(`[${rule}] CONSTRAINTS.md`);
+    });
+
+    it('is clean when unchanged, and when only an issue reference changes', () => {
+      realRepo();
+      expect(guard().code).toBe(0);
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, '| Types | 0 type errors | Any error is a bug or a lie | `tsc -b` (incremental) | edit, CI | `ci / typecheck` | #40 |', '| Types | 0 type errors | Any error is a bug or a lie | `tsc -b` (incremental) | edit, CI | `ci / typecheck` | #41 |') });
+      expect(guard().code).toBe(0);
+    });
+
+    const NOT_YET = 'not yet: recorded after the first `packages/sim` PR';
+    it('lets the coverage ratchet get its first value, then holds it', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, NOT_YET, '92.5%') });
+      expect(guard().code).toBe(0);
+      realRepo(edit(REAL, NOT_YET, '92.5%'));
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, NOT_YET, '90%') });
+      expect(guard().out).toContain('[threshold-loosened] CONSTRAINTS.md');
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, NOT_YET, '93%') });
+      expect(guard().code).toBe(0);
+    });
+  });
+
   it.each([
     ['a strict option turned off', 'tsconfig.base.json', '{\n  "compilerOptions": {\n    "strict": false\n  }\n}\n'],
     ['a strict option removed', 'tsconfig.base.json', '{\n  "compilerOptions": {\n  }\n}\n'],

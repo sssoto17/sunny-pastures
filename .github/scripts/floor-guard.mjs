@@ -122,13 +122,103 @@ const configLoosening = (f, mergeBase) => {
   return hits;
 };
 
-// CONSTRAINTS.md rules. A rule is a floor bullet (its text before the first colon) or a table row
-// (its first cell). Numbers carry a direction read from the words around them; see the reference.
-const ruleKey = (t) => {
-  const s = t.trim();
-  if (s.startsWith('|')) return s.split('|').map((c) => c.trim()).filter(Boolean)[0] ?? null;
-  if (/^[-*] /.test(s)) return s.slice(2).split(':')[0].trim();
-  return null;
+// CONSTRAINTS.md rules. The file is compared as a whole, before and after: every table row, list
+// item (with its continuation lines) and paragraph is a rule. Rows and list items pair by section
+// and key (first cell, or the text before the first colon); paragraphs pair with the most similar
+// paragraph in the same section. Numbers carry a direction read from the words around them.
+export const parseRules = (lines) => {
+  const rules = [];
+  let section = '';
+  let headers = null;
+  let cur = null;
+  let fence = false;
+  const flush = () => {
+    if (cur) rules.push(cur);
+    cur = null;
+  };
+  lines.forEach((line = '', i) => {
+    const n = i + 1;
+    if (/^\s*```/.test(line)) {
+      flush();
+      fence = !fence;
+      return;
+    }
+    if (fence) return;
+    if (/^#{1,6} /.test(line)) {
+      flush();
+      headers = null;
+      section = line.replace(/^#+\s*/, '').trim();
+      return;
+    }
+    if (!line.trim()) {
+      flush();
+      headers = null;
+      return;
+    }
+    if (line.trim().startsWith('|')) {
+      flush();
+      const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+      if (cells.every((c) => /^:?-+:?$/.test(c))) return;
+      if (!headers) headers = cells;
+      else rules.push({ kind: 'row', section, key: cells[0], line: n, text: line, cells, headers });
+      return;
+    }
+    const item = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
+    if (item) {
+      flush();
+      cur = { kind: 'item', section, key: item[1].replace(/\*\*/g, '').split(':')[0].trim(), line: n, text: item[1] };
+    } else if (cur && (cur.kind === 'para' || /^\s+\S/.test(line))) {
+      cur.text += `\n${line}`;
+    } else {
+      flush();
+      cur = { kind: 'para', section, key: null, line: n, text: line };
+    }
+  });
+  flush();
+  return rules;
+};
+// Tokens that contain digits but aren't thresholds: issue refs, dates, versions, IDs such as
+// MUST-10.1, BASE-04, E1, v8 or p95, and link targets.
+const NOT_NUMBERS = [
+  /\(https?:[^)]*\)|https?:\/\/\S+/g,
+  /#\d+/g,
+  /\b\d{4}-\d{2}-\d{2}\b/g,
+  /\b\d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{4}\b/g,
+  /\b\d+(\.\d+){2,}\b/g,
+  /\b[A-Za-z][A-Za-z-]*\d[\w.-]*/g,
+];
+export const numbersOf = (text) => {
+  let t = text.replace(/\*\*/g, '').replace(/\s+/g, ' ');
+  for (const re of NOT_NUMBERS) t = t.replace(re, ' ');
+  return thresholds(t);
+};
+const PROSE_HEADER = /why|reason|covers|what is checked|notes?/i;
+// Numbers are judged by direction (compareNumbers), so list items compare with them masked.
+const norm = (s) => s.replace(/[`*]/g, '').replace(/\d+(\.\d+)*/g, 'N').replace(/\s+/g, ' ').replace(/[.:]+$/, '').trim().toLowerCase();
+const ticks = (t) => new Set([...t.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+// What a rule lists: backticked tokens, plus the comma-separated items of a table's list cells.
+const listed = (r) => {
+  if (r.kind !== 'row') return new Set(ticks(r.text));
+  const out = new Set();
+  r.cells.forEach((c, i) => {
+    const h = r.headers[i] ?? '';
+    if (i === 0 || PROSE_HEADER.test(h) || /^today$/i.test(h)) return;
+    for (const t of ticks(c)) out.add(`\`${norm(t)}\``);
+    for (const item of c.split(/[,;]/)) if (norm(item)) out.add(norm(item));
+  });
+  return out;
+};
+const cellOf = (r, header) => {
+  const i = r.headers?.findIndex((h) => new RegExp(`^${header}$`, 'i').test(h)) ?? -1;
+  return i > -1 ? r.cells[i] ?? '' : null;
+};
+const words = (t) => new Set(t.toLowerCase().match(/[a-z]{3,}/g) ?? []);
+const similarity = (a, b) => {
+  const A = words(a);
+  const B = words(b);
+  let shared = 0;
+  for (const w of A) if (B.has(w)) shared++;
+  return shared / Math.max(1, A.size + B.size - shared);
 };
 const EXCEPTION_ROW = /^\|\s*E\d+\s*\|/;
 const MIN_BEFORE = /(>=|>|≥|at least|minimum|\bmin\b|no less than|not fall|not drop)\s*$/;
@@ -152,36 +242,70 @@ const stages = (t) =>
   new Set(t.split('|').map((c) => c.trim()).filter((c) => STAGE_CELL.test(c)).flatMap((c) => c.toLowerCase().split(/\s*,\s*/)));
 const WEAKER_SEVERITY = /_\(warn\)_|\(not required\)/;
 
-const constraintsFindings = (f) => {
+const compareNumbers = (was, now) => {
+  for (const dir of ['min', 'max', null]) {
+    const before = was.filter((x) => x.dir === dir);
+    const after = now.filter((x) => x.dir === dir);
+    for (const [i, b] of before.entries()) {
+      const n = after[i];
+      if (!n) return 'threshold-removed';
+      if (n.n !== b.n && (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : true)) return dir ? 'threshold-loosened' : 'threshold-changed';
+    }
+  }
+  return null;
+};
+
+// The verdict for one rule that changed, or null when it only got stricter or was reworded
+// without dropping a number, a listed item, a stage or a severity.
+const compareRule = (old, now) => {
+  // A ratchet's "Today" cell: "not yet" → a number is its first value; after that it holds.
+  const textOf = (r) => (r.kind === 'row' && cellOf(r, 'today') !== null ? r.cells.filter((_, i) => !/^today$/i.test(r.headers[i] ?? '')).join(' | ') : r.text);
+  const verdict = compareNumbers(numbersOf(textOf(old)), numbersOf(textOf(now)));
+  if (verdict) return verdict;
+  if (old.kind === 'row' && cellOf(old, 'today') !== null) {
+    const was = numbersOf(cellOf(old, 'today'))[0];
+    const is = numbersOf(cellOf(now, 'today') ?? '')[0];
+    const grows = /grow|exceed/i.test(cellOf(now, 'direction') ?? '');
+    if (was && !is) return 'threshold-removed';
+    if (was && is && (grows ? is.n > was.n : is.n < was.n)) return 'threshold-loosened';
+  }
+  if (WEAKER_SEVERITY.test(now.text) && !WEAKER_SEVERITY.test(old.text)) return 'severity-dropped';
+  const nowStages = stages(now.text);
+  if ([...stages(old.text)].some((s) => !nowStages.has(s))) return 'stage-moved';
+  const nowListed = listed(now);
+  if ([...listed(old)].some((x) => !nowListed.has(x))) return 'rule-narrowed';
+  return null;
+};
+
+const constraintsFindings = (f, mergeBase) => {
   const out = [];
-  const removed = f.removed.filter((l) => ruleKey(l.text) !== null);
-  const added = f.added.filter((l) => ruleKey(l.text) !== null);
-  for (const r of removed) {
-    const key = ruleKey(r.text);
-    const a = added.find((x) => ruleKey(x.text) === key);
-    if (!a) {
-      // Dropping an exception, or the table's `_none_` placeholder, tightens: silent.
-      if (!EXCEPTION_ROW.test(r.text.trim()) && key !== '_none_') out.push({ rule: 'rule-removed', line: `${r.line} (old)`, key });
+  const before = parseRules(oldContent(mergeBase, f.oldPath ?? f.path) ?? []);
+  const after = parseRules(readFileSync(f.path, 'utf8').split('\n'));
+  const isException = (r) => r.kind === 'row' && (/^E\d+$/.test(r.key) || r.key === '_none_');
+  const unchanged = new Set(after.map((r) => `${r.section}\0${r.text}`));
+  const taken = new Set();
+  for (const old of before) {
+    // Dropping an exception, or the table's `_none_` placeholder, tightens: silent.
+    if (isException(old) || unchanged.has(`${old.section}\0${old.text}`)) continue;
+    let now;
+    if (old.kind === 'para') {
+      let best = 0.5;
+      for (const r of after) {
+        if (r.kind !== 'para' || r.section !== old.section || taken.has(r)) continue;
+        const s = similarity(old.text, r.text);
+        if (s >= best) [best, now] = [s, r];
+      }
+    } else {
+      now = after.find((r) => r.kind === old.kind && r.section === old.section && r.key === old.key && !taken.has(r));
+    }
+    const key = old.key ?? `paragraph in "${old.section}"`;
+    if (!now) {
+      out.push({ rule: 'rule-removed', line: `${old.line} (old)`, key });
       continue;
     }
-    const before = thresholds(r.text);
-    const after = thresholds(a.text);
-    let verdict = null;
-    for (const dir of ['min', 'max', null]) {
-      const was = before.filter((x) => x.dir === dir);
-      const now = after.filter((x) => x.dir === dir);
-      was.forEach((b, i) => {
-        const n = now[i];
-        if (verdict) return;
-        if (!n) verdict = 'threshold-removed';
-        else if (n.n === b.n) return;
-        else if (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : true) verdict = dir ? 'threshold-loosened' : 'threshold-changed';
-      });
-    }
-    if (!verdict && WEAKER_SEVERITY.test(a.text) && !WEAKER_SEVERITY.test(r.text)) verdict = 'severity-dropped';
-    const nowStages = stages(a.text);
-    if (!verdict && [...stages(r.text)].some((s) => !nowStages.has(s))) verdict = 'stage-moved';
-    if (verdict) out.push({ rule: verdict, line: a.line, key });
+    taken.add(now);
+    const verdict = compareRule(old, now);
+    if (verdict) out.push({ rule: verdict, line: now.line, key });
   }
   return out;
 };
@@ -225,7 +349,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       continue;
     }
     if (isConstraints(f.path)) {
-      for (const c of constraintsFindings(f)) weak(c.rule, f.path, c.line, c.key);
+      for (const c of constraintsFindings(f, mergeBase)) weak(c.rule, f.path, c.line, c.key);
     }
     if (isProse(f.path)) continue;
     const byLine = new Map(f.added.map((a) => [a.line, a.text]));
@@ -300,6 +424,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
 const HINTS = {
   'rule-removed': "A rule-removed finding can also mean the rule's label changed: rename a rule in one commit and change its thresholds in another.",
   'threshold-removed': 'A threshold-removed finding can also mean a number lost its direction words (">= 80%" becoming "80%"): compare the two lines.',
+  'rule-narrowed': 'A rule-narrowed finding means a listed item (a backticked token, or an item in a table\'s list cell) is gone from the rule. A rewording that drops one counts too: keep the item, or route it through an exception.',
   'config-loosened': 'A tool config was loosened (CONSTRAINTS.md, Floor, last bullet).',
   'check-removed': 'A workflow step that runs a check was removed, or a job was allowed to fail.',
 };
