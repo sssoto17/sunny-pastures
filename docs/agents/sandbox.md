@@ -4,7 +4,7 @@ Claude Code runs each Bash command in its own sandbox (bubblewrap on WSL2). Each
 hit in this repo, and each comes with the way around it. Commands that need the host go outside
 the sandbox: say which restriction blocks them, then retry with the sandbox disabled.
 
-Last checked: 2026-11-07.
+Last checked: 2026-11-08.
 
 ## Must run outside the sandbox
 
@@ -24,8 +24,9 @@ Across commands, run both outside.
 Sandboxed commands can write `.git`: objects, refs, the index and `.git/worktrees`, including a
 worktree's shared `.git`. Only `.git/config` and `.git/hooks` are protected (checked 7 Nov with
 `test -w`, and by `git worktree add` run inside the sandbox). So `git add`, `commit`, `fetch`,
-`switch`, `merge`, `worktree add/remove` and `push` all run sandboxed. Don't add
-`dangerouslyDisableSandbox` to `git` or `gh`. These habits keep `.git/config` out of it:
+`switch`, `merge`, `worktree add` and `push` all run sandboxed. Don't add
+`dangerouslyDisableSandbox` to `git` or `gh`, except for the cases under "When git does need the
+host" below. These habits keep `.git/config` out of it:
 
 - Create worktrees without tracking: `git worktree add --no-track -b <branch>
   .claude/worktrees/<N>-<slug> origin/main`.
@@ -33,6 +34,29 @@ worktree's shared `.git`. Only `.git/config` and `.git/hooks` are protected (che
   an upstream.
 - Don't run `gh pr checkout` or `git remote set-url`. Read a PR's files with `git show
   origin/<branch>:<path>` or `gh api`.
+
+### When git does need the host
+
+Each case below was hit on 7 or 8 Nov. #77 (the post-merge script, still open) will handle the same cases.
+
+- **Updating the main folder when the change touches `.claude/settings.json`, hooks or skills**
+  (`git merge --ff-only`, `git pull`). Those paths are write-denied in the main folder, so git
+  updates the other files, then stops with "unable to unlink". That leaves a half-applied
+  checkout: `HEAD` hasn't moved, but the files it already wrote show as modified. Recover by
+  restoring them (`git restore <paths>`), then run the update outside the sandbox. To know
+  beforehand, run `git diff --name-only HEAD origin/main -- .claude/`: if it lists any of those
+  paths, run the update outside from the start.
+- **`git worktree remove`.** On 8 Nov (#71 cleanup) it refused, because the sandbox's `/dev/null`
+  placeholders (`.bashrc`, `.mcp.json`, `.claude/*` and so on; see "Phantom files" below) showed
+  as untracked files in the worktree. Placeholders don't count as work to keep: if `git status`
+  lists nothing else, `git worktree remove --force` is safe. It deregistered the worktree, but
+  deleting the folder failed with "Device or resource busy" (the placeholder mounts). Finish
+  outside the sandbox: `rm -rf .claude/worktrees/<name>`, then `git worktree prune`, which also
+  clears a leftover `.git/worktrees/<name>`. The same "Device or resource busy" on
+  `.git/worktrees/<name>` was seen on 7 Nov; `git worktree prune` outside fixes it too.
+- **`git branch -D` on a branch with upstream tracking** writes `.git/config` to drop the
+  tracking entry. Inside the sandbox the ref is deleted and the config entry stays behind,
+  harmlessly. Branches created with `--no-track` (above) avoid it.
 
 ## Phantom files in `git status`
 

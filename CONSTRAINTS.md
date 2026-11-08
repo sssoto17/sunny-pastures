@@ -34,7 +34,7 @@ Checked in the diff against the merge base by the floor guard (`guard / floor`, 
 reports the rule and the location, never a matched value.
 
 **A weakened bar is blocked unless the same PR adds an [Exceptions](#exceptions) row.** That row
-changes this file, so the PR needs the admin's approval (ADR-0002, tier H). A weakened bar is any
+changes this file, so the PR needs the admin's approval (a code-owned path, ADR-0002 area 2). A weakened bar is any
 of:
 
 - A new suppression comment: `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error`, `eslint-disable`,
@@ -293,7 +293,8 @@ Decided in the review of PR #45 (7 Nov):
 
 - **D1:** a weakened bar is blocked unless the same PR adds an Exceptions row, which needs the
   admin's approval. "A reason in the commit message" is no longer enough.
-- **D2:** this file owns the blast-radius numbers, ADR-0002 owns the mechanism (#47).
+- **D2:** this file owns the blast-radius numbers, ADR-0002 owns the mechanism (#47). Since #47,
+  those numbers are the escalation criteria and the split size ([Admin review](#admin-review-escalation-and-split-size)).
 - **D3:** `pnpm audit --audit-level=high` is the dependency check. osv-scanner stays only if #42
   shows it catches a known-vulnerable dev dependency in pnpm's lockfile.
 

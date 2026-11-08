@@ -294,6 +294,12 @@ Agent PRs can't modify them.
 | MUST-15.2 | A CI check fails any PR from an agent branch that touches `tests/acceptance/**`. | `ci` |
 | MUST-15.3 | The acceptance tests run on every PR against a fresh stack, and they treat the app as a black box over HTTP. | `ci` |
 
+MUST-15.1 is met in mechanism once CODEOWNERS (ADR-0002, appendix A3) and the `main` ruleset are
+in place. Until #37 gives the factory its own GitHub identity, its PRs come from the admin's
+account, and GitHub doesn't let the admin approve their own PR. So until then, the admin's
+approval on a factory PR is a bypass merge, held by instructions rather than by GitHub (ADR-0002,
+area 2, "The honest limit").
+
 The setup itself belongs to the M2 GitHub-strategy issue.
 
 ### MUST-16 Cheat-attack tests
@@ -332,7 +338,7 @@ CI runs the checks on every PR. The game is deployed on Vercel with Supabase Pos
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-17.1 | Every PR runs typecheck, lint, unit and property tests, the determinism gate and the acceptance tests against a throwaway Supabase stack inside CI. A red check blocks the merge. | `ci` |
-| MUST-17.2 | A merge to `main` deploys to Vercel production on the hosted Supabase project. | `ci` |
+| MUST-17.2 | A `v*` release tag on `main` deploys to Vercel production on the hosted Supabase project. A merge to `main` deploys to staging (ADR-0002, area 4; #51 owns the deploy workflow). | `ci` |
 | MUST-17.3 | Each PR gets a Vercel preview that talks to a separate staging Supabase project. No preview touches production data. | `ci`, `review` |
 | MUST-17.4 | Secrets come from environment variables. `.env.example` lists every name with a placeholder value. | `ci`, `review` |
 

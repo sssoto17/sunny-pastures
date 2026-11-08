@@ -37,7 +37,8 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   or `supabase status`.
 - Read `CONSTRAINTS.md` before writing code. Do not weaken it to make a change pass.
 - Before running commands, read `docs/agents/sandbox.md`. It lists the sandbox pitfalls:
-  `supabase`, localhost services and `.git` writes have to run outside the sandbox.
+  `supabase` and localhost services have to run outside the sandbox. Most git commands run
+  inside it; the exceptions are under "Git inside the sandbox" and "When git does need the host".
 - Parallel sessions never share a branch. The main folder stays on `main` and belongs to the
   coordinating session. Any session that changes files or needs another branch works in its own
   git worktree under `.claude/worktrees/`, named `<N>-<slug>` after its issue (use the worktree
@@ -51,6 +52,12 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   rule, Fallow boundary, test, CI step), judgement calls become standards (this file or
   `CONSTRAINTS.md`). The weekly retro looks for them; see `docs/diagrams/workflow.md`,
   "Self-improving loops".
+- Reviews follow ADR-0002 (area 2). Agents never merge a PR, never turn on auto-merge by hand,
+  never bypass a ruleset and never remove `review:admin`. When a PR meets a row of
+  `CONSTRAINTS.md`, "Admin review (escalation and split size)", add the label as you open it:
+  `gh pr create --label review:admin`. The admin merges admin-review PRs in the UI. The permission
+  rules in `.claude/settings.json` (PR #52) ask before `gh pr merge`, `gh ruleset` and removing
+  `review:admin`, and deny `gh pr merge --admin`.
 
 ## Agent skills
 
@@ -60,7 +67,7 @@ Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone a
 
 ### Triage labels
 
-Every issue carries one type (`feature`, `bug`, `spike`, `design`, `chore`, `idea`) and one `area:*` label, or `triage` until it's evaluated; PRs carry only the areas they touch. Readiness is the Project Status, and manual work carries no label. `factory:ready` is the only label that says an issue can be worked without the admin; `blocked:*` says why an issue can't move yet. See `docs/agents/triage-labels.md`.
+Every issue carries one type (`feature`, `bug`, `spike`, `design`, `chore`, `idea`) and one `area:*` label, or `triage` until it's evaluated; PRs carry only the areas they touch, plus `review:admin` when they need the admin. Readiness is the Project Status, and manual work carries no label. `factory:ready` is the only label that says an issue can be worked without the admin; `blocked:*` says why an issue can't move yet. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
