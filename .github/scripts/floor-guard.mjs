@@ -18,9 +18,13 @@ import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CannotRun, baseArg, enterRepo, oldContent, readChange } from './diff.mjs';
 
-// This file and its tests spell out every pattern they look for, so the line scans skip them.
-// Both sit under .github/, which is code-owned (ADR-0002, appendix A3).
+// This file and its tests spell out the suppression and stub patterns, so those two scans skip
+// them; every other check still applies. CI runs the base branch's copy of this guard (ci.yml,
+// `guard / floor`), so a PR can't switch it off by editing it.
 const SELF = new Set(['.github/scripts/floor-guard.mjs', '.github/scripts/floor-guard.test.mjs']);
+// A workflow line that runs a check: removing it, or letting the job fail quietly, weakens the bar.
+const WORKFLOW = /^\.github\/(workflows|actions)\/.+\.ya?ml$/;
+const CHECK_STEP = /floor-guard\.mjs|coverage-gate\.mjs|pnpm (typecheck|lint|test)\b|SIM_PROPERTY_RUNS/;
 const FREEZE = '2026-12-20'; // CONSTRAINTS.md, Exceptions: never past the feature freeze
 const MAX_EXCEPTION_DAYS = 30;
 
@@ -37,6 +41,17 @@ const ASSERTIONS = /\b(expect|assert)\b/g;
 const RUN_COUNT = /\b(numRuns|SIM_PROPERTY_RUNS)\b\D{0,20}?(\d+)/;
 const STRICT_KEYS =
   /"(strict\w*|noImplicit\w+|noUnused\w+|noUnchecked\w+|noFallthroughCasesInSwitch|noPropertyAccessFromIndexSignature|exactOptionalPropertyTypes|alwaysStrict|useUnknownInCatchVariables|allowUnreachableCode|allowUnusedLabels)"\s*:\s*(true|false)/;
+
+// The id of the workflow job a line sits in (a two-space-indented key under `jobs:`), or null.
+const jobOf = (lines, n) => {
+  for (let i = n - 1; i >= 0; i--) {
+    const l = lines[i] ?? '';
+    const m = /^ {2}([\w-]+):\s*$/.exec(l);
+    if (m) return m[1];
+    if (/^\S/.test(l)) return null;
+  }
+  return null;
+};
 
 const isTest = (f) => /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests)\//.test(f);
 const isProse = (f) => /\.(md|mdx|txt)$/i.test(f);
@@ -209,18 +224,40 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       if (isTest(f.path)) weak('test-deleted', f.path, 'file');
       continue;
     }
-    const scan = !SELF.has(f.path) && !isProse(f.path);
-    if (scan) {
-      const byLine = new Map(f.added.map((a) => [a.line, a.text]));
-      for (const { line, text } of f.added) {
+    if (isConstraints(f.path)) {
+      for (const c of constraintsFindings(f)) weak(c.rule, f.path, c.line, c.key);
+    }
+    if (isProse(f.path)) continue;
+    const byLine = new Map(f.added.map((a) => [a.line, a.text]));
+    for (const { line, text } of f.added) {
+      // Only the suppression and stub scans skip the guard's own files (see SELF).
+      if (!SELF.has(f.path)) {
         if (SUPPRESSIONS.test(text)) weak('silenced-checker', f.path, line);
-        if (isTest(f.path) && SKIPS.test(text)) weak('test-made-easier', f.path, line);
         if (STUBS.test(text)) always('unfinished-work', f.path, line);
         else if (OPEN_CATCH.test(text) && /^\s*\}/.test(byLine.get(line + 1) ?? '')) always('unfinished-work', f.path, line);
       }
-      if (isTest(f.path)) {
-        const count = (ls) => ls.reduce((n, l) => n + (l.text.match(ASSERTIONS)?.length ?? 0), 0);
-        if (count(f.removed) > count(f.added)) weak('assertion-removed', f.path, `${f.removed.find((l) => ASSERTION.test(l.text))?.line} (old)`);
+      if (isTest(f.path) && SKIPS.test(text)) weak('test-made-easier', f.path, line);
+    }
+    if (isTest(f.path)) {
+      const count = (ls) => ls.reduce((n, l) => n + (l.text.match(ASSERTIONS)?.length ?? 0), 0);
+      if (count(f.removed) > count(f.added)) weak('assertion-removed', f.path, `${f.removed.find((l) => ASSERTION.test(l.text))?.line} (old)`);
+    }
+    if (WORKFLOW.test(f.path)) {
+      const before = f.oldPath ? oldContent(mergeBase, f.oldPath) ?? [] : [];
+      const now = readFileSync(f.path, 'utf8').split('\n');
+      const kept = new Set(f.added.map((a) => a.text.trim()));
+      const gone = new Set(f.removed.map((r) => r.text.trim()));
+      for (const r of f.removed) {
+        const guarded = CHECK_STEP.test(r.text) || jobOf(before, r.line) === 'floor';
+        if (guarded && !kept.has(r.text.trim())) weak('check-removed', f.path, `${r.line} (old)`);
+      }
+      // A workflow, or a floor job, that didn't exist at the merge base has no bar to lower.
+      const hadFloor = before.some((l) => /^ {2}floor:\s*$/.test(l));
+      for (const a of f.added) {
+        if (f.status === 'added') break;
+        // A skipped required job reports as passing, so a new `if:` counts too.
+        const loosens = /continue-on-error:\s*true|^\s*-?\s*if:/.test(a.text) || (hadFloor && jobOf(now, a.line) === 'floor');
+        if (loosens && !gone.has(a.text.trim())) weak('check-removed', f.path, a.line);
       }
     }
     for (const r of f.removed) {
@@ -230,9 +267,6 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       if (now && Number(now[2]) < Number(was[2])) weak('property-runs-cut', f.path, `${r.line} (old)`);
     }
     for (const line of configLoosening(f, mergeBase)) weak('config-loosened', f.path, line);
-    if (isConstraints(f.path)) {
-      for (const c of constraintsFindings(f)) weak(c.rule, f.path, c.line, c.key);
-    }
   }
 
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.
@@ -267,6 +301,7 @@ const HINTS = {
   'rule-removed': "A rule-removed finding can also mean the rule's label changed: rename a rule in one commit and change its thresholds in another.",
   'threshold-removed': 'A threshold-removed finding can also mean a number lost its direction words (">= 80%" becoming "80%"): compare the two lines.',
   'config-loosened': 'A tool config was loosened (CONSTRAINTS.md, Floor, last bullet).',
+  'check-removed': 'A workflow step that runs a check was removed, or a job was allowed to fail.',
 };
 
 const main = () => {

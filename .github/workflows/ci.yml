@@ -68,4 +68,19 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           install: 'false' # the guard uses only Node and git
-      - run: node .github/scripts/floor-guard.mjs --base "origin/$BASE_REF"
+      # Run the base branch's guard, not the PR's, so a PR can't weaken the guard that judges it.
+      # The PR's own copy is used only while the base has no guard yet (the PR that adds it).
+      - name: Take the guard from the base branch
+        run: |
+          dir="$RUNNER_TEMP/floor-guard"
+          mkdir -p "$dir"
+          if git cat-file -e "origin/$BASE_REF:.github/scripts/floor-guard.mjs" 2>/dev/null; then
+            for f in floor-guard.mjs diff.mjs; do
+              git show "origin/$BASE_REF:.github/scripts/$f" > "$dir/$f"
+            done
+            echo "Using the floor guard from origin/$BASE_REF"
+          else
+            cp .github/scripts/floor-guard.mjs .github/scripts/diff.mjs "$dir/"
+            echo "::warning::origin/$BASE_REF has no floor guard yet; using this PR's copy"
+          fi
+      - run: node "$RUNNER_TEMP/floor-guard/floor-guard.mjs" --base "origin/$BASE_REF"

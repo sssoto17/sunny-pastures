@@ -1,4 +1,5 @@
-import { rmSync, renameSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { readFileSync, rmSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -74,12 +75,99 @@ describe('floor guard, end to end', () => {
     expect(guard().code).toBe(0);
   });
 
-  it('blocks a skipped or focused test', () => {
+  // This file is scanned for skipped tests too, so the modifiers are assembled, never written out.
+  const modified = (m) => `it.${m}('a', () => {\n  expect(a).toBe(1);\n  expect(a).not.toBe(2);\n});\n`;
+
+  it.each(['skip', 'only', 'todo'])('blocks a test marked %s', (m) => {
     setup();
-    repo.write({ 'packages/sim/src/a.test.ts': "it.skip('a', () => {\n  expect(a).toBe(1);\n  expect(a).not.toBe(2);\n});\n" });
+    repo.write({ 'packages/sim/src/a.test.ts': modified(m) });
     expect(guard().out).toContain('[test-made-easier]');
-    repo.write({ 'packages/sim/src/a.test.ts': "it.only('a', () => {\n  expect(a).toBe(1);\n  expect(a).not.toBe(2);\n});\n" });
-    expect(guard().code).toBe(1);
+  });
+
+  describe("the guard's own files", () => {
+    const SELF_TEST = '.github/scripts/floor-guard.test.mjs';
+    const selfSetup = () => (repo = makeRepo({ ...BASE, [SELF_TEST]: "it('a', () => {\n  expect(1).toBe(1);\n  expect(2).toBe(2);\n});\n" }));
+
+    it('are checked for skipped tests', () => {
+      selfSetup();
+      repo.write({ [SELF_TEST]: modified('skip') });
+      expect(guard().out).toContain(`[test-made-easier] ${SELF_TEST}`);
+    });
+
+    it('are checked for removed assertions and deletion', () => {
+      selfSetup();
+      repo.write({ [SELF_TEST]: "it('a', () => {\n  expect(1).toBe(1);\n});\n" });
+      expect(guard().out).toContain(`[assertion-removed] ${SELF_TEST}`);
+      rmSync(join(repo.dir, SELF_TEST));
+      expect(guard().out).toContain(`[test-deleted] ${SELF_TEST}`);
+    });
+
+    it('may still spell out suppression and stub patterns', () => {
+      selfSetup();
+      repo.write({ '.github/scripts/floor-guard.mjs': '// @ts-ignore, TODO and an empty catch {} are patterns here\n' });
+      expect(guard().code).toBe(0);
+    });
+  });
+
+  describe('workflows', () => {
+    const CI = '.github/workflows/ci.yml';
+    const STEPS = 'jobs:\n  test:\n    steps:\n      - run: pnpm test\n  floor:\n    steps:\n      - run: git show "origin/$BASE_REF:x" > "$dir/x"\n      - run: node guard.mjs\n';
+
+    it.each([
+      ['a removed check step', STEPS.replace('      - run: pnpm test\n', '      - run: echo skipped\n')],
+      ['a changed line in the floor job', STEPS.replace('node guard.mjs', 'true')],
+      ['a job allowed to fail', STEPS.replace('  test:\n', '  test:\n    continue-on-error: true\n')],
+    ])('block %s', (_, content) => {
+      repo = makeRepo({ ...BASE, [CI]: STEPS });
+      repo.write({ [CI]: content });
+      expect(guard().out).toContain(`[check-removed] ${CI}`);
+    });
+
+    // Runs the real step from ci.yml, so the test breaks if the step changes shape.
+    const takeGuardStep = () => {
+      const lines = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8').split('\n');
+      const start = lines.findIndex((l) => l.includes('name: Take the guard from the base branch')) + 2;
+      const end = lines.findIndex((l, i) => i >= start && !l.startsWith('          '));
+      return lines.slice(start, end).map((l) => l.slice(10)).join('\n');
+    };
+    const runTakeGuard = () => {
+      const temp = join(repo.dir, '.runner-temp');
+      const r = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', takeGuardStep()], {
+        cwd: repo.dir,
+        env: { ...process.env, BASE_REF: 'main', RUNNER_TEMP: temp },
+        encoding: 'utf8',
+      });
+      expect(r.status).toBe(0);
+      return readFileSync(join(temp, 'floor-guard', 'floor-guard.mjs'), 'utf8');
+    };
+
+    it("make guard / floor run the base branch's guard, not the PR's", () => {
+      repo = makeRepo({ ...BASE, '.github/scripts/floor-guard.mjs': 'base guard\n', '.github/scripts/diff.mjs': 'base diff\n' });
+      repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+      repo.write({ '.github/scripts/floor-guard.mjs': 'process.exit(0);\n' });
+      repo.commit();
+      expect(runTakeGuard()).toBe('base guard\n');
+    });
+
+    it("make guard / floor fall back to the PR's guard while the base has none", () => {
+      setup();
+      repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+      repo.write({ '.github/scripts/floor-guard.mjs': 'new guard\n', '.github/scripts/diff.mjs': 'new diff\n' });
+      repo.commit();
+      expect(runTakeGuard()).toBe('new guard\n');
+    });
+
+    it('accept unrelated workflow edits, and a floor job or workflow that is new', () => {
+      repo = makeRepo({ ...BASE, [CI]: STEPS });
+      repo.write({ [CI]: `name: ci\n${STEPS}` });
+      expect(guard().code).toBe(0);
+      repo.write({ [CI]: 'jobs:\n  test:\n    steps:\n      - run: pnpm test\n', '.github/workflows/new.yml': "jobs:\n  x:\n    if: github.actor != 'bot'\n" });
+      repo.commit();
+      repo.git('switch', '-q', '-C', 'main');
+      repo.git('switch', '-q', '-c', 'add-floor');
+      repo.write({ [CI]: STEPS });
+      expect(guard().code).toBe(0);
+    });
   });
 
   it('blocks a deleted test file but not a moved one', () => {
