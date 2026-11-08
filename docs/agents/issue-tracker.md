@@ -156,6 +156,6 @@ all of:
 | ------------------------ | ---------------------------------------------------------------------------------------- |
 | Ready → In progress      | Someone starts it: the admin is assigned (manual), or the factory claims it (factory). A branch exists. |
 | In progress → In review  | A PR is open with `Closes #N` and its checks are green.                                   |
-| In review → Done         | The admin merged the PR (the issue closes, and the Project moves it).                     |
+| In review → Done         | The PR merged (the issue closes, and the Project moves it).                               |
 | Any → Backlog            | It turns out not ready (add the `blocked:*` label that says why, or split it), or the admin drops it from the current focus. |
 
