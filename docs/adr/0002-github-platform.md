@@ -37,17 +37,22 @@ Project workflow names (area 5) and the Repository admin role's ID (checklist st
 - **Q1:** the account is on **GitHub Pro**, through a verified GitHub Education student account.
   The repo stays **private until about M3–M4**, then goes public (#38).
 - **Q2:** the factory gets **its own identity**. How it reaches GitHub is spike #37 (area 2).
+  *Decided 8 Nov in #37:* its own GitHub App, `sunny-factory`, from Actions on GitHub-hosted
+  runners, beside the reviewer's App.
 - **Q7 and Q8** are decided together when the repo goes public (#38).
 - **Q9:** `area:tools` widens to cover all dev tooling (area 6).
 - **Approvals:** PRs are reviewed the way people on GitHub review each other. A reviewer bot,
   its own GitHub App, **approves** a PR, which then auto-merges, or **requests changes**. The
-  admin approves only sensitive paths (CODEOWNERS) and PRs an agent escalates with the label
-  `review:admin`, for example a finished feature slice or a changed module interface (area 2).
+  admin approves only sensitive paths (CODEOWNERS) and PRs that are escalated, for example a
+  finished feature slice or a changed module interface (area 2). Escalation was the label
+  `review:admin`; on 8 Nov (#37) a review thread from the bot replaced it, and the label goes
+  with #104.
 - **Deploys:** once production is live, only a `v*` release tag ships to production, deployed by
   GitHub Actions; a merge to `main` reaches staging only. Bot-approved PRs keep auto-merging
   (area 4).
 - **The merge guard** is for unattended sessions only, once #37 shows how to detect them;
-  attended sessions are never blocked (area 2).
+  attended sessions are never blocked (area 2). *Dropped 8 Nov in #37:* the factory runs as its
+  own App, which GitHub holds to the rulesets.
 
 **The approval mechanics** were checked on 7 Nov against the `github/docs` source, the REST API
 description (`github/rest-api-description`) and two community reports, each cited where it's
@@ -322,8 +327,8 @@ The flow:
 4. **Not OK:** the bot submits **Request changes**, with its blocking findings as line comments.
    The factory fixes them and pushes. The push dismisses any earlier approval, and the bot
    reviews again.
-5. **Needs the admin:** an agent adds the label `review:admin` (below). The bot reviews but doesn't
-   approve, and the PR waits for the admin.
+5. **Needs the admin:** the bot escalates with a review thread that mentions the admin (below,
+   decided in #37). It doesn't approve, and the PR waits for the admin.
 
 | Need | Native GitHub feature |
 |---|---|
@@ -345,39 +350,61 @@ The flow:
   (`docs/agents/`, `docs/diagrams/workflow.md`, `skills-lock.json`); migrations and RLS. GitHub
   enforces these:
   without the admin's approval, the PR doesn't merge.
-- **Escalated PRs:** any agent, the factory or the reviewer bot, may add the label
-  **`review:admin`** to any PR, code-owned ones included (the admin's choice, 7 Nov; widened in
-  #47). Escalate when a PR
-  wraps up a feature slice, or changes a module's public interface (for example the exports of
-  `packages/sim`, or an API contract), so the admin keeps ownership of how a module turns out.
-  The reviewer bot may also escalate on its own judgement. **The bot never approves a PR that
-  carries `review:admin`**, so with 1 required approval, the PR waits for the admin's. The
-  exact criteria live in `CONSTRAINTS.md` (#47, whose scope changes from tier numbers to these
-  criteria and the size at which the bot asks for a split).
-  - **Label at creation.** An agent that knows a PR needs the admin labels it when it opens it
-    (`gh pr create --label review:admin`). If the label arrives after the bot approved, the
-    bot's review job runs again on the `labeled` event, dismisses its own approval and turns
-    auto-merge off. But auto-merge may already have merged the PR: a late label can lose that
-    race. Then the PR is reverted, and the case is logged as tuning data (below).
+- **Escalated PRs (decided 8 Nov in #37; this replaces the label `review:admin`):** the reviewer
+  bot escalates a PR, code-owned ones included, when it meets a row of the escalation criteria
+  in `CONSTRAINTS.md` (#47) or on the bot's own judgement. Escalate when a PR wraps up a feature
+  slice, or changes a module's public interface (for example the exports of `packages/sim`, or
+  an API contract), so the admin keeps ownership of how a module turns out. The bot checks every
+  row on every run. Every row can be read from the PR, its diff and its linked issue. An agent
+  that knows a reason the PR can't show (for example "can't be split") writes it in the PR
+  template's Review section (A2), which the bot reads. A body that asks for more caution is
+  harmless even though the PR wrote it.
+  - **The escalation is a thread.** The bot posts a file-level review thread on the file that
+    triggered the row, "escalated: <rows>", which mentions `@sssoto17` so the admin is notified.
+    A review summary or a plain comment wouldn't create a thread. Required conversation
+    resolution holds the merge until the thread is resolved, and the bot withholds its approval,
+    so with 1 required approval the PR waits for the admin. On a factory PR the bot also
+    requests the admin's review, so `review-requested:@me` is the admin's queue. The admin's own
+    open PRs show under `author:@me`.
+  - **The bot never approves a PR it has escalated.** Its escalation threads are its memory
+    across runs. Anyone with write access can resolve a thread, the factory App included.
+    Resolving doesn't start a workflow: `pull_request_review_thread` is a webhook event, not an
+    Actions trigger
+    ([events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows),
+    read 8 Nov). So on its next run the bot reads each escalation thread's `resolvedBy`, and
+    unresolves (`unresolveReviewThread`) one that anyone but the admin (`User` `sssoto17`)
+    resolved. When it resolves its own fixed findings, it skips escalation threads.
+  - **The admin's go-ahead** is resolving the thread, then approving (factory PRs) or
+    bypass-merging (attended PRs, which the admin authored and so can't approve). The resolved
+    thread and the approval or merge are the record of who decided.
   - **The bot's earlier Request changes.** On an escalated PR the bot doesn't approve, so its
     Request changes would block for good. When its re-review finds those findings fixed, the bot
     dismisses its own Request changes review (`dismissPullRequestReview`). The admin can also
     dismiss it.
-  - **Only the admin removes the label.** Nothing on GitHub enforces that; see "The honest
-    limit" below.
-  - **Why a label and not "request review":** until #37, every agent acts as the admin, so the
-    admin is the PR's author, and GitHub doesn't request a review from a PR's own author. That's
-    widely reported as an API error; it isn't in the docs or tested here. The request would fail
-    quietly, the bot would see no request and approve. A label works the same before and after
-    #37. After #37, an agent may also request the admin's review, but the label stays the signal
-    the bot checks.
+  - **Why a thread, not a review request or a label.** Attended sessions act as the admin after
+    #37 too, so the admin authors their PRs, and GitHub doesn't request a review from a PR's own
+    author. That's widely reported as an API error; it isn't in the docs or tested here. So a
+    review request can't carry the signal alone. The 7 Nov design used a label,
+    `review:admin`, which works whoever the author is. The admin retired it on 8 Nov: as few
+    label families as possible, and native features wherever they can carry a signal. Renaming
+    it into `blocked:*` was rejected, because that family's rule is "remove it when the reason
+    clears", while this one only the admin may clear. A draft PR was rejected too: anyone can
+    mark a PR ready, and "draft" would also have to mean "unfinished". Deciding at approval
+    time also removes the label's race, where a label added after the bot approved could lose
+    to auto-merge.
+  - **Until #104, the label stays.** Until the reviewer App posts escalation threads (#68),
+    `review:admin` is the admin's only queue. So [Retire review:admin](https://github.com/sssoto17/sunny-pastures/issues/104)
+    waits for #68 and #101. Until it lands, agents add the label as `CONSTRAINTS.md` says, the
+    bot never approves a PR that carries it, and only the admin removes it. Nothing on GitHub
+    enforces that last rule; see "The honest limit" below.
 
 **The reviewer bot is its own GitHub App** (the admin's choice, 7 Nov), for example
 `sunny-reviewer[bot]`, used from Actions. It runs Claude with the repo's review skills
 (`code-review`, the standards and spec axes). It is a separate identity from the PR's author,
 so its approval is not a self-approval, even while the factory still acts as the admin
 (until #37). Its private key is an environment secret, handed only to the review job. It's set up
-alongside the factory's App (#37), which also settles how Claude is billed in CI.
+alongside the factory's App, `sunny-factory`: two Apps, since one App can't approve the PRs it
+opens. Claude is billed through the admin's employer seat (#37; "The factory's identity" below).
 
 - **The App's permissions (decided 7 Nov, Q14).** The App turns on auto-merge (step 3
   of the flow), and GitHub's docs say "People with write permissions to a repository can enable
@@ -421,31 +448,106 @@ so the PR then needs the admin's approval. One rule, with no commit-message esca
 **Tuning** (the self-improving loop, `docs/diagrams/workflow.md`):
 
 - log every revert of a bot-approved PR, with its paths and cause, as data for the report,
-  including PRs that merged before a late `review:admin`;
+  including PRs the admin would have escalated;
 - when a bad bot approval happens twice, move the paths to CODEOWNERS or sharpen the
   escalation criteria (`CONSTRAINTS.md`, "Admin review");
 - when escalated PRs keep coming back unchanged from the admin, loosen the criteria.
 
-### The factory's identity (Q2)
+### The factory's identity (Q2, decided in #37)
 
-**Decided:** the factory gets its own identity, so code-owner review and the reviewer bot see a factory
-PR as someone else's. How that identity reaches GitHub is spike #37. What's already known, from
-the admin's earlier research (summarised in #37):
+**What the factory is.** The *factory* is agent work on a `factory:ready` issue that runs without
+the admin in the loop, from launch until its PR is open. The reviewer bot is not part of the
+factory: it reviews the factory's PRs. A session the admin drives is *attended*, and is never the
+factory, even when it works a `factory:ready` issue. `GLOSSARY.md` holds the game's language,
+where "factory" is a word to avoid (it means a Facility), so the process term is defined here.
 
-- A cloud session always acts as its owner. The cloud GitHub proxy swaps every credential for the
-  owner's token, so a machine user's or an App's token set in a cloud session is ignored.
-- GraphQL is closed in cloud sessions.
+**Decided 7 Nov:** the factory gets its own identity, so code-owner review and the reviewer bot see
+a factory PR as someone else's. A cloud session always acts as its owner, since the cloud GitHub
+proxy swaps git credentials for the owner's token (#37, #60), so that identity can't come from a
+cloud session.
 
-So the identity has to be a **GitHub App used from Actions**, on GitHub-hosted runners (minutes
-cost money while the repo is private and are free once it's public, area 9) or on a self-hosted
-runner. #37 decides which. An App needs no seat and no second account. It doesn't need to be a
-code owner, since its PRs are what the admin approves. Its PRs start CI normally. A PR opened with
-`GITHUB_TOKEN` would not: its runs wait for someone to approve them
-([triggering a workflow from a workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow),
-`data/reusables/actions/actions-do-not-trigger-workflows.md`, checked 7 Nov).
+**Decided 8 Nov (#37): the factory runs as its own GitHub App, `sunny-factory`, from Actions on
+GitHub-hosted runners.** An App needs no seat and no second account, and it isn't a code owner:
+its PRs are what the admin approves. The facts behind it are in the research for #60
+(`docs/spikes/research-factory-identity.md` on the throwaway branch `research/factory-identity`),
+where each claim is marked as documented, repo record or inference. The options #37 weighed:
 
-**Until #37 lands, every session acts as `sssoto17`.** Cloud and local sessions alike, factory
-or not, use the admin's account, so they hold the admin's "For pull requests only" bypass too.
+| | (a) App, GitHub-hosted runners | (b) App, self-hosted runner | (c) Claude self-hosted environment | (d) own `claude -p` dispatcher |
+|---|---|---|---|---|
+| Identity | `sunny-factory[bot]` | `sunny-factory[bot]` | The admin, unless a wrapper mints App tokens | `sunny-factory[bot]` if handed an App token |
+| Cost while private | Pro's $18 a month (area 9), then billed or blocked | Minutes free; the host is ours | Our host, plus Team seats | Our host |
+| Cost once public | Free | Free, but GitHub says self-hosted runners "should almost never be used" on public repos | Our host | Our host |
+| Repo hooks run | Yes: `claude-code-action` loads project settings by default | Yes, plus the host's `~/.claude` | Yes | Yes, without `--bare` |
+| A database per job | A fresh VM per job, Docker on Ubuntu runners | Only with just-in-time runners and our own cleanup; must stay off the load-test VM | One container per session | Ours to build |
+| Secrets | Actions environment secrets | Actions secrets, delivered to our host | Our host | Our host |
+| What the admin sets up | Two Apps, their keys, the Claude token, "Allowed actions", the workflows | All of (a), plus a host, runner automation and Docker | A Team organisation, a runner image, a token wrapper | A host, the dispatcher, token minting, isolation |
+
+(c) needs a Team or Enterprise plan whose Owner turns it on, so it would put the project inside the
+admin's employer's organisation. (b) and (d) add infrastructure we'd build and keep running, and
+(b) must be dropped or fenced off once the repo is public. (a) costs minutes only until go-public
+(#38).
+
+- **Two Apps, `sunny-factory` and `sunny-reviewer`.** GitHub doesn't let a PR's author approve
+  it, so one App couldn't open a PR and approve it. Each App has its own private key, an
+  environment secret handed only to its own job, so a leaked factory key can't approve anything.
+  The reviewer's workflow lists the factory App in `claude-code-action`'s `allowed_bots`.
+- **The factory App's permissions:** contents, pull requests and issues write. No
+  Administration, no Workflows, and **on no bypass list** (`main`, `v*`, `production`). The
+  factory job sets `permissions:` so its `GITHUB_TOKEN` is read-only; otherwise that token is a
+  second identity the factory could act through.
+- **Its token** comes from `actions/create-github-app-token` (GitHub-owned, so already allowed by
+  area 8), expires after an hour and is revoked when the job ends. Its PRs start CI. A PR opened
+  with `GITHUB_TOKEN` would not: its runs wait for someone to approve them
+  ([triggering a workflow from a workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow),
+  checked 7 Nov).
+- **Hooks:** `claude-code-action` loads the project's `.claude/settings.json` by default, so the
+  repo's hooks run in factory jobs (#60).
+- **A database per job:** each job is a fresh VM, and the acceptance stack runs in Docker on it.
+- **Secrets** are Actions environment secrets: the two App keys, `CLAUDE_CODE_OAUTH_TOKEN` and the
+  sweep's Project token, each set with `gh secret set` and never echoed.
+
+**How Claude is billed in CI (decided 8 Nov).** The factory and the reviewer use a `setup-token`
+from the admin's employer seat (Team or Enterprise), stored as `CLAUDE_CODE_OAUTH_TOKEN`. Team and
+Enterprise seats fall under Anthropic's Commercial Terms, so the Consumer Terms' clause on
+"automated or non-human means" (#60) doesn't apply. The admin's statement, recorded here: the
+employer knows the seat is used for school work, and the project only uses allowance the employer
+already pays for, which the admin's 60 hours a month of paid work leave unused. A billed API key is
+the fallback, only if it becomes necessary. The factory and the reviewer share the seat's weekly
+limit with the admin's paid work, hence the caps below.
+
+**How a factory job starts (decided 8 Nov).** The factory is a `workflow_dispatch` workflow that
+takes an issue number. It refuses an issue that lacks `factory:ready` or isn't in Ready. Three
+things dispatch it:
+
+- **a scheduled sweep** at 07:00, 12:00 and 17:00 CET. It dispatches every item that is Ready,
+  has Mode Factory and carries `factory:ready`, and has no open PR or branch yet;
+- **a chain:** when a factory job finishes (`workflow_run`), the sweep runs again, so a queue
+  drains without waiting for the next slot;
+- **`/today`** (stage 2, #73): it reports what the factory did since the admin's last workday,
+  which issues are ready for it and a suggested queue, and dispatches the queue on the admin's
+  go-ahead.
+
+Concurrency is 1: one factory job at a time. Moving an issue to Ready can't start a workflow
+itself, because Project field changes aren't an Actions trigger. `GITHUB_TOKEN` can't read a
+user-owned Project (area 5), so the sweep reads the board with a read-only token of the admin's.
+Which token is #102. It is never a classic PAT with `repo`, which would reach every private
+repository the admin's account can, the employer's included. Each run costs at least a whole runner
+minute: a sweep every 30 minutes would cost about 1,440 minutes a month while private, and three
+slots plus the chain about 90.
+
+**Caps (decided 8 Nov).** A repo variable, `FACTORY_ENABLED`, is the kill switch: the sweep, the
+chain and the factory job check it. The reviewer keeps running, so open PRs still get reviewed.
+Each Claude run has `--max-turns`, and its job has `timeout-minutes`, so one runaway issue can't
+use up the week. Every factory and review run logs `total_cost_usd` (a client-side estimate) and
+its runner minutes, as report data. A weekly budget is set from the first week of that data,
+together with the map's cap on CI cost (#59).
+
+**Until the factory App runs, every session acts as `sssoto17`.** Elsewhere in this ADR, "until
+#37" means until then: the build issues under #58, after the checks #101–#103. Cloud and local
+sessions alike, factory or not, use the admin's account, so they hold the admin's "For pull
+requests only" bypass too. **The interim rule (decided 8 Nov): no unattended factory runs until
+the App runs.** `factory:ready` issues are worked from attended sessions, and no interim guard is
+built.
 
 - **Admin-review PRs are then held by instructions only.** GitHub doesn't let an author approve
   their own PR, so an admin-review PR the factory opened merges only by bypass, and any session
@@ -464,43 +566,39 @@ or not, use the admin's account, so they hold the admin's "For pull requests onl
   `Co-Authored-By: Claude` / `Claude-Session:` trailers that agents add by instruction. With the
   App, it checks the author.
 
-**A merge guard for unattended sessions only, once #37 shows how to detect them** (the admin's
-decision, 7 Nov). A blanket guard is not wanted: attended sessions are never blocked, because
-the admin already meets enough stops and prompts. If a guard exists, it is a `PreToolUse` hook in
-the style of `block-branch-switch.sh` (#16) that applies only to unattended (factory) sessions and
-denies:
+**No merge guard for unattended sessions (decided 8 Nov).** On 7 Nov the admin allowed one only
+"once #37 shows how to detect them", and map #59 kept it open in case the factory got no App of its
+own. It has one, and GitHub enforces the limits on it:
 
-- `gh pr merge`, including `--admin` and `--auto`;
-- `gh api` calls to `…/pulls/N/merge`;
-- turning on auto-merge (`gh api graphql` with `enablePullRequestAutoMerge`);
-- the GitHub MCP server's merge tool, through a matcher on the tool's name;
-- pushing a `v*` tag, which now ships to production (area 4).
+| What a session on the admin's account can do | What stops the factory App |
+|---|---|
+| Bypass-merge an admin-review PR | It's on no bypass list. Code-owner review and the 1 required approval hold the merge |
+| Clear an escalation | It can resolve the escalation thread, but the reviewer never approves an escalated PR, and unresolves a thread the admin didn't resolve (area 2, "Approvals") |
+| Push a `v*` tag | The tag ruleset restricts creation, and only the Repository admin role bypasses it (A8). An App installation doesn't hold that role |
+| Edit a ruleset | That needs the Administration permission, which the factory App doesn't get |
 
-Bot-approved PRs merge through auto-merge, which the reviewer App turns on in Actions, where the
-hook doesn't apply. Like #16, it stops the honest mistake, not a determined workaround: a raw
-`curl` or a script would get past a command pattern. **Unverified:** how a hook tells an
-unattended session from an attended one (`permission_mode` in the hook input, an environment
-variable such as `CLAUDE_CODE_REMOTE`, a routine against an interactive session), and whether
-project hooks run in cloud sessions at all. Both are being researched and belong to #37. No issue
-is filed for the guard now.
+No unattended runs happen before the App (the interim rule above), and attended sessions are never
+guarded. So no hook is built. Two open facts from #60 were only needed for a guard, and they are
+dropped: whether the cloud proxy replaces a `GH_TOKEN` set in a cloud session, and how a hook tells
+a routine from an attended cloud session. A third answer stays useful: the cloud GitHub proxy
+refuses tag pushes, so no cloud session can push a `v*` tag at all (#60).
 
-**The honest limit, before and after #37.** Any session on the admin's account *is* the admin
-on GitHub: same account, same rights. That includes attended local and cloud sessions after #37,
-which still act as `sssoto17`. For those sessions, four things stay held by instructions, the
-permission rules and the classifier, never by GitHub:
+**The honest limit.** Any session on the admin's account *is* the admin on GitHub: same account,
+same rights. That includes attended local and cloud sessions after #37, which still act as
+`sssoto17`. For those sessions, four things stay held by instructions, the permission rules and the
+classifier, never by GitHub:
 
 - bypass-merging an admin-review PR;
-- removing `review:admin`;
-- pushing a `v*` tag, which ships to production (area 4);
+- resolving an escalation thread, whose `resolvedBy` is then the admin's (and, until #104 retires
+  it, removing `review:admin`);
+- pushing a `v*` tag from a local session, which ships to production (area 4);
 - editing a ruleset.
 
 PR #52 makes Claude Code ask before tag pushes and before `--remove-label review:admin`
-(permission rules, commit `523f745`), so two of the four become a prompt the admin sees. What
-#37 changes is the factory: its PRs come from the App, so the admin can approve them and no
-longer needs the bypass for them. After #37, the bot can also re-escalate when `review:admin` is
-removed (`unlabeled` event), unless the sender is the admin themself (`sender.login ==
-'sssoto17'` and `sender.type == 'User'`). The rulesets still stop the mechanical mistakes: a
-direct push, a force-push, a merge with a red check.
+(permission rules, commit `523f745`), so two of the four become a prompt the admin sees. The
+factory is outside this limit: its PRs come from the App, so the admin can approve them and no
+longer needs the bypass for them. The rulesets still stop the mechanical mistakes: a direct push, a
+force-push, a merge with a red check.
 
 **MUST-15.1** ("CODEOWNERS entry and a ruleset on `main` requiring code-owner review") is met in
 mechanism once A3 and the `main` ruleset are in place. Until #37, the admin's approval on a
@@ -1066,8 +1164,9 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   three tiers with the agent's verdict as a check, or **a reviewer bot that approves or requests
   changes, with the admin on sensitive and escalated PRs** (area 2). The admin chose the last.
 - **One GitHub identity for everyone** (today) against **a factory App from Actions** (area 2, Q2,
-  #37). Until #37 lands, admin-review PRs from the factory rest on the admin's bypass and the
-  agents' instructions.
+  #37). #37 chose GitHub-hosted runners over a self-hosted runner, a Claude self-hosted
+  environment and an own dispatcher. Until the App runs, admin-review PRs from the factory rest
+  on the admin's bypass and the agents' instructions.
 - **Deploy on merge** against **deploy on a release tag** (area 4). The admin chose the tag, so
   bot-approved PRs can auto-merge to `main` without reaching the players.
 - **Private on Pro now, public at M3–M4** (Q1, #38) against **public now**. It decides when
@@ -1098,14 +1197,15 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   credentials live in the `production` environment, which only `v*` tags can use (area 4).
 - MUST-15.1 is met in mechanism once CODEOWNERS (A3) and the `main` ruleset are in place. **Until
   #37, an admin-review PR from the factory merges by bypass, held by instructions** (area 2, "The
-  honest limit"). For any session on the admin's account, bypass merges, removing
-  `review:admin`, tag pushes and ruleset edits stay instruction-only, before and after #37.
-  PR #52 turns tag pushes and label removal into prompts.
+  honest limit"). For any session on the admin's account, bypass merges, clearing an escalation
+  (resolving its thread, or removing `review:admin` until #104), tag pushes and ruleset edits
+  stay instruction-only, before and after #37. PR #52 turns tag pushes and label removal into
+  prompts.
 - **Rollout order** (checklist): rulesets now, with 0 required approvals → the reviewer App,
   then 1 required approval and `require_last_push_approval`, then tests (a)–(f) → auto-merge only
   when the required checks report, the App passes (a)–(f) and #47's escalation criteria are
-  merged (Q16) → unattended factory work only once #37 gives the factory its own identity, or shows
-  how to guard unattended sessions. Attended sessions are never blocked.
+  merged (Q16) → unattended factory work only once the factory App runs (#37 decided it: checks
+  #101–#103, then the build issues under #58). Attended sessions are never blocked.
 - `CONSTRAINTS.md` owns the escalation criteria and the split size (#47) and the list of ways a
   bar gets lowered ("Guarding the bar"). This ADR owns the mechanism.
 - **Actions cost.** While private, the checks draw on Pro's included compute, about $18 a month
@@ -1114,9 +1214,12 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   (CI runner time per PR, enforced by #40).
 - **Claude cost per review.** Each run of the reviewer bot is a Claude run: on every push, every
   `labeled` event and every "Update branch", since each of those dismisses the approval. That is
-  separate from Actions compute, and it needs #37's decision on how Claude is billed in CI and
-  what the terms allow, before step 12. One `concurrency` group per PR with
-  `cancel-in-progress` keeps only the newest run.
+  separate from Actions compute. #37 decided how it's billed: a `setup-token` from the admin's
+  employer seat, under the Commercial Terms, which the factory shares (area 2, "The factory's
+  identity"). It costs no money, but it draws on the seat's weekly limit, which the admin's paid
+  work also uses. So every run logs `total_cost_usd` and its minutes, the factory has a kill
+  switch and per-run caps, and a weekly budget follows from the first week of data. One
+  `concurrency` group per PR with `cancel-in-progress` keeps only the newest run.
 - **Ratchets can drift** while "branches up to date" is off: two PRs can each pass the bundle or
   coverage ratchet and together go past it. Accepted: the next PR's run catches it (area 2).
 - `.github/` files (templates, CODEOWNERS, labeler, the review workflow, Dependabot, release
@@ -1165,7 +1268,8 @@ deferred to go-public (#38), Q10 waits for Vercel and Q11 for #47. Q14–Q16 wer
 1. **Q1, plan and visibility.** *Decided 7 Nov:* GitHub Pro (GitHub Education); private until
    about M3–M4, then public (#38).
 2. **Q2, factory identity.** *Decided 7 Nov:* its own identity, a GitHub App used from Actions.
-   Where it runs is spike #37 (area 2).
+   Where it runs is spike #37 (area 2). *Decided 8 Nov in #37:* `sunny-factory`, on GitHub-hosted
+   runners; it starts from a scheduled sweep, a chain and `/today`.
 3. **Q3, Project state.** *Answered.* All 8 built-in workflows the API lists are on, including
    Auto-archive, Auto-close issue and Pull request linked to issue, which this ADR turns off.
    Auto-add is on and adds PRs as well as issues; its filter isn't readable through the API.
@@ -1193,7 +1297,8 @@ deferred to go-public (#38), Q10 waits for Vercel and Q11 for #47. Q14–Q16 wer
 11. **Q11, the escalation criteria.** *In #47.* When an agent adds `review:admin`, and
     the size at which the bot asks for a split, in `CONSTRAINTS.md`. The sensitive paths are A3.
 12. **Q12, the reviewer bot.** *Decided 7 Nov:* its own GitHub App running Claude with the repo's
-    review skills (area 2). Its permissions are Q14; how Claude is billed in CI is #37.
+    review skills (area 2). Its permissions are Q14; how Claude is billed in CI is #37, which
+    decided on a `setup-token` from the admin's employer seat.
 13. **Q13, Semgrep or CodeQL as the required code scan.** *At go-public (#38).* Semgrep is
     required from the CI/CD step; when CodeQL becomes available, one of them stays required and
     the other runs as advice (area 8).
@@ -1276,11 +1381,10 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     ```sh
     gh api -X PUT repos/sssoto17/sunny-pastures/automated-security-fixes --silent
     ```
-11. **No unattended factory work until #37** (area 2). Until #37 gives the factory its own
-    identity, or shows how a hook can tell an unattended session from an attended one, the
-    factory runs only with the admin watching. If a guard for unattended sessions follows, the
-    admin adds it under `.claude/hooks/` and registers it in `.claude/settings.json`, which
-    sessions can't write. Attended sessions are never blocked.
+11. **No unattended factory work until the factory App runs** (area 2). #37 gave the factory
+    its own App, so no guard for unattended sessions is built. Until the App runs, `factory:ready`
+    issues are worked only from attended sessions. Attended sessions are never blocked. The
+    admin's setup steps for the Apps and the Claude token are in #101 and #103.
 12. **CI/CD step:** **[.github]** `labeler.yml` and its workflow (A1); the CI workflows and the
     review workflow (area 2). **After #37 has settled how Claude is billed in CI** (Consequences),
     register the reviewer App (with #37's factory App) with `contents: write` and
@@ -1295,7 +1399,11 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
       `BLOCKED`). GitHub's protected-branches page speaks of "a person with admin permissions",
       so test it rather than assume it;
     - (d) a push to the PR dismisses the App's approval (back to `REVIEW_REQUIRED`);
-    - (e) adding `review:admin` makes the App dismiss its approval and turn auto-merge off;
+    - (e) a PR that meets an escalation row gets an escalation thread that mentions the admin and
+      no approval. When the factory App resolves the thread, the App's next run unresolves it.
+      When the admin resolves it, it stays resolved, and the PR merges only on the admin's
+      approval. Until #104, adding `review:admin` also makes the App dismiss its approval and turn
+      auto-merge off;
     - (f) an App-approved PR that changes one line of `AGENTS.md` still waits for the code
       owner's review (`BLOCKED`).
 
