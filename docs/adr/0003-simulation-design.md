@@ -17,7 +17,9 @@ The kickoff grill on #72 with the admin, 8 Nov 2026, settled decisions D1–D14;
 D5–D13. D1–D4 (the slice content) and D14 (the records) are scope, not design, and stay on #72.
 Writing it down exposed four gaps, which the admin answered on 8 Nov: how `apply` returns a
 refusal (now D15), and the rejected alternatives for time (D7), the generator (D9) and the state
-shape (D12). Those answers are on #72's Decisions as well. Each section names its D-number.
+shape (D12). The review of this ADR added D16 (integer-only numbers and maths), the pattern for
+the property tests (D10), and how the stream seed is read from the hash (D9). All of these are on
+#72's Decisions as well. Each section names its D-number.
 
 The spike's sim (`prototypes/persistence/src/sim.ts` on the unmerged branch
 `prototype/persistence`) is the reference, not a port: it imports `node:crypto`, which the real
@@ -34,11 +36,13 @@ function createSim(content: Content): {
   advance(state: FarmState, to: number): FarmState;
 };
 
-function stateHash(value: unknown): string; // the same for every content
+function stateHash(value: unknown): string; // 64 lowercase hex digits; the same for every content
 ```
 
 `at` and `to` are integer ms of server time. `apply(state, action, at)` and `advance(state, to)`
-keep the signatures in `AGENTS.md`; `createSim` adds the content around them.
+keep the signatures in `AGENTS.md`; `createSim` adds the content around them. A player has one
+farm (spec, Actors), and a farm's id is its player's id, so `newFarm(farmId)` here is ADR-0001's
+`newFarm(playerId)`.
 
 ## 1. Rules as a function of content (D5)
 
@@ -96,6 +100,8 @@ milliseconds. Content timers are whole seconds (MUST-10.4) and are converted to 
   backwards) then holds in the sim itself, not only through the handler's clamp
   `at = max(serverNow, lastAt)` (ADR-0001).
 
+**Pattern:** none (a representation choice).
+
 **Rejected:**
 
 - **Seconds as sim time.** Server time and the log's `at` are already integer ms (ADR-0001), and a
@@ -150,10 +156,11 @@ ordered.
 ## 6. The state hash is in the sim (D8, settles MUST-10.5)
 
 `stateHash(value)` is canonical JSON (object keys sorted at every level) hashed with SHA-256
-written in pure TypeScript, and `packages/sim` exports it. It is tested against the NIST vectors
-and against vectors for inputs of 55, 56, 63, 64 and 65 bytes, around SHA-256's 64-byte block and
-padding boundary. Those vectors are recorded once from `node:crypto` and committed as literals, so
-the tests keep the purity boundary too.
+written in pure TypeScript, returned as 64 lowercase hex digits, and `packages/sim` exports it.
+How the canonical JSON orders keys and treats non-finite numbers is in section 10. It is tested
+against the NIST vectors and against vectors for inputs of 55, 56, 63, 64 and 65 bytes, around
+SHA-256's 64-byte block and padding boundary. Those vectors are recorded once from `node:crypto`
+and committed as literals, so the tests keep the purity boundary too.
 
 This settles ADR-0001's open bullet on where the state hash lives and spec MUST-10.5.
 
@@ -161,8 +168,7 @@ This settles ADR-0001's open bullet on where the state hash lives and spec MUST-
 
 **Rejected:**
 
-- **A non-cryptographic 53–64-bit hash.** Collisions become likely across many farms and
-  snapshots, and a collision would hide a divergence.
+- **A non-cryptographic 53–64-bit hash:** collisions across many farms and snapshots.
 - **Hashing outside the sim**, in server and client code. That is two implementations that can
   drift, and the browser's `crypto.subtle` is async.
 
@@ -170,8 +176,11 @@ This settles ADR-0001's open bullet on where the state hash lives and spec MUST-
 
 Each purpose has its own stream: **yields** and **orders**. A stream's seed is the first 32 bits of
 `stateHash(farmId + ":" + purpose)`, so a new farm is the same on every server (MUST-10.3,
-ADR-0001). The generator is mulberry32, as in the spike, and the streams' states live in the farm
-state (section 5).
+ADR-0001). Exactly: `stateHash` of a string hashes the UTF-8 bytes of its canonical JSON, which is
+the JSON-encoded string with its quotes (for farm `farm-1`, the 15 bytes `"farm-1:yields"`). The
+seed is the first 8 hex digits of the result, read as a big-endian unsigned 32-bit integer. The
+generator is mulberry32, as in the spike, and the streams' states live in the farm state
+(section 5).
 
 **Patterns:** seeded PRNG; independent streams per purpose.
 
@@ -190,6 +199,8 @@ largest content farm in ≤ 50 ms, and `apply()` ≤ 1 ms per call. `spec.md` MU
 and is corrected to 30 to match. The `advance` ticket reports a `vitest bench` at 30 days in its
 PR. That isn't gating yet: the bench check is #41 (M3).
 
+**Pattern:** none (a budget).
+
 **Rejected:** designing for 7 days (MUST-07.4's old figure). `CONSTRAINTS.md` is canonical, and
 offline catch-up runs inside a request with a 300 ms p95 budget (BASE-04).
 
@@ -207,6 +218,40 @@ fixed seed:
 
 Each property runs 100 times at task end and 1,000 times in CI. The tests read the count from
 `SIM_PROPERTY_RUNS`, which `ci / test` sets (#40).
+
+**Pattern:** property-based testing (fast-check, fixed seed).
+
+**Rejected:**
+
+- **Example-based tests only.** They can't reach the generated tie and storage cases that
+  MUST-14.8 needs.
+- **A fresh random seed per run.** A failure couldn't be reproduced, and CI would flake.
+
+## 10. Numbers are safe integers, and the maths is integer-only (D16)
+
+Approved by the admin on 8 Nov, in the review of this ADR (PR #100).
+
+- **Every number in the state is a safe integer** (`Number.isSafeInteger`).
+- **No transcendental or engine-dependent maths in the rules:** no `Math.pow` with a non-integer
+  result, no `Math.exp`, `Math.log`, `Math.sin` and so on. Their results can differ between V8
+  and JavaScriptCore, which would split client and server hashes. Multipliers and growing costs
+  (#83, #85) stay in integers, for example per-mille with floor division, as defined in content.
+- **No 32-bit operators on times** (`|0`, `>>>0`, `<<`): they truncate above 2^31 ms (about 24.9
+  days), inside the 30-day window (section 8). The rule is about times: mulberry32's stream state
+  is a 32-bit value by design (section 7).
+- **`stateHash`'s canonical JSON sorts object keys by UTF-16 code unit** (the default
+  `Array.prototype.sort` order, never `localeCompare`), and **throws on a non-finite number**:
+  `JSON.stringify` would silently turn `NaN` and `Infinity` into `null`.
+
+**Pattern:** integer fixed-point arithmetic (per-mille, floor division), defined in content.
+
+**Rejected:**
+
+- **Floats rounded at the end.** `Math.pow`, `exp` and `log` can still differ between V8 and
+  JavaScriptCore before the rounding.
+- **`bigint`.** It isn't plain JSON (section 5).
+- **A pure-TypeScript deterministic maths library.** More code to verify, for curves that integers
+  already express.
 
 ## Vocabulary (D11)
 
@@ -227,6 +272,8 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Single source of truth for derived values | Level, unlocks, producibility | Computed from content, so they can't disagree with the stored facts. |
 | Canonical serialization plus cryptographic hash | `stateHash` | One implementation, synchronous, with collisions that don't hide divergence. |
 | Seeded PRNG, independent streams per purpose | yields, orders | Deterministic, and a draw in one rule doesn't shift another. |
+| Property-based testing | MUST-14 | Generated farms reach the tie and storage cases; a fixed seed makes failures reproducible. |
+| Integer fixed-point arithmetic | multipliers, growing costs | The same result in every JavaScript engine, so client and server hashes agree. |
 
 ## Consequences
 
@@ -238,6 +285,8 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
   `processed` check comes first) and keeps the farm it loaded.
 - **The state hash is one pure, synchronous function** for client and server. It encodes strings
   to UTF-8 itself, since `TextEncoder` isn't in the ES lib that the purity guard allows.
+- **Content expresses curves as integers** (section 10): a multiplier or growing cost is a
+  per-mille value or similar, applied with floor division.
 - **The state is the persisted format.** Adding or changing a field in the state or action types,
   or an export, meets `CONSTRAINTS.md`'s "Interface change" row and carries `review:admin`.
 - **MUST-07.4 is 30 days**, as in `CONSTRAINTS.md`. The bench in the `advance` ticket's PR is the
