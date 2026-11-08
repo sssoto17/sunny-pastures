@@ -338,11 +338,12 @@ Whichever store wins:
 
 - The clamp `at = max(serverNow, lastAt)` stays in the real API, so a farm's time never runs
   backwards across server instances.
-- **Open M2 decision: where the state hash lives.** The spike hashes with SHA-256 from
+- **M2 decision: where the state hash lives.** The spike hashes with SHA-256 from
   `node:crypto`. The real `packages/sim` can't import it (zero runtime dependencies, no `node:*`
   imports), and the browser's `crypto.subtle` is async. So in M2 the state hash either moves out
   of the sim into the server and client code around it, or becomes a small pure-TypeScript hash
-  inside the sim.
+  inside the sim. **Decided 8 Nov:** a pure-TypeScript SHA-256 inside the sim, exported as
+  `stateHash` ([ADR-0003](0003-simulation-design.md), section 6).
 
 Because B100 won:
 

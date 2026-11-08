@@ -43,6 +43,12 @@ What a farm produces between a player's last action and their return, computed w
 back rather than while they are away.
 _Avoid_: idle income, catch-up, background ticks
 
+**Automated step**:
+A change the farm makes by itself at a server time, with no action behind it (a crop ripening, an
+animal producing, a job finishing, a Collector moving goods, a Loop restarting, an order slot
+refilling).
+_Avoid_: event, tick, timer
+
 ### What a farm makes
 
 **Goods**:
