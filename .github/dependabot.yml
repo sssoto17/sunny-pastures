@@ -10,8 +10,12 @@ updates:
       all-dev:
         dependency-type: development
     open-pull-requests-limit: 3
+    labels: ["area:ci-cd", "review:admin"]          # code-owned paths (triage-labels.md)
+    commit-message: { prefix: chore, include: scope } # chore(deps): / chore(deps-dev):
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
     cooldown:
       default-days: 7
+    labels: ["area:ci-cd", "review:admin"]
+    commit-message: { prefix: chore, include: scope }
