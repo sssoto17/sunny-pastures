@@ -1,0 +1,76 @@
+# .github/labeler.yml: area:* labels from changed paths (docs/agents/triage-labels.md, "Areas").
+# tests/acceptance/ and prototypes/<name>/ take the area of what they test: set by hand.
+
+"area:ui":        # apps/web/ outside src/server/: pages, components, client state
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/web/*"
+          - "apps/web/!(src)/**"
+          - "apps/web/src/*"
+          - "apps/web/src/!(server)/**/!(route.*)"
+
+"area:api":       # apps/web/src/server/, route handlers
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/web/src/server/**"
+          - "apps/web/src/app/**/route.{ts,tsx,js}"
+
+"area:sim":
+  - changed-files:
+      - any-glob-to-any-file: "packages/sim/**"
+
+"area:db":        # supabase/, the Drizzle schema, migrations, RLS (Drizzle paths: fix at M3)
+  - changed-files:
+      - any-glob-to-any-file:
+          - "supabase/**"
+          - "apps/web/drizzle/**"
+          - "apps/web/src/server/db/**"
+          - "**/drizzle.config.*"
+
+"area:ci-cd":     # .github/, deploy config, root config
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "vercel.json"
+          - "package.json"
+          - "pnpm-workspace.yaml"
+          - "pnpm-lock.yaml"
+          - "skills-lock.json"
+          - ".nvmrc"
+          - ".gitignore"
+          - ".env.example"
+          # Root tool configs that CODEOWNERS owns (admin, 8 Nov). The same names inside
+          # apps/web/ or packages/<name>/ take that package's area.
+          - "**/.gitattributes"
+          - "tsconfig*.json"
+          - "eslint.config.*"
+          - "vitest.config.*"
+          - "stryker.conf*"
+          - "stryker.config.*"
+          - "lighthouserc.*"
+          - ".lighthouserc.*"
+          - ".gitleaks.toml"
+          - ".gitleaksignore"
+          - "osv-scanner.toml"
+          - ".semgrepignore"
+          - ".fallowrc.json"
+          - ".fallowrc.jsonc"
+          - "fallow.toml"
+          - ".fallow.toml"
+
+"area:tools":     # all dev tooling: tools/, scripts/, .claude/, .agents/
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tools/**"
+          - "scripts/**"
+          - ".claude/**"
+          - ".agents/**"
+
+"area:docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "GLOSSARY.md"
+          - "AGENTS.md"
+          - "CLAUDE.md"
+          - "README.md"

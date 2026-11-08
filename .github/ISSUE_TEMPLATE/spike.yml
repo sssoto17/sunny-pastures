@@ -1,0 +1,29 @@
+name: Spike
+description: Throwaway work that answers a question with measurements or a prototype
+labels: [spike, triage]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: The question, and the ADR or doc the answer lands in.
+    validations: { required: true }
+  - type: textarea
+    id: rule
+    attributes:
+      label: Decision rule (fixed before measuring)
+      description: What is measured, how, and which result picks which answer.
+    validations: { required: true }
+  - type: input
+    id: timebox
+    attributes:
+      label: Timebox
+      placeholder: e.g. one project day
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] Results and the decision recorded in <ADR/doc>
+    validations: { required: true }

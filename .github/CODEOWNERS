@@ -1,0 +1,40 @@
+# Code-owned paths (ADR-0002, area 2): a PR that touches any of these needs the admin's approval,
+# because the main ruleset requires code-owner review. Tuned with CONSTRAINTS.md (#34).
+# Only @sssoto17 is a code owner; never add a bot or an app.
+/tests/acceptance/      @sssoto17
+/.github/               @sssoto17
+/.claude/               @sssoto17
+/.agents/               @sssoto17
+/AGENTS.md              @sssoto17
+/CLAUDE.md              @sssoto17
+/CONSTRAINTS.md         @sssoto17
+/docs/adr/              @sssoto17
+/docs/requirements/     @sssoto17
+/docs/agents/           @sssoto17
+/docs/diagrams/workflow.md @sssoto17
+/skills-lock.json       @sssoto17
+.gitattributes          @sssoto17
+**/package.json         @sssoto17
+/vercel.json            @sssoto17
+/pnpm-workspace.yaml    @sssoto17
+/pnpm-lock.yaml         @sssoto17
+/supabase/config.toml   @sssoto17
+/supabase/migrations/   @sssoto17
+# Drizzle migrations and RLS: add the folder at M3, when it exists.
+
+# Configs that can weaken a check (CONSTRAINTS.md, "Guarding the bar"), in any directory.
+eslint.config.*         @sssoto17
+tsconfig*.json          @sssoto17
+vitest.config.*         @sssoto17
+stryker.conf*           @sssoto17
+stryker.config.*        @sssoto17
+.gitleaks.toml          @sssoto17
+.gitleaksignore         @sssoto17
+osv-scanner.toml        @sssoto17
+.semgrepignore          @sssoto17
+lighthouserc.*          @sssoto17
+.lighthouserc.*         @sssoto17
+.fallowrc.json          @sssoto17
+.fallowrc.jsonc         @sssoto17
+fallow.toml             @sssoto17
+.fallow.toml            @sssoto17

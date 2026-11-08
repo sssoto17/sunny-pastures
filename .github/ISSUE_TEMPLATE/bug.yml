@@ -1,0 +1,28 @@
+name: Bug
+description: Something that worked, or was specified, behaves wrongly
+labels: [bug, triage]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be true once it's fixed.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include the farm seed or action log if the sim is involved, and the browser for UI bugs.
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] A regression test that fails before the fix and passes after
+    validations: { required: true }

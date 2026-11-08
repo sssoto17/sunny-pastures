@@ -1,0 +1,23 @@
+name: Feature
+description: New behaviour for the player, the admin or the API
+labels: [feature, triage]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What changes for whom, and why now. Link the requirement (MUST-/SHOULD-…).
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: A list a reviewer can verify (a test, a command, a file, a number).
+      value: |
+        - [ ] 
+    validations: { required: true }
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: ADRs, glossary terms, code areas and issues to read first. Blockers go in native dependencies.

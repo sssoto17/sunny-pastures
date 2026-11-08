@@ -1,0 +1,22 @@
+name: Design
+description: Work whose output is decisions (a grill, an ADR, glossary terms, the spec)
+labels: [design, triage]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: The decisions to make, and the issues they block (add those as native dependencies).
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Which files hold the decisions when it's done.
+      value: |
+        - [ ] Decision recorded in <ADR / GLOSSARY.md / spec.md>
+    validations: { required: true }
+  - type: textarea
+    id: context
+    attributes:
+      label: Known constraints and context
