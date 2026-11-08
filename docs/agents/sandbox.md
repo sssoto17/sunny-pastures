@@ -54,9 +54,11 @@ Each case below was hit on 7 or 8 Nov. #77 (the post-merge script, still open) w
   outside the sandbox: `rm -rf .claude/worktrees/<name>`, then `git worktree prune`, which also
   clears a leftover `.git/worktrees/<name>`. The same "Device or resource busy" on
   `.git/worktrees/<name>` was seen on 7 Nov; `git worktree prune` outside fixes it too.
-- **`git branch -D` on a branch with upstream tracking** writes `.git/config` to drop the
-  tracking entry. Inside the sandbox the ref is deleted and the config entry stays behind,
-  harmlessly. Branches created with `--no-track` (above) avoid it.
+- **`git branch -D`** always tries to drop the branch's `branch.<name>` section from
+  `.git/config`, so inside the sandbox it warns "could not lock config file .git/config". The
+  warning is harmless: the ref is deleted. A branch created with `--no-track` (above) has no
+  such section, so nothing is left behind (seen 8 Nov, #90 cleanup). A branch with upstream
+  tracking leaves a stale `branch.<name>` entry, which is also harmless.
 
 ## Phantom files in `git status`
 
