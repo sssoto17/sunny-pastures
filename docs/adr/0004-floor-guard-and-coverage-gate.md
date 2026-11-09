@@ -15,8 +15,8 @@ change to `CONSTRAINTS.md` itself (#122). #99 adds the rest of the guard's desig
 ### The problem
 
 The guard compares each rule of `CONSTRAINTS.md` with its old version. It knows numbers and their
-direction, severities, stages and listed items: a table's list cells split at `,`, `;` and sentence
-ends, plus backticked tokens. It doesn't know what new words mean. In PR #121 the admin-approved
+direction, severities, stages and listed items: a table's list cells split at `,` and `;`, plus
+backticked tokens. It doesn't know what new words mean. In PR #121 the admin-approved
 allowance on the sim purity row ("test files … may also import `vitest` and `fast-check`") first
 failed as `rule-narrowed`. Moved behind a `;`, it kept every old item and passed as clean. The
 change was legitimate and disclosed, but an unapproved "…except in X" would have passed the same
@@ -41,11 +41,21 @@ edit in front of that review.
 2. **A narrowing warning.** A rule that gains a narrowing word (`except…`, `unless`, `but not`,
    `only`, `may`, `can also`, `other than`, `apart from`, `aside`, `besides`, `save for`,
    `exclud…`, `exempt…`, `allow…`, `permit…`, `waive…`, `optional…`, `no longer`, `as long as`,
-   `provided that`, "does not apply") is marked `warning [rule-narrowed]`. So is one that gains or
-   drops a negation (`not`, `no`, `never`, `none`, `nothing`, …), and a table row that gains a
-   clause of two or more words in a list cell. Words are counted against the old rule, so
-   rewording a rule that already says "only" doesn't trip it. Code spans don't count: they're names
-   (`gitleaks:allow`), and adding one is how a list gets tighter.
+   `provided that`, "does not apply", and after the review of #129 `warn…`, `skip…`, `ignor…`,
+   `outside`, `fine`) is marked `warning [rule-narrowed]`. So is a rule that:
+   - gains or drops a negation (`not`, `no`, `never`, `none`, `nothing`, …);
+   - gains a clause of two or more words: in a table row's list cell, or anywhere in a list item or
+     paragraph, where a clause that only edits an old one (a typo fix) doesn't count;
+   - gains an inline HTML comment or a footnote;
+   - is new (any row, item or paragraph but an Exceptions row);
+   - moved under another list's introduction (from "Also blocked, with no exception possible:" to
+     "A weakened bar is any of:", say). Its text is unchanged, so it used to pair as unchanged and
+     pass as `clean`. A rule reordered within its list is reported without a warning.
+
+   Any new line outside a rule (a heading, a comment, a fence) warns too. Words are counted against
+   the old rule, so rewording a rule that already says "only" doesn't trip it. Code spans don't
+   count: they're names (`gitleaks:allow`), and adding one is how a list gets tighter. Only a
+   blank-line edit passes with no report.
 3. **It warns; it never fails (admin, 9 Nov).** `guard / floor` is a required check in the ruleset
    `main checks`, which has no bypass (checked with `gh api` on 9 Nov; ADR-0002 describes only the
    ruleset `main`, whose admin bypass doesn't reach these checks). A failure could be cleared only
@@ -103,6 +113,11 @@ loosens anything", which a test holds), and a carve-out in other words or inside
 still appears in the report, so the admin's merge review catches it. In the other direction, a
 typo fixed inside a table's list cell, and an item appended right before a full stop, read as a
 removed item and fail as before.
+
+The redaction is a courtesy, not a secrets check. It replaces runs of 24 or more key-like
+characters that contain both a letter and a digit, so a shorter key, or one made only of letters,
+is quoted as written. The text is in the PR's diff anyway, and gitleaks (`guard / secrets`, #42) is
+the check for secrets (the admin, review of #129).
 
 ### Consequences
 

@@ -264,15 +264,22 @@ approval through CODEOWNERS.
 
 **What the guard can judge in this file.** It compares each rule with its old version: a number
 moved the wrong way, a severity or a stage dropped, a listed item gone, a rule removed. It can't
-read what new words mean. So whenever this file changes, the guard also reports every changed
-rule, and every changed line outside a rule (a heading, a comment, a fence), with the old and new
-text side by side and the edit marked. The report goes to the guard's log, the job summary and a
-warning annotation on the changed line in the PR's Files changed tab (#122). GitHub shows 10
-annotations per step, so with more changes the last one points to the job summary, which has them
-all. Key-like text in the quotes is redacted. A rule that gains a narrowing word (`except`,
-`unless`, `but not`, `only`, `may`, `other than`, `apart from` and a few more), gains or drops a
-negation (`not`, `never`, …), or gains a clause of two or more words in a table's list cell is
-marked `warning [rule-narrowed]`.
+read what new words mean. So whenever this file changes, the guard also reports every changed or
+moved rule, and every changed line outside a rule (a heading, a comment, a fence), with the old and
+new text side by side and the edit marked. Only a blank-line edit passes with no report. The report
+goes to the guard's log, the job summary and a warning annotation on the changed line in the PR's
+Files changed tab (#122). GitHub shows 10 annotations per step, so with more changes the last one
+points to the job summary, which has them all. Long key-like text in the quotes is redacted.
+
+These are marked `warning [rule-narrowed]`:
+
+- A rule that gains a narrowing word: `except`, `unless`, `but not`, `only`, `may`, `other than`,
+  `apart from`, `warn`, `skip`, `ignore`, `outside`, `fine` and a few more.
+- A rule that gains or drops a negation (`not`, `never`, …).
+- A rule that gains a clause of two or more words, an HTML comment or a footnote.
+- A new rule, or new text outside the rules.
+- A rule moved under another list's introduction, such as from "Also blocked, with no exception
+  possible:" to "A weakened bar is any of:".
 
 That warning isn't a _warn_ row and doesn't break "Every failing check blocks the merge": it rides
 on a review that happens anyway, because every PR that touches this file carries `review:admin`.

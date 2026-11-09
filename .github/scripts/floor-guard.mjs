@@ -9,9 +9,10 @@
 // One addition (#122): when CONSTRAINTS.md changes, the change report quotes every changed rule,
 // tightenings included, old and new, with the edit marked, in the log, the job summary
 // ($GITHUB_STEP_SUMMARY) and warning annotations, and the guard no longer logs `clean`. It quotes
-// only CONSTRAINTS.md, a prose file, never code, with key-like text redacted. A rule that gains a
-// narrowing word, a negation or a new clause is marked `warning [rule-narrowed]` there: a warning
-// for the admin's merge review, never a failure (admin, 9 Nov; ADR-0004).
+// only CONSTRAINTS.md, a prose file, never code, with key-like text redacted. A possible carve-out
+// (a narrowing word, a negation, a new clause, comment, footnote or rule, a rule moved to another
+// list) is marked `warning [rule-narrowed]` there: a warning for the admin's merge review, never a
+// failure (admin, 9 Nov; ADR-0004).
 //
 // Usage: node .github/scripts/floor-guard.mjs [--base <ref>]   (default base: origin/main)
 // FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date (tests only).
@@ -294,7 +295,7 @@ const WEAKER_SEVERITY = /_\(warn\)_|\(not required\)/;
 // when every listed item survives: "…except in X" keeps them all and still lowers the bar. It's a
 // warning for the admin, not a failure (admin, 9 Nov): the list is a tripwire, not a parser, and
 // the change report shows every changed rule whether it trips or not.
-const NARROWING = /\bexcept\w*|\bunless\b|\bbut not\b|\bonly\b|\bmay\b|\bcan also\b|\bother than\b|\bapart from\b|\baside\b|\bbesides\b|\bsave for\b|\bexclud\w*|\bexempt\w*|\ballow\w*|\bpermit\w*|\bwaive\w*|\boptional\w*|\bno longer\b|\bas long as\b|\bprovided that\b|\b(does not|doesn't|do not|don't|need not|needn't) (apply|count)\b/g;
+const NARROWING = /\bexcept\w*|\bunless\b|\bbut not\b|\bonly\b|\bmay\b|\bcan also\b|\bother than\b|\bapart from\b|\baside\b|\bbesides\b|\bsave for\b|\bexclud\w*|\bexempt\w*|\ballow\w*|\bpermit\w*|\bwaive\w*|\boptional\w*|\bwarn\w*|\bskip\w*|\bignor\w*|\boutside\b|\bfine\b|\bno longer\b|\bas long as\b|\bprovided that\b|\b(does not|doesn't|do not|don't|need not|needn't) (apply|count)\b/g;
 // A negation added or dropped flips a rule ("is blocked" / "is not blocked"), so both directions warn.
 const NEGATION = /\b(not|no|never|none|nothing|nor|cannot|can't|mustn't|isn't|aren't|won't)\b/g;
 // Code spans are names (`gitleaks:allow`, `istanbul ignore`), so adding one to a list isn't a
@@ -310,12 +311,41 @@ const surplus = (re, a, b) => {
     return false;
   });
 };
+// Places to hide text the rendered file doesn't show, or shows somewhere else.
+const HIDING = [
+  [/<!--/g, 'adds an HTML comment'],
+  [/\[\^[^\]\s]+\]/g, 'adds a footnote'],
+];
+// A rule's clauses: split at `,`, `;` and full stops. Only the warning uses this split; the
+// blocking check (listed) splits list cells at `,` and `;` only.
+const clausesOf = (t) => t.split(/[,;]|\.(?=\s|$)/).map((s) => s.trim()).filter(Boolean);
+const wordCount = (s) => (s.replace(/`[^`]*`/g, ' ').match(/[a-z]{2,}/gi) ?? []).length;
+// Clauses of `nowText` that are new: not in `oldText`, and not an edit of an old clause (as similar
+// as a reworded paragraph, and not two or more words longer). A typo fix pairs with its old clause;
+// "Fixtures are okay." doesn't pair with anything.
+const proseClauses = (oldText, nowText) => {
+  const was = clausesOf(oldText);
+  const is = clausesOf(nowText);
+  const wasSet = new Set(was.map(norm));
+  const isSet = new Set(is.map(norm));
+  const gone = was.filter((c) => !isSet.has(norm(c)));
+  return is.filter((c) => {
+    if (wasSet.has(norm(c))) return false;
+    const i = gone.findIndex((g) => similarity(g, c) >= 0.5 && wordCount(c) - wordCount(g) < 2);
+    if (i > -1) {
+      gone.splice(i, 1);
+      return false;
+    }
+    return wordCount(c) >= 2;
+  });
+};
 // Why a change from `oldText` to `nowText` may carve out an exception ('' for a new rule).
 const narrowingLabels = (oldText, nowText) => [
   ...new Set([
     ...surplus(NARROWING, oldText, nowText).map((w) => `adds "${w}"`),
     ...surplus(NEGATION, oldText, nowText).map((w) => `adds "${w}"`),
     ...surplus(NEGATION, nowText, oldText).map((w) => `drops "${w}"`),
+    ...HIDING.filter(([re]) => surplus(re, oldText, nowText).length).map(([, label]) => label),
   ]),
 ];
 
@@ -356,8 +386,9 @@ const compareRule = (old, now) => {
 const keyOf = (r) => r.key ?? `${r.kind === 'item' ? 'list item' : r.kind === 'row' ? 'row' : 'paragraph'} in "${r.section}"`;
 
 // Compares CONSTRAINTS.md at the merge base with the working tree. Returns the findings, and every
-// rule that changed, was removed or was added, for the change report (#122). `narrows` lists why a
-// change may carve out an exception: the narrowing words it adds, and new clauses in a list cell.
+// rule that changed, moved, was removed or was added, and every other changed line, for the change
+// report (#122). `narrows` lists why a change may carve out an exception (narrowingLabels, new
+// clauses, a new rule, a move to another list).
 const constraintsFindings = (f, mergeBase) => {
   const out = [];
   const changes = [];
@@ -365,10 +396,14 @@ const constraintsFindings = (f, mergeBase) => {
   const after = parseRules(readFileSync(f.path, 'utf8').split('\n'));
   const isException = (r) => r.kind === 'row' && (/^E\d+$/.test(r.key) || r.key === '_none_');
   const taken = new Set();
+  const unchanged = new Map(); // after rule → the old rule with the same section and text
   // Pair unchanged rules first, so a changed rule can't pair with one of them.
   const pending = before.filter((old) => {
     const same = after.find((r) => !taken.has(r) && r.section === old.section && r.text === old.text);
-    if (same) taken.add(same);
+    if (same) {
+      taken.add(same);
+      unchanged.set(same, old);
+    }
     return !same;
   });
   for (const old of pending) {
@@ -395,29 +430,55 @@ const constraintsFindings = (f, mergeBase) => {
       continue;
     }
     taken.add(now);
-    const narrows = [...narrowingLabels(old.text, now.text), ...(newClauses(old, now).length ? ['adds a clause to a list cell'] : [])];
-    changes.push({ kind: 'changed', old, now, key, narrows });
+    const clauses = now.kind === 'row' ? newClauses(old, now).length && 'adds a clause to a list cell' : proseClauses(old.text, now.text).length && 'adds a clause';
+    changes.push({ kind: 'changed', old, now, key, narrows: [...narrowingLabels(old.text, now.text), ...(clauses ? [clauses] : [])] });
     const verdict = compareRule(old, now);
     if (verdict) out.push({ rule: verdict, line: now.line, key });
   }
-  // A new rule has no old text to lose items from, but it can still carve out an exception.
+  // A new rule has no old text to lose items from, but it can be a carve-out on its own.
   for (const r of after) {
     if (taken.has(r)) continue;
-    changes.push({ kind: 'added', now: r, key: keyOf(r), narrows: isException(r) ? [] : narrowingLabels('', r.text) });
+    changes.push({ kind: 'added', now: r, key: keyOf(r), narrows: isException(r) ? [] : ['adds a rule', ...narrowingLabels('', r.text)] });
   }
-  // Changed lines no rule covers: headings, table headers, HTML comments and fences. They hold no
-  // rule the guard can compare, but a comment or a fence can still tell an agent something.
-  const covered = (rules) => new Set(rules.flatMap((r) => Array.from({ length: r.end - r.line + 1 }, (_, k) => r.line + k)));
-  const inAfter = covered(after);
-  const inBefore = covered(before);
+  // Every other changed line. A line outside any rule (a heading, a table header, an HTML comment,
+  // a fence) holds nothing the guard can compare, but it can still tell an agent something. A line
+  // of a rule whose text didn't change means the rule moved, perhaps into another list.
+  const ruleAt = (rules, n) => rules.find((r) => r.line <= n && n <= r.end);
+  const at = (c, side) => (c[side] ? [c[side].line, c[side].end ?? c[side].line] : null);
+  const reported = (side, n) => changes.some((c) => at(c, side) && at(c, side)[0] <= n && n <= at(c, side)[1]);
+  const moves = new Set();
   for (const a of f.added) {
-    if (a.text.trim() && !inAfter.has(a.line)) changes.push({ kind: 'other', now: { line: a.line, text: a.text }, narrows: narrowingLabels('', a.text) });
+    if (!a.text.trim() || reported('now', a.line)) continue;
+    const r = ruleAt(after, a.line);
+    if (r && unchanged.has(r)) moves.add(r);
+    else if (!r) changes.push({ kind: 'other', now: { line: a.line, text: a.text }, narrows: ['adds text outside the rules', ...narrowingLabels('', a.text)] });
   }
-  for (const r of f.removed) {
-    if (r.text.trim() && !inBefore.has(r.line)) changes.push({ kind: 'other', old: { line: r.line, text: r.text }, narrows: [] });
+  for (const d of f.removed) {
+    if (!d.text.trim() || reported('old', d.line)) continue;
+    const old = ruleAt(before, d.line);
+    const now = old && [...unchanged].find(([, o]) => o === old)?.[0];
+    if (now) moves.add(now);
+    else if (!old) changes.push({ kind: 'other', old: { line: d.line, text: d.text }, narrows: [] });
+  }
+  for (const now of moves) {
+    const old = unchanged.get(now);
+    const from = contextOf(before, old);
+    const to = contextOf(after, now);
+    changes.push({ kind: 'moved', old, now, key: keyOf(now), from, to, narrows: from === to ? [] : [`moves from "${from}" to "${to}"`] });
   }
   changes.sort((a, b) => (a.now ?? a.old).line - (b.now ?? b.old).line);
   return { findings: out, changes };
+};
+
+// What a rule sits under: the last sentence of the paragraph that introduces its list ("Also
+// blocked, with no exception possible:"), or its section's title.
+const contextOf = (rules, r) => {
+  const i = rules.indexOf(r);
+  for (let k = i - 1; k >= 0 && rules[k].sectionNo === r.sectionNo; k--) {
+    if (rules[k].kind === 'para') return flat(rules[k].text).split(/(?<=[.!?])\s+/).pop().slice(-80);
+    if (rules[k].kind !== r.kind) break;
+  }
+  return r.section;
 };
 
 // The change report's marks, in git's --word-diff style. Tokens keep their leading space, so
@@ -472,6 +533,7 @@ const reportEntries = (changes) =>
     const warn = c.narrows.length ? [`warning [rule-narrowed]: ${c.narrows.join(', ')}; check it isn't a carve-out`] : [];
     if (!c.now) return { c, head, lines: [`was: [-${flat(c.old.text)}-]`] };
     if (!c.old) return { c, head, lines: [...warn, `now: {+${flat(c.now.text)}+}`] };
+    if (c.kind === 'moved') return { c, head, lines: [...warn, `from: CONSTRAINTS.md:${c.old.line} (old), under "${c.from}"`, `to: under "${c.to}"`, `text: ${flat(c.now.text)}`] };
     const lines = [...warn];
     if (c.old.kind === 'row' && c.old.cells.length === c.now.cells.length) {
       c.now.cells.forEach((cell, k) => {

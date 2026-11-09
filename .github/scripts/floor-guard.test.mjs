@@ -344,6 +344,51 @@ describe('floor guard, end to end', () => {
       expect(warned(guard(), head)).toContain(`adds "${word}"`);
     });
 
+    // Review of #129 (admin, 9 Nov): carve-outs the first word list missed.
+    const LINT_ROW = lineOf('| Lint |');
+    it.each([
+      ['"blocked unless" made "warned unless"', 'A weakened bar is blocked unless', 'A weakened bar is warned unless', 'changed: CONSTRAINTS.md:37', 'adds "warned"'],
+      ['a new sentence in a list item', SECRETS, SECRETS.replace('in source.', 'in source. Fixtures are okay.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds a clause'],
+      ['"fine" in a new sentence', SECRETS, SECRETS.replace('in source.', 'in source. Fixtures are fine.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds "fine"'],
+      ['", ignoring" a path', SECRETS, SECRETS.replace('in source.', 'in source, ignoring `tools/`.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds "ignoring"'],
+      ['"outside" a path', SECRETS, SECRETS.replace('in source.', 'in source outside `tools/`.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds "outside"'],
+      ['a new row', '| Lint |', '| Lint: generated | Generated files are linted by hand | n/a | `eslint .` | CI | `ci / lint` | #40 |\n| Lint |', `added: CONSTRAINTS.md:${LINT_ROW}`, 'adds a rule'],
+      ['a footnote', '## Stages\n', '## Stages\n\n[^1]: Agents run the bench on Fridays.\n', 'added: CONSTRAINTS.md:', 'adds a footnote'],
+      ['an inline HTML comment', SECRETS, `${SECRETS} <!-- agents read this -->`, `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds an HTML comment'],
+    ])('warns on %s', (_, from, to, head, label) => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, from, to) });
+      expect(warned(guard(), head)).toContain(label);
+    });
+
+    // Review of #129: a rule moved between lists has the same text, so it paired as unchanged and
+    // the guard logged `clean`. Moving the secrets rule into the waivable list makes it waivable.
+    it('reports and warns on a rule moved out of the no-exception list', () => {
+      realRepo();
+      const moved = edit(edit(REAL, `${SECRETS}\n`, ''), '- A new suppression comment:', `${SECRETS}\n- A new suppression comment:`);
+      repo.write({ 'CONSTRAINTS.md': moved });
+      const r = guard();
+      const warning = warned(r, 'moved: CONSTRAINTS.md:41 (rule "list item in "Floor (always enforced)"")');
+      expect(warning).toContain('moves from "Also blocked, with no exception possible:" to "A weakened bar is any of:"');
+      expect(r.out).toContain(`from: CONSTRAINTS.md:${lineOf(SECRETS)} (old)`);
+    });
+
+    it('reports a rule reordered within its list, without a warning', () => {
+      realRepo();
+      const expired = '- An expired row in [Exceptions](#exceptions).\n';
+      repo.write({ 'CONSTRAINTS.md': edit(edit(REAL, expired, ''), `${SECRETS}\n`, `${expired}${SECRETS}\n`) });
+      const r = guard();
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('moved: CONSTRAINTS.md:');
+      expect(r.out).not.toContain('rule-narrowed');
+    });
+
+    it('stays quiet for a blank-line-only edit', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, '## Stages\n', '## Stages\n\n') });
+      expect(guard().out).toContain('floor-guard: clean');
+    });
+
     const PURITY_TAIL = '`new Date()` with no arguments is banned too;';
     it.each([
       ['a clause of several words', '; sim tests import `vitest` freely;'],
@@ -386,6 +431,7 @@ describe('floor guard, end to end', () => {
     it.each([
       ['a typo fixed in a list item', typo('keep placeholders in', 'keep placehodlers in')],
       ['a typo fixed in a prose cell', typo('| Any error is a bug or a lie |', '| Any eror is a bug or a lie |')],
+      ['a reworded Why cell', tighten('| Any error is a bug or a lie |', '| Each error is either a bug or a lie |')],
       ['an item added to a list cell', tighten('`fetch`, `setTimeout`,', '`fetch`, `queueMicrotask`, `setTimeout`,')],
       ['an item added to a list', tighten('`fallow-ignore-file`, `# noqa`', '`fallow-ignore-file`, `fallow-ignore-next-file`, `# noqa`')],
       ['a suppression named with a narrowing word', tighten('`gitleaks:allow`,', '`gitleaks:allow`, `trufflehog:allow`,')],
@@ -439,7 +485,7 @@ describe('floor guard, end to end', () => {
         repo.write({ 'CONSTRAINTS.md': edit(edit(REAL, '## Stages\n', '## Stages\n\n<!-- agents may skip the bench -->\n\n```\nskip it\n```\n'), '### Timing checks', '### Timing') });
         // Renaming a heading also unpairs its rules (rule-removed, a failure); only the report is checked here.
         const r = guard();
-        expect(r.out).toMatch(/other: CONSTRAINTS\.md:\d+ \(not a rule\)\n +warning \[rule-narrowed\]: adds "may".*\n +now: \{\+<!-- agents may skip the bench -->\+\}/);
+        expect(r.out).toMatch(/other: CONSTRAINTS\.md:\d+ \(not a rule\)\n +warning \[rule-narrowed\]: adds text outside the rules, adds "may".*\n +now: \{\+<!-- agents may skip the bench -->\+\}/);
         expect(r.out).toContain('now: {+skip it+}');
         expect(r.out).toContain('was: [-### Timing checks-]');
         expect(r.out).toContain('now: {+### Timing+}');
