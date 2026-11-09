@@ -52,8 +52,8 @@ describe('typecheck reach', () => {
     expect(repo.run(SCRIPT).code).toBe(0);
   });
 
-  it('counts a package as referenced only through its own tsconfig.json', () => {
-    repo = makeRepo({ 'pnpm-workspace.yaml': WORKSPACE, 'tsconfig.json': solution(['./packages/sim/tsconfig.test.json']), ...pkg('packages/sim') });
+  it.each(['./packages/sim/tsconfig.test.json', './packages/sim/package.json'])('counts a package as referenced only through its own tsconfig.json, not %s', (ref) => {
+    repo = makeRepo({ 'pnpm-workspace.yaml': WORKSPACE, 'tsconfig.json': solution([ref]), ...pkg('packages/sim') });
     expect(repo.run(SCRIPT).code).toBe(1);
   });
 

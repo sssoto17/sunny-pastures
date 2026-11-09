@@ -71,6 +71,14 @@ describe('coverage gate, end to end', () => {
     expect(repo.run(SCRIPT).code).toBe(2);
   });
 
+  it('reads the real "not yet" cell as no ratchet, end to end', () => {
+    repo = makeRepo({ 'CONSTRAINTS.md': ratchets('not yet: recorded after the first `packages/sim` PR') });
+    repo.write({ 'coverage/lcov.info': 'SF:packages/sim/src/a.ts\nDA:1,1\nend_of_record\n' });
+    const r = repo.run(SCRIPT);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('project coverage ratchet: no value recorded yet');
+  });
+
   it('exits 2 when the Today cell is unreadable', () => {
     repo = makeRepo({ 'CONSTRAINTS.md': ratchets('TBD') });
     repo.write({ 'coverage/lcov.info': 'SF:packages/sim/src/a.ts\nDA:1,1\nend_of_record\n' });
