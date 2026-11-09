@@ -188,6 +188,11 @@ export const enclosingKey = (lines, n) => {
 // #125) doesn't need Exceptions rows. Only JS, TS and JSON configs, by extension, where quotes and
 // whitespace outside strings carry no meaning. YAML (indentation is meaning) and files without an
 // extension are left to the exact checks (spec review of #141).
+// Every file Prettier reads its settings from (#125). A new one, nested or at the root, overrides
+// .prettierrc for its folder, and a deleted or renamed one drops the settings, so each counts as
+// loosening the formatting check (security review of #147).
+const PRETTIER_CONFIG =
+	/^(\.prettierrc(\.(json5?|ya?ml|toml|[cm]?[jt]s))?|prettier\.config\.[cm]?[jt]s)$/;
 const FORMATTED_CONFIG =
 	/^(eslint\.config|vitest\.config|tsconfig.*|\.?fallowrc|\.?fallow|stryker\.(conf|config)|\.?lighthouserc)\.(c|m)?[jt]s$|^(tsconfig.*|\.?fallowrc|\.?fallow|\.?lighthouserc)\.jsonc?$/;
 // After a line break these end a statement (JavaScript's restricted productions): `return⏎x` isn't
@@ -378,7 +383,8 @@ const configLoosening = (f, mergeBase) => {
 			if (t && !t.startsWith("#") && !(name === ".prettierignore" && t.startsWith("!")))
 				hits.push(a.line);
 		}
-	} else if (name === ".prettierrc") {
+	} else if (PRETTIER_CONFIG.test(name)) {
+		if (f.status === "added" || (f.oldPath && basename(f.oldPath) !== name)) return ["file"];
 		// Prettier's settings (#125): an `overrides` block, an ignore-like key or `requirePragma`
 		// (which formats only files that ask for it) narrows the check, and so does dropping a plugin
 		// such as the import sorter.
@@ -1349,6 +1355,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 	for (const f of changes) {
 		if (f.status === "deleted") {
 			if (isTest(f.path)) weak("test-deleted", f.path, "file");
+			else if (PRETTIER_CONFIG.test(basename(f.path))) weak("config-loosened", f.path, "file");
 			// A deleted config that held a run count takes it with it (review of #133).
 			else if ((oldContent(mergeBase, f.path) ?? []).some(runCount))
 				weak("property-runs-cut", f.path, "file");
@@ -1384,6 +1391,28 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 		}
 		if (basename(f.path) === "package.json" && f.status !== "added")
 			for (const line of scriptChecks(f)) weak("check-removed", f.path, line);
+		// A top-level "prettier" key in any package.json takes over from .prettierrc for its folder
+		// (#125, security review of #147).
+		if (basename(f.path) === "package.json") {
+			const key = (text) => {
+				try {
+					return JSON.stringify(JSON.parse(text).prettier ?? null);
+				} catch {
+					return null;
+				}
+			};
+			const now = readFileSync(f.path, "utf8");
+			const was =
+				f.status === "added"
+					? "null"
+					: key((oldContent(mergeBase, f.oldPath ?? f.path) ?? []).join("\n"));
+			if (key(now) !== "null" && key(now) !== was)
+				weak(
+					"config-loosened",
+					f.path,
+					f.added.find((a) => /^\s*"prettier"\s*:\s*[{"[]/.test(a.text))?.line ?? "file",
+				);
+		}
 		if (WORKFLOW.test(f.path)) {
 			const before = f.oldPath ? (oldContent(mergeBase, f.oldPath) ?? []) : [];
 			const now = readFileSync(f.path, "utf8").split("\n");

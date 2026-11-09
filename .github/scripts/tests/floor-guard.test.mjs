@@ -1395,6 +1395,49 @@ describe("floor guard, end to end", () => {
 			expect(run(files).code).toBe(0);
 		});
 
+		// Prettier reads its settings from other places too, so moving them is a way around the line
+		// checks (security review of #147).
+		it.each([
+			["deleting .prettierrc", (r) => rmSync(join(r.dir, ".prettierrc"))],
+			[
+				"renaming .prettierrc to .prettierrc.json",
+				(r) => renameSync(join(r.dir, ".prettierrc"), join(r.dir, ".prettierrc.json")),
+			],
+			[
+				"a nested .prettierrc",
+				(r) => r.write({ "packages/sim/.prettierrc": '{ "semi": false }\n' }),
+			],
+			[
+				"a new prettier.config.mjs",
+				(r) => r.write({ "prettier.config.mjs": "export default {};\n" }),
+			],
+			[
+				"a top-level prettier key in package.json",
+				(r) => r.write({ "package.json": '{\n  "prettier": { "semi": false }\n}\n' }),
+			],
+		])("blocks %s", (_, change) => {
+			repo = makeRepo({
+				...BASE,
+				".prettierrc": RC,
+				".prettierignore": IGNORE,
+				"package.json": "{}\n",
+			});
+			change(repo);
+			expect(guard().out).toContain("[config-loosened]");
+		});
+
+		it("accepts a prettier version bump in package.json's devDependencies", () => {
+			const pkg = (v) => `{\n  "devDependencies": {\n    "prettier": "${v}"\n  }\n}\n`;
+			repo = makeRepo({
+				...BASE,
+				".prettierrc": RC,
+				".prettierignore": IGNORE,
+				"package.json": pkg("3.9.10"),
+			});
+			repo.write({ "package.json": pkg("3.9.11") });
+			expect(guard().code).toBe(0);
+		});
+
 		// Its re-indented lines name `overrides` and `ignore`, which flag unless the whole file
 		// parses to the same JSON as before.
 		it("accepts a pure reformat of a .prettierrc that already has overrides (#138)", () => {

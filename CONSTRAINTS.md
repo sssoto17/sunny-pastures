@@ -59,7 +59,8 @@ of:
   `extends` nor `strict`, #99), Stryker ignore patterns,
   assertions turned off in `lighthouserc.*`, `disableRules` in the axe setup, the Fallow
   config, a path added to `.prettierignore`, and in `.prettierrc` an `overrides` block, an
-  ignore-like key, `requirePragma` or a dropped plugin (#125). In `eslint.config.*`, `vitest.config.*`, `tsconfig*.json`, and the Fallow, Stryker and
+  ignore-like key, `requirePragma` or a dropped plugin; and a new, deleted or renamed Prettier
+  config file, or a `prettier` key in a `package.json`, which takes over from it (#125). In `eslint.config.*`, `vitest.config.*`, `tsconfig*.json`, and the Fallow, Stryker and
   Lighthouse configs written as JS, TS or JSON, and in a `.prettierrc` that parses as JSON to
   the same value, a change that only reformats (quotes,
   indentation, trailing commas, re-wrapped lists) isn't a loosening; any change in content still
