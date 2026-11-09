@@ -43,7 +43,17 @@ const CHECK_STEP =
 // script that loses one of these, or skips the ratchet outside `check:task`, is a removed check.
 const SCRIPT_LINE = /^\s*"([\w:.-]+)"\s*:\s*"(.*)",?\s*$/;
 const CHECK_CMD =
-	/node \S*(?:floor-guard|coverage-gate|typecheck-reach)\.mjs|\btsc -b\b|\beslint\b|\bvitest run\b|pnpm (?:typecheck|lint|test|guard:floor|coverage:gate|check:fast)\b/g;
+	/node \S*(?:floor-guard|coverage-gate|typecheck-reach)\.mjs|\btsc -b\b|\beslint\b|\bvitest run\b|\bprettier --check\b|\bfallow dupes\b|pnpm (?:typecheck|lint|test|guard:floor|coverage:gate|check:fast|format:check|dupes)\b/g;
+// The file types a `prettier --check "**/*.{a,b}"` glob covers (#125), so a script that drops one
+// narrows the formatting check.
+const prettierTypes = (value) =>
+	/\bprettier --check\b/.test(value)
+		? new Set(
+				[...value.matchAll(/\*\.\{([\w,]+)\}|\*\.(\w+)\b/g)].flatMap((m) =>
+					(m[1] ?? m[2]).split(","),
+				),
+			)
+		: null;
 const scriptChecks = (f) => {
 	const hits = [];
 	const byKey = (lines) =>
@@ -57,7 +67,11 @@ const scriptChecks = (f) => {
 	const now = byKey(f.added);
 	for (const [key, old] of was) {
 		const value = now.get(key)?.value ?? "";
-		if ((old.value.match(CHECK_CMD) ?? []).some((cmd) => !value.includes(cmd)))
+		const types = [prettierTypes(old.value), prettierTypes(value)];
+		if (
+			(old.value.match(CHECK_CMD) ?? []).some((cmd) => !value.includes(cmd)) ||
+			(types[0] && types[1] && [...types[0]].some((t) => !types[1].has(t)))
+		)
 			hits.push(`${old.line} (old)`);
 	}
 	for (const [key, cur] of now) {
@@ -333,6 +347,21 @@ const normalizeCode = (text) => {
 // (spec, admin and security reviews of #141). A PR that mixes a reformat with a content change in
 // the same config gets every finding, so a reformat goes in a PR of its own.
 const withoutFormatting = (f, mergeBase) => {
+	// .prettierrc has no extension and may be JSON or YAML, so it reads as unchanged only when both
+	// versions parse as JSON to the same value (#125).
+	if (basename(f.path) === ".prettierrc" && f.status === "modified") {
+		const parse = (text) => {
+			try {
+				return JSON.stringify(JSON.parse(text));
+			} catch {
+				return null;
+			}
+		};
+		const before = parse((oldContent(mergeBase, f.path) ?? []).join("\n"));
+		return before !== null && before === parse(readFileSync(f.path, "utf8"))
+			? { ...f, removed: [], added: [] }
+			: f;
+	}
 	if (!FORMATTED_CONFIG.test(basename(f.path)) || f.status !== "modified") return f;
 	const before = normalizeCode((oldContent(mergeBase, f.path) ?? []).join("\n"));
 	const after = normalizeCode(readFileSync(f.path, "utf8"));
@@ -342,8 +371,28 @@ const configLoosening = (f, mergeBase) => {
 	const name = basename(f.path);
 	const hits = [];
 	const newLines = () => readFileSync(f.path, "utf8").split("\n");
-	if (name === ".gitleaksignore" || name === ".semgrepignore") {
-		for (const a of f.added) if (a.text.trim() && !a.text.trim().startsWith("#")) hits.push(a.line);
+	if (name === ".gitleaksignore" || name === ".semgrepignore" || name === ".prettierignore") {
+		// A `!` line in .prettierignore re-includes a path, which widens the check (#125).
+		for (const a of f.added) {
+			const t = a.text.trim();
+			if (t && !t.startsWith("#") && !(name === ".prettierignore" && t.startsWith("!")))
+				hits.push(a.line);
+		}
+	} else if (name === ".prettierrc") {
+		// Prettier's settings (#125): an `overrides` block, an ignore-like key or `requirePragma`
+		// (which formats only files that ask for it) narrows the check, and so does dropping a plugin
+		// such as the import sorter.
+		for (const a of f.added)
+			if (/overrides|ignore|exclude|requirePragma|skip|disable/i.test(a.text)) hits.push(a.line);
+		const plugins = (lines) =>
+			new Set(
+				lines.flatMap((l) =>
+					[...l.text.matchAll(/["']([^"']*prettier-plugin[^"']*)["']/g)].map((m) => m[1]),
+				),
+			);
+		const kept = plugins(f.added);
+		for (const r of f.removed)
+			if ([...plugins([r])].some((p) => !kept.has(p))) hits.push(`${r.line} (old)`);
 	} else if (
 		/^(\.gitleaks\.toml|osv-scanner\.toml|stryker\.(conf|config)\..+|\.?lighthouserc(\..+)?|\.?fallowrc(\..+)?|\.?fallow\.(toml|json|jsonc))$/.test(
 			name,

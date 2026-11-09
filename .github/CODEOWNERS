@@ -38,3 +38,5 @@ lighthouserc.*          @sssoto17
 .fallowrc.jsonc         @sssoto17
 fallow.toml             @sssoto17
 .fallow.toml            @sssoto17
+.prettierrc             @sssoto17
+.prettierignore         @sssoto17
