@@ -13,7 +13,7 @@ export function canonicalJson(value: unknown): string {
 function write(value: unknown, ancestors: Set<object>): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error(`canonicalJson: ${value} is not a finite number`);
+    if (!Number.isFinite(value)) throw new Error(`canonicalJson: ${String(value)} is not a finite number`);
     return JSON.stringify(value); // -0 is written as 0
   }
   if (!Array.isArray(value) && !isPlainObject(value)) throw notPlain(typeName(value));

@@ -105,7 +105,7 @@ export const evaluate = ({ changes, lcov, recorded, skipRatchet = false }) => {
 
 // Changed files that look like source under coverage, used only when the lcov is missing.
 const looksLikeSource = (f) =>
-  /^(apps|packages)\/[^/]+\/src\/.*\.(ts|tsx)$/.test(f.path) && !/\.(test|spec)\.|\.d\.ts$/.test(f.path) && f.status !== 'deleted';
+  /^(apps|packages)\/[^/]+\/src\/.*\.(ts|tsx)$/.test(f.path) && !/\.(test|spec)\.|\.d\.ts$|\/tests\//.test(f.path) && f.status !== 'deleted';
 
 const main = () => {
   const argv = process.argv;

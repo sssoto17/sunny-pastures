@@ -7,7 +7,10 @@ import { stateHash } from './state-hash.js';
 export type StreamPurpose = 'yields' | 'orders';
 
 /** One draw: a uniform unsigned 32-bit `value`, and the stream's `next` state. */
-export type Draw = { readonly next: number; readonly value: number };
+export interface Draw {
+  readonly next: number;
+  readonly value: number;
+}
 
 /**
  * The first state of a farm's stream for `purpose`: the first 8 hex digits of

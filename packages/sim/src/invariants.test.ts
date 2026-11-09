@@ -18,7 +18,9 @@ const unsafeNumber = fc.oneof(
 describe('assertSafeIntegers', () => {
   test('accepts a state whose numbers are all safe integers', () => {
     const state = { time: 2 ** 31 + 5, coins: 0, rng: 0, plots: [{ grownAt: Number.MAX_SAFE_INTEGER }] };
-    expect(() => assertSafeIntegers(state)).not.toThrow();
+    expect(() => {
+      assertSafeIntegers(state);
+    }).not.toThrow();
   });
 
   test.each([
@@ -29,7 +31,9 @@ describe('assertSafeIntegers', () => {
     ['-(2^53)', -(2 ** 53)],
     ['-0, which a JSON round trip turns into 0', -0],
   ])('throws on %s, naming where it is', (_name, bad) => {
-    expect(() => assertSafeIntegers({ plots: [{ ok: 1 }, { grownAt: bad }] })).toThrow('$.plots[1].grownAt');
+    expect(() => {
+      assertSafeIntegers({ plots: [{ ok: 1 }, { grownAt: bad }] });
+    }).toThrow('$.plots[1].grownAt');
   });
 
   test('property: accepts any tree of safe integers, strings, booleans and null', () => {
@@ -46,7 +50,9 @@ describe('assertSafeIntegers', () => {
       fc.property(fc.array(safeTree), fc.nat(), unsafeNumber, (trees, index, bad) => {
         const state = [...trees];
         state.splice(index % (trees.length + 1), 0, { deep: [bad] });
-        expect(() => assertSafeIntegers({ state })).toThrow(/not a safe integer/);
+        expect(() => {
+          assertSafeIntegers({ state });
+        }).toThrow(/not a safe integer/);
       }),
       params,
     );
