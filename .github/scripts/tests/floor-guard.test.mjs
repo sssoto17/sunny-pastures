@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -1411,6 +1411,25 @@ describe("floor guard, end to end", () => {
 				"a new prettier.config.mjs",
 				(r) => r.write({ "prettier.config.mjs": "export default {};\n" }),
 			],
+			[
+				"moving .prettierrc to a file the guard skips as prose",
+				(r) => {
+					mkdirSync(join(r.dir, "docs"), { recursive: true });
+					renameSync(join(r.dir, ".prettierrc"), join(r.dir, "docs/notes.md"));
+				},
+			],
+			[
+				"moving .prettierrc into another folder under the same name",
+				(r) => {
+					mkdirSync(join(r.dir, "packages/sim"), { recursive: true });
+					renameSync(join(r.dir, ".prettierrc"), join(r.dir, "packages/sim/.prettierrc"));
+				},
+			],
+			[
+				"a prettier key in package.yaml",
+				(r) => r.write({ "package.yaml": "prettier:\n  semi: false\n" }),
+			],
+			["a new .editorconfig", (r) => r.write({ ".editorconfig": "[*]\nend_of_line = crlf\n" })],
 			[
 				"a top-level prettier key in package.json",
 				(r) => r.write({ "package.json": '{\n  "prettier": { "semi": false }\n}\n' }),

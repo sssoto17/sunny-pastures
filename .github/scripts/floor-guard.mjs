@@ -384,7 +384,8 @@ const configLoosening = (f, mergeBase) => {
 				hits.push(a.line);
 		}
 	} else if (PRETTIER_CONFIG.test(name)) {
-		if (f.status === "added" || (f.oldPath && basename(f.oldPath) !== name)) return ["file"];
+		// A moved one is reported in the guard's loop, before prose files are skipped.
+		if (f.status === "added") return ["file"];
 		// Prettier's settings (#125): an `overrides` block, an ignore-like key or `requirePragma`
 		// (which formats only files that ask for it) narrows the check, and so does dropping a plugin
 		// such as the import sorter.
@@ -1361,6 +1362,21 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 				weak("property-runs-cut", f.path, "file");
 			continue;
 		}
+		// Prettier's settings, wherever they live (#125; security reviews of #147). A Prettier config
+		// moved anywhere, even to a name the guard skips or a folder where it applies to fewer
+		// files, counts; and so do a prettier key in package.yaml and a new or changed
+		// .editorconfig, which Prettier also reads. Checked before prose files are skipped.
+		if (
+			f.oldPath &&
+			f.oldPath !== f.path &&
+			(PRETTIER_CONFIG.test(basename(f.oldPath)) || PRETTIER_CONFIG.test(basename(f.path)))
+		)
+			weak("config-loosened", f.path, "file");
+		if (basename(f.path) === "package.yaml")
+			for (const a of f.added)
+				if (/^prettier\s*:/.test(a.text)) weak("config-loosened", f.path, a.line);
+		if (basename(f.path) === ".editorconfig" && f.added.length > 0)
+			weak("config-loosened", f.path, f.status === "added" ? "file" : f.added[0].line);
 		if (isConstraints(f.path)) {
 			const result = constraintsFindings(f, mergeBase);
 			for (const c of result.findings) weak(c.rule, f.path, c.line, c.key);
