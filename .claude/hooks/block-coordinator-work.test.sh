@@ -146,6 +146,11 @@ bash_tool 2 "$MAIN" 'echo x > "docs/a b.md"'
 bash_tool 2 "$MAIN" 'echo x > ~/sunny-pastures/docs/x.md'
 bash_tool 2 "$MAIN" 'echo x > "$HOME/sunny-pastures/docs/x.md"'
 bash_tool 2 "$MAIN" 'echo x > .scratch/../docs/x.md'
+bash_tool 2 "$MAIN" 'echo x > "$CLAUDE_PROJECT_DIR/docs/x.md"' # security review of 8fa6f96
+bash_tool 2 "$MAIN" 'echo x > ${CLAUDE_PROJECT_DIR}/AGENTS.md'
+bash_tool 2 "$MAIN/docs" "sed -i s/a/b/ \"\$PWD/x.md\""
+bash_tool 0 "$MAIN" 'echo x > "$CLAUDE_PROJECT_DIR/.scratch/x.md"'
+bash_tool 0 "$MAIN" 'echo x > "$PWD/.scratch/x.md"'
 bash_tool 2 "$MAIN/docs" 'echo x > x.md'
 bash_tool 2 "$MAIN" 'cd docs && echo x > x.md'
 bash_tool 2 "$MAIN" '( cd .claude/worktrees/16-x && echo x > docs/x.md )'

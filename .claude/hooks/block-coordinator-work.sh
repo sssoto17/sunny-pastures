@@ -76,10 +76,15 @@ EOF
 # directory $3 (default: the command's directory). With $4 = rm, removing a whole worktree
 # (.claude/worktrees/<name>) is allowed: the coordinator cleans up merged lanes (workflow.md).
 check_write() {
-  local w=$1 from=${3:-$here} home_re='^(~|\$HOME|\$\{HOME\})(/.*)?$'
-  if [[ $w =~ $home_re ]]; then
-    [[ -n ${HOME:-} ]] || return 0
-    w=$HOME${BASH_REMATCH[2]}
+  local w=$1 from=${3:-$here} var_re='^(~|\$\{?(HOME|PWD|CLAUDE_PROJECT_DIR)\}?)(/.*)?$'
+  if [[ $w =~ $var_re ]]; then
+    case ${BASH_REMATCH[2]} in
+      PWD) w=$here ;;
+      CLAUDE_PROJECT_DIR) w=$root ;;
+      *) w=${HOME:-} ;;
+    esac
+    [[ -n $w && $w != '?' ]] || return 0
+    w+=${BASH_REMATCH[3]}
   elif [[ $w == '$'* ]]; then
     return 0 # $TMPDIR, another variable or a substitution: not the repo, or not knowable
   fi
