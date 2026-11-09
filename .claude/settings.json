@@ -167,6 +167,18 @@
 					}
 				]
 			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "Edit|Write|MultiEdit",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "root=$(git rev-parse --show-toplevel 2>/dev/null) && cd \"$root\" && [ -d node_modules ] || exit 0; command -v pnpm >/dev/null || { echo \"check:fast skipped: pnpm not on PATH\" >&2; exit 1; }; pnpm --silent check:fast >&2 || exit 2",
+						"timeout": 30
+					}
+				]
+			}
 		]
 	}
 }
