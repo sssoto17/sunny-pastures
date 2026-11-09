@@ -2,8 +2,8 @@
 // a path to `ignores`, is a moved threshold that the floor guard reports.
 import js from '@eslint/js';
 import vitest from '@vitest/eslint-plugin';
-import { defineConfig } from 'eslint/config';
 import checkFile from 'eslint-plugin-check-file';
+import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 const nodeGlobals = {
