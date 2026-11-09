@@ -30,26 +30,44 @@ edit in front of that review.
    prints old and new text side by side with the edit marked in git's word-diff style
    (`[-removed-]`, `{+added+}`), and a changed row shows only the cells that changed. The report
    goes to three places: the guard's log, the job summary (`$GITHUB_STEP_SUMMARY`), and one
-   warning annotation per change. GitHub shows annotations "in the Checks and Files changed tab of
-   the pull request" (REST docs, check runs, read 9 Nov), next to the changed line. Actions keeps
-   10 warning annotations per step, so past 10 the guard shows the possible narrowings first, and
-   its last annotation points to the summary, which holds every change. With a report, the guard
-   never logs `clean` for a PR that changes the file.
+   warning annotation per change. Annotations "are visible on GitHub in the Checks and Files
+   changed tab of the pull request", and "GitHub Actions are limited to 10 warning annotations and
+   10 error annotations per step"
+   ([REST: check runs](https://docs.github.com/en/rest/checks/runs), checked 9 Nov). So past 10 the
+   guard shows the possible narrowings first, and its last annotation points to the summary, which
+   holds every change (1 MiB per step,
+   [workflow commands](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands),
+   checked 9 Nov). With a report, the guard never logs `clean` for a PR that changes the file.
 2. **A narrowing warning.** A rule that gains a narrowing word (`except…`, `unless`, `but not`,
    `only`, `may`, `can also`, `other than`, `apart from`, `aside`, `besides`, `save for`,
    `exclud…`, `exempt…`, `allow…`, `permit…`, `waive…`, `optional…`, `no longer`, `as long as`,
-   `provided that`, "does not apply") is marked `warning [rule-narrowed]`. So is a table row that
-   gains a clause of three or more words in a list cell. Words are counted against the old rule,
-   so rewording a rule that already says "only" doesn't trip it. Code spans don't count: they're
-   names (`gitleaks:allow`), and adding one is how a list gets tighter.
+   `provided that`, "does not apply") is marked `warning [rule-narrowed]`. So is one that gains or
+   drops a negation (`not`, `no`, `never`, `none`, `nothing`, …), and a table row that gains a
+   clause of two or more words in a list cell. Words are counted against the old rule, so
+   rewording a rule that already says "only" doesn't trip it. Code spans don't count: they're names
+   (`gitleaks:allow`), and adding one is how a list gets tighter.
 3. **It warns; it never fails (admin, 9 Nov).** `guard / floor` is a required check in the ruleset
-   `main checks`, which has no bypass. A failure could be cleared only by an Exceptions row on
-   `CONSTRAINTS.md`, which lasts at most 30 days and then fails every PR until it's removed. The
-   word list also trips on real tightenings ("only"). The admin reads every `CONSTRAINTS.md` PR
-   anyway: the file is code-owned, so the PR carries `review:admin`.
+   `main checks`, which has no bypass (checked with `gh api` on 9 Nov; ADR-0002 describes only the
+   ruleset `main`, whose admin bypass doesn't reach these checks). A failure could be cleared only
+   by an Exceptions row on `CONSTRAINTS.md`, which lasts at most 30 days and then fails every PR
+   until it's removed. The word list also trips on real tightenings ("only"). The admin reads every
+   `CONSTRAINTS.md` PR anyway: the file is code-owned, so the PR carries `review:admin`.
+4. **The quotes are made safe.** The report is the one place the guard prints text a PR wrote,
+   against its rule of "the location, never the matched text". So under Actions the log is printed
+   inside a `::stop-commands::` block with a random token, and no line of it can run as a workflow
+   command. Indenting the lines isn't relied on: the review of #122 reported that the runner trims
+   leading spaces before it reads a command (not checked against the runner's source). The
+   annotations come after
+   the block, with `%`, CR and LF escaped. Any run of 24 or more key-like characters with both a
+   letter and a digit is replaced with `[redacted]` in all three places. gitleaks
+   (`guard / secrets`, #42) is the check meant for secrets; this only keeps the report from
+   repeating one.
 
 The guard's existing failures don't change: a removed listed item is still a failing
-`rule-narrowed`, and a lowered number is still `threshold-loosened`.
+`rule-narrowed`, and a lowered number is still `threshold-loosened`. A first build also split list
+cells at full stops, so that an item appended before one wouldn't read as removed. The review
+found that it let a new sentence in between two items with neither removed, which turned a failure
+into a warning, so it was dropped.
 
 ### Patterns
 
@@ -79,11 +97,23 @@ The guard's existing failures don't change: a removed listed item is still a fai
 
 ### What still passes, and who catches it
 
-`CONSTRAINTS.md`, "Guarding the bar", lists it: a rewording that flips the meaning with no listed
-word and no new clause ("must not fall" becoming "must now fall"), a carve-out in other words or
-inside a code span. Each still appears in the report, so the admin's merge review catches it. In
-the other direction, a typo fixed inside a table's list cell reads as a removed item and fails as
-before.
+`CONSTRAINTS.md`, "Guarding the bar", lists it: a rewording that changes the meaning with none of
+the listed words and no new clause ("Only the admin loosens anything" becoming "Only the agent
+loosens anything", which a test holds), and a carve-out in other words or inside a code span. Each
+still appears in the report, so the admin's merge review catches it. In the other direction, a
+typo fixed inside a table's list cell, and an item appended right before a full stop, read as a
+removed item and fail as before.
 
-The guard runs from the base branch (#96), so this behaviour judges PRs only once it's on `main`.
-Its own PR was judged by the old guard.
+### Consequences
+
+- Every `CONSTRAINTS.md` PR shows a report and never a `clean` line, tightenings included. That's
+  more to read on a ratchet update, and it's the point: the admin sees every edit.
+- The merge review is the control for meaning. If an unapproved carve-out ever merges, the weekly
+  retro treats it as a missing safeguard (`docs/diagrams/workflow.md`, "Self-improving loops"), and
+  the first lever is the word list.
+- The guard runs from the base branch (#96), so this behaviour judges PRs only once it's on `main`.
+  Its own PR was judged by the old guard. Its tests and dry runs on the real diffs (#121's
+  rewording, an "…except in X") show the new behaviour.
+- `floor-guard.mjs` now also holds a word diff and the workflow-command escaping. They stay in the
+  file because CI copies only `floor-guard.mjs` and `diff.mjs` from the base branch, and a new
+  module would need a floor-job change.

@@ -329,7 +329,8 @@ describe('floor guard, end to end', () => {
       realRepo(edit(REAL, ALLOWANCE, ''));
       repo.write({ 'CONSTRAINTS.md': REAL });
       const warning = warned(guard(), `changed: CONSTRAINTS.md:${PURITY} (rule "Boundaries: sim purity (MUST-10.1)")`);
-      expect(warning).toContain('adds "may", adds a clause to a list cell');
+      expect(warning).toContain('adds "may"');
+      expect(warning).toContain('adds a clause to a list cell');
     });
 
     const SECRETS = '- Secrets in source. Read them from env vars and keep placeholders in `.env.example`.';
@@ -344,10 +345,39 @@ describe('floor guard, end to end', () => {
     });
 
     const PURITY_TAIL = '`new Date()` with no arguments is banned too;';
-    it('warns on a new clause in a list cell, even without a narrowing word', () => {
+    it.each([
+      ['a clause of several words', '; sim tests import `vitest` freely;'],
+      ['a two-word clause', ', tests aside;'.replace('aside', 'excused')],
+    ])('warns on %s added to a list cell, even without a narrowing word', (_, tail) => {
       realRepo();
-      repo.write({ 'CONSTRAINTS.md': edit(REAL, PURITY_TAIL, '`new Date()` with no arguments is banned too; sim tests import `vitest` freely;') });
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, PURITY_TAIL, `\`new Date()\` with no arguments is banned too${tail}`) });
       expect(warned(guard(), `changed: CONSTRAINTS.md:${PURITY}`)).toContain('adds a clause to a list cell');
+    });
+
+    it('warns on a dropped negation', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, 'One automatic retry, never more.', 'One automatic retry, more.') });
+      expect(warned(guard(), 'changed: CONSTRAINTS.md:')).toContain('drops "never"');
+    });
+
+    // CONSTRAINTS.md, "Guarding the bar", names this as what the guard can't catch: it passes, but
+    // it's in the report.
+    it('passes a meaning change it cannot judge, and still reports it', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, 'Only the admin loosens anything.', 'Only the agent loosens anything.') });
+      const r = guard();
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('Only the {+agent+} loosens anything.');
+      expect(r.out).not.toContain('rule-narrowed');
+    });
+
+    // Review of #122: splitting list cells at full stops let a new sentence in between two items.
+    it('still fails a sentence slipped in before a full stop', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, '`setImmediate`. `new Date()`', '`setImmediate`. Tests are fine. `new Date()`') });
+      const r = guard();
+      expect(r.code).toBe(1);
+      expect(r.out).toContain(`[rule-narrowed] CONSTRAINTS.md:${PURITY}`);
     });
 
     // Each case: [the text at the merge base, the text in the PR], as edits of the real file.
@@ -356,7 +386,7 @@ describe('floor guard, end to end', () => {
     it.each([
       ['a typo fixed in a list item', typo('keep placeholders in', 'keep placehodlers in')],
       ['a typo fixed in a prose cell', typo('| Any error is a bug or a lie |', '| Any eror is a bug or a lie |')],
-      ['an item added to a list cell', tighten('`setInterval`, `setImmediate`.', '`setInterval`, `setImmediate`, `queueMicrotask`.')],
+      ['an item added to a list cell', tighten('`fetch`, `setTimeout`,', '`fetch`, `queueMicrotask`, `setTimeout`,')],
       ['an item added to a list', tighten('`fallow-ignore-file`, `# noqa`', '`fallow-ignore-file`, `fallow-ignore-next-file`, `# noqa`')],
       ['a suppression named with a narrowing word', tighten('`gitleaks:allow`,', '`gitleaks:allow`, `trufflehog:allow`,')],
     ])('does not flag %s as narrowing', (_, [base, change]) => {
@@ -422,6 +452,37 @@ describe('floor guard, end to end', () => {
         const notes = guard({ ...TODAY, GITHUB_ACTIONS: 'true' }).out.split('\n').filter((l) => l.startsWith('::warning'));
         expect(notes).toHaveLength(10);
         expect(notes[9]).toMatch(/^::warning file=CONSTRAINTS\.md,title=[^:]+::\d+ more changed rules are in the job summary/);
+      });
+
+      // The report quotes text a PR wrote, so under Actions it must not run as a workflow command.
+      it('prints quoted text inside a stop-commands block, and the annotations after it', () => {
+        realRepo();
+        // A rule's own text, and a table header that the report prints on a line of its own (review
+        // of #122: the runner trims leading spaces before it reads a command).
+        const header = edit(REAL, '| Required check | Enforced by |\n|---', '| Required check | ::error file=x.ts::pwned |\n|---');
+        const injected = edit(edit(header, '| `ci / typecheck` | #40 |', '| `ci / typecheck` | #41 |'), SECRETS, `${SECRETS}\n- Injected:\n::error::pwned\n\n::add-mask::x`);
+        repo.write({ 'CONSTRAINTS.md': injected });
+        const lines = guard({ ...TODAY, GITHUB_ACTIONS: 'true' }).out.split('\n');
+        const open = lines.findIndex((l) => l.startsWith('::stop-commands::'));
+        const token = lines[open]?.slice('::stop-commands::'.length);
+        expect(token).toMatch(/^[0-9a-f-]{36}$/);
+        const close = lines.indexOf(`::${token}::`);
+        expect(close).toBeGreaterThan(open);
+        const outside = lines.filter((l, i) => (i < open || i > close) && l.trim().startsWith('::'));
+        expect(outside.length).toBeGreaterThan(0);
+        expect(outside.every((l) => l.startsWith('::warning file=CONSTRAINTS.md'))).toBe(true);
+        const inside = lines.slice(open + 1, close);
+        expect(inside.join('\n')).toContain('::error::pwned');
+        expect(inside.some((l) => l.trim().startsWith('::error file=x.ts::pwned'))).toBe(true);
+      });
+
+      it('redacts key-like text it quotes', () => {
+        realRepo();
+        const key = `ghp_${'a1B2'.repeat(9)}`; // assembled, so no scanner reads a key in this file
+        repo.write({ 'CONSTRAINTS.md': edit(REAL, SECRETS, `${SECRETS}\n- Example key: ${key}.`) });
+        const r = summaryOf({ GITHUB_ACTIONS: 'true' });
+        expect(r.out).toContain('Example key: [redacted]');
+        expect(r.out + r.summary).not.toContain(key);
       });
 
       it('stays out of the log when CONSTRAINTS.md is unchanged', () => {

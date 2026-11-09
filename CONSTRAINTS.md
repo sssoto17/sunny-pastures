@@ -267,23 +267,29 @@ moved the wrong way, a severity or a stage dropped, a listed item gone, a rule r
 read what new words mean. So whenever this file changes, the guard also reports every changed
 rule, and every changed line outside a rule (a heading, a comment, a fence), with the old and new
 text side by side and the edit marked. The report goes to the guard's log, the job summary and a
-warning annotation on the changed line in the PR's Files changed tab (#122). A rule that gains a
-narrowing word (`except`, `unless`, `but not`, `only`, `may`, `other than`, `apart from` and a few
-more) or a new clause in a table's list cell is marked `warning [rule-narrowed]`. It warns rather
-than fails (admin, 9 Nov): the guard can't tell an approved carve-out from an unapproved one, and
-`guard / floor` is a required check with no bypass. ADR-0004 records the choice.
+warning annotation on the changed line in the PR's Files changed tab (#122). GitHub shows 10
+annotations per step, so with more changes the last one points to the job summary, which has them
+all. Key-like text in the quotes is redacted. A rule that gains a narrowing word (`except`,
+`unless`, `but not`, `only`, `may`, `other than`, `apart from` and a few more), gains or drops a
+negation (`not`, `never`, …), or gains a clause of two or more words in a table's list cell is
+marked `warning [rule-narrowed]`.
+
+That warning isn't a _warn_ row and doesn't break "Every failing check blocks the merge": it rides
+on a review that happens anyway, because every PR that touches this file carries `review:admin`.
+It warns rather than fails (admin, 9 Nov): the guard can't tell an approved carve-out from an
+unapproved one, and `guard / floor` is a required check with no bypass, so a failure could only be
+cleared by an Exceptions row that expires. ADR-0004 records the choice.
 
 **The admin's merge review reads every changed rule in that report**, including the ones the guard
 passes. What the guard still can't catch, and leaves to that review:
 
-- A rewording that flips the meaning with no narrowing word and no new clause, such as "must not
-  fall" becoming "must now fall".
+- A rewording that changes the meaning with none of the words above and no new clause, such as
+  "Only the admin loosens anything" becoming "Only the agent loosens anything".
 - A carve-out in words that aren't on the list, or inside a code span.
-- More than 10 changes at once: GitHub shows 10 annotations per step, so the last one points to the
-  job summary, which has them all.
 
-It errs the other way on one edit: a typo fixed inside a table's list cell reads as a removed item
-and fails as `rule-narrowed`, as it did before #122.
+It errs the other way on two edits, which fail as `rule-narrowed`, as they did before #122: a typo
+fixed inside a table's list cell, and an item appended to a list cell right before a full stop.
+Both read as a removed item.
 
 ## Exceptions
 
@@ -350,3 +356,11 @@ Decided in the coordinator's review of PR #57 (7 Nov):
 - **Weakened bar before the guard:** the bot also requests changes unless an Exceptions row is
   added (D1), until `guard / floor` is a required check.
 - **Test lines:** count at full weight toward the split size.
+
+Decided while building #122 (9 Nov), for [Guarding the bar](#guarding-the-bar):
+
+- **Changes to this file:** the floor guard reports every one, old and new side by side, in its
+  log, the job summary and annotations on the PR. A PR comment would have needed a floor-job change.
+- **Carve-outs:** a narrowing word, a negation or a new clause warns as `rule-narrowed` and doesn't
+  fail. A failure could only be cleared by an expiring Exceptions row, since `guard / floor` has no
+  bypass, and the admin reads every PR that touches this file anyway.
