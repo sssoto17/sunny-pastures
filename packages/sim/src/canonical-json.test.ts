@@ -54,8 +54,41 @@ describe('canonicalJson', () => {
     ['a sparse array', Object.assign([], { 1: 1 })],
     ['an array of holes only', new Array(3)],
     ['a sparse array with an extra property', Object.assign([], { 1: 1, foo: 2 })],
+    // JSON.stringify and Object.keys skip these silently, so two different values would hash alike.
+    ['an array with an extra property', Object.assign([1], { foo: 2 })],
+    ['an object with a symbol key', { a: 1, [Symbol('s')]: 2 }],
+    ['an array with a symbol key', Object.assign([1], { [Symbol('s')]: 2 })],
+    ['an object with a non-enumerable property', Object.defineProperty({ a: 1 }, 'hidden', { value: 2 })],
+    ['an object with a getter', { get a() { return 1; } }],
+    ['an array with a getter', Object.defineProperty([0], 0, { get: () => 1, enumerable: true })],
   ])('throws on a value that is not plain JSON data: %s', (_name, value) => {
     expect(() => canonicalJson(value)).toThrow(/plain JSON/);
+  });
+
+  test('never calls a getter', () => {
+    let calls = 0;
+    const value = {
+      get a() {
+        calls++;
+        return 1;
+      },
+    };
+    expect(() => canonicalJson(value)).toThrow(/plain JSON/);
+    expect(calls).toBe(0);
+  });
+
+  test('throws on a cycle, naming it, instead of overflowing the stack', () => {
+    const object: Record<string, unknown> = { a: 1 };
+    object['self'] = { back: object };
+    const array: unknown[] = [1];
+    array.push([array]);
+    expect(() => canonicalJson(object)).toThrow(/cycle/);
+    expect(() => canonicalJson(array)).toThrow(/cycle/);
+  });
+
+  test('accepts the same object twice when it is not a cycle', () => {
+    const shared = { n: 1 };
+    expect(canonicalJson({ a: shared, b: [shared, shared] })).toBe('{"a":{"n":1},"b":[{"n":1},{"n":1}]}');
   });
 
   test('accepts an object without a prototype', () => {

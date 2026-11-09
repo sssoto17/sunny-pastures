@@ -1,28 +1,53 @@
 // Canonical JSON for the state hash (ADR-0003, sections 6 and 10): object keys sorted at every
 // level by UTF-16 code unit, and only plain JSON data accepted. JSON.stringify would silently turn
-// NaN and Infinity into null, drop undefined, and serialize a Date or Map as something else, so
-// two different states could hash the same; this throws instead.
+// NaN and Infinity into null, drop undefined, symbol keys and non-enumerable properties, call
+// getters, and serialize a Date or Map as something else, so two different states could hash the
+// same; this throws instead.
 
 /** The canonical JSON text of a plain JSON value. Throws on anything else. */
 export function canonicalJson(value: unknown): string {
+  return write(value, new Set());
+}
+
+/** `ancestors` holds the arrays and objects on the path to `value`, to find a cycle. */
+function write(value: unknown, ancestors: Set<object>): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new Error(`canonicalJson: ${value} is not a finite number`);
     return JSON.stringify(value); // -0 is written as 0
   }
+  if (!Array.isArray(value) && !isPlainObject(value)) throw notPlain(typeName(value));
+  if (ancestors.has(value)) throw notPlain('a cycle');
+  if (Object.getOwnPropertySymbols(value).length > 0) throw notPlain('a symbol key');
+  ancestors.add(value);
+  let text: string;
   if (Array.isArray(value)) {
-    // `.map` skips holes, so a sparse array would read as a shorter one or as invalid JSON.
-    for (let i = 0; i < value.length; i++) {
-      if (!(i in value)) throw new Error('canonicalJson: a sparse array is not plain JSON data');
+    // Own names are the indexes plus `length`; anything more is a property JSON would drop.
+    if (Object.getOwnPropertyNames(value).length !== value.length + 1) {
+      throw notPlain('an array with properties other than its items');
     }
-    return `[${value.map(canonicalJson).join(',')}]`;
-  }
-  if (isPlainObject(value)) {
+    const items = Array.from({ length: value.length }, (_, i) => write(dataValue(value, String(i)), ancestors));
+    text = `[${items.join(',')}]`;
+  } else {
     // The default sort compares UTF-16 code units, the same on every engine; never localeCompare.
     const keys = Object.keys(value).sort();
-    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+    if (Object.getOwnPropertyNames(value).length !== keys.length) throw notPlain('a non-enumerable property');
+    text = `{${keys.map((key) => `${JSON.stringify(key)}:${write(dataValue(value, key), ancestors)}`).join(',')}}`;
   }
-  throw new Error(`canonicalJson: ${typeName(value)} is not plain JSON data`);
+  ancestors.delete(value);
+  return text;
+}
+
+/** The value stored at `key`, read without calling a getter. */
+function dataValue(owner: object, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(owner, key);
+  if (descriptor === undefined) throw notPlain('a sparse array'); // only a hole has no descriptor
+  if (!('value' in descriptor)) throw notPlain(`a getter or setter at key ${JSON.stringify(key)}`);
+  return descriptor.value;
+}
+
+function notPlain(what: string): Error {
+  return new Error(`canonicalJson: ${what} is not plain JSON data`);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
