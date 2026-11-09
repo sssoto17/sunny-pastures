@@ -478,12 +478,16 @@ const compareNumbers = (was, now) => {
       if (!n) return 'threshold-removed';
       if (n.n !== b.n && (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : true)) return dir ? 'threshold-loosened' : 'threshold-changed';
     }
-    // A new number left over in a capped rule: looser than every old one of its direction is a
-    // loosening ("10 changed files or 800 lines" for "400 changed lines"); a tighter one isn't.
+    // A new number left over in a capped rule is compared only with old numbers of its own unit:
+    // looser than all of them is a loosening ("10 changed files or 800 lines" for "400 changed
+    // lines"). A cap in a unit the rule didn't use ("≤ 50 ms or 5 s") can't be compared, and a new
+    // "or" may let either cap pass, so it counts as a loosening too (security review of #99).
     if (dir && before.length) {
-      const extra = after.filter((x) => !used.has(x));
-      const loosest = dir === 'max' ? Math.max(...before.map((b) => b.n)) : Math.min(...before.map((b) => b.n));
-      if (extra.some((x) => (dir === 'max' ? x.n > loosest : x.n < loosest))) return 'threshold-loosened';
+      for (const x of after.filter((y) => !used.has(y))) {
+        const same = before.filter((b) => b.unit === x.unit).map((b) => b.n);
+        if (!same.length) return 'threshold-loosened';
+        if (dir === 'max' ? x.n > Math.max(...same) : x.n < Math.min(...same)) return 'threshold-loosened';
+      }
     }
   }
   return null;
@@ -843,11 +847,18 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
     if (WORKFLOW.test(f.path)) {
       const before = f.oldPath ? oldContent(mergeBase, f.oldPath) ?? [] : [];
       const now = readFileSync(f.path, 'utf8').split('\n');
+      // A `uses:` line that only moves the same action to another full commit SHA (Dependabot's
+      // weekly bump, #69) counts as kept on both sides (#99). Another action, or a tag instead
+      // of a SHA, is still a change.
+      const pinnedAction = (t) => /^\s*-?\s*uses:\s*([\w.-]+\/[\w./-]+)@[0-9a-f]{40}\s*(#.*)?$/.exec(t)?.[1] ?? null;
+      const bumpedFrom = new Set(f.added.map((a) => pinnedAction(a.text)).filter(Boolean));
+      const bumpedTo = new Set(f.removed.map((r) => pinnedAction(r.text)).filter(Boolean));
       const kept = new Set(f.added.map((a) => a.text.trim()));
       const gone = new Set(f.removed.map((r) => r.text.trim()));
       for (const r of f.removed) {
         const guarded = CHECK_STEP.test(r.text) || jobOf(before, r.line) === 'floor';
-        if (guarded && !kept.has(r.text.trim())) weak('check-removed', f.path, `${r.line} (old)`);
+        const bump = bumpedFrom.has(pinnedAction(r.text));
+        if (guarded && !bump && !kept.has(r.text.trim())) weak('check-removed', f.path, `${r.line} (old)`);
       }
       // A workflow, or a floor job, that didn't exist at the merge base has no bar to lower.
       const hadFloor = before.some((l) => /^ {2}floor:\s*$/.test(l));
@@ -855,7 +866,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
         if (f.status === 'added') break;
         // A skipped required job reports as passing, so a new `if:` counts too.
         const loosens = /continue-on-error:\s*true|^\s*-?\s*if:/.test(a.text) || (hadFloor && jobOf(now, a.line) === 'floor');
-        if (loosens && !gone.has(a.text.trim())) weak('check-removed', f.path, a.line);
+        if (loosens && !gone.has(a.text.trim()) && !bumpedTo.has(pinnedAction(a.text))) weak('check-removed', f.path, a.line);
       }
     }
     for (const r of f.removed) {
@@ -950,7 +961,10 @@ const HINTS = {
   'threshold-removed': 'A threshold-removed finding can also mean a number lost its direction words (">= 80%" becoming "80%"): compare the two lines.',
   'rule-narrowed': 'A rule-narrowed finding means a listed item (a backticked token, or an item in a table\'s list cell) is gone from the rule. A rewording that drops one counts too: keep the item, or route it through an exception.',
   'config-loosened': 'A tool config was loosened (CONSTRAINTS.md, Floor, last bullet).',
-  'check-removed': 'A workflow step that runs a check was removed, or a job was allowed to fail.',
+  // #99: name the real route. `guard / floor` is in ruleset `main checks`, which has no bypass, so
+  // the admin's bypass merge (ruleset `main`) can't get a red guard through.
+  'check-removed':
+    "A workflow step that runs a check was removed, a job was allowed to fail, or the floor job changed. `guard / floor` has no bypass (ruleset `main checks`), so the routes are: keep the step; add an Exceptions row for `check-removed` on the workflow file in this PR (admin approval); or the admin lifts `main checks` for that one merge (ADR-0004). A Dependabot bump that only moves an action's pinned SHA passes on its own.",
 };
 
 const main = () => {

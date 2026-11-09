@@ -159,6 +159,31 @@ describe('floor guard, end to end', () => {
       expect(runTakeGuard()).toBe('new guard\n');
     });
 
+    // #99: Dependabot's weekly github-actions bump moves only the pinned SHA (#69).
+    const SHA_A = 'a'.repeat(40);
+    const SHA_B = 'b'.repeat(40);
+    const PINNED = STEPS.replace('  floor:\n    steps:\n', `  floor:\n    steps:\n      - uses: actions/checkout@${SHA_A} # v7.0.1\n`);
+    it.each([
+      ['a SHA-only bump in the floor job', PINNED.replace(`@${SHA_A} # v7.0.1`, `@${SHA_B} # v7.1.0`), 0],
+      ['another action in its place', PINNED.replace(`actions/checkout@${SHA_A}`, `actions/other@${SHA_B}`), 1],
+      ['a tag instead of a SHA', PINNED.replace(`@${SHA_A} # v7.0.1`, '@v7'), 1],
+    ])('judge %s', (_, content, code) => {
+      repo = makeRepo({ ...BASE, [CI]: PINNED });
+      repo.write({ [CI]: content });
+      const r = guard();
+      expect(r.code).toBe(code);
+      if (code) expect(r.out).toContain(`[check-removed] ${CI}`);
+    });
+
+    it('name the real route for a blocked floor-job change', () => {
+      repo = makeRepo({ ...BASE, [CI]: STEPS });
+      repo.write({ [CI]: STEPS.replace('node guard.mjs', 'true') });
+      const r = guard();
+      expect(r.out).toContain('no bypass');
+      expect(r.out).toContain('an Exceptions row for `check-removed`');
+      expect(r.out).toContain('lifts `main checks`');
+    });
+
     it('accept unrelated workflow edits, and a floor job or workflow that is new', () => {
       repo = makeRepo({ ...BASE, [CI]: STEPS });
       repo.write({ [CI]: `name: ci\n${STEPS}` });
@@ -306,6 +331,9 @@ describe('floor guard, end to end', () => {
       // #99: numbers paired by position let a new number in front take the old one's place.
       ['the split size raised behind a new cap', 'at most **400 changed lines**', 'at most **under 10 files or 800 changed lines**', 'threshold-loosened'],
       ['the split size raised in a new cap that took the old unit', 'at most **400 changed lines**', 'at most **10 changed files or 800 lines**', 'threshold-loosened'],
+      // Security review of B2: an extra cap in another unit was compared across units.
+      ['a cap in a new unit next to the bench budget', 'largest content farm ≤ 50 ms', 'largest content farm ≤ 50 ms or 5 s', 'threshold-loosened'],
+      ['a cap in a new unit next to the split size', 'at most **400 changed lines**', 'at most **400 changed lines or 20 files**', 'threshold-loosened'],
       ['the exception limit raised in a paragraph', 'no more than 30 days out', 'no more than 90 days out', 'threshold-loosened'],
       ['a suppression dropped from a continuation line', '`fallow-ignore-next-line`, `fallow-ignore-file`, ', '', 'rule-narrowed'],
       ['the floor guard dropped from a stage', 'lint on changed files, floor guard, boundaries', 'lint on changed files, boundaries', 'rule-narrowed'],
@@ -321,7 +349,7 @@ describe('floor guard, end to end', () => {
     it.each([
       ['the split size lowered in the interview record', '- **Split size:** 400 changed lines', '- **Split size:** 300 changed lines'],
       ['the ratchet tolerance lowered', '| must not fall | 0.5 points |', '| must not fall | 0.2 points |'],
-      ['a tighter cap added next to the split size', 'at most **400 changed lines**', 'at most **400 changed lines or 20 files**'],
+      ['a tighter cap of the same unit added next to the split size', 'at most **400 changed lines**', 'at most **400 changed lines, or 300 changed lines for a spike**'],
       ['a comma removed from an unlabelled list item', '- **Every failing check blocks the merge**, except', '- **Every failing check blocks the merge** except'],
     ])('stays silent for %s', (_, from, to) => {
       realRepo();
