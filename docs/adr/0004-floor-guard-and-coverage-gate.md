@@ -11,7 +11,8 @@ record for both scripts, and for `typecheck-reach.mjs`, which keeps `ci / typech
 sections:
 - how the guard handles a change to `CONSTRAINTS.md` itself (#122);
 - Exceptions rows (#99, part 1);
-- the guard's and the gate's design as a whole (#99, part 3).
+- the guard's and the gate's design as a whole (#99, part 3), which also records part 2's (#133)
+  patterns and number pairing.
 
 ## Reviewing a change to `CONSTRAINTS.md` (#122, decided 9 Nov)
 
@@ -210,10 +211,10 @@ run; a 2 never reads as clean.
 | Diff-scoped check | Only added and removed lines, and the files they're in | A PR is judged on what it changes, so old code can't block it and new code can't hide in it. |
 | Trusted code judges | CI runs the base branch's guard, not the PR's (#96) | A PR can't weaken the guard that judges it. A change to the guard takes effect from the next PR. |
 | Fail closed | Exit 2 on anything it can't read; an unreadable Exceptions row fails | Silence must mean "checked and clean", never "couldn't tell". |
-| Denylist of weakening forms | Suppressions, skips, stubs, loosened configs, removed workflow steps | Each is a known shape of a lowered bar. #99 added the forms the #40 review found passing: an empty `.catch`, a comment-only `catch`, "not yet implemented", every `fallow-ignore-*`, a deleted run count, a new tsconfig with neither `extends` nor `strict`. |
-| Structural diff of `CONSTRAINTS.md` | Rules pair by section and key, then by similarity; numbers carry a direction and a unit | It compares what a rule says, not its line. Since #99, numbers pair by unit before position, so a new cap added in front can't take an old one's place, and a cap in a new unit counts as a loosening. |
+| Denylist of weakening forms | Suppressions, skips, stubs, loosened configs, removed workflow steps | Each is a known shape of a lowered bar. #99 part 2 (#133) adds the forms the #40 review found passing: an empty `.catch`, a comment-only `catch`, "not yet implemented", every `fallow-ignore-*`, a deleted run count, a new tsconfig with neither `extends` nor `strict`. |
+| Structural diff of `CONSTRAINTS.md` | Rules pair by section and key, then by similarity; numbers carry a direction and a unit | It compares what a rule says, not its line. With #99 part 2 (#133), numbers pair by unit before position, so a new cap added in front can't take an old one's place, and a cap in a new unit counts as a loosening. |
 | Time-boxed, scoped waiver | Exceptions rows | A weakened bar passes only on a named path, for named findings, until a date, with the admin's approval (code-owned). |
-| Allowlist for one known change | A SHA-only `uses:` bump in the floor job, from Dependabot only | Dependabot's weekly bump would otherwise need the admin every week. The actor check stops an imposter commit from riding along. |
+| Allowlist for one known change (#133) | A SHA-only `uses:` bump in the floor job, from Dependabot only | Dependabot's weekly bump would otherwise need the admin every week. The actor check stops an imposter commit from riding along. |
 
 **Alternatives considered.**
 - *An AST-based checker (the TypeScript compiler API, or custom ESLint rules).* It would see
@@ -223,6 +224,21 @@ run; a 2 never reads as clean.
 - *Running the PR's own guard.* Rejected in #96: a PR could switch it off.
 - *A review bot instead of a script.* It's not deterministic, and it's the reviewer most open to
   manipulation (ADR-0002, area 2). The bot reviews as well, but it doesn't replace the guard.
+
+**The routes past a red guard.** `guard / floor` is a required check in the ruleset `main checks`,
+which has no bypass. So the admin's bypass merge on the ruleset `main` can't get a red guard
+through. A blocked PR has three routes:
+1. Fix the change.
+2. Add an Exceptions row for the finding on the file's path, in the same PR, with the admin's
+   approval (the file is code-owned). A workflow file is a valid Path, so `check-removed` on
+   `.github/workflows/ci.yml` lets a floor-job change through.
+3. The admin lifts `main checks` for that one merge, a ruleset change only the admin can make.
+
+The guard's hint for `check-removed` names all three (#99 part 2).
+
+**Package scripts count as checks (#99).** CI runs the PR's own `package.json` scripts. So a script
+line that loses a check command (`tsc -b`, `eslint`, `vitest run`, one of the guard scripts), or a
+script other than `check:task` that gains `--skip-ratchet`, is `check-removed` too.
 
 ### The coverage gate
 
@@ -253,7 +269,10 @@ coverage must not fall more than 0.5 points below the recorded ratchet. The numb
 `tsc -b` builds only referenced projects.
 
 - *Pattern: a completeness check.* The workspace list is the source of truth, and the build graph
-  must cover it.
+  must cover it. It fails closed. It reads the `packages:` list of `pnpm-workspace.yaml` with
+  comments, blank lines and `!` exclusions, and it expands only plain folders and `dir/*`. Any
+  other glob, an empty list, or a root tsconfig that isn't plain JSON exits 2. A package counts as
+  referenced only through its own `tsconfig.json`.
 - *Alternatives:* `pnpm -r exec tsc --noEmit` checks every package, but it loses build mode's
   caching and the project graph; a single root tsconfig that includes everything loses the
   per-package `lib` and `types` that keep the sim free of DOM and Node types (ADR-0003).

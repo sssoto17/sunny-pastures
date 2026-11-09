@@ -7,19 +7,15 @@
 //
 // Usage: node .github/scripts/typecheck-reach.mjs   (from anywhere in the repo)
 // Exit codes: 0 every package referenced, 1 a package missed, 2 could not run (never reads as 0).
-import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
-
-class CannotRun extends Error {}
+import { CannotRun, git } from './diff.mjs';
 
 const top = () => {
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch {
-    throw new CannotRun('not inside a git work tree');
-  }
+  const dir = git(['rev-parse', '--show-toplevel'])?.trim();
+  if (!dir) throw new CannotRun('not inside a git work tree');
+  return dir;
 };
 
 // The `packages:` globs of pnpm-workspace.yaml. Only `dir/*` and plain folders are expanded; any
@@ -27,17 +23,21 @@ const top = () => {
 const workspaceDirs = (root) => {
   const file = join(root, 'pnpm-workspace.yaml');
   if (!existsSync(file)) throw new CannotRun('pnpm-workspace.yaml is missing');
-  const lines = readFileSync(file, 'utf8').split('\n');
-  const start = lines.findIndex((l) => /^packages:\s*$/.test(l));
+  const lines = readFileSync(file, 'utf8').replace(/\r/g, '').split('\n');
+  const start = lines.findIndex((l) => /^packages:\s*(#.*)?$/.test(l));
   if (start === -1) throw new CannotRun('pnpm-workspace.yaml has no packages list');
+  // The list runs to the next top-level key. Blank lines and comments sit inside it, and its items
+  // may be indented or not (review of #134: the reader stopped at the first of these and passed).
   const globs = [];
   for (const l of lines.slice(start + 1)) {
-    const m = /^\s+-\s+["']?([^"'#]+?)["']?\s*(#.*)?$/.exec(l);
-    if (!m) break;
-    globs.push(m[1]);
+    if (!l.trim() || /^\s*#/.test(l)) continue;
+    const m = /^\s*-\s+["']?([^"'#]+?)["']?\s*(#.*)?$/.exec(l);
+    if (m) globs.push(m[1]);
+    else if (/^\S/.test(l)) break;
+    else throw new CannotRun(`pnpm-workspace.yaml packages line it can't read: ${l.trim()}`);
   }
-  return globs.flatMap((glob) => {
-    if (glob.startsWith('!')) return []; // an exclusion only narrows the set
+  if (!globs.length) throw new CannotRun('pnpm-workspace.yaml lists no packages');
+  const expand = (glob) => {
     const star = /^([\w.-]+(?:\/[\w.-]+)*)\/\*$/.exec(glob);
     if (star) {
       const dir = join(root, star[1]);
@@ -48,7 +48,10 @@ const workspaceDirs = (root) => {
     }
     if (/^[\w.-]+(?:\/[\w.-]+)*$/.test(glob)) return [glob];
     throw new CannotRun(`pnpm-workspace.yaml glob it can't expand: ${glob}`);
-  });
+  };
+  // An exclusion (`!packages/old`) takes its folders out of the set.
+  const excluded = new Set(globs.filter((g) => g.startsWith('!')).flatMap((g) => expand(g.slice(1))));
+  return globs.filter((g) => !g.startsWith('!')).flatMap(expand).filter((d) => !excluded.has(d));
 };
 
 // The folders the root tsconfig.json references, as repo-relative paths.
@@ -59,11 +62,14 @@ const referenced = (root) => {
   } catch (e) {
     throw new CannotRun(`can't read the root tsconfig.json as JSON: ${e.message}`);
   }
+  // A package counts as referenced through its own tsconfig.json only, as a folder or the file
+  // itself: a sibling such as `tsconfig.test.json` builds the tests, not the package (review of
+  // #134).
   return new Set(
-    (config.references ?? []).map((r) => {
-      const p = normalize(r.path).replace(/\/$/, '');
-      return /\.json$/.test(p) ? p.replace(/\/[^/]+$/, '') : p;
-    }),
+    (config.references ?? [])
+      .map((r) => normalize(r.path).replace(/\/$/, ''))
+      .filter((p) => !/\.json$/.test(p) || /(^|\/)tsconfig\.json$/.test(p))
+      .map((p) => p.replace(/(^|\/)tsconfig\.json$/, '') || '.'),
   );
 };
 

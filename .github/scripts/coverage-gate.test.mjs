@@ -48,7 +48,7 @@ describe('coverage gate', () => {
   });
 
   // #99: only "not yet" means no ratchet; anything else it can't read can't run.
-  it.each(['about 92%', 'TBD', '', '92.5', 'n/a'])('cannot run on a Today cell it cannot read: %j', (today) => {
+  it.each(['about 92%', 'TBD', '', '92.5', 'n/a', 'not yet 90%', 'not yet, ratchet at 92%', 'not yet-92%'])('cannot run on a Today cell it cannot read: %j', (today) => {
     expect(() => recordedProjectCoverage(ratchets(today))).toThrow(/Project coverage/);
   });
 

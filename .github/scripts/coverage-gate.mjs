@@ -47,7 +47,9 @@ export const recordedProjectCoverage = (constraints) => {
   const row = constraints.split('\n').find((l) => /^\|\s*Project coverage\s*\|/.test(l));
   if (!row) throw new CannotRun('CONSTRAINTS.md has no "Project coverage" row under Ratchets');
   const today = row.split('|')[2]?.trim() ?? '';
-  if (/^not yet\b/i.test(today)) return null;
+  // "not yet" alone, or followed by a colon and a note with no number in it (the real cell reads
+  // "not yet: recorded after the first `packages/sim` PR"). "not yet 90%" can't run (review of #134).
+  if (/^not yet(?::[^\d%]*)?$/i.test(today)) return null;
   const m = /^(\d+(?:\.\d+)?)\s*%$/.exec(today);
   if (!m) throw new CannotRun(`the Project coverage "Today" cell is neither a percentage nor "not yet": ${JSON.stringify(today)}`);
   return Number(m[1]);

@@ -1,5 +1,5 @@
 // Test helper: a throwaway git repo with a `main` commit and a working branch, for running the
-// guard scripts end to end. Used by floor-guard.test.mjs and coverage-gate.test.mjs.
+// guard scripts end to end. Used by the floor guard, coverage gate and typecheck-reach tests.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -35,6 +35,28 @@ describe('typecheck reach', () => {
     expect(r.out).toContain('packages/raw has no tsconfig.json');
   });
 
+  // Review of #134: the list reader stopped at the first line it didn't expect, and passed.
+  it.each([
+    ['a blank line between items', 'packages:\n  - packages/*\n\n  - apps/*\n'],
+    ['a comment between items', 'packages:\n  - packages/*\n  # the app\n  - apps/*\n'],
+    ['an unindented list', 'packages:\n- packages/*\n- apps/*\n'],
+  ])('reads a workspace list with %s', (_, workspace) => {
+    repo = makeRepo({ 'pnpm-workspace.yaml': workspace, 'tsconfig.json': solution(['./packages/sim']), ...pkg('packages/sim'), ...pkg('apps/web') });
+    const r = repo.run(SCRIPT);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('apps/web is not in the root tsconfig.json references');
+  });
+
+  it('applies an exclusion glob', () => {
+    repo = makeRepo({ 'pnpm-workspace.yaml': `${WORKSPACE}  - "!packages/raw"\n`, 'tsconfig.json': solution(['./packages/sim']), ...pkg('packages/sim'), 'packages/raw/package.json': '{}\n' });
+    expect(repo.run(SCRIPT).code).toBe(0);
+  });
+
+  it('counts a package as referenced only through its own tsconfig.json', () => {
+    repo = makeRepo({ 'pnpm-workspace.yaml': WORKSPACE, 'tsconfig.json': solution(['./packages/sim/tsconfig.test.json']), ...pkg('packages/sim') });
+    expect(repo.run(SCRIPT).code).toBe(1);
+  });
+
   it('ignores a folder without a package.json', () => {
     repo = makeRepo({ 'pnpm-workspace.yaml': WORKSPACE, 'tsconfig.json': solution(['./packages/sim']), ...pkg('packages/sim'), 'packages/notes/README.md': 'x\n' });
     expect(repo.run(SCRIPT).code).toBe(0);
@@ -44,6 +66,7 @@ describe('typecheck reach', () => {
     ['a workspace glob it cannot expand', { 'pnpm-workspace.yaml': 'packages:\n  - "packages/**"\n', 'tsconfig.json': solution([]) }],
     ['a root tsconfig it cannot read', { 'pnpm-workspace.yaml': WORKSPACE, 'tsconfig.json': '{ not json' }],
     ['no workspace file', { 'tsconfig.json': solution([]) }],
+    ['an empty packages list', { 'pnpm-workspace.yaml': 'packages:\n\nminimumReleaseAge: 1\n', 'tsconfig.json': solution([]) }],
   ])('exits 2, never 0, on %s', (_, files) => {
     repo = makeRepo(files);
     expect(repo.run(SCRIPT).code).toBe(2);
