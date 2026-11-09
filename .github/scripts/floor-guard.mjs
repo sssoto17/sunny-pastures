@@ -33,7 +33,7 @@ import { CannotRun, baseArg, enterRepo, git, oldContent, readChange } from './di
 const SELF = new Set(['.github/scripts/floor-guard.mjs', '.github/scripts/tests/floor-guard.test.mjs']);
 // A workflow line that runs a check: removing it, or letting the job fail quietly, weakens the bar.
 const WORKFLOW = /^\.github\/(workflows|actions)\/.+\.ya?ml$/;
-const CHECK_STEP = /floor-guard\.mjs|coverage-gate\.mjs|pnpm (typecheck|lint|test)\b|SIM_PROPERTY_RUNS/;
+const CHECK_STEP = /floor-guard\.mjs|coverage-gate\.mjs|pnpm (typecheck|lint|test|dupes|format:check)\b|SIM_PROPERTY_RUNS/;
 // The checks a package.json script runs (#99, review of #134). CI runs the PR's own scripts, so a
 // script that loses one of these, or skips the ratchet outside `check:task`, is a removed check.
 const SCRIPT_LINE = /^\s*"([\w:.-]+)"\s*:\s*"(.*)",?\s*$/;

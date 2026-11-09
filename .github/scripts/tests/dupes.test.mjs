@@ -54,7 +54,7 @@ describe('fallow dupes', () => {
     expect(dupes().code).toBe(1);
   });
 
-  it('passes the same shape with other names: the same rule, not the same shape, is a clone', () => {
+  it('passes the same shape with other names, since a clone is the same rule, not the same shape', () => {
     base();
     const renamed = helper('badNumbers').replaceAll('found', 'seen').replaceAll('value', 'node').replaceAll('item', 'child');
     repo.write({ 'packages/sim/src/plots/index.ts': renamed });
