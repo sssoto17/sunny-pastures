@@ -1,5 +1,10 @@
-import { describe, expect, test } from 'vitest';
+import fc from 'fast-check';
+import { describe, expect, inject, test } from 'vitest';
 import { mulberry32, streamSeed } from './index.js';
+import { assertSafeIntegers } from './invariants.js';
+
+const params = inject('fastCheck');
+const UINT32_END = 2 ** 32;
 
 /** The values of `count` draws from a stream that starts at `state`. */
 const draws = (state: number, count: number): number[] => {
@@ -26,6 +31,18 @@ describe('streamSeed', () => {
   test('gives each purpose its own stream', () => {
     expect(streamSeed('farm-1', 'yields')).not.toBe(streamSeed('farm-1', 'orders'));
   });
+
+  test('property: is an unsigned 32-bit safe integer for any farm id', () => {
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary' }), fc.constantFrom('yields' as const, 'orders' as const), (farmId, purpose) => {
+        const seed = streamSeed(farmId, purpose);
+        assertSafeIntegers(seed);
+        expect(seed).toBeGreaterThanOrEqual(0);
+        expect(seed).toBeLessThan(UINT32_END);
+      }),
+      params,
+    );
+  });
 });
 
 describe('mulberry32', () => {
@@ -47,5 +64,19 @@ describe('mulberry32', () => {
 
   test('is a pure function of the state', () => {
     expect(mulberry32(0xdeadbeef)).toEqual(mulberry32(0xdeadbeef));
+  });
+
+  test('property: keeps the stream state and the value unsigned 32-bit safe integers', () => {
+    fc.assert(
+      fc.property(fc.nat({ max: UINT32_END - 1 }), (state) => {
+        const draw = mulberry32(state);
+        assertSafeIntegers(draw);
+        for (const n of [draw.next, draw.value]) {
+          expect(n).toBeGreaterThanOrEqual(0);
+          expect(n).toBeLessThan(UINT32_END);
+        }
+      }),
+      params,
+    );
   });
 });

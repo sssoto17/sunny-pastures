@@ -1,5 +1,29 @@
-import { describe, expect, test } from 'vitest';
-import { stateHash } from './index.js';
+import fc from 'fast-check';
+import { describe, expect, inject, test } from 'vitest';
+import { mulberry32, stateHash } from './index.js';
+
+const params = inject('fastCheck');
+
+/** JSON values with keys and strings over all of Unicode, astral characters included. */
+const jsonValue = fc.jsonValue({ stringUnit: 'binary' });
+
+/** A copy of `value` with the keys of every object in a shuffled insertion order. */
+const shuffleKeys = (value: unknown, seed: number): unknown => {
+  let state = seed;
+  const draw = (): number => {
+    const step = mulberry32(state);
+    state = step.next;
+    return step.value;
+  };
+  const visit = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(visit);
+    if (typeof v !== 'object' || v === null) return v;
+    const keyed = Object.entries(v).map((entry) => ({ entry, order: draw() }));
+    keyed.sort((p, q) => p.order - q.order);
+    return Object.fromEntries(keyed.map(({ entry: [key, inner] }) => [key, visit(inner)]));
+  };
+  return visit(value);
+};
 
 // Recorded once from node:crypto over the JSON text named in each row (#81, ADR-0003 section 6).
 describe('stateHash', () => {
@@ -43,5 +67,32 @@ describe('stateHash', () => {
 
   test('throws on a non-finite number', () => {
     expect(() => stateHash({ coins: NaN })).toThrow(/finite/);
+  });
+
+  test('property: key order does not change the hash', () => {
+    fc.assert(
+      fc.property(jsonValue, fc.nat(), (value, seed) => {
+        expect(stateHash(shuffleKeys(value, seed))).toBe(stateHash(value));
+      }),
+      params,
+    );
+  });
+
+  test('property: a JSON round trip does not change the hash', () => {
+    fc.assert(
+      fc.property(jsonValue, (value) => {
+        expect(stateHash(JSON.parse(JSON.stringify(value)))).toBe(stateHash(value));
+      }),
+      params,
+    );
+  });
+
+  test('property: is 64 lowercase hex digits', () => {
+    fc.assert(
+      fc.property(jsonValue, (value) => {
+        expect(stateHash(value)).toMatch(/^[0-9a-f]{64}$/);
+      }),
+      params,
+    );
   });
 });
