@@ -16,7 +16,9 @@ named, and which of the admin's conventions are adopted. #125 builds it: the con
 
 A grill on #124 with the admin, 9 Nov 2026, one question per turn, with the findings of #123
 (`docs/spikes/code-style/findings.md`: conventions C1–C20 and 17 conflicts with this repo) in hand.
-Q1–Q27 below are the questions in the order they were settled. Where a convention clashed with
+Q1–Q27 below are the questions in the order they were settled. The review of PR #130 added fixes,
+and the admin confirmed two details there (9 Nov): property selectors enforce the outside-shape
+naming row (section 6), and the *Avoid* list of `GLOSSARY.md`'s Interface entry. Where a convention clashed with
 `CONSTRAINTS.md`, ADR-0002 or ADR-0003, the repo won unless the admin changed it; each change to
 `CONSTRAINTS.md` is listed under [Consequences](#consequences).
 
@@ -69,8 +71,14 @@ deep modules (a small interface over a larger implementation, `codebase-design`)
 no code. It is the only place a re-export is allowed, and nothing but re-exports is allowed in it.
 `createSim` gets its own module (`sim/`).
 
-So a diff to that file is exactly an interface change, which is what `CONSTRAINTS.md`'s "Interface
-change" row reads, and a package's whole public surface is one short file.
+So a change to which names a package exports is always a diff to that one file, which is what
+`CONSTRAINTS.md`'s "Interface change" row reads, and the list of a package's exported names is one
+short file (resolves conflict 4 with section 1).
+
+The file lists names, not their shapes. Changing `createSim`'s signature, or a state-slice or action
+type inside a feature module, changes the interface without touching `src/index.ts`. The "Interface
+change" row's "the sim's state or action types" therefore spans `state/` and the feature modules,
+and #125 updates the row's paths to say so.
 
 **Pattern:** facade (one entry that lists a package's interface).
 
@@ -78,13 +86,14 @@ change" row reads, and a package's whole public surface is one short file.
 
 - **The package's main code in its `index.ts`**, as section 1 does for modules: every edit to
   `createSim`'s body would then trigger the "Interface change" row.
-- **Subpath exports** (`@sunny-pastures/sim/hash`): a wider surface, and more paths for the row to
+- **Subpath exports** (`@sunny-pastures/sim/hash`): a wider interface, and more paths for the row to
   watch.
 
 ## 3. `packages/sim` splits by feature (Q4, Q5, Q6)
 
 One module per glossary concept, each owning its rules, its part of the state type, its actions
-and its automated steps, next to a few shared modules. Content stays one module.
+and its automated steps, next to a few shared modules. Content stays one module. This is C16's
+folder structure for the sim.
 
 ```
 packages/sim/src/
@@ -152,8 +161,11 @@ cross-cutting modules; DRY at the second occurrence, extracted by concept.
 - **Lint snippet tests** (`sim-purity.test.mjs`, and #125's module-boundary snippets) live in
   `.github/scripts/tests/`, since they import ESLint and `node:*`.
 
-**Patterns:** co-located tests (per module, in a subfolder); the module's interface as its test
-surface, with internal seams open to the module's own tests.
+This resolves conflict 2: the tests leave the code's folder but stay under `src/`, so Vitest's
+`include` still finds them.
+
+**Patterns:** co-located tests (per module, in a subfolder); tests exercise the module's
+interface, with internal seams open to the module's own tests.
 
 **Rejected:**
 
@@ -175,7 +187,7 @@ surface, with internal seams open to the module's own tests.
 
 - One lowercase word where possible (`hash/`, `random/`, `plots/`, `storage/`, `sha256.ts`);
   camelCase when a name needs more words (`addOns/`, `canonicalJson.ts`); PascalCase for React
-  component files and folders in `apps/web` (C19).
+  component files and folders in `apps/web` (C19; resolves conflict 1).
 - `.test.ts` is the only suffix: no `.spec.ts`, and no `*.types.ts`, since a module's types live in
   its `index.ts` or a `types.ts` sibling.
 - Never rename by case alone: case-insensitive filesystems (macOS, Windows) confuse git.
@@ -184,7 +196,10 @@ surface, with internal seams open to the module's own tests.
   sections 1 and 4 (a module folder has an `index.ts`; `tests/` is the only other folder) are
   doc only: the admin doesn't need them enforced that strictly, and prefers a maintained
   dependency to custom tooling. The import rules of sections 1 and 4 are configuration of core
-  ESLint `no-restricted-imports`, proved by snippet tests.
+  ESLint `no-restricted-imports`, proved by snippet tests. A later ESLint block's options for a
+  rule replace an earlier block's, so in the sim the module-boundary patterns are merged into the
+  purity rule's options in both sim blocks, not added as a block of their own; otherwise the
+  purity import ban would silently drop.
 
 **Rejected:** kebab-case everywhere (today's `canonical-json.ts`), and kebab-case modules with
 PascalCase components: both buy only npm-style consistency nothing here needs. A custom layout test
@@ -199,20 +214,32 @@ can't check.
 
 ### Tooling
 
-- **Typed linting** (Q22): `tseslint.configs.strict` becomes `strictTypeChecked` plus
-  `stylisticTypeChecked`, with `parserOptions.projectService`, and `disableTypeChecked` for JS and
-  config files (`*.mjs`, `vitest.config.mts`). It only adds rules. It brings
-  `switch-exhaustiveness-check` over the `Action` and status unions (ADR-0003 §5), and the
-  type-aware rules named below. #125 measures `check:fast` before and after against its 5 s
-  budget; if typed linting breaks it, the fallback is typed rules in `check:task` only, which is a
-  moved stage and needs an admin PR.
-- **Prettier** (Q19): `prettier` with a committed `.prettierrc`: double quotes, semicolons,
-  `trailingComma: "all"`, **tabs** (`useTabs: true`), `printWidth: 100`. Scope:
-  `*.{ts,tsx,mts,mjs,js,json}`; Markdown is out (hand-wrapped docs, tables). `prettier --check`
-  runs in `check:fast` and CI. The reformat of today's code is its own formatting-only part of
-  #125, listed in `.git-blame-ignore-revs`.
-- **Import order** (Q20): `@ianvs/prettier-plugin-sort-imports`, so sorting is part of formatting.
-  Groups today: packages, a blank line, relative. `apps/web` adds `@/` and its layers in M3.
+- **Typed linting** (Q22): `tseslint.configs.strict` becomes `strictTypeChecked` (which includes
+  `strict`) plus `stylisticTypeChecked`, with `parserOptions.projectService`, and
+  `disableTypeChecked` for JS and config files (`*.mjs`, `vitest.config.mts`). It adds rules and
+  turns none off. It makes the type-aware rules below possible, and one of them is turned on by
+  name because neither preset includes it: **`@typescript-eslint/switch-exhaustiveness-check`**,
+  over the `Action` and status unions (ADR-0003 §5). It was the main reason for typed linting.
+  #125 measures `check:fast` before and after against its 5 s budget; if typed linting breaks it,
+  the fallback is typed rules in `check:task` only, which is a moved stage and needs an admin PR.
+  Rejected: **a hand-picked set of typed rules** on top of `strict` (a list of our own that drifts
+  as typescript-eslint adds rules), and **no typed linting** (it gives up exhaustiveness checking,
+  which the sim's growing action and status unions lean on).
+- **Prettier** (Q19; C15, resolves conflict 14): `prettier` with a committed `.prettierrc`:
+  double quotes, semicolons, `trailingComma: "all"`, **tabs** (`useTabs: true`; the admin's call
+  over 2 spaces), `printWidth: 100`. Scope: `*.{ts,tsx,mts,mjs,js,json}`; Markdown is out
+  (hand-wrapped docs, tables). `prettier --check` runs in `check:fast` and CI. The reformat of
+  today's code is its own PR in #125, so `.git-blame-ignore-revs` can name its squash commit.
+  Rejected: **`@stylistic/eslint-plugin`** (formatting through lint rules, slower, with weaker
+  auto-fix) and **no formatter** (quotes and indentation drift between agents).
+- **Import order** (Q20; C8): `@ianvs/prettier-plugin-sort-imports`, so sorting is part of
+  formatting. Groups today: packages, a blank line, relative. `apps/web` adds `@/` and its layers
+  in M3. Rejected: **`eslint-plugin-simple-import-sort`** (a second tool doing a formatting job)
+  and **no sorting** (the admin's most deliberate setup, at work, sorted imports through
+  Prettier).
+- **New dependencies** (resolves conflict 17), each approved by the admin in this grill:
+  `eslint-plugin-check-file`, `prettier`, `@ianvs/prettier-plugin-sort-imports`,
+  `@vitest/eslint-plugin`, plus Fallow, which `CONSTRAINTS.md` already lists.
 
 ### Types (Q16)
 
@@ -240,19 +267,19 @@ relax the rule for the state types.
 
 ### Imports (Q18)
 
-Relative imports only in `packages/*`, with `.js` extensions as NodeNext requires (the repo wins on
-that part of conflict 5); the `@/` alias belongs to `apps/web`, where Next resolves tsconfig
+C8: relative imports only in `packages/*`, with `.js` extensions as NodeNext requires (the repo
+wins on that part of conflict 5); the `@/` alias belongs to `apps/web`, where Next resolves tsconfig
 `paths`. Rejected: Node subpath imports (`#hash`; the purity rule would need a `#` exception) and a
 tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's private aliases).
 
-### Naming in code (Q21)
+### Naming in code (Q21; C9)
 
 | Kind | Decision | Enforced by |
 |---|---|---|
 | Types, interfaces, components | PascalCase | `@typescript-eslint/naming-convention` |
 | Functions, variables, parameters | camelCase; functions start with a verb | same (the verb: doc) |
 | Module constants | camelCase, no UPPER_SNAKE (conflict 15). Names that mirror an outside spec keep its name (SHA-256's `K`, `H0`) | same, with the spec names in its `filter` |
-| Outside shapes | snake_case only where data mirrors one (DB columns, API fields); sim state and actions are camelCase | same (property selectors); the boundary: doc |
+| Outside shapes | snake_case only where data mirrors one (DB columns, API fields); sim state and actions are camelCase | same: object-literal and type properties may be camelCase or snake_case, everything else camelCase; in `packages/sim` properties are camelCase only (it mirrors no outside shape); whether a snake_case property really mirrors an outside shape: doc |
 | Booleans | `is`, `has`, `can` prefix | same (type-aware selector, Q22) |
 | Domain words | `GLOSSARY.md` terms, never its *Avoid* words | doc |
 | Handlers (`apps/web`) | `handleX` inside, `onX` props | doc (M3) |
@@ -264,12 +291,15 @@ tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's p
 | C10 | Expected failures returned | Adopt (agrees with ADR-0003 §4, conflict 12); `throw` only for programmer errors | `only-throw-error` |
 | C10 | Logged and dropped | Drop: handle or pass up | `no-console` in `packages/*`; empty `catch` blocked by the Floor |
 | C10 | Messages to users | Full sentences ending in a period | doc |
-| C11 | `\|\|` fallbacks | Drop for `??` (0 coins is a value) | `prefer-nullish-coalescing` |
-| C11 | Defensive `?.` | Drop | `no-unnecessary-condition` |
+| C11, conflict 11 | `\|\|` fallbacks | Drop for `??` (0 coins is a value) | `prefer-nullish-coalescing` |
+| C11, conflict 11 | Defensive `?.` | Drop | `no-unnecessary-condition` |
 | C11, conflict 10 | `null` vs `undefined` | `null` for an absent value wherever we control it (it survives JSON; ADR-0003 §5); `undefined` only where the language gives it; no `null \| undefined` unions | doc; `exactOptionalPropertyTypes` (on) |
 | C11 | `==` | `===` always | core `eqeqeq: "always"` |
 | C12 | `return await` | Adopt | `return-await: ["error", "always"]` |
 | C12 | `.then` inside `await` | Drop; `Promise.all` for independent awaits | doc |
+
+Rejected: **`eslint-plugin-promise`** for `.then` mixing (`prefer-await-to-then`): a plugin for one
+rule.
 
 ### Comments and statements (Q24)
 
@@ -286,19 +316,28 @@ tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's p
 | C14 | Ternaries | One level at most | core `no-nested-ternary` |
 | C14 | Strings, spread | Templates and spread | core `prefer-template`, `prefer-spread`, `prefer-object-spread` |
 
+Rejected: **`sonarjs/no-commented-code`** (`eslint-plugin-sonarjs`) for commented-out code: a
+large plugin for one rule.
+
 ### Tests and the rest (Q25, Q26)
 
 - **`describe`/`it` everywhere** (C18, conflict 3): a `describe` names the unit, each `it` reads as
   a sentence. Enforced by `@vitest/eslint-plugin` (`consistent-test-it`, plus `expect-expect`,
   `no-focused-tests` and `no-disabled-tests`, which back up the Floor), a new dev dependency.
+  Rejected: **`test` everywhere** (against the admin's habit, and the `.github/scripts` half of
+  the repo already uses `it`) and **leaving the split** (sim on `test`, scripts on `it`).
 - **Config as data** (C20): adopted; it is already ADR-0003 §1 and MUST-10.4.
 - **Copy before abstracting** (C20): dropped by section 3.
 - **Commit subjects** (conflict 16): Conventional Commits stay. ADR-0002 makes the PR title's
   prefix the PR's type and the squash subject, and agents write the commits.
 - **Conflict 9** (unseeded `Math.random`, `setTimeout` time): the purity rules win
   (ADR-0003 §3, §7).
-- **Findings' open questions** 3, 4, 6, 7 and 9 are answered above; 1, 2 and 8 (identity, AI help,
-  how much work-A counts) are moot, since each convention was decided here rather than counted.
+- **Findings' open questions:** 3 (`noImplicitAny`: the repo's `strict` wins), 4 (tabs), 5
+  (arrow-const fetchers become `function` declarations, C2; server actions are camelCase and
+  verb-first, Q21; handler names are settled in M3), 6 (snake_case for outside shapes: keep), 7
+  (tests: in each module's `tests/`) and 9 (banners: allowed, with a split cue) are answered
+  above. 1, 2 and 8 (identity, AI help, how much work-A counts) are moot, since each convention was
+  decided here rather than counted.
 
 ## Patterns
 
@@ -306,7 +345,7 @@ tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's p
 | --- | --- | --- |
 | Module pattern, information hiding | every module folder | Callers see one entry; the rest can change without them. |
 | Deep modules | module interfaces | Much behaviour behind few names, deepened inside the folder. |
-| Facade | `packages/*/src/index.ts` | One export list, so the "Interface change" row stays exact. |
+| Facade | `packages/*/src/index.ts` | One export list, so every change to the exported names is a diff to one file. |
 | Package by feature, shared kernel | `packages/sim/src/` | A ticket mostly adds one folder; names match `GLOSSARY.md`. |
 | DRY at the second occurrence, by concept | shared modules such as `storage/` | No copies, and no `utils/` drawer without an owner. |
 | Co-located tests in a subfolder | `<module>/tests/` | Tests move with their module and may test its internal seams. |
@@ -329,10 +368,25 @@ tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's p
     `include` gains `src/**/tests/**`.
   - `eslint.config.mjs`: `SIM_TEST_FILES` becomes `packages/sim/**/*.test.ts` and
     `packages/sim/**/tests/**`; the new rules above are added. No rule is turned off.
-  - The coverage and tsconfig `exclude` additions are what `guard / floor` blocks as a moved
-    threshold (`floor-guard.mjs`, lines 94 and 118), so #125 adds an Exceptions row for those two
-    edits in the same PR. The exclusion stays after the row expires, because `CONSTRAINTS.md`'s
-    text now says so.
+- **What `guard / floor` reports, and the Exceptions rows it needs.** An Exceptions row holds one
+  Path glob, and the guard's glob has no `{a,b}` braces, so #125 writes one row per path, in the
+  PR that trips it:
+  - `vitest.config.mts`: the `**/tests/**` added to `coverage.exclude`; in the reformat, every
+    re-indented line inside `exclude` (added) and `include` (removed).
+  - `packages/sim/tsconfig.json`: `src/**/tests/**` added to `exclude`; in the reformat, the
+    re-indented `exclude` line.
+  - `eslint.config.mjs`: any removed line matching `configs.` or `'error'`, so replacing
+    `tseslint.configs.strict` trips it, and so does the reformat (each `'error'` becomes
+    `"error"`).
+
+  The exclusions stay after the rows expire, because `CONSTRAINTS.md`'s text now says so.
+- **The order of #125's PRs matters**, because CI runs the base branch's guard:
+  `floor-guard.test.mjs` holds TODO, "not implemented" and suppression strings as test data. If
+  they show up as added lines, they are findings that can't be waived. So the move of
+  `.github/scripts` tests is a near-pure rename (git's `-M`) in its own PR, first. The Prettier
+  reformat is its own PR, so `.git-blame-ignore-revs` can name its squash commit. Moving the sim's
+  tests and rewriting `test(` to `it(` happen in different PRs, or git may miss the rename and
+  report a deleted test.
 - **`CONSTRAINTS.md` changes (in #125, admin-approved):**
   - the purity row: files in a module's `tests/` folder (not only `*.test.ts`) may also import
     `vitest` and `fast-check`;
@@ -340,17 +394,29 @@ tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's p
     excluded;
   - a new duplication row: `fallow dupes`, 0 new clones in changed files across `packages/sim`
     source and tests, at task end and in CI;
+  - the "Interface change" row: "the sim's state or action types" now lives in `state/` and the
+    feature modules (section 2), and the row's paths say so;
   - "Tools are dependencies" names `eslint-plugin-check-file`, `prettier`,
     `@ianvs/prettier-plugin-sort-imports` and `@vitest/eslint-plugin` next to the tools already
     listed;
-  - the Exceptions row above.
-- **Paths named in docs and scripts that the layout changes:** `floor-guard.mjs`'s `SELF` set
-  (line 24) and `floor-guard.test.mjs` (line 90) name `.github/scripts/floor-guard.test.mjs`;
-  `test-repo.mjs` is a test helper and moves to `.github/scripts/tests/`; `sim-purity.test.mjs`
-  lints `packages/sim/src/random.ts` and `packages/sim/src/sha256.ts` by path (line 151), which
-  become `random/index.ts` and `hash/sha256.ts`. The "Content change" row
-  (`packages/sim/src/content/**`) and the "Interface change" row (`packages/*/src/index.ts`) keep
-  their paths. `AGENTS.md` links `docs/agents/code-style.md` with one line.
+  - the Exceptions rows above.
+- **Paths and path logic in scripts that the layout changes** (line numbers as of `b82fc1f`):
+  - `floor-guard.mjs`'s `SELF` set (line 32) and `floor-guard.test.mjs`'s `SELF_TEST` (line 90)
+    name `.github/scripts/floor-guard.test.mjs`.
+  - Relative URLs that change depth when the tests move into `tests/`: `floor-guard.test.mjs`
+    lines 9 (`./floor-guard.mjs`), 130 (`../workflows/ci.yml`) and 237 (`../../CONSTRAINTS.md`);
+    `coverage-gate.test.mjs` line 6 (`./coverage-gate.mjs`); `sim-purity.test.mjs` line 11
+    (`new URL('../..')`, the repo root).
+  - `test-repo.mjs` is a test helper and moves to `.github/scripts/tests/`.
+  - `sim-purity.test.mjs` lints `packages/sim/src/random.ts` and `packages/sim/src/sha256.ts` by
+    path, which become `random/index.ts` and `hash/sha256.ts`.
+  - `coverage-gate.mjs` line 100 (`looksLikeSource`, used when the lcov is missing) tells source
+    from tests by `.test.` alone, so it would count `tests/` helpers as source; it learns
+    `/tests/`.
+
+  The "Content change" row (`packages/sim/src/content/**`) keeps its path, and the "Interface
+  change" row keeps `packages/*/src/index.ts` (with the addition above). `AGENTS.md` links
+  `docs/agents/code-style.md` with one line.
 - **Every new dependency is pinned exactly** and must be at least 7 days old (`pnpm-workspace.yaml`).
   #125 checks each plugin's peer range against ESLint 10.14.0 and Prettier 3.
 - **Tickets #82–#89 follow the map** in section 3, creating each folder when its ticket needs it.
