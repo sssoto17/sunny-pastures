@@ -126,7 +126,12 @@ emit_word() {
       redirect_out) # a file the command writes; `>&2` and `2>&1` duplicate a descriptor instead
         ((redir_dup)) && [[ $word =~ ^([0-9]+|-)$ ]] || toks+=("$word") kinds+=(R)
         ;;
-      *) toks+=("$word") kinds+=(W) ;;
+      *)
+        toks+=("$word") kinds+=(W)
+        # A keyword or an assignment in command position leaves the next word there too.
+        [[ $cmd_pos == 1 && ($word =~ ^(if|then|elif|else|while|until|do|!|\{|time)$ ||
+          $word =~ ^[A-Za-z_][A-Za-z0-9_]*=) ]] || cmd_pos=0
+        ;;
     esac
     next_is=''
   fi
@@ -134,7 +139,7 @@ emit_word() {
   have_word=0
 }
 # An operator is never a redirect target: `>(cmd)` and `<(cmd)` are process substitutions.
-emit_op() { emit_word; next_is=''; toks+=("$1") kinds+=(O); }
+emit_op() { emit_word; next_is='' cmd_pos=1; toks+=("$1") kinds+=(O); }
 
 # At cmd[i] == "'": append the quoted text to $word and move past the closing quote.
 lex_squote() {
@@ -212,14 +217,10 @@ lex_heredoc_delim() {
   heredocs+=("$( ((strip)) && printf -- -)$delim")
 }
 
-# Is the next word in command position: first, after an operator, or after a keyword? Only
-# there are `[[` and `((` the test and arithmetic commands; elsewhere they're plain text.
-at_command_start() {
-  local k=$((${#toks[@]} - 1))
-  ((k < 0)) && return 0
-  [[ ${kinds[k]} == O ]] && return 0
-  [[ ${kinds[k]} == W && ${toks[k]} =~ ^(if|then|elif|else|while|until|do|!|\{|time)$ ]]
-}
+# Is the next word in command position: first, after an operator, or after a keyword or an
+# assignment that was itself in command position (cmd_pos, kept by emit_word and emit_op)?
+# Only there are `[[` and `((` the test and arithmetic commands; elsewhere they're plain text.
+at_command_start() { ((cmd_pos)); }
 
 # At cmd[i] == '[[' starting a word: if a closing ` ]]` ends a word later on, move past it and
 # keep the test as one opaque word (`>` and `<` inside it compare, they don't redirect).
@@ -281,6 +282,7 @@ lex_command() {
   have_word=0
   next_is=''   # '' | redirect | redirect_out | heredoc: what the next word is for
   redir_dup=0  # the redirect was `>&`: a target of digits or `-` is a descriptor, not a file
+  cmd_pos=1    # the next word is in command position (see at_command_start)
   heredocs=()  # pending heredoc delimiters, "-DELIM" when <<- strips tabs
   heredoc_strip=0
   local c rest

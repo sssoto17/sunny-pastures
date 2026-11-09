@@ -306,6 +306,12 @@ bash_tool 2 "$MAIN" '[[ a > b ]] && git commit -m x'
 bash_tool 2 "$MAIN" 'if (( n > 0 )); then sed -i s/a/b/ docs/x.md; fi'
 # security review of 099a3b7: only a real test or arithmetic command is opaque
 bash_tool 2 "$MAIN" 'echo [[ > docs/x.md ]]'         # `[[` as an argument: the redirect is real
+bash_tool 2 "$MAIN" 'echo if [[ > docs/x.md ]]'      # `if` as an argument isn't a keyword
+bash_tool 2 "$MAIN" 'printf %s do [[ >docs/x.md ]]'
+bash_tool 2 "$MAIN" 'echo then ((true) && git commit -m x)'
+bash_tool 0 "$MAIN" 'if ! [[ a > b ]]; then echo no; fi'
+bash_tool 0 "$MAIN" 'while true; do [[ x > y ]] && break; done'
+bash_tool 0 "$MAIN" '{ (( n > 0 )); }'
 bash_tool 2 "$MAIN" '((true) && git commit -m x)'    # nested subshells, not arithmetic
 bash_tool 2 "$MAIN" '((cd docs) && echo x > x.md)'
 bash_tool 2 "$MAIN" '[[ a ]]>docs/x.md'
