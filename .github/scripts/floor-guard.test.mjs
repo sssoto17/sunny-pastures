@@ -303,6 +303,9 @@ describe('floor guard, end to end', () => {
 
     it.each([
       ['the split size raised in a paragraph', 'at most **400 changed lines**', 'at most **800 changed lines**', 'threshold-loosened'],
+      // #99: numbers paired by position let a new number in front take the old one's place.
+      ['the split size raised behind a new cap', 'at most **400 changed lines**', 'at most **under 10 files or 800 changed lines**', 'threshold-loosened'],
+      ['the split size raised in a new cap that took the old unit', 'at most **400 changed lines**', 'at most **10 changed files or 800 lines**', 'threshold-loosened'],
       ['the exception limit raised in a paragraph', 'no more than 30 days out', 'no more than 90 days out', 'threshold-loosened'],
       ['a suppression dropped from a continuation line', '`fallow-ignore-next-line`, `fallow-ignore-file`, ', '', 'rule-narrowed'],
       ['the floor guard dropped from a stage', 'lint on changed files, floor guard, boundaries', 'lint on changed files, boundaries', 'rule-narrowed'],
@@ -318,6 +321,7 @@ describe('floor guard, end to end', () => {
     it.each([
       ['the split size lowered in the interview record', '- **Split size:** 400 changed lines', '- **Split size:** 300 changed lines'],
       ['the ratchet tolerance lowered', '| must not fall | 0.5 points |', '| must not fall | 0.2 points |'],
+      ['a tighter cap added next to the split size', 'at most **400 changed lines**', 'at most **400 changed lines or 20 files**'],
       ['a comma removed from an unlabelled list item', '- **Every failing check blocks the merge**, except', '- **Every failing check blocks the merge** except'],
     ])('stays silent for %s', (_, from, to) => {
       realRepo();

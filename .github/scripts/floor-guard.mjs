@@ -349,11 +349,20 @@ const thresholds = (t) => {
   const out = [];
   const re = /\d+(?:\.\d+)?/g;
   let m;
+  let last = null; // the previous number with a direction, and where it ended
   while ((m = re.exec(t))) {
     const before = t.slice(Math.max(0, m.index - 24), m.index).toLowerCase();
     const after = t.slice(m.index + m[0].length, m.index + m[0].length + 40).toLowerCase();
-    const dir = MIN_BEFORE.test(before) || MIN_AFTER.test(after) ? 'min' : MAX_BEFORE.test(before) || MAX_AFTER.test(after) ? 'max' : null;
-    out.push({ n: Number(m[0]), dir });
+    let dir = MIN_BEFORE.test(before) || MIN_AFTER.test(after) ? 'min' : MAX_BEFORE.test(before) || MAX_AFTER.test(after) ? 'max' : null;
+    // A number listed right after a capped one shares its direction: in "at most 10 files or 800
+    // lines" the 800 is a cap too (#99). Only across a short "or", "and" or comma, in one clause.
+    const gap = last ? t.slice(last.end, m.index) : '';
+    if (!dir && last && gap.length <= 30 && !/[.;|]/.test(gap) && /\b(or|and)\b|,/.test(gap)) dir = last.dir;
+    if (dir) last = { dir, end: m.index + m[0].length };
+    // The unit is the word right after the number ("changed", "files", "%", "ms"), so numbers pair
+    // by what they count, not by position (#99).
+    const unit = (/^\s*(%|[a-z]+)/.exec(after)?.[1] ?? '').replace(/s$/, '');
+    out.push({ n: Number(m[0]), dir, unit });
   }
   return out;
 };
@@ -420,14 +429,31 @@ const narrowingLabels = (oldText, nowText) => [
   ]),
 ];
 
+// Pairs each old number with a new one of the same direction: the same unit first, in order, and
+// only then the next unused one, so a rewording that changes the unit still pairs. A new number
+// added in front ("under 10 files or 800 changed lines") can't take an old one's place (#99).
 const compareNumbers = (was, now) => {
   for (const dir of ['min', 'max', null]) {
     const before = was.filter((x) => x.dir === dir);
     const after = now.filter((x) => x.dir === dir);
+    const used = new Set();
+    const take = (pick) => {
+      const n = after.find((x) => !used.has(x) && pick(x));
+      if (n) used.add(n);
+      return n;
+    };
+    const paired = before.map((b) => take((x) => x.unit === b.unit));
     for (const [i, b] of before.entries()) {
-      const n = after[i];
+      const n = paired[i] ?? take(() => true);
       if (!n) return 'threshold-removed';
       if (n.n !== b.n && (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : true)) return dir ? 'threshold-loosened' : 'threshold-changed';
+    }
+    // A new number left over in a capped rule: looser than every old one of its direction is a
+    // loosening ("10 changed files or 800 lines" for "400 changed lines"); a tighter one isn't.
+    if (dir && before.length) {
+      const extra = after.filter((x) => !used.has(x));
+      const loosest = dir === 'max' ? Math.max(...before.map((b) => b.n)) : Math.min(...before.map((b) => b.n));
+      if (extra.some((x) => (dir === 'max' ? x.n > loosest : x.n < loosest))) return 'threshold-loosened';
     }
   }
   return null;
