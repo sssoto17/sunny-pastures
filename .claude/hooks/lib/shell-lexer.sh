@@ -241,7 +241,7 @@ lex_dbracket() {
         continue
         ;;
     esac
-    if [[ ${cmd:j:2} == ']]' && ${cmd:j-1:1} == [[:space:]] ]] &&
+    if [[ ${cmd:j:2} == ']]' && ${cmd:j-1:1} == [[:space:]\)] ]] && # `[[ (a)]]` closes at `)]]`
       { ((j + 2 >= n)) || [[ ${cmd:j+2:1} == [[:space:]\;\&\|\)\<\>] ]]; }; then
       word+='[[ … ]]'
       i=$((j + 2))

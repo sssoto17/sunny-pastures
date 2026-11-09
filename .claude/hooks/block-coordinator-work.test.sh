@@ -309,6 +309,13 @@ bash_tool 2 "$MAIN" 'echo [[ > docs/x.md ]]'         # `[[` as an argument: the 
 bash_tool 2 "$MAIN" 'echo if [[ > docs/x.md ]]'      # `if` as an argument isn't a keyword
 bash_tool 2 "$MAIN" 'printf %s do [[ >docs/x.md ]]'
 bash_tool 2 "$MAIN" 'echo then ((true) && git commit -m x)'
+# bash closes `[[ (a)]]` at `)]]`: what follows is lexed normally (independent review of 7b07348)
+bash_tool 2 "$MAIN" '[[ (a)]] && git commit -m x; echo ]]'
+bash_tool 2 "$MAIN" '[[ (a)]] > docs/a; echo ]]'
+bash_tool 0 "$MAIN" '[[ (a) ]] && echo ok'
+bash_tool 0 "$MAIN" '[[ ( a ) && b ]] && echo ok'
+bash_tool 0 "$MAIN" 'if [[ (a)]]; then echo ok; fi'
+bash_tool 0 "$MAIN" '[[ (a > b)]] && echo ok'
 bash_tool 2 "$MAIN" 'x=1 [[ > docs/x.md ]]'          # after an assignment, `[[` is a plain word
 bash_tool 2 "$MAIN" '>/dev/null [[ > docs/x.md ]]'   # after a redirect, too
 bash_tool 2 "$MAIN" '</dev/null [[ > docs/x.md ]]'

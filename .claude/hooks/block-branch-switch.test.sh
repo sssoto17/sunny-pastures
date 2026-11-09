@@ -192,6 +192,8 @@ allow "$MAIN" 'git status > .scratch/status.txt 2>&1'
 deny "$MAIN" '(( n > 0 )) && git switch feature'
 deny "$MAIN" '[[ a > b ]] && git checkout feature'
 deny "$MAIN" '((true) && git switch feature)'
+deny "$MAIN" '[[ (a)]] && git switch feature; echo ]]'
+allow "$MAIN" 'if [[ (a)]]; then git status; fi'
 allow "$MAIN" 'if (( $(git rev-list --count HEAD..origin/main) > 0 )); then git status; fi'
 
 # --- remote sessions have no main folder to protect (#75) --------------------------------------

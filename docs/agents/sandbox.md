@@ -96,7 +96,8 @@ files, not devices. Like placeholders, they can't be deleted from inside the san
 - In the main folder, `.claude/hooks/block-coordinator-work.sh` (#75) denies the coordinating
   session's file tools and common shell writes (redirects, `sed -i`, `cp`, `mv`, `rm` and the
   like) on repo files outside `.scratch/` and `.remember/`. Paths outside the repo and removing
-  a merged worktree stay allowed.
+  a merged worktree stay allowed. It and the branch guard skip remote sessions
+  (`CLAUDE_CODE_REMOTE=true` or `GITHUB_ACTIONS=true`), which have no main folder.
 - Never writable from a session: the main folder's `.claude/settings.json`,
   `.claude/settings.local.json`, `.claude/hooks/` and `.claude/skills/`, and everything under
   `~/.claude/`. Changes there are the admin's. A worktree's copies can be edited, and they reach
