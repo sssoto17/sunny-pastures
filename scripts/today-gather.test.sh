@@ -161,7 +161,7 @@ snapshot() { # -> one line per path in the repo: type, size, mtime, path
 run() { # args... -> sets code, out, err, calls; runs in $work/repo unless $cwd is set
   local before after
   before=$(snapshot)
-  out=$(cd "${cwd:-$work/repo}" && PATH="$work/bin:$PATH" bash "$script" "$@" 2>"$work/err")
+  out=$(cd "${cwd:-$work/repo}" && PATH="${extra_path:+$extra_path:}$work/bin:$PATH" bash "$script" "$@" 2>"$work/err")
   code=$?
   err=$(cat "$work/err")
   calls=$(cat "$work/calls" 2>/dev/null || true)
@@ -240,6 +240,26 @@ expect_call() { # substring of one call, its arguments joined by spaces
     grep -qF -- "$1"; then ok; else bad "expected a gh call containing: $1"; fi
 }
 expect_call "project item-list 3 --owner sssoto17 --format json --limit 1000 --jq"
+
+# No --date: today in Copenhagen. A `date` stub answers a bare `date +%F` by TZ (late on 8 Nov
+# in UTC is already 9 Nov in Copenhagen) and passes every other call to the real date.
+mkdir -p "$work/datebin"
+cat >"$work/datebin/date" <<FAKE
+#!/usr/bin/env bash
+if [[ \$# -eq 1 && \$1 == +%F ]]; then
+  [[ \${TZ-} == Europe/Copenhagen ]] && echo 2026-11-09 || echo 2026-11-08
+  exit 0
+fi
+exec $(command -v date) "\$@"
+FAKE
+chmod +x "$work/datebin/date"
+reset
+board "$two_weeks"
+extra_path="$work/datebin"
+case_ "default date"
+unset extra_path
+expect_code 0
+assert "expected today in Copenhagen" contains "$(section today)" "date${T}2026-11-09"$'\n'"week${T}$WK2"
 
 # No iteration holds the date: say so, list no week, but still gather the rest.
 reset

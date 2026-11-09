@@ -18,13 +18,16 @@ compare with a hand-written brief).
 
 ## Steps
 
-1. **Gather.** Run `scripts/today-gather.sh` from the top of the checkout you're in (normally the
-   main folder). `--help` explains every section and column. On a non-zero exit, tell the admin
-   its error and stop: write nothing.
+1. **Gather.** Run `scripts/today-gather.sh` from the top of the checkout you're in. `/today`
+   belongs in the main folder, where the coordinator's briefs live: from a worktree, `out` is
+   that worktree's `.scratch/`, so the main folder's briefs read as missing. When `out` isn't
+   `<root>/.scratch`, the agenda's first line says so. `--help` explains every section and
+   column. On a non-zero exit, tell the admin its error and stop: write nothing.
 2. **Handoff.** If the `handoff` line says `present`, read that file. If it says `missing`, that's
    normal (`.remember/` is git-ignored); the agenda says so in one line.
-3. **Pick the briefs.** One per `ready` line with mode Manual, plus each issue named in the
-   arguments. Skip these, and list them in the agenda instead:
+3. **Pick the briefs.** One per `ready` line with mode Manual or no mode (`-`: treat it as
+   Manual, and say under For the coordinator that its Mode is unset), plus each issue named in
+   the arguments. Skip these, and list them in the agenda instead:
    - a `ready` line whose brief column holds a path: the brief **exists**, maybe edited by hand.
      Also skip any `out/brief-<N>-*.md` that exists for a named issue;
    - the Retro inbox (title "Retro inbox"): it collects notes, it's never a lane;
@@ -99,6 +102,11 @@ Deliverable: one PR that closes #<N>. Run <the checks its criteria call for: the
 ```
 # Today: <date>, <week>
 
+<Only when `out` isn't the main folder's `.scratch/`: "Run from a worktree: briefs in the main
+folder's .scratch/ weren't seen, so some may show as new.">
+<Only when week is `-`: "No Week iteration holds <date>, or no item is in it yet; This week is
+empty.">
+
 <The handoff in three to five lines: what's pending and the top next steps. Or: "No handoff:
 <path> is missing.">
 
@@ -120,7 +128,9 @@ PR, and no launch line.>
 
 ## Leftovers
 - Merged worktrees: <each `worktrees` line in state merged, with its PR; "locked" means a session
-  may still hold it>. Cleanup is `docs/diagrams/workflow.md`, evening step 3.
+  may still hold it>, each as "merged (run `scripts/after-merge.sh <name>`, which confirms)".
+  This list goes by the PR's state alone; `after-merge.sh` also refuses a branch with commits
+  the merged PR doesn't carry.
 - Other worktrees without an open PR: <state none, closed or detached>.
 - Strays: <each `strays` line>: not a registered worktree; check what it holds before deleting.
 - Orphans: <each `orphans` line>: needs a workstream parent (`issue-tracker.md`, "Grouping").

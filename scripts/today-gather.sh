@@ -25,7 +25,8 @@ not even a file. Run it from the main folder; from a worktree, "out" is that wor
 
 Output: sections headed "== <name>", one tab-separated record per line, "-" for an empty field,
 in this order:
-  today      date; week (the board's Week iteration that contains the date, or -); root (the
+  today      date; week (the board's Week iteration that contains the date, or -: weeks are
+             read from the items, so an iteration no item is in yet shows as -); root (the
              main folder); out (.scratch/ of the checkout it runs in); handoff (path,
              present|missing)
   ready      every Ready issue, by priority (none last) then number: #N, mode, priority, size,
