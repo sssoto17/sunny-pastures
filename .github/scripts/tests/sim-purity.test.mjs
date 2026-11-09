@@ -32,6 +32,8 @@ const BANNED = [
   'export const d = new Date;',
   'export const e = Date();',
   "export const f = import('./lazy.js');",
+  'export class Farm {}',
+  'export const g = class {};',
 ].join('\n');
 
 const BANNED_FINDINGS = [
@@ -44,6 +46,8 @@ const BANNED_FINDINGS = [
   '7 no-restricted-syntax',
   '8 no-restricted-syntax',
   '9 no-restricted-syntax',
+  '10 no-restricted-syntax',
+  '11 no-restricted-syntax',
 ];
 
 // Ways around the rules above, each reaching the clock or randomness another way (review of #121).

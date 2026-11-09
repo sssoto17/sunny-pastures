@@ -79,6 +79,11 @@ const SIM_SYNTAX = [
     message: 'No dynamic import: the sim imports only its own files, statically (MUST-10.1).',
   },
   {
+    // State is plain JSON data and rules are functions over it (ADR-0003, section 5; ADR-0005, C2).
+    selector: ':matches(ClassDeclaration, ClassExpression)',
+    message: 'No classes in the sim: state is plain data, and rules are functions (ADR-0003, section 5).',
+  },
+  {
     selector: `${BITWISE}:has(Identifier[name=${TIME_NAME}], Literal[value=${TIME_NAME}])`,
     message: 'No 32-bit operators on times: they truncate above 2^31 ms (ADR-0003, section 10).',
   },

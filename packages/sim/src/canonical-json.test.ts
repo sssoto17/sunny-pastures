@@ -48,7 +48,8 @@ describe('canonicalJson', () => {
     ['a bigint', 1n],
     ['a Date', new Date(0)],
     ['a Map', new Map()],
-    ['a class instance', new (class Thing { readonly n = 1; })()],
+    // What a class instance is to canonicalJson, without class syntax (banned in the sim, ADR-0005).
+    ['an object with another prototype, as a class instance has', Object.create({ n: 1 }) as object],
     ['an object whose prototype has no constructor', Object.create(Object.create(null) as object)],
     // `.map` skips holes: [,] would read as [] and [,1] as the invalid text "[,1]".
     ['a sparse array', Object.assign([], { 1: 1 })],
