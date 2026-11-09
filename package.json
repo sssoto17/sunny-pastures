@@ -1,39 +1,40 @@
 {
-  "name": "sunny-pastures",
-  "private": true,
-  "description": "Cosy farm and bakery idle game with a deterministic simulation shared by client and server.",
-  "packageManager": "pnpm@12.15.0",
-  "engines": {
-    "node": ">=24 <25"
-  },
-  "scripts": {
-    "supabase:check": "v=$(supabase --version 2>/dev/null); [ \"$v\" = 2.122.0 ] || { echo \"Supabase CLI 2.122.0 required, found: ${v:-none}\" >&2; exit 1; }",
-    "db:start": "supabase/db.sh start",
-    "db:status": "supabase/db.sh status",
-    "db:env": "supabase/db.sh env",
-    "typecheck": "tsc -b && node .github/scripts/typecheck-reach.mjs",
-    "lint": "eslint .",
-    "lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
-    "test": "vitest run --coverage",
-    "test:related": "vitest run --changed origin/main --coverage",
-    "guard:floor": "node .github/scripts/floor-guard.mjs",
-    "coverage:gate": "node .github/scripts/coverage-gate.mjs",
-    "check:fast": "pnpm typecheck && pnpm lint:changed && pnpm guard:floor",
-    "dupes": "fallow dupes packages/sim --fail-on-issues --quiet",
-    "check:task": "pnpm check:fast && pnpm lint && pnpm dupes --changed-since origin/main && pnpm test:related && pnpm coverage:gate --skip-ratchet",
-    "check:full": "pnpm typecheck && pnpm lint && pnpm dupes --changed-since origin/main && pnpm guard:floor && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate"
-  },
-  "devDependencies": {
-    "@eslint/js": "10.0.1",
-    "@ianvs/prettier-plugin-sort-imports": "4.7.1",
-    "@vitest/coverage-v8": "5.0.5",
-    "@vitest/eslint-plugin": "1.6.28",
-    "eslint": "10.14.0",
-    "eslint-plugin-check-file": "3.3.2",
-    "fallow": "3.38.1",
-    "prettier": "3.9.10",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.72.1",
-    "vitest": "5.0.5"
-  }
+	"name": "sunny-pastures",
+	"private": true,
+	"description": "Cosy farm and bakery idle game with a deterministic simulation shared by client and server.",
+	"packageManager": "pnpm@12.15.0",
+	"engines": {
+		"node": ">=24 <25"
+	},
+	"scripts": {
+		"supabase:check": "v=$(supabase --version 2>/dev/null); [ \"$v\" = 2.122.0 ] || { echo \"Supabase CLI 2.122.0 required, found: ${v:-none}\" >&2; exit 1; }",
+		"db:start": "supabase/db.sh start",
+		"db:status": "supabase/db.sh status",
+		"db:env": "supabase/db.sh env",
+		"typecheck": "tsc -b && node .github/scripts/typecheck-reach.mjs",
+		"lint": "eslint .",
+		"lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
+		"test": "vitest run --coverage",
+		"test:related": "vitest run --changed origin/main --coverage",
+		"guard:floor": "node .github/scripts/floor-guard.mjs",
+		"coverage:gate": "node .github/scripts/coverage-gate.mjs",
+		"format:check": "prettier --check --log-level warn \"**/*.{ts,tsx,mts,mjs,js,json}\"",
+		"check:fast": "pnpm typecheck && pnpm lint:changed && pnpm format:check && pnpm guard:floor",
+		"dupes": "fallow dupes packages/sim --fail-on-issues --quiet",
+		"check:task": "pnpm check:fast && pnpm lint && pnpm dupes --changed-since origin/main && pnpm test:related && pnpm coverage:gate --skip-ratchet",
+		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm dupes --changed-since origin/main && pnpm guard:floor && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate"
+	},
+	"devDependencies": {
+		"@eslint/js": "10.0.1",
+		"@ianvs/prettier-plugin-sort-imports": "4.7.1",
+		"@vitest/coverage-v8": "5.0.5",
+		"@vitest/eslint-plugin": "1.6.28",
+		"eslint": "10.14.0",
+		"eslint-plugin-check-file": "3.3.2",
+		"fallow": "3.38.1",
+		"prettier": "3.9.10",
+		"typescript": "6.0.3",
+		"typescript-eslint": "8.72.1",
+		"vitest": "5.0.5"
+	}
 }

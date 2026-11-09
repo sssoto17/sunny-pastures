@@ -1,13 +1,13 @@
 {
-  "//": "The sim's tests: the same ES2022 lib and no ambient types as the source, plus the types of what the root vitest.config.mts provides (vitest.context.d.ts).",
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "lib": ["ES2022"],
-    "types": [],
-    "emitDeclarationOnly": true,
-    "sourceMap": false,
-    "outDir": "node_modules/.cache/tsc/test"
-  },
-  "include": ["src/**/*.test.ts", "src/**/tests/**/*", "../../vitest.context.d.ts"],
-  "references": [{ "path": "./tsconfig.json" }]
+	"//": "The sim's tests: the same ES2022 lib and no ambient types as the source, plus the types of what the root vitest.config.mts provides (vitest.context.d.ts).",
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["ES2022"],
+		"types": [],
+		"emitDeclarationOnly": true,
+		"sourceMap": false,
+		"outDir": "node_modules/.cache/tsc/test"
+	},
+	"include": ["src/**/*.test.ts", "src/**/tests/**/*", "../../vitest.context.d.ts"],
+	"references": [{ "path": "./tsconfig.json" }]
 }

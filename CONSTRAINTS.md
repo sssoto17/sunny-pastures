@@ -84,6 +84,7 @@ the thresholds).
 |---|---|---|---|---|---|---|
 | Types | 0 type errors | Any error is a bug or a lie | `tsc -b` (incremental) | edit, CI | `ci / typecheck` | #40 |
 | Lint | 0 errors from the project config | The config is the standard; a warning nobody fixes is noise | `eslint .` | edit, CI | `ci / lint` | #40 |
+| Formatting (ADR-0005) | 0 files that Prettier would change, across `*.{ts,tsx,mts,mjs,js,json}` | Quotes, indentation and import order don't drift between agents | `prettier --check`, settings in `.prettierrc` | edit, CI | `ci / lint` | #125 |
 | Duplication (ADR-0005) | 0 clones in the changed files of `packages/sim`, source and tests: exact copies of 50 tokens and 5 lines or more | A rule written twice drifts apart; a repeated rule becomes a shared module at its second occurrence | `fallow dupes --changed-since <merge base>`, settings in `.fallowrc.jsonc` | task end, CI | `ci / lint` | #125 |
 | Coverage: `packages/sim` | Changed lines ≥ 90% covered | The sim is the research contribution, and a pure module with no I/O is cheap to cover | Vitest coverage (v8) lcov ∩ `git diff` | task end, CI | `ci / test` | #40 |
 | Coverage: rest of `apps/` and `packages/` | Changed lines ≥ 80% covered | High enough that new logic needs a test; the rest leaves room for defensive branches that unit tests can't reach without contortions | Vitest coverage (v8) lcov ∩ `git diff` | task end, CI | `ci / test` | #40 |
@@ -165,7 +166,7 @@ A check that stalls the agent gets switched off, so the cost of a check decides 
 
 | Stage | Command | Runs | Budget |
 |---|---|---|---|
-| After each edit | `pnpm check:fast` (agent hook, proposed in #40) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, boundaries | under 5 s |
+| After each edit | `pnpm check:fast` (agent hook, proposed in #40) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, boundaries, formatting check | under 5 s |
 | Task end, before the agent opens a PR | `pnpm check:task` | `check:fast`, plus related unit and property tests (fixed seed, capped runs), coverage of changed lines, sim benchmark, duplication in changed files, and a full lint without the cache (typed rules read other files, and the cache only tracks each file's own content) | ≤ 90 s |
 | Every PR | CI (`pnpm check:full` + scan jobs) | Everything above, plus larger property runs, the determinism gate, gitleaks, `pnpm audit`, Semgrep, Stryker _(warn)_, acceptance tests | unlimited |
 | Every preview deploy | CI against the Vercel preview | Lighthouse, axe, bundle ratchet, latency smoke | unlimited |

@@ -39,6 +39,8 @@ jobs:
           fetch-depth: 0 # fallow dupes reports clones in the files changed since the merge base
       - uses: ./.github/actions/setup
       - run: pnpm lint
+      # CONSTRAINTS.md, formatting row.
+      - run: pnpm format:check
       # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
       - run: pnpm dupes --changed-since "origin/$BASE_REF"
 
