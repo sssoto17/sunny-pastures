@@ -22,10 +22,10 @@
 // whose Path, one file or one folder, covers the file. Unfinished work and invalid, too broad or
 // expired exceptions always fail, and so does a second `## Exceptions` heading.
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CannotRun, baseArg, enterRepo, oldContent, readChange } from './diff.mjs';
+import { CannotRun, baseArg, enterRepo, git, oldContent, readChange } from './diff.mjs';
 
 // This file and its tests spell out the suppression and stub patterns, so those two scans skip
 // them; every other check still applies. CI runs the base branch's copy of this guard (ci.yml,
@@ -57,15 +57,57 @@ const MAX_EXCEPTION_DAYS = 30;
 
 // CONSTRAINTS.md, Floor: the suppression comments.
 const SUPPRESSIONS =
-  /@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|istanbul ignore|c8 ignore|v8 ignore|Stryker disable|nosemgrep|gitleaks:allow|fallow-ignore-next-line|fallow-ignore-file|#\s*noqa|#\s*type:\s*ignore/;
+  /@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|istanbul ignore|c8 ignore|v8 ignore|Stryker disable|nosemgrep|gitleaks:allow|fallow-ignore[\w-]*|#\s*noqa|#\s*type:\s*ignore/;
 const SKIPS = /\.(skip|only|todo|skipIf|runIf)\b|\b(xit|xtest|xdescribe|fit|fdescribe)\s*\(/;
-const STUBS = /throw new \w*Error\(\s*['"`][^'"`]*[Nn]ot [Ii]mplemented|catch\s*(\([^)]*\))?\s*\{\s*\}|\bTODO\b/;
+// Unfinished work (#99 added the last four): a not-implemented stub, "not yet implemented" and
+// "unimplemented" included; an empty `catch`, or one holding only a comment; an empty `.catch`
+// callback; a TODO.
+// A block comment that doesn't run past its own `*/`, so it can't swallow code between two
+// comments (review of #133).
+const BLOCK_COMMENT = String.raw`\/\*(?:(?!\*\/).)*\*\/`;
+// An arrow or function callback whose body is empty, holds only comments, or returns nothing.
+const EMPTY_CALLBACK = String.raw`(?:async\s+)?(?:\([^)]*\)|\w+)\s*=>\s*(?:\{\s*(?:${BLOCK_COMMENT}\s*)*\}|undefined|void 0|null)|(?:async\s+)?function\s*\w*\s*\([^)]*\)\s*\{\s*\}`;
+const STUBS = new RegExp(
+  [
+    String.raw`catch\s*(\([^)]*\))?\s*\{\s*(?:${BLOCK_COMMENT}\s*)*\}`,
+    String.raw`\.catch\(\s*(?:${EMPTY_CALLBACK})\s*\)`,
+    String.raw`\.then\([^,()]+(?:\([^)]*\))?,\s*(?:${EMPTY_CALLBACK})\s*\)`,
+    String.raw`\bTODO\b`,
+  ].join('|'),
+);
+// A stub that throws instead of doing the work: the message starts with "not implemented", "not
+// yet implemented" (spaces or hyphens) or "unimplemented", in any case, with or without `new`.
+// A `NotImplementedError` is the same stub by name (independent review of #133).
+const STUB_THROW = /throw\s+(?:new\s+)?(?:NotImplemented\w*|\w*Error\(\s*['"`]\s*(?:not[\s-]+(?:yet[\s-]+)?implemented|unimplemented)\b)/i;
+// Whether the block opened on line `n` (1-based) holds nothing but blanks and comments before its
+// closing `}`. The lines are read together, so a block comment may span several of them, and a
+// line that opens a comment and then has code (`/* log */ report(e);`) isn't empty (reviews of
+// #133).
+const emptyBlockAfter = (lines, n) => {
+  let text = '';
+  for (let i = n; i < lines.length; i++) {
+    text += `${lines[i] ?? ''}\n`;
+    if (text.lastIndexOf('/*') > text.lastIndexOf('*/')) continue; // inside a block comment
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, '');
+    if (code.trim()) return /^\s*\}/.test(code);
+  }
+  return false;
+};
 // An ESLint rule turned off or down to a warning: `'rule': 'off'`, `'rule': 0`, `'rule': ['warn', …]`.
 const RULE_OFF = /(["'][\w@/-]+["']|\w+)\s*:\s*\[?\s*["'](off|warn)["']|["'][\w@/-]+["']\s*:\s*\[?\s*[01]\b/;
-const OPEN_CATCH = /catch\s*(\([^)]*\))?\s*\{\s*$/;
+// A `catch` block, or a `.catch` callback, opened at the end of a line (review of #133).
+const OPEN_CATCH = /catch\s*(\([^)]*\))?\s*\{\s*$|\.catch\(\s*(?:async\s+)?(?:\([^)]*\)|\w+)\s*=>\s*\{\s*$/;
 const ASSERTION = /\b(expect|assert)\b/;
 const ASSERTIONS = /\b(expect|assert)\b/g;
-const RUN_COUNT = /\b(numRuns|SIM_PROPERTY_RUNS)\b\D{0,20}?(\d+)/;
+const RUN_COUNT = /\b(numRuns|SIM_PROPERTY_RUNS)\b(?:\D{0,20}?(\d+))?/;
+// A line of JS or TS without its comments.
+const stripComments = (t) => t.replace(/\/\*(?:(?!\*\/).)*(?:\*\/|$)/g, ' ').replace(/\/\/.*$/, '');
+// A property-test run count on a line of code: its key, and its value, or null when it comes from
+// a variable (review of #133). Comments neither hold a count nor hide one.
+const runCount = (t) => {
+  const m = RUN_COUNT.exec(stripComments(t));
+  return m ? { key: m[1], n: m[2] === undefined ? null : Number(m[2]) } : null;
+};
 const STRICT_KEYS =
   /"(strict\w*|noImplicit\w+|noUnused\w+|noUnchecked\w+|noFallthroughCasesInSwitch|noPropertyAccessFromIndexSignature|exactOptionalPropertyTypes|alwaysStrict|useUnknownInCatchVariables|allowUnreachableCode|allowUnusedLabels)"\s*:\s*(true|false)/;
 
@@ -130,6 +172,19 @@ const configLoosening = (f, mergeBase) => {
       for (const r of f.removed) if (/configs\.|["']error["']/.test(r.text)) hits.push(`${r.line} (old)`);
     }
   } else if (/^tsconfig.*\.json$/.test(name)) {
+    // A new tsconfig that neither extends a shared one nor turns `strict` on compiles a package
+    // with TypeScript's loose defaults (#99).
+    // Its `extends` must name a file that exists (review of #133): `"./nope.json"` or `[]` extends
+    // nothing. A package name (`@tsconfig/node20`) isn't resolved here and counts as an extends.
+    if (f.status === 'added') {
+      // Read without comments, so `// "strict": true` doesn't count (independent review of #133).
+      const text = readFileSync(f.path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:"])\/\/.*$/gm, '$1');
+      const value = /"extends"\s*:\s*("(?:[^"\\]|\\.)*"|\[[^\]]*\])/.exec(text)?.[1];
+      const targets = value ? [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]) : [];
+      const resolves = (t) => t.trim() !== '' && (!/^\.{1,2}\//.test(t) || [t, `${t}.json`].some((p) => existsSync(join(dirname(f.path), p))));
+      const extendsReal = targets.length > 0 && targets.every(resolves);
+      if (!extendsReal && !/"strict"\s*:\s*true/.test(text)) hits.push(1);
+    }
     const addedTrue = new Set(f.added.map((a) => STRICT_KEYS.exec(a.text)).filter((m) => m?.[2] === 'true').map((m) => m[1]));
     for (const a of f.added) {
       const m = STRICT_KEYS.exec(a.text);
@@ -319,7 +374,7 @@ const ruleNumbers = (r) => {
 };
 const PROSE_HEADER =/why|reason|covers|what is checked|notes?/i;
 // Numbers are judged by direction (compareNumbers), so list items compare with them masked.
-const norm = (s) => s.replace(/[`*]/g, '').replace(/\d+(\.\d+)*/g, 'N').replace(/\s+/g, ' ').replace(/[.:]+$/, '').trim().toLowerCase();
+const norm = (s) => s.replace(/[`*]/g, '').replace(/(?<![A-Za-z])\d+(\.\d+)*/g, 'N').replace(/\s+/g, ' ').replace(/[.:]+$/, '').trim().toLowerCase();
 const ticks = (t) => new Set([...t.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
 // A table's list cells: every cell but the key, prose columns and a ratchet's "Today".
 const isListCell = (r, i) => i > 0 && !PROSE_HEADER.test(r.headers[i] ?? '') && !/^today$/i.test(r.headers[i] ?? '');
@@ -365,15 +420,33 @@ const MIN_AFTER = /^\s*\S*\s*(or more|or higher|must not fall|must not drop)/;
 const MAX_AFTER = /^\s*\S*\s*(or less|or lower|must not grow|must not exceed|changed lines|points?\b)/;
 // A table column whose numbers are caps even without direction words.
 const MAX_HEADER = /^(tolerance|budget|limit)$/i;
+// Words that qualify a unit rather than name it.
+const QUALIFIER = /^(changed|new|added|removed|total|more|extra)$/;
 const thresholds = (t) => {
   const out = [];
   const re = /\d+(?:\.\d+)?/g;
   let m;
+  let last = null; // the previous number with a direction, and where it ended
   while ((m = re.exec(t))) {
     const before = t.slice(Math.max(0, m.index - 24), m.index).toLowerCase();
     const after = t.slice(m.index + m[0].length, m.index + m[0].length + 40).toLowerCase();
-    const dir = MIN_BEFORE.test(before) || MIN_AFTER.test(after) ? 'min' : MAX_BEFORE.test(before) || MAX_AFTER.test(after) ? 'max' : null;
-    out.push({ n: Number(m[0]), dir });
+    let dir = MIN_BEFORE.test(before) || MIN_AFTER.test(after) ? 'min' : MAX_BEFORE.test(before) || MAX_AFTER.test(after) ? 'max' : null;
+    // A number listed right after a capped one shares its direction: in "at most 10 files or 800
+    // lines" the 800 is a cap too (#99). Only across a short "or", "and" or comma, in one clause.
+    const gap = last ? t.slice(last.end, m.index) : '';
+    let via = null;
+    if (!dir && last && gap.length <= 30 && !/[.;|]/.test(gap) && /\b(or|and)\b|,/.test(gap)) {
+      dir = last.dir;
+      via = /\band\b/.test(gap) && !/\bor\b/.test(gap) ? 'and' : 'or';
+    }
+    if (dir) last = { dir, end: m.index + m[0].length };
+    // The unit is the word right after the number ("changed", "files", "%", "ms"), so numbers pair
+    // by what they count, not by position (#99).
+    // A qualifier ("changed", "new", "total") takes the next word too, so "400 changed lines" and "400
+    // changed files" count different things (review of #133).
+    const words = /^\s*(%|[a-z]+)(?:\s+([a-z]+))?/.exec(after) ?? [];
+    const unit = [words[1], QUALIFIER.test(words[1] ?? '') ? words[2] : null].filter(Boolean).map((w) => w.replace(/s$/, '')).join(' ');
+    out.push({ n: Number(m[0]), dir, unit, via });
   }
   return out;
 };
@@ -440,14 +513,60 @@ const narrowingLabels = (oldText, nowText) => [
   ]),
 ];
 
+// Pairs each old number with a new one of the same direction: the same unit first, in order, and
+// only then the next unused one, so a rewording that changes the unit still pairs. A new number
+// added in front ("under 10 files or 800 changed lines") can't take an old one's place (#99).
 const compareNumbers = (was, now) => {
+  const capped = was.some((x) => x.dir);
   for (const dir of ['min', 'max', null]) {
     const before = was.filter((x) => x.dir === dir);
     const after = now.filter((x) => x.dir === dir);
-    for (const [i, b] of before.entries()) {
-      const n = after[i];
+    const used = new Set();
+    const loosens = (o, n) => n !== o && (dir === 'min' ? n < o : dir === 'max' ? n > o : true);
+    // Within one unit, old and new are compared as sorted lists, so reordering a rule's numbers
+    // isn't a change ("LCP ≤ 2500 ms, …, TBT ≤ 200 ms", independent review of #133). Caps pair
+    // smallest first and floors largest first, so the extra new numbers, the loosest, are left
+    // over for the check below.
+    const order = (a, b) => (dir === 'min' ? b - a : a - b);
+    const unpaired = [];
+    for (const unit of new Set(before.map((b) => b.unit))) {
+      const olds = before.filter((b) => b.unit === unit).sort((a, b) => order(a.n, b.n));
+      const news = after.filter((x) => !used.has(x) && x.unit === unit).sort((a, b) => order(a.n, b.n));
+      for (const [i, b] of olds.entries()) {
+        const n = news[i];
+        if (!n) {
+          unpaired.push(b);
+          continue;
+        }
+        used.add(n);
+        if (loosens(b.n, n.n)) return dir ? 'threshold-loosened' : 'threshold-changed';
+      }
+    }
+    // An old number with no new one of its unit pairs with the next unused one. Across two named
+    // units it now counts something else, so it can't be judged by size ("30 days" becoming "30
+    // weeks", review of #133).
+    for (const b of unpaired) {
+      const n = after.find((x) => !used.has(x));
       if (!n) return 'threshold-removed';
-      if (n.n !== b.n && (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : true)) return dir ? 'threshold-loosened' : 'threshold-changed';
+      used.add(n);
+      if (b.unit && n.unit && n.unit !== b.unit) return 'threshold-changed';
+      if (loosens(b.n, n.n)) return dir ? 'threshold-loosened' : 'threshold-changed';
+    }
+    // A new number with no direction in a rule that had a cap or a floor can't be judged, so it's a
+    // change ("400 changed lines; 900 for docs", #99's own fallback, independent review of #133).
+    if (!dir && capped && after.some((x) => !used.has(x) && x.via !== 'and')) return 'threshold-changed';
+    // A new number left over in a capped rule is compared only with old numbers of its own unit:
+    // looser than all of them is a loosening ("10 changed files or 800 lines" for "400 changed
+    // lines"). A cap in a unit the rule didn't use ("≤ 50 ms or 5 s") can't be compared, and a new
+    // "or" may let either cap pass, so it counts as a loosening too (security review of #99). Joined
+    // with "and", it's a second cap that must also hold, which tightens (review of #133).
+    if (dir && before.length) {
+      for (const x of after.filter((y) => !used.has(y))) {
+        const same = before.filter((b) => b.unit === x.unit).map((b) => b.n);
+        if (!same.length && x.via !== 'and') return 'threshold-loosened';
+        if (!same.length) continue;
+        if (dir === 'max' ? x.n > Math.max(...same) : x.n < Math.min(...same)) return 'threshold-loosened';
+      }
     }
   }
   return null;
@@ -769,7 +888,7 @@ export const globToRegExp = (glob) =>
       '$',
   );
 
-export const guard = (changes, { mergeBase, today, constraintsNow }) => {
+export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = false }) => {
   const findings = []; // { rule, file, line, key?, waivable }
   const notices = [];
   const ruleChanges = []; // CONSTRAINTS.md rules that changed, for the change report
@@ -780,6 +899,8 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   for (const f of changes) {
     if (f.status === 'deleted') {
       if (isTest(f.path)) weak('test-deleted', f.path, 'file');
+      // A deleted config that held a run count takes it with it (review of #133).
+      else if ((oldContent(mergeBase, f.path) ?? []).some(runCount)) weak('property-runs-cut', f.path, 'file');
       continue;
     }
     if (isConstraints(f.path)) {
@@ -788,13 +909,15 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       ruleChanges.push(...result.changes);
     }
     if (isProse(f.path)) continue;
-    const byLine = new Map(f.added.map((a) => [a.line, a.text]));
+    // The whole new file, read once and only if a check needs lines that weren't added.
+    let content;
+    const fileLines = () => (content ??= readFileSync(f.path, 'utf8').split('\n'));
     for (const { line, text } of f.added) {
       // Only the suppression and stub scans skip the guard's own files (see SELF).
       if (!SELF.has(f.path)) {
         if (SUPPRESSIONS.test(text)) weak('silenced-checker', f.path, line);
-        if (STUBS.test(text)) always('unfinished-work', f.path, line);
-        else if (OPEN_CATCH.test(text) && /^\s*\}/.test(byLine.get(line + 1) ?? '')) always('unfinished-work', f.path, line);
+        if (STUBS.test(text) || STUB_THROW.test(text)) always('unfinished-work', f.path, line);
+        else if (OPEN_CATCH.test(stripComments(text)) && emptyBlockAfter(fileLines(), line)) always('unfinished-work', f.path, line);
       }
       if (isTest(f.path) && SKIPS.test(text)) weak('test-made-easier', f.path, line);
     }
@@ -806,11 +929,26 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
     if (WORKFLOW.test(f.path)) {
       const before = f.oldPath ? oldContent(mergeBase, f.oldPath) ?? [] : [];
       const now = readFileSync(f.path, 'utf8').split('\n');
+      // A `uses:` line that only moves the same action to another full commit SHA (Dependabot's
+      // weekly bump, #69) counts as kept on both sides (#99). Another action, or a tag instead
+      // of a SHA, is still a change.
+      const pinnedAction = (t) => /^\s*-?\s*uses:\s*([\w.-]+\/[\w./-]+)@[0-9a-f]{40}\s*(#.*)?$/.exec(t)?.[1] ?? null;
+      // Dependabot's PRs only (security review of #133): any 40-hex SHA can be an imposter commit
+      // from a fork, served under the original repo's name. GITHUB_ACTOR is set by the runner.
+      // Bumps pair within one job, and a job counts as bumped for an action only when it removes and
+      // adds the same number of its `uses:` lines (review of #133: pairing across the whole file
+      // let a bump in one job hide a step deleted from, or added to, the floor job).
+      const bumpKey = (lines, l) => (pinnedAction(l.text) ? `${jobOf(lines, l.line)}|${pinnedAction(l.text)}` : null);
+      const tally = (ls, lines) => ls.reduce((m, l) => (bumpKey(lines, l) ? m.set(bumpKey(lines, l), (m.get(bumpKey(lines, l)) ?? 0) + 1) : m), new Map());
+      const removedPins = tally(f.removed, before);
+      const addedPins = tally(f.added, now);
+      const bumped = new Set(dependabot ? [...removedPins].filter(([k, n]) => addedPins.get(k) === n).map(([k]) => k) : []);
       const kept = new Set(f.added.map((a) => a.text.trim()));
       const gone = new Set(f.removed.map((r) => r.text.trim()));
       for (const r of f.removed) {
         const guarded = CHECK_STEP.test(r.text) || jobOf(before, r.line) === 'floor';
-        if (guarded && !kept.has(r.text.trim())) weak('check-removed', f.path, `${r.line} (old)`);
+        const bump = bumped.has(bumpKey(before, r));
+        if (guarded && !bump && !kept.has(r.text.trim())) weak('check-removed', f.path, `${r.line} (old)`);
       }
       // A workflow, or a floor job, that didn't exist at the merge base has no bar to lower.
       const hadFloor = before.some((l) => /^ {2}floor:\s*$/.test(l));
@@ -818,14 +956,26 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
         if (f.status === 'added') break;
         // A skipped required job reports as passing, so a new `if:` counts too.
         const loosens = /continue-on-error:\s*true|^\s*-?\s*if:/.test(a.text) || (hadFloor && jobOf(now, a.line) === 'floor');
-        if (loosens && !gone.has(a.text.trim())) weak('check-removed', f.path, a.line);
+        if (loosens && !gone.has(a.text.trim()) && !bumped.has(bumpKey(now, a))) weak('check-removed', f.path, a.line);
       }
     }
-    for (const r of f.removed) {
-      const was = RUN_COUNT.exec(r.text);
-      if (!was) continue;
-      const now = f.added.map((a) => RUN_COUNT.exec(a.text)).find((m) => m?.[1] === was[1]);
-      if (now && Number(now[2]) < Number(was[2])) weak('property-runs-cut', f.path, `${r.line} (old)`);
+    // Run counts (#99): the file's counts, old against new, one to one, read from code without its
+    // comments. Each old literal needs its own new literal at least as high, and each old count
+    // taken from a variable needs one that's still there. A count lowered, deleted (it falls back to
+    // a default the guard can't see), or turned from a variable into a literal is a cut (reviews
+    // of #133).
+    const removedKeys = new Map(f.removed.map((r) => [runCount(r.text)?.key, r]).filter(([k]) => k));
+    if (removedKeys.size) {
+      const before = (oldContent(mergeBase, f.oldPath ?? f.path) ?? []).map(runCount).filter(Boolean);
+      const now = fileLines().map(runCount).filter(Boolean);
+      for (const [key, r] of removedKeys) {
+        const literals = (cs) => cs.filter((c) => c.key === key && c.n !== null).map((c) => c.n).sort((a, b) => b - a);
+        const variables = (cs) => cs.filter((c) => c.key === key && c.n === null).length;
+        const was = literals(before);
+        const is = literals(now);
+        const kept = variables(now) >= variables(before) && is.length >= was.length && was.every((n, i) => is[i] >= n);
+        if (!kept) weak('property-runs-cut', f.path, `${r.line} (old)`);
+      }
     }
     for (const line of configLoosening(f, mergeBase)) weak('config-loosened', f.path, line);
   }
@@ -906,7 +1056,10 @@ const HINTS = {
   'threshold-removed': 'A threshold-removed finding can also mean a number lost its direction words (">= 80%" becoming "80%"): compare the two lines.',
   'rule-narrowed': 'A rule-narrowed finding means a listed item (a backticked token, or an item in a table\'s list cell) is gone from the rule. A rewording that drops one counts too: keep the item, or route it through an exception.',
   'config-loosened': 'A tool config was loosened (CONSTRAINTS.md, Floor, last bullet).',
-  'check-removed': 'A workflow step that runs a check was removed, or a job was allowed to fail.',
+  // #99: name the real route. `guard / floor` is in ruleset `main checks`, which has no bypass, so
+  // the admin's bypass merge (ruleset `main`) can't get a red guard through.
+  'check-removed':
+    "A workflow step that runs a check was removed, a job was allowed to fail, or the floor job changed. `guard / floor` has no bypass (ruleset `main checks`), so the routes are: keep the step; add an Exceptions row for `check-removed` on the workflow file in this PR (admin approval); or the admin lifts `main checks` for that one merge (ADR-0004). A Dependabot PR that only moves an action's pinned SHA passes on its own.",
 };
 
 const main = () => {
@@ -926,7 +1079,23 @@ const main = () => {
   } catch {
     throw new CannotRun('CONSTRAINTS.md is missing');
   }
-  const { blocking, notices, report } = guard(changes, { mergeBase, today, constraintsNow });
+  // Dependabot's PR only when the runner's actor is Dependabot and every commit in the PR is its
+  // own: GITHUB_ACTOR is whoever pushed the commit the run is for (security review of #133).
+  // The event payload also has to name Dependabot as the PR's author, from a branch of this repo,
+  // not a fork (independent review of #133): GITHUB_ACTOR is only the latest event's actor.
+  const authors = git(['log', '--no-merges', '--format=%an', `${mergeBase}..HEAD`])?.split('\n').filter(Boolean) ?? ['?'];
+  const pullRequest = () => {
+    try {
+      return JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? '', 'utf8')).pull_request ?? null;
+    } catch {
+      return null; // no event file: not a Dependabot PR
+    }
+  };
+  const pr = pullRequest();
+  const sameRepo = Boolean(pr?.head?.repo?.full_name) && pr.head.repo.full_name === pr.base?.repo?.full_name;
+  const dependabot =
+    process.env.GITHUB_ACTOR === 'dependabot[bot]' && pr?.user?.login === 'dependabot[bot]' && sameRepo && authors.every((a) => a === 'dependabot[bot]');
+  const { blocking, notices, report } = guard(changes, { mergeBase, today, constraintsNow, dependabot });
   for (const n of notices) console.log(`floor-guard: note: ${n}`);
   if (report) {
     if (process.env.GITHUB_ACTIONS === 'true') {
