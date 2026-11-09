@@ -488,6 +488,23 @@ expect_err "doesn't point back at"
 expect_not_run
 assert "expected main to stay at ${before:0:7}" test "$(main_at)" == "$before"
 
+# A gitlink (submodule entry) staged in the lane's index, its folder linked to the planted repo:
+# git status and git worktree remove would run git inside it.
+reset
+merge_pr
+plant
+git -C "$work/evil" commit -q --allow-empty -m evil
+git -C "$lane" update-index --add --cacheinfo "160000,$(git -C "$work/evil" rev-parse HEAD),sub"
+mkdir -p "$lane/sub"
+printf 'gitdir: %s\n' "$work/evil/.git" >"$lane/sub/.git"
+rm -f "$work/pwned" # the commit in the planted repo ran its own fsmonitor
+before=$(main_at)
+case_ 9-lane
+expect_code 2
+expect_err "submodule"
+expect_not_run
+expect_untouched "$before"
+
 # The worktree's admin folder in .git/worktrees/ points its commondir somewhere else.
 reset
 merge_pr

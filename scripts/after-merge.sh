@@ -168,10 +168,27 @@ if [[ -z $admin || $back != "$path" || $shared != "$main_git" ]]; then
   die 2 "$path's git link (its .git file, or gitdir and commondir in .git/worktrees/) doesn't point back at $main_git, so git there could read another repository's config; nothing changed. Check those files by hand."
 fi
 
-# git status through the checked admin folder, with fsmonitor off as a second guard.
+# git in the worktree goes through the checked admin folder, with fsmonitor off as a second guard.
+lane_git() { # git args...
+  (cd "$path" && git -c core.fsmonitor=false --git-dir="$admin" --work-tree="$path" "$@")
+}
+
+# git status and git worktree remove (which runs status with --ignore-submodules=none) recurse
+# into submodules, and a submodule's folder can link to any repository and its config, filter
+# drivers included. The lane controls its own index, so refuse any gitlink (mode 160000) in it
+# before running status there. This repo has no submodules.
+gitlinks=()
+while IFS= read -r -d '' entry; do
+  [[ $entry == 160000\ * ]] && gitlinks+=("${entry#*$'\t'}")
+done < <(lane_git ls-files --stage -z)
+wait $! || die 1 "git ls-files failed in $path; nothing changed"
+if ((${#gitlinks[@]})); then
+  die 2 "$path has submodule entries in its index, and this repo has no submodules. Running git status there could run another repository's config, so nothing changed. Check them by hand:
+$(list "${gitlinks[@]}")"
+fi
+
 lane_status() { # status options...
-  (cd "$path" && git -c core.fsmonitor=false --git-dir="$admin" --work-tree="$path" \
-    status --porcelain=v1 -z --no-renames "$@")
+  lane_git status --porcelain=v1 -z --no-renames --ignore-submodules=all "$@"
 }
 work=() placeholders=() ignored=()
 while IFS= read -r -d '' entry; do
@@ -274,7 +291,7 @@ fi
 # started deleting, git found it clean, so what's left of the folder can go; any step that
 # didn't finish goes on a list of commands to run outside the sandbox.
 finish_outside=()
-if removed=$(git -C "$main" worktree remove "$path" 2>&1); then
+if removed=$(git -c core.fsmonitor=false -C "$main" worktree remove "$path" 2>&1); then
   echo "worktree: removed $path"
   ((${#ignored[@]} == 0)) || printf 'worktree: with its ignored files:\n%s\n' "$(list "${ignored[@]}")"
 elif [[ -e $path/.git && -d $admin ]]; then
