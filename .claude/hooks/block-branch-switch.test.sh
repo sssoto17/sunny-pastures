@@ -96,6 +96,7 @@ deny "$MAIN" $'cat <<EOF > notes.txt\ngit switch x\nEOF\ngit switch feature'
 
 # --- cd/pushd into a worktree (7 Nov comment) -----------------------------------------------
 deny "$MAIN" 'cd .claude/worktrees/16-branch-guard-hook' 'subshell'
+deny "$MAIN" 'cd .claude/worktrees/16-branch-guard-hook' 'worktree tool' # #75
 deny "$MAIN" "cd $WT"
 deny "$MAIN" 'cd .claude/worktrees'
 deny "$MAIN/docs" 'cd ../.claude/worktrees/16-branch-guard-hook'

@@ -47,6 +47,13 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   tool before the first edit). Never `git checkout` or `git switch` in the main folder. A
   `PreToolUse` hook (`.claude/hooks/block-branch-switch.sh`) enforces this: in the main folder it
   denies branch switches and a top-level `cd` into a worktree.
+- The coordinating session (the main folder) briefs, dispatches, reviews, relays and keeps the
+  board. Work that crops up becomes a brief in `.scratch/` for a lane, not an edit. After each
+  completed task it gives a short status: today's agenda, what's done, what's left in order. A
+  session that finishes an issue asks "close #N?" in the same report. A `PreToolUse` hook
+  (`.claude/hooks/block-coordinator-work.sh`) enforces this: in the main folder it denies edits
+  to repo files outside `.scratch/` and `.remember/`, `git commit` and `gh pr create`; filing
+  issues stays allowed.
 - Check before you state. Verify a claim about the board, the repo or the tools (an issue's
   blockers, a skill's name, what a doc or rule requires) with a command first, not from memory.
   Review a results PR against every step of the rule or criteria it reports on.
