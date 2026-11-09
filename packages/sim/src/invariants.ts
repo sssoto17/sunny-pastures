@@ -10,12 +10,14 @@ export function assertSafeIntegers(value: unknown): void {
 
 function check(value: unknown, path: string): void {
   if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) throw new Error(`${path} is ${value}, not a safe integer`);
+    if (!Number.isSafeInteger(value)) throw new Error(`${path} is ${String(value)}, not a safe integer`);
     // -0 is a safe integer to JavaScript, but a JSON round trip turns it into 0, so a state holding
     // it wouldn't survive a snapshot unchanged (ADR-0003, section 9).
     if (Object.is(value, -0)) throw new Error(`${path} is -0, not a safe integer for the state`);
   } else if (Array.isArray(value)) {
-    value.forEach((item, i) => check(item, `${path}[${i}]`));
+    value.forEach((item, i) => {
+      check(item, `${path}[${String(i)}]`);
+    });
   } else if (typeof value === 'object' && value !== null) {
     for (const [key, item] of Object.entries(value)) check(item, `${path}.${key}`);
   }
