@@ -4,16 +4,20 @@
 # session's cwd is the main folder (not inside .claude/worktrees/<name>), it denies:
 # - Edit/Write/MultiEdit/NotebookEdit on repo paths outside .scratch/ and .remember/, including
 #   another session's worktree;
-# - Bash writes to those paths: output redirects, `tee`, `sed -i`, `perl -i`, `cp`, `mv`,
-#   `install`, `ln`, `rm`, `touch`, `truncate`, `git apply` and `patch`;
+# - the common Bash writes to those paths: output redirects, `tee`, `sed -i`, `perl -i` (and
+#   either through xargs), `cp`, `mv`, `install`, `ln`, `rm`, `unlink`, `touch`, `truncate`,
+#   `git apply` and `patch`;
 # - Bash `git commit`, `gh pr create` and a `gh api` POST that opens a PR.
 # Wrappers (`timeout`, `env -i`, `xargs`, …) and `bash -c` strings are looked through. The real
-# path decides (a symlink in .scratch/ to a repo file is a repo file). Paths outside the repo
-# (session memory, the scratchpad, $TMPDIR) stay writable, as do reads, `gh issue create`,
-# `git fetch`/`merge` and `git worktree`. Worktree sessions are unaffected. Exit 2 blocks the
-# tool call and stderr goes back to the session. Reads the raw hook JSON on stdin, so it needs no
-# jq; shared parts are in lib/shell-lexer.sh. Tests: block-coordinator-work.test.sh next to this
-# file.
+# path decides (a symlink in .scratch/ to a repo file is a repo file; `rm` of a link removes the
+# link). Known misses, left to the AGENTS.md standard: other tools that write files (`curl -o`,
+# `sort -o`, `prettier --write`, `lint --fix`, `git restore`/`checkout -- <path>`, `git stash
+# pop`, `python3`/`node -e`), `$( … )` bodies, and targets behind unknown variables. Paths
+# outside the repo (session memory, the scratchpad, $TMPDIR) stay writable, as do reads,
+# `gh issue create`, `git fetch`/`merge` and `git worktree`. Worktree sessions are unaffected.
+# Exit 2 blocks the tool call and stderr goes back to the session. Reads the raw hook JSON on
+# stdin, so it needs no jq; shared parts are in lib/shell-lexer.sh. Tests:
+# block-coordinator-work.test.sh next to this file.
 set -uo pipefail
 # Without the lib the hook exits 1: Claude Code reports the error and lets the call through.
 # shellcheck source-path=SCRIPTDIR source=lib/shell-lexer.sh
@@ -41,9 +45,15 @@ real_path "$REPLY"
 root=$REPLY
 
 # Is absolute path $1 a lane's file: in the repo, outside .scratch/ and .remember/? Sets REPLY to
-# its real path.
+# its real path; with $2 set, only its parent's symlinks are resolved (the path names a link).
 lane_path() {
-  real_path "$1"
+  if [[ -n ${2:-} ]]; then
+    local parent=${1%/*}
+    real_path "${parent:-/}"
+    REPLY=${REPLY%/}/${1##*/}
+  else
+    real_path "$1"
+  fi
   case $REPLY in
     "$root"/.scratch | "$root"/.scratch/* | "$root"/.remember | "$root"/.remember/*) return 1 ;;
     "$root" | "$root"/*) return 0 ;;
@@ -94,7 +104,11 @@ check_write() {
     ${REPLY#"$root"/.claude/worktrees/} != */* ]]; then
     return 0
   fi
-  lane_path "$REPLY" && deny_bash "$2 on ${REPLY#"$root"/}"
+  # rm removes a link itself, not its target: resolve only the parent. A trailing `/` goes
+  # through the link, so then the whole path is resolved.
+  local nofollow=''
+  [[ ${4:-} == rm && $w != */ ]] && nofollow=1
+  lane_path "$REPLY" "$nofollow" && deny_bash "$2 on ${REPLY#"$root"/}"
   return 0
 }
 
@@ -256,6 +270,8 @@ check_command() {
       local ends=efl rest=''
       [[ $name == perl ]] && ends=eE rest=MmIlx0CdD
       if inplace_targets "$ends" "$rest" "${@:2}"; then
+        # Under xargs the files come from stdin, so they can't be checked.
+        ((via_xargs)) && deny_bash "\`$name -i\` through xargs"
         for r in "${operands[@]}"; do check_write "$r" "\`$name -i\`"; done
       fi
       ;;
@@ -270,13 +286,15 @@ check_command() {
         check_write "${operands[0]##*/}" '`ln`' # a link in the current directory
       fi
       ;;
-    rm | touch | truncate)
+    rm | unlink | touch | truncate)
       case $name in
-        rm) split_args '' '' "${@:2}" ;;
+        rm | unlink) split_args '' '' "${@:2}" ;;
         touch) split_args dtr 'date:d reference:r' "${@:2}" ;;
         truncate) split_args sr 'size:s reference:r' "${@:2}" ;;
       esac
-      for r in "${operands[@]}"; do check_write "$r" "\`$name\`" "$here" "$name"; done
+      local mode=''
+      [[ $name == rm || $name == unlink ]] && mode='rm'
+      for r in "${operands[@]}"; do check_write "$r" "\`$name\`" "$here" "$mode"; done
       ;;
     patch) check_patch "${@:2}" ;;
   esac
@@ -289,7 +307,7 @@ case $tool in
     # Nothing to check: skip the lexer. Only for unquoted text, since quotes or a backslash can
     # split a command name (`g'i't`, `g\it`) and hide it from this test.
     if [[ ! $command =~ [\'\"\\] &&
-      ! $command =~ (git|gh|\>|tee|sed|perl|cp|mv|install|ln|rm|touch|truncate|patch|sh) ]]; then
+      ! $command =~ (git|gh|\>|tee|sed|perl|cp|mv|install|ln|link|rm|touch|truncate|patch|sh) ]]; then
       exit 0
     fi
     lex_command "$command"

@@ -188,6 +188,9 @@ deny "$MAIN" "sh -c 'cd docs && git checkout feature'"
 allow "$MAIN" "bash -c 'cd .claude/worktrees/16-x && git switch feature'"
 allow "$MAIN" "bash -c 'cd .claude/worktrees/16-x'" # a child shell's cd ends with it
 allow "$MAIN" 'git status > .scratch/status.txt 2>&1'
+deny "$MAIN" '(( n > 0 )) && git switch feature'
+deny "$MAIN" '[[ a > b ]] && git checkout feature'
+allow "$MAIN" 'if (( $(git rev-list --count HEAD..origin/main) > 0 )); then git status; fi'
 
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label

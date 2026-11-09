@@ -204,6 +204,36 @@ lex_heredoc_delim() {
   heredocs+=("$( ((strip)) && printf -- -)$delim")
 }
 
+# At cmd[i] == '[[' starting a word: if a closing ` ]]` ends a word later on, move past it and
+# keep the test as one opaque word (`>` and `<` inside it compare, they don't redirect).
+lex_dbracket() {
+  local j=$((i + 2)) c rest
+  while ((j < n)); do
+    c=${cmd:j:1}
+    case $c in
+      \\) j=$((j + 2)); continue ;;
+      "'") rest=${cmd:j+1}; rest=${rest%%\'*}; j=$((j + ${#rest} + 2)); continue ;;
+      '"')
+        j=$((j + 1))
+        while ((j < n)) && [[ ${cmd:j:1} != '"' ]]; do
+          [[ ${cmd:j:1} == \\ ]] && j=$((j + 1))
+          j=$((j + 1))
+        done
+        j=$((j + 1))
+        continue
+        ;;
+    esac
+    if [[ ${cmd:j:2} == ']]' && ${cmd:j-1:1} == [[:space:]] ]] &&
+      { ((j + 2 >= n)) || [[ ${cmd:j+2:1} == [[:space:]\;\&\|\)] ]]; }; then
+      word+='[[ … ]]'
+      i=$((j + 2))
+      return 0
+    fi
+    j=$((j + 1))
+  done
+  return 1
+}
+
 # At the start of a line: skip the bodies of every pending heredoc.
 skip_heredoc_bodies() {
   local d delim strip line
@@ -211,7 +241,10 @@ skip_heredoc_bodies() {
     strip=0 delim=$d
     [[ $d == -* ]] && strip=1 delim=${d#-}
     while ((i < n)); do
-      line=${cmd:i}
+      # Copy a window, not the whole rest of the command: per line, that copy made long
+      # heredocs quadratic. A line longer than the window falls back to the full copy.
+      line=${cmd:i:4096}
+      [[ $line == *$'\n'* || ${#line} -lt 4096 ]] || line=${cmd:i}
       line=${line%%$'\n'*}
       i=$((i + ${#line} + 1))
       ((strip)) && line=${line#"${line%%[!$'\t']*}"}
@@ -253,7 +286,23 @@ lex_command() {
           if [[ ${cmd:i+1:1} == '&' ]]; then emit_op '&&'; i=$((i + 2)); else emit_op ';'; i=$((i + 1)); fi
         fi
         ;;
-      '(' | ')') emit_op "$c"; i=$((i + 1)) ;;
+      '(')
+        if ((!have_word)) && [[ ${cmd:i+1:1} == '(' ]]; then
+          # `(( … ))` arithmetic: one opaque word, like `$(( … ))` (its `>` compares)
+          have_word=1
+          lex_subst
+          [[ ${cmd:i:1} == ')' ]] && i=$((i + 1))
+        else
+          emit_op "$c"; i=$((i + 1))
+        fi
+        ;;
+      ')') emit_op "$c"; i=$((i + 1)) ;;
+      '[')
+        have_word=1
+        if [[ $word == '' && ${cmd:i:3} == '[['[[:space:]] ]] && lex_dbracket; then :; else
+          word+=$c; i=$((i + 1))
+        fi
+        ;;
       '<' | '>')
         [[ $word =~ ^[0-9]+$ ]] && word='' have_word=0 # the fd in 2>&1
         emit_word
@@ -337,7 +386,7 @@ shell_c_string() {
 # the resolved directory.
 visit_command() {
   local words=("$@")
-  negated=0
+  negated=0 via_xargs=0 # via_xargs: the command runs under xargs, which adds operands to it
   while ((${#words[@]})); do
     case ${words[0]} in
       '!') negated=1 words=("${words[@]:1}") ;;
@@ -347,7 +396,7 @@ visit_command() {
       env) drop_opts uCS ;;
       nice) drop_opts n ;;
       timeout) drop_opts sk; words=("${words[@]:1}") ;; # and its duration
-      xargs) drop_opts IdELnPsa ;;
+      xargs) drop_opts IdELnPsa; via_xargs=1 ;;
       stdbuf) drop_opts ioe ;;
       sudo) drop_opts ugpCDhrtTU ;;
       *)

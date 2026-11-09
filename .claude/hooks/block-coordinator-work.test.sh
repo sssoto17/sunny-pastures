@@ -285,6 +285,33 @@ bash_tool 0 "$MAIN" "gh api graphql -f query='query { viewer { login } }'"
 bash_tool 0 "$WT" "bash -c 'git commit -m x && gh pr create --fill'"
 bash_tool 0 "$WT" "sed -i 's/a/b/' docs/x.md && echo x > docs/y.md"
 
+# --- re-review of #115: `>` in arithmetic and `[[ ]]` is a comparison, not a redirect -------------
+bash_tool 0 "$MAIN" 'n=$(gh pr list --json number --jq length); (( n > 0 )) && echo open'
+bash_tool 0 "$MAIN" 'if (( $(git rev-list --count origin/main..HEAD) > 0 )); then echo ahead; fi'
+bash_tool 0 "$MAIN" '(( n >= 2 ))'
+bash_tool 0 "$MAIN" '((n>0)) && echo yes'
+bash_tool 0 "$MAIN" 'while (( i < 3 )); do i=$((i + 1)); done'
+bash_tool 0 "$MAIN" 'while (( n > 0 )); do n=$((n - 1)); done'
+bash_tool 0 "$MAIN" 'git fetch && (( $(git rev-list --count HEAD..origin/main) > 0 )) && echo behind'
+bash_tool 0 "$MAIN" '(( (a + b) * 2 > c ))'
+bash_tool 0 "$MAIN" '[[ a > b ]]'
+bash_tool 0 "$MAIN" 'if [[ "$a" > "$b" ]]; then echo later; fi'
+bash_tool 0 "$MAIN" '[[ -f x ]] && [[ x > y ]] && echo hi'
+bash_tool 0 "$MAIN" 'while [[ $(date +%s) > 5 ]]; do break; done'
+bash_tool 0 "$MAIN" "[[ \$x == ']]' ]] && echo q"
+bash_tool 0 "$MAIN" "awk '\$1 > 3' .scratch/data"
+bash_tool 2 "$MAIN" '(( n > 0 )) && echo x > docs/x.md'
+bash_tool 2 "$MAIN" '[[ a > b ]] && git commit -m x'
+bash_tool 2 "$MAIN" 'if (( n > 0 )); then sed -i s/a/b/ docs/x.md; fi'
+
+# --- re-review of #115: sed -i / perl -i through xargs has no operand to check ---------------------
+bash_tool 2 "$MAIN" "grep -rl foo docs | xargs sed -i 's/foo/bar/'" 'xargs'
+bash_tool 2 "$MAIN" "git ls-files '*.md' | xargs -n1 perl -pi -e 's/a/b/'"
+bash_tool 2 "$MAIN" "find .scratch -name '*.md' | xargs sed -i.bak 's/a/b/'"
+bash_tool 0 "$MAIN" 'gh issue list --json number --jq ".[].number" | xargs -n1 gh issue view'
+bash_tool 0 "$MAIN" 'git ls-files docs | xargs sed -n 1p'
+bash_tool 0 "$MAIN" 'git ls-files docs | xargs wc -l'
+
 # --- symlinks: the real path decides --------------------------------------------------------------
 REAL=$(mktemp -d "${TMPDIR:-/tmp}/coordinator-test.XXXXXX")
 trap 'rm -rf "$REAL"' EXIT
@@ -305,6 +332,13 @@ real_file 0 "$REAL/repo" Write "$REAL/repo/.scratch/out-link/new.md"
 real_bash 2 "$REAL/repo" 'echo x > .scratch/agents-link'
 real_bash 2 "$REAL/repo" "sed -i 's/a/b/' .scratch/docs-link/x.md"
 real_bash 0 "$REAL/repo" 'echo x > .scratch/new.md'
+# rm and unlink remove the link itself, not its target (re-review of #115)
+real_bash 0 "$REAL/repo" 'rm .scratch/agents-link'
+real_bash 0 "$REAL/repo" 'rm -f .scratch/docs-link'
+real_bash 0 "$REAL/repo" 'unlink .scratch/agents-link'
+real_bash 2 "$REAL/repo" 'rm -rf .scratch/docs-link/' # a trailing slash goes through the link
+real_bash 2 "$REAL/repo" 'rm .scratch/docs-link/x.md'
+real_bash 2 "$REAL/repo" 'unlink docs/x.md'
 
 # --- no repo to guard: CLAUDE_PROJECT_DIR unset and cwd outside any git repo ----------------------
 mkdir -p "$REAL/no-repo"
@@ -338,6 +372,11 @@ bash_tool 2 "$MAIN" "$big"
 if ((SECONDS - start <= 3)); then pass=$((pass + 1)); else
   fail=$((fail + 1)); echo "FAIL: ${#big}-char command took $((SECONDS - start))s"
 fi
+
+# A heredoc line longer than the lexer's 4096-char window still ends where it should.
+long=$(printf 'git commit -m nope; %.0s' {1..300})
+bash_tool 2 "$MAIN" $'cat > .scratch/x.md <<\'EOF\'\n'"$long"$'\nEOF\ngit commit -m x'
+bash_tool 0 "$MAIN" $'cat > .scratch/x.md <<\'EOF\'\n'"$long"$'\nEOF\ngit status'
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

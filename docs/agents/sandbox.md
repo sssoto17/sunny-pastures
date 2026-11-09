@@ -93,9 +93,10 @@ files, not devices. Like placeholders, they can't be deleted from inside the san
 ## Paths you can't write
 
 - Writable: the current folder and `$TMPDIR`. Use `$TMPDIR` for scratch files, not `/tmp`.
-- In the main folder, the coordinating session writes only to `.scratch/`, `.remember/` and
-  paths outside the repo, with the file tools or Bash; removing a merged worktree stays allowed
-  (`.claude/hooks/block-coordinator-work.sh`, #75).
+- In the main folder, `.claude/hooks/block-coordinator-work.sh` (#75) denies the coordinating
+  session's file tools and common shell writes (redirects, `sed -i`, `cp`, `mv`, `rm` and the
+  like) on repo files outside `.scratch/` and `.remember/`. Paths outside the repo and removing
+  a merged worktree stay allowed.
 - Never writable from a session: the main folder's `.claude/settings.json`,
   `.claude/settings.local.json`, `.claude/hooks/` and `.claude/skills/`, and everything under
   `~/.claude/`. Changes there are the admin's. A worktree's copies can be edited, and they reach
