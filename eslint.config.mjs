@@ -143,6 +143,9 @@ export default defineConfig(
     files: ['{apps,packages}/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/switch-exhaustiveness-check': 'error', // in neither preset (ADR-0005)
+      // No `import('…')` in a type: no-restricted-imports can't see it, so it would pass module
+      // privacy (review of #140). Types come in through `import type` statements instead.
+      '@typescript-eslint/consistent-type-imports': ['error', { disallowTypeAnnotations: true }],
       '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'as', objectLiteralTypeAssertions: 'never' }],
       '@typescript-eslint/return-await': ['error', 'always'],
