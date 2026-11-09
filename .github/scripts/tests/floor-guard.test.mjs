@@ -147,6 +147,18 @@ describe('floor guard, end to end', () => {
       expect(guard().out).toContain(`[check-removed] ${CI}`);
     });
 
+    // #99: a local action (`uses: ./…`) is read from the PR's checkout, so a PR could change what the
+    // floor job runs before the base branch's guard starts. The floor job uses pinned actions only.
+    it('run no action from the PR in the floor job', () => {
+      const lines = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8').split('\n');
+      const start = lines.findIndex((l) => /^ {2}floor:\s*$/.test(l));
+      const end = lines.findIndex((l, i) => i > start && /^ {2}\S/.test(l));
+      const floor = lines.slice(start, end === -1 ? undefined : end);
+      expect(start).toBeGreaterThan(-1);
+      expect(floor.filter((l) => /uses:\s*\.\//.test(l))).toEqual([]);
+      expect(floor.filter((l) => /uses:/.test(l)).every((l) => /@[0-9a-f]{40}\b/.test(l))).toBe(true);
+    });
+
     // Runs the real step from ci.yml, so the test breaks if the step changes shape.
     const takeGuardStep = () => {
       const lines = readFileSync(fileURLToPath(new URL('../../workflows/ci.yml', import.meta.url)), 'utf8').split('\n');
@@ -492,8 +504,11 @@ describe('floor guard, end to end', () => {
 
     it('waives through the real Exceptions table', () => {
       realRepo();
-      repo.write({ 'packages/sim/src/a.ts': '// @ts-ignore\n', 'CONSTRAINTS.md': edit(REAL, '| _none_ | | | | | |', row('E1', 'packages/sim/src/a.ts', '2026-11-30')) });
-      expect(guard().out).toContain('waived by E1');
+      // A new row under the table's header, whatever rows the real file holds now. E99 so it can't
+      // repeat a real ID.
+      const HEADER = '| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n';
+      repo.write({ 'packages/sim/src/a.ts': '// @ts-ignore\n', 'CONSTRAINTS.md': edit(REAL, HEADER, `${HEADER}${row('E99', 'packages/sim/src/a.ts', '2026-11-30')}\n`) });
+      expect(guard().out).toContain('waived by E99');
     });
 
     it('is clean when unchanged, and when only an issue reference changes', () => {

@@ -209,7 +209,7 @@ run; a 2 never reads as clean.
 | Pattern | Where | Why |
 |---|---|---|
 | Diff-scoped check | Only added and removed lines, and the files they're in | A PR is judged on what it changes, so old code can't block it and new code can't hide in it. |
-| Trusted code judges | CI runs the base branch's guard, not the PR's (#96) | A PR can't weaken the guard that judges it. A change to the guard takes effect from the next PR. |
+| Trusted code judges | CI runs the base branch's guard, not the PR's (#96), and the floor job runs pinned actions only, no local action from the PR's checkout (#99 part 4) | A PR can't weaken the guard that judges it, nor what runs before it. A change to the guard takes effect from the next PR. |
 | Fail closed | Exit 2 on anything it can't read; an unreadable Exceptions row fails | Silence must mean "checked and clean", never "couldn't tell". |
 | Denylist of weakening forms | Suppressions, skips, stubs, loosened configs, removed workflow steps | Each is a known shape of a lowered bar. #99 part 2 (#133) adds the forms the #40 review found passing: an empty `.catch`, a comment-only `catch`, "not yet implemented", every `fallow-ignore-*`, a deleted run count, a new tsconfig with neither `extends` nor `strict`. |
 | Structural diff of `CONSTRAINTS.md` | Rules pair by section and key, then by similarity; numbers carry a direction and a unit | It compares what a rule says, not its line. With #99 part 2 (#133), numbers pair by unit before position, so a new cap added in front can't take an old one's place, and a cap in a new unit counts as a loosening. |

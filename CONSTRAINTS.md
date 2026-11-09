@@ -360,7 +360,7 @@ the guard sees only the PR's own diff.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| _none_ | | | | | |
+| E1 | check-removed | `.github/workflows/ci.yml` | The floor job runs `actions/setup-node` directly instead of the PR's own `./.github/actions/setup` (#99, part 4). A follow-up PR removes this row once that merges | Soto | 2026-11-12 |
 
 ## Interview record
 

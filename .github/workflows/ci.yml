@@ -65,9 +65,12 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # the guard diffs against the merge base
-      - uses: ./.github/actions/setup
+      # Node only, from a pinned action: the guard uses only Node and git. A local action such as
+      # ./.github/actions/setup is read from the PR's checkout, so a PR could change what runs here
+      # before the base branch's guard starts (#99).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          install: 'false' # the guard uses only Node and git
+          node-version-file: .nvmrc
       # Run the base branch's guard, not the PR's, so a PR can't weaken the guard that judges it.
       # The PR's own copy is used only while the base has no guard yet (the PR that adds it).
       - name: Take the guard from the base branch
