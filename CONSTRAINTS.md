@@ -80,6 +80,7 @@ the thresholds).
 |---|---|---|---|---|---|---|
 | Types | 0 type errors | Any error is a bug or a lie | `tsc -b` (incremental) | edit, CI | `ci / typecheck` | #40 |
 | Lint | 0 errors from the project config | The config is the standard; a warning nobody fixes is noise | `eslint .` | edit, CI | `ci / lint` | #40 |
+| Duplication (ADR-0005) | 0 clones in the changed files of `packages/sim`, source and tests: exact copies of 50 tokens and 5 lines or more | A rule written twice drifts apart; a repeated rule becomes a shared module at its second occurrence | `fallow dupes --changed-since <merge base>`, settings in `.fallowrc.jsonc` | task end, CI | `ci / lint` | #125 |
 | Coverage: `packages/sim` | Changed lines ≥ 90% covered | The sim is the research contribution, and a pure module with no I/O is cheap to cover | Vitest coverage (v8) lcov ∩ `git diff` | task end, CI | `ci / test` | #40 |
 | Coverage: rest of `apps/` and `packages/` | Changed lines ≥ 80% covered | High enough that new logic needs a test; the rest leaves room for defensive branches that unit tests can't reach without contortions | Vitest coverage (v8) lcov ∩ `git diff` | task end, CI | `ci / test` | #40 |
 | Boundaries: sim purity (MUST-10.1) | 0 violations. `packages/sim` imports nothing outside itself and no `node:*`, and calls none of `Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `crypto.randomUUID`, `fetch`, `setTimeout`, `setInterval`, `setImmediate`. `new Date()` with no arguments is banned too; test files in `packages/sim` (`*.test.ts`) may also import `vitest` and `fast-check` and nothing else from outside the sim, and stay banned from `node:*` and from the calls above (admin, 9 Nov, #81); every file in a module's `tests/` folder counts as a test file here, test helpers included | The determinism claim depends on it, and the spec asks for a check, not review | Fallow boundaries with `boundaries.calls.forbidden`; ESLint `no-restricted-syntax` for argument-less `new Date()`, since Fallow checks direct callees, not constructors | edit, CI | `ci / boundaries` | #41 |
@@ -161,7 +162,7 @@ A check that stalls the agent gets switched off, so the cost of a check decides 
 | Stage | Command | Runs | Budget |
 |---|---|---|---|
 | After each edit | `pnpm check:fast` (agent hook, proposed in #40) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, boundaries | under 5 s |
-| Task end, before the agent opens a PR | `pnpm check:task` | `check:fast`, plus related unit and property tests (fixed seed, capped runs), coverage of changed lines, sim benchmark | ≤ 90 s |
+| Task end, before the agent opens a PR | `pnpm check:task` | `check:fast`, plus related unit and property tests (fixed seed, capped runs), coverage of changed lines, sim benchmark, duplication in changed files, and a full lint without the cache (typed rules read other files, and the cache only tracks each file's own content) | ≤ 90 s |
 | Every PR | CI (`pnpm check:full` + scan jobs) | Everything above, plus larger property runs, the determinism gate, gitleaks, `pnpm audit`, Semgrep, Stryker _(warn)_, acceptance tests | unlimited |
 | Every preview deploy | CI against the Vercel preview | Lighthouse, axe, bundle ratchet, latency smoke | unlimited |
 | Milestone gate | the admin | [Checked by review](#checked-by-review), BASE-04 from the metrics | n/a |
@@ -366,6 +367,7 @@ the guard sees only the PR's own diff.
 | E2 | config-loosened | `eslint.config.mjs` | #125 part 2: `tseslint.configs.strict` is replaced by `strictTypeChecked`, which includes it, plus `stylisticTypeChecked` (ADR-0005, section 6). `disableTypeChecked` covers only JS and config files, where no typed rule ran before; the default-export rule's `ignores` keeps it out of Next's `app/`. No rule that ran before is turned off | Soto | 2026-11-23 |
 | E3 | config-loosened | `vitest.config.mts` | #125 part 2: `coverage.exclude` adds `**/tests/**`, so test helpers aren't counted as source. Every source file stays under `coverage.include`, since source never sits in a `tests/` folder (ADR-0005, section 4) | Soto | 2026-11-23 |
 | E4 | config-loosened | `packages/sim/tsconfig.json` | #125 part 2: `exclude` adds `src/**/tests/**`, which `tsconfig.test.json` now compiles, with the same strict options (ADR-0005, section 4) | Soto | 2026-11-23 |
+| E5 | config-loosened | `.fallowrc.jsonc` | #125 part 2c: the new Fallow config sets `ignoreDefaults: false`, which tightens: Fallow's defaults leave `*.test.ts` files out of duplication, and the duplication row covers the sim's tests | Soto | 2026-11-23 |
 
 ## Interview record
 
