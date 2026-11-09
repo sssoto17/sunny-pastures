@@ -56,7 +56,8 @@ of:
 Also blocked, with no exception possible:
 
 - Unimplemented stubs: `throw new Error("Not implemented")`, an empty `catch {}`, a `TODO`
-  standing in for the implementation.
+  standing in for the implementation. Also "not yet implemented" and "unimplemented" stubs, a
+  `catch` holding only a comment, and an empty `.catch(() => {})` (#99).
 - Secrets in source. Read them from env vars and keep placeholders in `.env.example`.
 - An expired row in [Exceptions](#exceptions).
 - An Exceptions row the guard can't accept: a date it can't read, a Rule it doesn't know, a Path
