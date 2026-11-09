@@ -849,6 +849,22 @@ describe('floor guard, end to end', () => {
       expect(run(files).out).toContain('[config-loosened]');
     });
 
+    // Security review of #141: a move inside one hunk, with every line re-indented so the hunk spans
+    // both blocks.
+    it('does not pair a glob moved from include to exclude within one hunk', () => {
+      const base = "export default {\n  test: {\n    include: [\n      'a/**',\n      'b/**',\n    ],\n    exclude: [\n      'c/**',\n    ],\n  },\n};\n";
+      const moved = "export default {\n  test: {\n      include: [\n          'a/**',\n      ],\n      exclude: [\n          'b/**',\n          'c/**',\n      ],\n  },\n};\n";
+      repo = makeRepo({ ...configs, 'vitest.config.mts': base });
+      repo.write({ 'vitest.config.mts': moved });
+      expect(guard().out).toContain('[config-loosened] vitest.config.mts');
+    });
+
+    it('does not pair a rule moved between config objects within one hunk', () => {
+      const reindented = ESLINT.replace(/^( +)/gm, '$1$1');
+      const moved = reindented.replace("            'no-x': 'error',\n", '').replace("            'no-y': 'error'\n", "            'no-x': 'error',\n            'no-y': 'error'\n");
+      expect(run({ 'eslint.config.mjs': moved }).out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
     it('does not pair a rule moved into another config object', () => {
       // Everything re-quoted, and `no-x` moved from the `a/**` object to the `b/**` one.
       const moved = ESLINT.replace("      'no-x': 'error',\n", '').replace("      'no-y': 'error'\n", "      'no-x': 'error',\n      'no-y': 'error'\n").replaceAll("'", '"');

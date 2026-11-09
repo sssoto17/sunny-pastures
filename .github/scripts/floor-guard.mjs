@@ -193,9 +193,14 @@ const normalizeCode = (text) => {
 // Removes the removed and added lines of `f` that differ only in formatting. Pairs stay within one
 // diff hunk and in order, so a line moved to another block, past lines that stayed, doesn't pair
 // (#138). A whole hunk whose normalized text is equal (a re-wrapped list) pairs as one.
-const withoutFormatting = (f) => {
+const withoutFormatting = (f, mergeBase) => {
   if (!FORMATTED_CONFIG.test(basename(f.path)) || f.status === 'added') return f;
-  const key = (t) => normalizeCode(t) ?? `\0${t.trim()}`; // `\0`: an exact match only
+  // A pair also needs the same enclosing array key (`include`, `exclude`, `ignores`) on both
+  // sides, a second safeguard beside the order (security review of #141).
+  const before = oldContent(mergeBase, f.oldPath ?? f.path) ?? [];
+  const after = readFileSync(f.path, 'utf8').split('\n');
+  const where = (lines, l) => enclosingKey(lines, l.line) ?? '';
+  const pairKey = (lines, l) => `${where(lines, l)}\u0001${normalizeCode(l.text) ?? `\0${l.text.trim()}`}`; // `\0`: an exact match only
   const paired = new Set();
   for (const hunk of new Set([...f.removed, ...f.added].map((l) => l.hunk))) {
     const was = f.removed.filter((l) => l.hunk === hunk);
@@ -207,8 +212,8 @@ const withoutFormatting = (f) => {
       continue;
     }
     // Longest common subsequence of the lines' normalized keys.
-    const a = was.map((l) => key(l.text));
-    const b = now.map((l) => key(l.text));
+    const a = was.map((l) => pairKey(before, l));
+    const b = now.map((l) => pairKey(after, l));
     const common = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
     for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) common[i][j] = a[i] === b[j] ? common[i + 1][j + 1] + 1 : Math.max(common[i + 1][j], common[i][j + 1]);
     for (let i = 0, j = 0; i < a.length && j < b.length; ) {
@@ -1049,7 +1054,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
         if (!kept) weak('property-runs-cut', f.path, `${r.line} (old)`);
       }
     }
-    for (const line of configLoosening(withoutFormatting(f), mergeBase)) weak('config-loosened', f.path, line);
+    for (const line of configLoosening(withoutFormatting(f, mergeBase), mergeBase)) weak('config-loosened', f.path, line);
   }
 
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.
