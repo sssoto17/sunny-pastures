@@ -1,5 +1,9 @@
 {
-  "//": "Solution file for `tsc -b`. Each workspace package adds itself to `references` and extends tsconfig.base.json.",
-  "files": [],
-  "references": [{ "path": "./tsconfig.tools.json" }, { "path": "./packages/sim" }, { "path": "./packages/sim/tsconfig.test.json" }]
+	"//": "Solution file for `tsc -b`. Each workspace package adds itself to `references` and extends tsconfig.base.json.",
+	"files": [],
+	"references": [
+		{ "path": "./tsconfig.tools.json" },
+		{ "path": "./packages/sim" },
+		{ "path": "./packages/sim/tsconfig.test.json" }
+	]
 }

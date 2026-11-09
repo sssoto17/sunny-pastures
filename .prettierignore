@@ -1,0 +1,15 @@
+# Prettier formats *.{ts,tsx,mts,mjs,js,json} (ADR-0005, section 6). Prettier already skips
+# what .gitignore lists.
+# Hand-wrapped prose and tables.
+*.md
+# Workflow and tool files Prettier would otherwise reformat.
+*.yml
+*.yaml
+# Written by tools, not by hand.
+pnpm-lock.yaml
+skills-lock.json
+# Agent configuration, owned by the admin.
+.claude/
+.agents/
+# Local tool config, not the repo's code (in the sandbox it is an unreadable placeholder).
+.mcp.json
