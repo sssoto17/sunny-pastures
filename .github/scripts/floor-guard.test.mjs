@@ -315,50 +315,74 @@ describe('floor guard, end to end', () => {
 
     // A narrowing is a warning for the admin, never a failure (admin, 9 Nov): the guard can't tell
     // an approved carve-out from an unapproved one, and a red required check has no bypass.
-    const warned = (r, head) => {
+    // An entry's reasons, in two tiers (admin, 9 Nov): `warning [rule-narrowed]` for strong signals,
+    // `note [check]` for weak ones. Each comes right after the entry's head, warning first.
+    const reasons = (r, head) => {
       expect(r.code).toBe(0);
       expect(r.out).not.toContain('floor-guard: clean');
       const lines = r.out.split('\n');
       const at = lines.findIndex((l) => l.includes(head));
       expect(at, `no report entry for ${head}`).toBeGreaterThan(-1);
-      expect(lines[at + 1]).toContain('warning [rule-narrowed]: ');
-      return lines[at + 1];
+      const next = lines.slice(at + 1, at + 3);
+      return { warning: next.find((l) => l.includes('warning [rule-narrowed]: ')), note: next.find((l) => l.includes('note [check]: ')) };
     };
+    const warned = (r, head) => {
+      const { warning } = reasons(r, head);
+      expect(warning, `no warning for ${head}`).toBeDefined();
+      return warning;
+    };
+    const noted = (r, head) => {
+      const { warning, note } = reasons(r, head);
+      expect(warning, `a weak signal warned for ${head}`).toBeUndefined();
+      expect(note, `no note for ${head}`).toBeDefined();
+      return note;
+    };
+    const TIER = { warning: warned, note: noted };
 
     it("warns on PR #121's real rewording of the purity row", () => {
       realRepo(edit(REAL, ALLOWANCE, ''));
       repo.write({ 'CONSTRAINTS.md': REAL });
-      const warning = warned(guard(), `changed: CONSTRAINTS.md:${PURITY} (rule "Boundaries: sim purity (MUST-10.1)")`);
-      expect(warning).toContain('adds "may"');
-      expect(warning).toContain('adds a clause to a list cell');
+      const head = `changed: CONSTRAINTS.md:${PURITY} (rule "Boundaries: sim purity (MUST-10.1)")`;
+      const r = guard();
+      expect(warned(r, head)).toContain('adds a clause to a list cell');
+      expect(reasons(r, head).note).toContain('adds "may"');
     });
 
     const SECRETS = '- Secrets in source. Read them from env vars and keep placeholders in `.env.example`.';
     it.each([
-      ['added to a list item', SECRETS, SECRETS.replace('in source.', 'in source, except in test fixtures.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'except'],
-      ['added to a paragraph', 'Each blocking CI job is a required status check on `main`.', 'Each blocking CI job is a required status check on `main`, unless it runs on preview deploys.', `changed: CONSTRAINTS.md:${lineOf('Each blocking CI job')}`, 'unless'],
-      ['added as a new list item', SECRETS, `${SECRETS}\n- Test files may use \`@ts-ignore\`.`, `added: CONSTRAINTS.md:${lineOf(SECRETS) + 1}`, 'may'],
-    ])('warns on a carve-out %s', (_, from, to, head, word) => {
+      ['added to a list item', SECRETS, SECRETS.replace('in source.', 'in source, except in test fixtures.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'warning', 'except'],
+      ['added to a paragraph', 'Each blocking CI job is a required status check on `main`.', 'Each blocking CI job is a required status check on `main`, unless it runs on preview deploys.', `changed: CONSTRAINTS.md:${lineOf('Each blocking CI job')}`, 'warning', 'unless'],
+      ['added as a new list item', SECRETS, `${SECRETS}\n- Test files may use \`@ts-ignore\`.`, `added: CONSTRAINTS.md:${lineOf(SECRETS) + 1}`, 'note', 'may'],
+    ])('flags a carve-out %s', (_, from, to, head, tier, word) => {
       realRepo();
       repo.write({ 'CONSTRAINTS.md': edit(REAL, from, to) });
-      expect(warned(guard(), head)).toContain(`adds "${word}"`);
+      expect(TIER[tier](guard(), head)).toContain(`adds "${word}"`);
     });
 
     // Review of #129 (admin, 9 Nov): carve-outs the first word list missed.
     const LINT_ROW = lineOf('| Lint |');
     it.each([
-      ['"blocked unless" made "warned unless"', 'A weakened bar is blocked unless', 'A weakened bar is warned unless', 'changed: CONSTRAINTS.md:37', 'adds "warned"'],
-      ['a new sentence in a list item', SECRETS, SECRETS.replace('in source.', 'in source. Fixtures are okay.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds a clause'],
-      ['"fine" in a new sentence', SECRETS, SECRETS.replace('in source.', 'in source. Fixtures are fine.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds "fine"'],
-      ['", ignoring" a path', SECRETS, SECRETS.replace('in source.', 'in source, ignoring `tools/`.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds "ignoring"'],
-      ['"outside" a path', SECRETS, SECRETS.replace('in source.', 'in source outside `tools/`.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds "outside"'],
-      ['a new row', '| Lint |', '| Lint: generated | Generated files are linted by hand | n/a | `eslint .` | CI | `ci / lint` | #40 |\n| Lint |', `added: CONSTRAINTS.md:${LINT_ROW}`, 'adds a rule'],
-      ['a footnote', '## Stages\n', '## Stages\n\n[^1]: Agents run the bench on Fridays.\n', 'added: CONSTRAINTS.md:', 'adds a footnote'],
-      ['an inline HTML comment', SECRETS, `${SECRETS} <!-- agents read this -->`, `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'adds an HTML comment'],
-    ])('warns on %s', (_, from, to, head, label) => {
+      ['"blocked unless" made "warned unless"', 'A weakened bar is blocked unless', 'A weakened bar is warned unless', 'changed: CONSTRAINTS.md:37', 'warning', 'adds "warned"'],
+      ['a new sentence in a list item', SECRETS, SECRETS.replace('in source.', 'in source. Fixtures are okay.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'note', 'adds a clause'],
+      ['"fine" in a new sentence', SECRETS, SECRETS.replace('in source.', 'in source. Fixtures are fine.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'note', 'adds "fine"'],
+      ['", ignoring" a path', SECRETS, SECRETS.replace('in source.', 'in source, ignoring `tools/`.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'warning', 'adds "ignoring"'],
+      ['"outside" a path', SECRETS, SECRETS.replace('in source.', 'in source outside `tools/`.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'note', 'adds "outside"'],
+      ['a new row', '| Lint |', '| Lint: generated | Generated files are linted by hand | n/a | `eslint .` | CI | `ci / lint` | #40 |\n| Lint |', `added: CONSTRAINTS.md:${LINT_ROW}`, 'note', 'adds a rule'],
+      ['a footnote', '## Stages\n', '## Stages\n\n[^1]: Agents run the bench on Fridays.\n', 'added: CONSTRAINTS.md:', 'warning', 'adds a footnote'],
+      ['an inline HTML comment', SECRETS, `${SECRETS} <!-- agents read this -->`, `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'warning', 'adds an HTML comment'],
+    ])('flags %s', (_, from, to, head, tier, label) => {
       realRepo();
       repo.write({ 'CONSTRAINTS.md': edit(REAL, from, to) });
-      expect(warned(guard(), head)).toContain(label);
+      expect(TIER[tier](guard(), head)).toContain(label);
+    });
+
+    it('titles the annotation by tier, so a note never reads as a narrowing', () => {
+      realRepo();
+      // A negation in a new rule is a prohibition, not a flip: still only a note.
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, SECRETS, `${SECRETS}\n- New rule: no stubs, never.`) });
+      const notes = guard({ ...TODAY, GITHUB_ACTIONS: 'true' }).out.split('\n').filter((l) => l.startsWith('::warning'));
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toContain('title=CONSTRAINTS.md rule to check (admin reads)::');
     });
 
     // Review of #129: a rule moved between lists has the same text, so it paired as unchanged and
@@ -485,7 +509,7 @@ describe('floor guard, end to end', () => {
         repo.write({ 'CONSTRAINTS.md': edit(edit(REAL, '## Stages\n', '## Stages\n\n<!-- agents may skip the bench -->\n\n```\nskip it\n```\n'), '### Timing checks', '### Timing') });
         // Renaming a heading also unpairs its rules (rule-removed, a failure); only the report is checked here.
         const r = guard();
-        expect(r.out).toMatch(/other: CONSTRAINTS\.md:\d+ \(not a rule\)\n +warning \[rule-narrowed\]: adds text outside the rules, adds "may".*\n +now: \{\+<!-- agents may skip the bench -->\+\}/);
+        expect(r.out).toMatch(/other: CONSTRAINTS\.md:\d+ \(not a rule\)\n +warning \[rule-narrowed\]: adds an HTML comment.*\n +note \[check\]: adds text outside the rules, adds "may".*\n +now: \{\+<!-- agents may skip the bench -->\+\}/);
         expect(r.out).toContain('now: {+skip it+}');
         expect(r.out).toContain('was: [-### Timing checks-]');
         expect(r.out).toContain('now: {+### Timing+}');

@@ -271,15 +271,22 @@ goes to the guard's log, the job summary and a warning annotation on the changed
 Files changed tab (#122). GitHub shows 10 annotations per step, so with more changes the last one
 points to the job summary, which has them all. Long key-like text in the quotes is redacted.
 
-These are marked `warning [rule-narrowed]`:
+Each entry names its reasons, in two tiers (admin, 9 Nov), so a real carve-out stands out. These
+are marked `warning [rule-narrowed]`, and their annotation says "may be narrowed":
 
-- A rule that gains a narrowing word: `except`, `unless`, `but not`, `only`, `may`, `other than`,
-  `apart from`, `warn`, `skip`, `ignore`, `outside`, `fine` and a few more.
-- A rule that gains or drops a negation (`not`, `never`, …).
-- A rule that gains a clause of two or more words, an HTML comment or a footnote.
-- A new rule, or new text outside the rules.
 - A rule moved under another list's introduction, such as from "Also blocked, with no exception
   possible:" to "A weakened bar is any of:".
+- A rule that gains a carve-out phrase: `except`, `unless`, `but not`, `other than`, `apart from`,
+  `excluding`, `exempt`, `ignore`, `allow`, `warn` and a few more.
+- A rule that gains or drops a negation (`not`, `never`, …).
+- A rule that gains an HTML comment, a footnote, or a clause in a table's list cell.
+
+These are common in honest edits, so they're marked `note [check]`, and their annotation says "to
+check":
+
+- A new rule, or new text outside the rules.
+- A new clause in a list item or a paragraph.
+- Everyday words: `only`, `may`, `can also`, `fine`, `outside`, `skip`.
 
 That warning isn't a _warn_ row and doesn't break "Every failing check blocks the merge": it rides
 on a review that happens anyway, because every PR that touches this file carries `review:admin`.
@@ -371,3 +378,7 @@ Decided while building #122 (9 Nov), for [Guarding the bar](#guarding-the-bar):
 - **Carve-outs:** a narrowing word, a negation or a new clause warns as `rule-narrowed` and doesn't
   fail. A failure could only be cleared by an expiring Exceptions row, since `guard / floor` has no
   bypass, and the admin reads every PR that touches this file anyway.
+- **Two tiers:** strong signals (a move to another list, a carve-out phrase, a negation, a hidden
+  comment or footnote, a clause in a list cell) stay `warning [rule-narrowed]`. Weak ones (a new
+  rule or text, a clause in prose, everyday words) become `note [check]`, so the warning stays
+  rare enough to stop at.

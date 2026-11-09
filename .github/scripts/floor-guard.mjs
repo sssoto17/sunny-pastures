@@ -11,8 +11,8 @@
 // ($GITHUB_STEP_SUMMARY) and warning annotations, and the guard no longer logs `clean`. It quotes
 // only CONSTRAINTS.md, a prose file, never code, with key-like text redacted. A possible carve-out
 // (a narrowing word, a negation, a new clause, comment, footnote or rule, a rule moved to another
-// list) is marked `warning [rule-narrowed]` there: a warning for the admin's merge review, never a
-// failure (admin, 9 Nov; ADR-0004).
+// list) is marked there, `warning [rule-narrowed]` for a strong signal and `note [check]` for a
+// weak one: for the admin's merge review, never a failure (admin, 9 Nov; ADR-0004).
 //
 // Usage: node .github/scripts/floor-guard.mjs [--base <ref>]   (default base: origin/main)
 // FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date (tests only).
@@ -339,11 +339,12 @@ const proseClauses = (oldText, nowText) => {
     return wordCount(c) >= 2;
   });
 };
-// Why a change from `oldText` to `nowText` may carve out an exception ('' for a new rule).
+// Why a change from `oldText` to `nowText` may carve out an exception ('' for a new rule). A
+// negation only flips a rule that existed: in a new rule it's usually a prohibition, which tightens.
 const narrowingLabels = (oldText, nowText) => [
   ...new Set([
     ...surplus(NARROWING, oldText, nowText).map((w) => `adds "${w}"`),
-    ...surplus(NEGATION, oldText, nowText).map((w) => `adds "${w}"`),
+    ...(oldText ? surplus(NEGATION, oldText, nowText).map((w) => `adds "${w}"`) : []),
     ...surplus(NEGATION, nowText, oldText).map((w) => `drops "${w}"`),
     ...HIDING.filter(([re]) => surplus(re, oldText, nowText).length).map(([, label]) => label),
   ]),
@@ -524,13 +525,30 @@ const wordDiff = (was, now) => {
 };
 
 const flat = (t) => t.replace(/\s+/g, ' ').trim();
+// Two tiers (admin, 9 Nov), so a real carve-out stands out on a PR where most changes trip
+// something. Weak reasons are common in honest edits: a new rule or new text, a new clause in prose,
+// and everyday words. Every other reason (a move to another list, a carve-out phrase, a negation, a
+// hidden comment or footnote, a new clause in a list cell) is strong.
+// `warn…` stays strong: "blocked unless" becoming "warned unless" drops a severity.
+const WEAK_WORD = /^(only|may|can also|fine|outside|skip\w*)$/;
+const WEAK_REASON = new Set(['adds a rule', 'adds text outside the rules', 'adds a clause']);
+const isStrong = (reason) => {
+  const word = /^adds "(.+)"$/.exec(reason)?.[1];
+  return word ? !WEAK_WORD.test(word) : !WEAK_REASON.has(reason);
+};
+const tierOf = (c) => (c.narrows.some(isStrong) ? 'strong' : c.narrows.length ? 'weak' : null);
 // One entry per changed rule: a heading line, then was/now lines. A changed row shows only the
 // cells that changed, each under its column's name.
 const reportEntries = (changes) =>
   changes.map((c) => {
     const where = c.now ? `CONSTRAINTS.md:${c.now.line}` : `CONSTRAINTS.md:${c.old.line} (old)`;
     const head = `${c.kind}: ${where} ${c.kind === 'other' ? '(not a rule)' : `(rule "${c.key}")`}`;
-    const warn = c.narrows.length ? [`warning [rule-narrowed]: ${c.narrows.join(', ')}; check it isn't a carve-out`] : [];
+    const strong = c.narrows.filter(isStrong);
+    const weak = c.narrows.filter((r) => !isStrong(r));
+    const warn = [
+      ...(strong.length ? [`warning [rule-narrowed]: ${strong.join(', ')}; check it isn't a carve-out`] : []),
+      ...(weak.length ? [`note [check]: ${weak.join(', ')}`] : []),
+    ];
     if (!c.now) return { c, head, lines: [`was: [-${flat(c.old.text)}-]`] };
     if (!c.old) return { c, head, lines: [...warn, `now: {+${flat(c.now.text)}+}`] };
     if (c.kind === 'moved') return { c, head, lines: [...warn, `from: CONSTRAINTS.md:${c.old.line} (old), under "${c.from}"`, `to: under "${c.to}"`, `text: ${flat(c.now.text)}`] };
@@ -563,20 +581,24 @@ const escapeProp = (s) => escapeData(s).replace(/:/g, '%3A').replace(/,/g, '%2C'
 const changeReport = (changes) => {
   if (!changes.length) return null;
   const entries = reportEntries(changes).map((e) => ({ ...e, head: redact(e.head), lines: e.lines.map(redact) }));
-  const narrowed = changes.filter((c) => c.narrows.length).length;
-  const intro = `CONSTRAINTS.md: ${changes.length} rule(s) changed${narrowed ? `, ${narrowed} may narrow a rule` : ''}. The admin reads each one at merge (CONSTRAINTS.md, "Guarding the bar"). {+…+} marks added text, [-…-] removed text.`;
+  const narrowed = changes.filter((c) => tierOf(c) === 'strong').length;
+  const toCheck = changes.filter((c) => tierOf(c) === 'weak').length;
+  const counts = [narrowed && `${narrowed} may narrow a rule`, toCheck && `${toCheck} to check`].filter(Boolean);
+  const intro = `CONSTRAINTS.md: ${changes.length} rule(s) changed${counts.map((s) => `, ${s}`).join('')}. The admin reads each one at merge (CONSTRAINTS.md, "Guarding the bar"). {+…+} marks added text, [-…-] removed text.`;
   const log = [`floor-guard: ${intro}`, ...entries.flatMap((e) => [`  ${e.head}`, ...e.lines.map((l) => `    ${l}`)])].join('\n');
   // Every entry sits in one fence, longer than any run of tildes or backticks in the text.
   const body = entries.flatMap((e) => [e.head, ...e.lines.map((l) => `  ${l}`), '']).join('\n');
   const fence = '~'.repeat(Math.max(3, ...[...body.matchAll(/~+/g)].map((m) => m[0].length + 1)));
   const summary = `### floor guard: CONSTRAINTS.md changes\n\n${intro}\n\n${fence}text\n${body}${fence}\n`;
   // GitHub keeps only 10 warning annotations per step, so past 10 the last one points to the
-  // summary, and the possible narrowings go first.
-  const ranked = [...entries.filter((e) => e.c.narrows.length), ...entries.filter((e) => !e.c.narrows.length)];
+  // summary, and the possible narrowings go first, then the ones to check.
+  const rank = { strong: 0, weak: 1, null: 2 };
+  const ranked = [...entries].sort((a, b) => rank[tierOf(a.c)] - rank[tierOf(b.c)]);
   const shown = ranked.length > MAX_ANNOTATIONS ? ranked.slice(0, MAX_ANNOTATIONS - 1) : ranked;
+  const TITLES = { strong: 'CONSTRAINTS.md rule may be narrowed (admin reads)', weak: 'CONSTRAINTS.md rule to check (admin reads)' };
   const annotations = shown.map((e) => {
     const line = e.c.now ? `,line=${e.c.now.line}` : '';
-    const title = e.c.narrows.length ? 'CONSTRAINTS.md rule may be narrowed (admin reads)' : `CONSTRAINTS.md rule ${e.c.kind}`;
+    const title = TITLES[tierOf(e.c)] ?? `CONSTRAINTS.md rule ${e.c.kind}`;
     return `::warning file=CONSTRAINTS.md${line},title=${escapeProp(title)}::${escapeData([e.head, ...e.lines].join('\n'))}`;
   });
   if (shown.length < ranked.length) {

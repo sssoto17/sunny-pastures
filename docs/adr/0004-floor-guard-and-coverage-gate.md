@@ -52,10 +52,18 @@ edit in front of that review.
      "A weakened bar is any of:", say). Its text is unchanged, so it used to pair as unchanged and
      pass as `clean`. A rule reordered within its list is reported without a warning.
 
-   Any new line outside a rule (a heading, a comment, a fence) warns too. Words are counted against
-   the old rule, so rewording a rule that already says "only" doesn't trip it. Code spans don't
-   count: they're names (`gitleaks:allow`), and adding one is how a list gets tighter. Only a
+   Any new line outside a rule (a heading, a comment, a fence) is flagged too. Words are counted
+   against the old rule, so rewording a rule that already says "only" doesn't trip it. Code spans
+   don't count: they're names (`gitleaks:allow`), and adding one is how a list gets tighter. Only a
    blank-line edit passes with no report.
+
+   **Two tiers (admin, 9 Nov).** With all of the above, most `CONSTRAINTS.md` PRs trip something,
+   and a tag that's always there gets skimmed. So the weak reasons are a `note [check]` with their
+   own annotation title ("to check"): a new rule, new text outside the rules, a new clause in prose,
+   and the everyday words `only`, `may`, `can also`, `fine`, `outside`, `skip…`. Every other reason
+   stays `warning [rule-narrowed]` ("may be narrowed"). Annotations list the warnings first. The
+   cost: a carve-out written as a new rule with only everyday words ("Test files may use
+   `@ts-ignore`.") is a note, not a warning. It's still reported in full.
 3. **It warns; it never fails (admin, 9 Nov).** `guard / floor` is a required check in the ruleset
    `main checks`, which has no bypass (checked with `gh api` on 9 Nov; ADR-0002 describes only the
    ruleset `main`, whose admin bypass doesn't reach these checks). A failure could be cleared only
