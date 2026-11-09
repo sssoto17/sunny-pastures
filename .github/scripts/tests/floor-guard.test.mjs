@@ -147,6 +147,14 @@ describe('floor guard, end to end', () => {
       expect(guard().out).toContain(`[check-removed] ${CI}`);
     });
 
+    // #125: the duplication and formatting checks run as steps of `ci / lint`.
+    it.each(['pnpm dupes --changed-since "origin/$BASE_REF"', 'pnpm format:check'])('block a removed `%s` step', (step) => {
+      const steps = `jobs:\n  lint:\n    steps:\n      - run: pnpm lint\n      - run: ${step}\n`;
+      repo = makeRepo({ ...BASE, [CI]: steps });
+      repo.write({ [CI]: steps.replace(`      - run: ${step}\n`, '') });
+      expect(guard().out).toContain(`[check-removed] ${CI}`);
+    });
+
     // #99: a local action (`uses: ./…`) is read from the PR's checkout, so a PR could change what the
     // floor job runs before the base branch's guard starts. The floor job uses pinned actions only.
     it('run no action from the PR in the floor job', () => {

@@ -30,12 +30,17 @@ jobs:
     name: ci / lint
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      BASE_REF: ${{ github.base_ref }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # fallow dupes reports clones in the files changed since the merge base
       - uses: ./.github/actions/setup
       - run: pnpm lint
+      # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
+      - run: pnpm dupes --changed-since "origin/$BASE_REF"
 
   test:
     name: ci / test
