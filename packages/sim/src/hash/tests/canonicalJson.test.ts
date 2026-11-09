@@ -1,36 +1,37 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../canonicalJson.js';
 
 describe('canonicalJson', () => {
-  test('sorts object keys at every level', () => {
+  it('sorts object keys at every level', () => {
     const value = { z: -5, b: [1, { d: 'é', c: null }], a: true };
     expect(canonicalJson(value)).toBe('{"a":true,"b":[1,{"c":null,"d":"é"}],"z":-5}');
   });
 
-  test('sorts keys by UTF-16 code unit, not by locale or code point', () => {
+  it('sorts keys by UTF-16 code unit, not by locale or code point', () => {
     // localeCompare would put "a" before "B"; code point order would put U+1F600 after U+FFFF.
-    const value = { '￿': 1, '😀': 2, é: 3, aa: 4, a: 5, B: 6 };
+    // Built from entries: the keys are data, not names, so the naming rule doesn't apply.
+    const value = Object.fromEntries([['￿', 1], ['😀', 2], ['é', 3], ['aa', 4], ['a', 5], ['B', 6]]);
     expect(canonicalJson(value)).toBe('{"B":6,"a":5,"aa":4,"é":3,"😀":2,"￿":1}');
   });
 
-  test('sorts integer-like keys as strings, not in the engine’s numeric key order', () => {
+  it('sorts integer-like keys as strings, not in the engine’s numeric key order', () => {
     expect(canonicalJson({ 9: 'n', 10: 't', a: 'a' })).toBe('{"10":"t","9":"n","a":"a"}');
   });
 
-  test('writes -0 as 0', () => {
+  it('writes -0 as 0', () => {
     expect(canonicalJson(-0)).toBe('0');
     expect(canonicalJson({ x: [-0] })).toBe('{"x":[0]}');
   });
 
-  test('writes strings, numbers, booleans and null as JSON does', () => {
+  it('writes strings, numbers, booleans and null as JSON does', () => {
     expect(canonicalJson(['a"\\\n', 2147483653, -1.5, false, null])).toBe('["a\\"\\\\\\n",2147483653,-1.5,false,null]');
   });
 
-  test('escapes a lone surrogate, so the text is always well-formed', () => {
+  it('escapes a lone surrogate, so the text is always well-formed', () => {
     expect(canonicalJson('\uD83D')).toBe('"\\ud83d"');
   });
 
-  test.each([
+  it.each([
     ['NaN', NaN],
     ['Infinity', Infinity],
     ['-Infinity', -Infinity],
@@ -39,7 +40,7 @@ describe('canonicalJson', () => {
     expect(() => canonicalJson(value)).toThrow(/finite/);
   });
 
-  test.each([
+  it.each([
     ['undefined', undefined],
     ['undefined in an object', { a: undefined }],
     ['undefined in an array', [undefined]],
@@ -66,7 +67,7 @@ describe('canonicalJson', () => {
     expect(() => canonicalJson(value)).toThrow(/plain JSON/);
   });
 
-  test('never calls a getter', () => {
+  it('never calls a getter', () => {
     let calls = 0;
     const value = {
       get a() {
@@ -78,7 +79,7 @@ describe('canonicalJson', () => {
     expect(calls).toBe(0);
   });
 
-  test('throws on a cycle, naming it, instead of overflowing the stack', () => {
+  it('throws on a cycle, naming it, instead of overflowing the stack', () => {
     const object: Record<string, unknown> = { a: 1 };
     object['self'] = { back: object };
     const array: unknown[] = [1];
@@ -87,12 +88,12 @@ describe('canonicalJson', () => {
     expect(() => canonicalJson(array)).toThrow(/cycle/);
   });
 
-  test('accepts the same object twice when it is not a cycle', () => {
+  it('accepts the same object twice when it is not a cycle', () => {
     const shared = { n: 1 };
     expect(canonicalJson({ a: shared, b: [shared, shared] })).toBe('{"a":{"n":1},"b":[{"n":1},{"n":1}]}');
   });
 
-  test('accepts an object without a prototype', () => {
+  it('accepts an object without a prototype', () => {
     const value = Object.create(null) as Record<string, number>;
     value['b'] = 2;
     value['a'] = 1;

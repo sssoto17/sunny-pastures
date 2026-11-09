@@ -5,7 +5,7 @@
 import { join } from 'node:path';
 import { ESLint } from 'eslint';
 import ts from 'typescript';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { lintSnippet, root } from './lint-snippet.mjs';
 
 const eslint = new ESLint({ cwd: root });
@@ -131,34 +131,34 @@ const ALLOWED = [
 ].join('\n');
 
 describe('sim purity rules', () => {
-  test('report every banned construct in a packages/sim source file', async () => {
+  it('report every banned construct in a packages/sim source file', async () => {
     expect(await purityFindings(BANNED, 'packages/sim/src/snippet.ts')).toEqual(BANNED_FINDINGS);
   });
 
-  test('report the ways around them: eval, globals, aliases of Date, Intl', async () => {
+  it('report the ways around them: eval, globals, aliases of Date, Intl', async () => {
     expect(await purityFindings(EVASIONS, 'packages/sim/src/snippet.ts')).toEqual(EVASION_FINDINGS);
   });
 
-  test('report 32-bit operators on time values in packages/sim', async () => {
+  it('report 32-bit operators on time values in packages/sim', async () => {
     expect(await purityFindings(TIME_BITWISE, 'packages/sim/src/snippet.ts')).toEqual(TIME_BITWISE_FINDINGS);
   });
 
-  test('leave relative imports, dates from a value and stream maths alone', async () => {
+  it('leave relative imports, dates from a value and stream maths alone', async () => {
     expect(await purityFindings(ALLOWED, 'packages/sim/src/snippet.ts')).toEqual([]);
   });
 
-  test("leave the sim's own 32-bit maths alone (mulberry32, SHA-256)", async () => {
+  it("leave the sim's own 32-bit maths alone (mulberry32, SHA-256)", async () => {
     const results = await eslint.lintFiles(['packages/sim/src/random/index.ts', 'packages/sim/src/hash/sha256.ts']);
     expect(results.flatMap((r) => r.messages)).toEqual([]);
   });
 
-  test('do not fire outside packages/sim', async () => {
+  it('do not fire outside packages/sim', async () => {
     const all = `${BANNED}\n${EVASIONS}\n${TIME_BITWISE}`;
     expect(await purityFindings(all, 'scripts/snippet.ts')).toEqual([]);
     expect(await purityFindings(all, 'packages/other/src/snippet.ts')).toEqual([]);
   });
 
-  test('let sim tests import vitest and fast-check, and nothing else', async () => {
+  it('let sim tests import vitest and fast-check, and nothing else', async () => {
     const code = [
       "import { test } from 'vitest';",
       "import fc from 'fast-check';",
@@ -180,7 +180,7 @@ describe('sim purity rules', () => {
     ]);
   });
 
-  test('make sim property tests pass the shared fast-check settings (D10)', async () => {
+  it('make sim property tests pass the shared fast-check settings (D10)', async () => {
     const code = [
       "import fc from 'fast-check';",
       "import { inject } from 'vitest';",
@@ -217,7 +217,7 @@ describe('sim tsconfigs', () => {
     return ts.getParsedCommandLineOfConfigFile(join(root, file), {}, host).options;
   };
 
-  test.each(['packages/sim/tsconfig.json', 'packages/sim/tsconfig.test.json'])(
+  it.each(['packages/sim/tsconfig.json', 'packages/sim/tsconfig.test.json'])(
     '%s compiles against ES2022 only, with no ambient types',
     (file) => {
       const options = resolvedOptions(file);
