@@ -50,6 +50,10 @@ describe('canonicalJson', () => {
     ['a Map', new Map()],
     ['a class instance', new (class Thing { readonly n = 1; })()],
     ['an object whose prototype has no constructor', Object.create(Object.create(null))],
+    // `.map` skips holes: [,] would read as [] and [,1] as the invalid text "[,1]".
+    ['a sparse array', Object.assign([], { 1: 1 })],
+    ['an array of holes only', new Array(3)],
+    ['a sparse array with an extra property', Object.assign([], { 1: 1, foo: 2 })],
   ])('throws on a value that is not plain JSON data: %s', (_name, value) => {
     expect(() => canonicalJson(value)).toThrow(/plain JSON/);
   });

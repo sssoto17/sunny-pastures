@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, inject, test } from 'vitest';
-import { mulberry32, streamSeed } from './index.js';
+import { mulberry32, streamSeed } from './random.js';
 import { assertSafeIntegers } from './invariants.js';
 
 const params = inject('fastCheck');

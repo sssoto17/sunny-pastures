@@ -10,13 +10,19 @@ export function canonicalJson(value: unknown): string {
     if (!Number.isFinite(value)) throw new Error(`canonicalJson: ${value} is not a finite number`);
     return JSON.stringify(value); // -0 is written as 0
   }
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (Array.isArray(value)) {
+    // `.map` skips holes, so a sparse array would read as a shorter one or as invalid JSON.
+    for (let i = 0; i < value.length; i++) {
+      if (!(i in value)) throw new Error('canonicalJson: a sparse array is not plain JSON data');
+    }
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
   if (isPlainObject(value)) {
     // The default sort compares UTF-16 code units, the same on every engine; never localeCompare.
     const keys = Object.keys(value).sort();
     return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
   }
-  throw new Error(`canonicalJson: ${describe(value)} is not plain JSON data`);
+  throw new Error(`canonicalJson: ${typeName(value)} is not plain JSON data`);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -25,7 +31,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-function describe(value: unknown): string {
+function typeName(value: unknown): string {
   if (typeof value !== 'object' || value === null) return typeof value;
   const { constructor } = value as { constructor?: { name?: string } };
   return `an object of type ${constructor?.name ?? 'unknown'}`;

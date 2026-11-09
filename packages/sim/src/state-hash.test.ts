@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, inject, test } from 'vitest';
-import { mulberry32, stateHash } from './index.js';
+import { stateHash } from './index.js';
+import { mulberry32 } from './random.js';
 
 const params = inject('fastCheck');
 
@@ -33,7 +34,8 @@ describe('stateHash', () => {
     [63, 'The quick brown fox jumps over the lazy dog, 0123456789 abcde', '6efe14722ece4b32b6ca867b19030abdbaedb124d82b1fdf62b017535a824c07'],
     [64, 'The quick brown fox jumps over the lazy dog, 0123456789 abcdef', '5a1fe963c2f3f61ad6ea58cb8ecfae669ce9a17668c138d25a200e8e8784fce0'],
     [65, 'The quick brown fox jumps over the lazy dog, 0123456789 abcdefg', '2be4258922d33eabc556cd57f3a00e2573132fc640661302261b0e348f18af84'],
-  ])('matches node:crypto at the block boundary: %i bytes of ASCII', (_bytes, value, digest) => {
+  ])('matches node:crypto at the block boundary: %i bytes of ASCII', (bytes, value, digest) => {
+    expect(JSON.stringify(value).length).toBe(bytes); // ASCII: one byte per character, quotes included
     expect(stateHash(value)).toBe(digest);
   });
 
@@ -44,7 +46,8 @@ describe('stateHash', () => {
     [63, 52, '2c3be05a1e52d0485fb2378b8ca42d30e848af0070b2e72bf143a0ca747e08f6'],
     [64, 53, '1f46e59ab8a192e8053ad5567d1800ae4bd20caeedf23cafec7a9e88f3f50506'],
     [65, 54, '0cef70371e679fc896ed9ad93317fd7da879e37bd13416351c2ca9db8179b3ac'],
-  ])('matches node:crypto at the block boundary: %i bytes with 2-, 3- and 4-byte characters', (_bytes, xs, digest) => {
+  ])('matches node:crypto at the block boundary: %i bytes with 2-, 3- and 4-byte characters', (bytes, xs, digest) => {
+    expect(2 + 3 + 4 + xs + 2).toBe(bytes); // "é€😀", the x's, and the two quotes
     expect(stateHash(`é€😀${'x'.repeat(xs)}`)).toBe(digest);
   });
 
