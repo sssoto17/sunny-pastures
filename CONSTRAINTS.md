@@ -346,7 +346,7 @@ What a row must hold, checked by the floor guard (#99):
 
 The guard reads this file with its own line parser, which follows CommonMark for the cases above.
 From 9 Nov that parser is frozen. Any further Markdown edge case is listed as a known miss and goes
-to the follow-up for a real Markdown parser (under #58), not into the line parser (admin, 9 Nov). A
+to the follow-up for a real Markdown parser, #132, not into the line parser (admin, 9 Nov). A
 known miss already: an ID reused after its row was removed in an earlier PR isn't caught, because
 the guard sees only the PR's own diff.
 

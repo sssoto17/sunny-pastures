@@ -171,7 +171,7 @@ reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
 
   **It's frozen from 9 Nov (admin).** The review of #131 found a new edge case on each round, the
   same pattern as #115's shell lexer. So any further case is listed as a known miss and goes to the
-  follow-up for a real Markdown parser (under #58).
+  follow-up for a real Markdown parser, #132 (under #58).
 - **Known misses.**
   - An ID reused after its row was removed in an earlier PR: the guard sees one diff, not the
     history.
@@ -188,7 +188,7 @@ reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
 **Alternatives considered.**
 - *A maintained Markdown parser (remark or markdown-it).* It would read the file exactly as it
   renders. It's not adopted: the floor job runs with Node only and no install, so it would need a
-  dependency and a floor-job change (admin's call).
+  dependency and a floor-job change. It moved to #132 (admin, 9 Nov).
 - *Refusing any wildcard in a Path.* Too strict: a folder waiver for one package is a legitimate
   case.
 - *Checking only added rows for a bad date.* That was the old behaviour, and an old row with a bad
