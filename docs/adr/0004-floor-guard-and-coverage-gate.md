@@ -99,8 +99,9 @@ into a warning, so it was dropped.
 
 - **Fail on a narrowing, cleared by an Exceptions row.** This was the first build. Rejected by the
   admin (9 Nov): approved carve-outs would each need a row that expires within 30 days and then
-  fails every PR, and "only" trips on tightenings. An Exceptions row on `CONSTRAINTS.md` would also
-  waive every other finding in the file.
+  fails every PR, and "only" trips on tightenings. At the time, an Exceptions row on
+  `CONSTRAINTS.md` would also have waived every other finding in the file. Since #99 a row waives
+  only the findings its Rule column names.
 - **Fail, cleared by an admin label** (`constraints:approved`). It needs a `labeled` trigger in
   `ci.yml`, a floor-job change, and agents can add labels too, so only instructions would hold it.
 - **A PR comment instead of annotations.** It needs `pull-requests: write` and a new job or step.

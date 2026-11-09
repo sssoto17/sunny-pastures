@@ -26,14 +26,16 @@ export const makeRepo = (files) => {
     git('add', '-A');
     git('commit', '-q', '--allow-empty', '-m', 'change');
   };
-  // Under Actions the test run itself has GITHUB_ACTIONS and GITHUB_STEP_SUMMARY set. The scripts
-  // under test must not inherit them: they'd write the fixtures' reports into the real job summary.
-  // A test that needs them passes them in `env`.
+  // Under Actions the test run itself has GITHUB_ACTIONS, GITHUB_STEP_SUMMARY and CI set. The
+  // scripts under test must not inherit them: they'd write the fixtures' reports into the real job
+  // summary, and the guard ignores FLOOR_GUARD_TODAY in CI, which the date tests rely on. A test
+  // that needs them passes them in `env`.
   const run = (script, args = [], env = {}) => {
     const base = args.includes('--base') ? [] : ['--base', 'main'];
     const outer = { ...process.env };
     delete outer.GITHUB_ACTIONS;
     delete outer.GITHUB_STEP_SUMMARY;
+    delete outer.CI;
     const r = spawnSync('node', [script, ...base, ...args], {
       cwd: dir,
       env: { ...outer, ...GIT_ENV, ...env },

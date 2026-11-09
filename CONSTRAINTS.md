@@ -59,6 +59,8 @@ Also blocked, with no exception possible:
   standing in for the implementation.
 - Secrets in source. Read them from env vars and keep placeholders in `.env.example`.
 - An expired row in [Exceptions](#exceptions).
+- An Exceptions row the guard can't accept: a date it can't read, a Rule it doesn't know, a Path
+  wider than one folder, or a second `## Exceptions` heading (#99).
 
 ## Enforced with numbers
 
@@ -318,15 +320,21 @@ it.
 
 What a row must hold, checked by the floor guard (#99):
 
-- **Rule** names the findings it waives, as the guard prints them (`silenced-checker`,
-  `config-loosened`, …), separated by commas. A finding the row doesn't name stays blocked, even
-  on its Path. A name the guard doesn't know fails the row.
-- **Path** is one file or folder, so its first segment has no wildcard: `packages/sim/**` is a
-  path, `**` and `**/*.ts` fail as `exception-too-broad`.
+- **Rule** names the findings it waives, as the guard prints them, separated by commas. The
+  waivable ones are the weakened-bar findings: `silenced-checker`, `test-made-easier`,
+  `test-deleted`, `assertion-removed`, `property-runs-cut`, `config-loosened`, `check-removed`, and
+  this file's `rule-removed`, `rule-narrowed`, `threshold-*`, `severity-dropped` and
+  `stage-moved`. A finding the row doesn't name stays blocked, even on its Path. Any other name
+  fails the row, so `unfinished-work` and the `exception-*` findings can't be waived.
+- **Path** is one file (`packages/sim/src/a.ts`) or one folder (`packages/sim/` or
+  `packages/sim/**`), with no other wildcard. `**`, `**/*.ts` and `packages/*/src/**` fail as
+  `exception-too-broad`.
 - **Expires** is a date the guard can read (`2026-11-30` or `30 Nov 2026`). Any other value fails
   every PR, as an expired row does.
-- The file has one `## Exceptions` heading. A second one fails every PR, and a row inside a code
-  fence (backticks or `~~~`) or a comment is never read.
+- The file has one `## Exceptions` heading. A second one fails every PR. Only a row in that table
+  waives anything; a row inside a code fence (backticks or `~~~`) or a comment never does. Expiry
+  and dates are checked on every line shaped like a row, wherever it sits, so no formatting hides
+  an expired row.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
