@@ -150,7 +150,7 @@ describe('floor guard, end to end', () => {
     // #99: a local action (`uses: ./…`) is read from the PR's checkout, so a PR could change what the
     // floor job runs before the base branch's guard starts. The floor job uses pinned actions only.
     it('run no action from the PR in the floor job', () => {
-      const lines = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8').split('\n');
+      const lines = readFileSync(fileURLToPath(new URL('../../workflows/ci.yml', import.meta.url)), 'utf8').split('\n');
       const start = lines.findIndex((l) => /^ {2}floor:\s*$/.test(l));
       const end = lines.findIndex((l, i) => i > start && /^ {2}\S/.test(l));
       const floor = lines.slice(start, end === -1 ? undefined : end);
