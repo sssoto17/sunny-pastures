@@ -26,6 +26,25 @@ const nonRelativeImport = (allowed, message) => ({
 const TIME_NAME = '/^(time|at|to)$|(Time|At)$/';
 const BITWISE = `:matches(BinaryExpression[operator=/^(\\||&|\\^|<<|>>>?)$/], AssignmentExpression[operator=/^(\\||&|\\^|<<|>>>?)=$/], UnaryExpression[operator='~'])`;
 
+const SIM_SYNTAX = [
+  {
+    selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+    message: 'new Date() reads the clock; time arrives as an argument (MUST-10.1).',
+  },
+  {
+    selector: "CallExpression[callee.name='Date']",
+    message: 'Date() reads the clock; time arrives as an argument (MUST-10.1).',
+  },
+  {
+    selector: 'ImportExpression',
+    message: 'No dynamic import: the sim imports only its own files, statically (MUST-10.1).',
+  },
+  {
+    selector: `${BITWISE} > :matches(Identifier[name=${TIME_NAME}], MemberExpression[property.name=${TIME_NAME}])`,
+    message: 'No 32-bit operators on times: they truncate above 2^31 ms (ADR-0003, section 10).',
+  },
+];
+
 export default defineConfig(
   {
     ignores: ['**/node_modules/', '**/coverage/', '**/dist/', '**/.next/', '.claude/', '.agents/'],
@@ -48,25 +67,7 @@ export default defineConfig(
         { object: 'Date', property: 'now', message: 'Time arrives as an argument (MUST-10.1).' },
         { object: 'Math', property: 'random', message: 'Randomness comes from a stream in the state (ADR-0003, section 7).' },
       ],
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: "NewExpression[callee.name='Date'][arguments.length=0]",
-          message: 'new Date() reads the clock; time arrives as an argument (MUST-10.1).',
-        },
-        {
-          selector: "CallExpression[callee.name='Date']",
-          message: 'Date() reads the clock; time arrives as an argument (MUST-10.1).',
-        },
-        {
-          selector: 'ImportExpression',
-          message: 'No dynamic import: the sim imports only its own files, statically (MUST-10.1).',
-        },
-        {
-          selector: `${BITWISE} > :matches(Identifier[name=${TIME_NAME}], MemberExpression[property.name=${TIME_NAME}])`,
-          message: 'No 32-bit operators on times: they truncate above 2^31 ms (ADR-0003, section 10).',
-        },
-      ],
+      'no-restricted-syntax': ['error', ...SIM_SYNTAX],
     },
   },
   {
@@ -77,6 +78,16 @@ export default defineConfig(
       'no-restricted-imports': [
         'error',
         nonRelativeImport(['vitest', 'fast-check'], 'Sim tests import only vitest, fast-check and sim files (#81).'),
+      ],
+      // A later block's options replace an earlier block's, so the sim selectors are repeated here.
+      'no-restricted-syntax': [
+        'error',
+        ...SIM_SYNTAX,
+        {
+          // Without the settings, fast-check picks a random seed and its own run count (D10).
+          selector: "CallExpression[callee.object.name='fc'][callee.property.name=/^(assert|check)$/][arguments.length<2]",
+          message: "Pass the shared settings: fc.assert(property, inject('fastCheck')) (D10, ADR-0003 section 9).",
+        },
       ],
     },
   },

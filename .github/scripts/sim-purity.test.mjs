@@ -104,4 +104,25 @@ describe('sim purity rules', () => {
       '9 no-restricted-syntax',
     ]);
   });
+
+  test('make sim property tests pass the shared fast-check settings (D10)', async () => {
+    const code = [
+      "import fc from 'fast-check';",
+      "import { inject } from 'vitest';",
+      "const params = inject('fastCheck');",
+      'const p = fc.property(fc.nat(), () => true);',
+      'fc.assert(p);',
+      'fc.check(p);',
+      'fc.assert(p, params);',
+      "fc.check(p, inject('fastCheck'));",
+      'export const a = Date.now();',
+      'export const b = new Date();',
+    ].join('\n');
+    expect(await purityFindings(code, 'packages/sim/src/hash.test.ts')).toEqual([
+      '5 no-restricted-syntax',
+      '6 no-restricted-syntax',
+      '9 no-restricted-properties',
+      '10 no-restricted-syntax',
+    ]);
+  });
 });
