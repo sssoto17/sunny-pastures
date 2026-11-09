@@ -9,6 +9,7 @@ MAIN=/home/dev/sunny-pastures
 WT=$MAIN/.claude/worktrees/16-branch-guard-hook
 pass=0
 fail=0
+unset CLAUDE_CODE_REMOTE GITHUB_ACTIONS # set in cloud sessions and CI; tested below
 
 # JSON-encode a string the way the harness does (backslash, quote, newline, tab).
 json_str() {
@@ -96,6 +97,7 @@ deny "$MAIN" $'cat <<EOF > notes.txt\ngit switch x\nEOF\ngit switch feature'
 
 # --- cd/pushd into a worktree (7 Nov comment) -----------------------------------------------
 deny "$MAIN" 'cd .claude/worktrees/16-branch-guard-hook' 'subshell'
+deny "$MAIN" 'cd .claude/worktrees/16-branch-guard-hook' 'worktree tool' # #75
 deny "$MAIN" "cd $WT"
 deny "$MAIN" 'cd .claude/worktrees'
 deny "$MAIN/docs" 'cd ../.claude/worktrees/16-branch-guard-hook'
@@ -178,6 +180,26 @@ deny "$MAIN" "g'i't switch feature"
 deny "$MAIN" 'g\it switch feature'
 deny "$MAIN" '"g"it checkout feature'
 deny "$MAIN" "c'd' .claude/worktrees/16-x"
+
+# --- shared lexer (#75): wrappers and `-c` shells are looked through ---------------------------
+deny "$MAIN" 'timeout 60 git switch feature'
+deny "$MAIN" 'env -i PATH=/usr/bin git checkout feature'
+deny "$MAIN" "bash -c 'git switch feature'"
+deny "$MAIN" "sh -c 'cd docs && git checkout feature'"
+allow "$MAIN" "bash -c 'cd .claude/worktrees/16-x && git switch feature'"
+allow "$MAIN" "bash -c 'cd .claude/worktrees/16-x'" # a child shell's cd ends with it
+allow "$MAIN" 'git status > .scratch/status.txt 2>&1'
+deny "$MAIN" '(( n > 0 )) && git switch feature'
+deny "$MAIN" '[[ a > b ]] && git checkout feature'
+deny "$MAIN" '((true) && git switch feature)'
+deny "$MAIN" '[[ (a)]] && git switch feature; echo ]]'
+allow "$MAIN" 'if [[ (a)]]; then git status; fi'
+allow "$MAIN" 'if (( $(git rev-list --count HEAD..origin/main) > 0 )); then git status; fi'
+
+# --- remote sessions have no main folder to protect (#75) --------------------------------------
+CLAUDE_CODE_REMOTE=true allow "$MAIN" 'git checkout -b claude/retro-2026-11-15'
+GITHUB_ACTIONS=true allow "$MAIN" 'git switch -c factory/80-x'
+CLAUDE_CODE_REMOTE=false deny "$MAIN" 'git switch feature'
 
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
