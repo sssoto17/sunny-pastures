@@ -7,8 +7,12 @@ status: proposed
 `guard / floor` (`.github/scripts/floor-guard.mjs`) and the coverage gate
 (`.github/scripts/coverage-gate.mjs`) are the checks that hold `CONSTRAINTS.md`'s bar in CI (#40).
 `AGENTS.md` asks each module to name its patterns and the alternatives considered. This ADR is that
-record for both scripts. It's written in parts: this first part covers how the guard handles a
-change to `CONSTRAINTS.md` itself (#122). #99 adds the rest of the guard's design and the gate's.
+record for both scripts, and for `typecheck-reach.mjs`, which keeps `ci / typecheck` complete. Its
+sections:
+- how the guard handles a change to `CONSTRAINTS.md` itself (#122);
+- Exceptions rows (#99, part 1);
+- the guard's and the gate's design as a whole (#99, part 3), which also records part 2's (#133)
+  patterns and number pairing.
 
 ## Reviewing a change to `CONSTRAINTS.md` (#122, decided 9 Nov)
 
@@ -193,3 +197,89 @@ reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
   case.
 - *Checking only added rows for a bad date.* That was the old behaviour, and an old row with a bad
   date never expired.
+
+## The guard and the gate as a whole (#99, decided 9 Nov)
+
+### The floor guard
+
+`guard / floor` reads the PR's diff against the merge base (`diff.mjs`) and fails a weakened bar
+unless an Exceptions row waives it. It exits 0 when clean, 1 on a violation, and 2 when it can't
+run; a 2 never reads as clean.
+
+| Pattern | Where | Why |
+|---|---|---|
+| Diff-scoped check | Only added and removed lines, and the files they're in | A PR is judged on what it changes, so old code can't block it and new code can't hide in it. |
+| Trusted code judges | CI runs the base branch's guard, not the PR's (#96) | A PR can't weaken the guard that judges it. A change to the guard takes effect from the next PR. |
+| Fail closed | Exit 2 on anything it can't read; an unreadable Exceptions row fails | Silence must mean "checked and clean", never "couldn't tell". |
+| Denylist of weakening forms | Suppressions, skips, stubs, loosened configs, removed workflow steps | Each is a known shape of a lowered bar. #99 part 2 (#133) adds the forms the #40 review found passing: an empty `.catch`, a comment-only `catch`, "not yet implemented", every `fallow-ignore-*`, a deleted run count, a new tsconfig with neither `extends` nor `strict`. |
+| Structural diff of `CONSTRAINTS.md` | Rules pair by section and key, then by similarity; numbers carry a direction and a unit | It compares what a rule says, not its line. With #99 part 2 (#133), numbers pair by unit before position, so a new cap added in front can't take an old one's place, and a cap in a new unit counts as a loosening. |
+| Time-boxed, scoped waiver | Exceptions rows | A weakened bar passes only on a named path, for named findings, until a date, with the admin's approval (code-owned). |
+| Allowlist for one known change (#133) | A SHA-only `uses:` bump in the floor job, from Dependabot only | Dependabot's weekly bump would otherwise need the admin every week. The actor check stops an imposter commit from riding along. |
+
+**Alternatives considered.**
+- *An AST-based checker (the TypeScript compiler API, or custom ESLint rules).* It would see
+  through spelling tricks that line patterns miss. It's not adopted: the floor job runs with Node
+  only and no install, and ESLint already holds the rules that need a parse. The gap is the
+  pattern list's known limit.
+- *Running the PR's own guard.* Rejected in #96: a PR could switch it off.
+- *A review bot instead of a script.* It's not deterministic, and it's the reviewer most open to
+  manipulation (ADR-0002, area 2). The bot reviews as well, but it doesn't replace the guard.
+
+**The routes past a red guard.** `guard / floor` is a required check in the ruleset `main checks`,
+which has no bypass. So the admin's bypass merge on the ruleset `main` can't get a red guard
+through. A blocked PR has three routes:
+1. Fix the change.
+2. Add an Exceptions row for the finding on the file's path, in the same PR, with the admin's
+   approval (the file is code-owned). A workflow file is a valid Path, so `check-removed` on
+   `.github/workflows/ci.yml` lets a floor-job change through.
+3. The admin lifts `main checks` for that one merge, a ruleset change only the admin can make.
+
+The guard's hint for `check-removed` names all three (#99 part 2).
+
+**Package scripts count as checks (#99).** CI runs the PR's own `package.json` scripts. So a script
+line that loses a check command (`tsc -b`, `eslint`, `vitest run`, one of the guard scripts), or a
+script other than `check:task` that gains `--skip-ratchet`, is `check-removed` too.
+
+### The coverage gate
+
+`coverage-gate.mjs` reads the lcov the test run already wrote and intersects it with the diff:
+changed lines need 90% in `packages/sim` and 80% elsewhere in `apps/` and `packages/`, and project
+coverage must not fall more than 0.5 points below the recorded ratchet. The numbers are
+`CONSTRAINTS.md`'s; this records the design.
+
+| Pattern | Where | Why |
+|---|---|---|
+| Diff coverage | lcov ∩ changed lines | New code needs tests without old code blocking the PR. |
+| Reuse the artifact | It reads `coverage/lcov.info` and never reruns the tests | One test run per job, within the stage budgets. |
+| Ratchet with tolerance | The project coverage row | No honest number exists before the code. It holds the first value and blocks a fall past the tolerance. |
+| Fail closed (#99) | Only "not yet" means no ratchet; any other cell it can't read exits 2 | A typo in the Today cell can't switch the ratchet off. |
+| Partial runs skip the whole-project check (#99) | `check:task` passes `--skip-ratchet` | `vitest --changed` counts every untested file at 0%, so the project figure would read low. CI runs the full suite and checks it. |
+
+**Alternatives considered.**
+- *A hosted service (Codecov, Coveralls).* It needs an external service and a token, and the
+  thresholds would live outside `CONSTRAINTS.md`.
+- *Vitest's own `coverage.thresholds`.* They're whole-project only, and they sit in
+  `vitest.config.*`, where an edit moves them.
+- *Rerunning the related tests in the gate.* It doubles the test time.
+
+### Typecheck reach
+
+`typecheck-reach.mjs` runs after `tsc -b` in `pnpm typecheck` (#99). Every package that
+`pnpm-workspace.yaml` matches must have a tsconfig.json that the root tsconfig references, because
+`tsc -b` builds only referenced projects.
+
+- *Pattern: a completeness check.* The workspace list is the source of truth, and the build graph
+  must cover it. It fails closed. It reads the `packages:` list of `pnpm-workspace.yaml` with
+  comments, blank lines and `!` exclusions, and it expands only plain folders and `dir/*`. Any
+  other glob, an empty list, or a root tsconfig that isn't plain JSON exits 2. A package counts as
+  referenced only through its own `tsconfig.json`.
+- *Alternatives:* `pnpm -r exec tsc --noEmit` checks every package, but it loses build mode's
+  caching and the project graph; a single root tsconfig that includes everything loses the
+  per-package `lib` and `types` that keep the sim free of DOM and Node types (ADR-0003).
+
+### Known limits
+
+What the guard still can't judge in `CONSTRAINTS.md` is listed there, under "Guarding the bar". It
+covers a rewording that changes meaning without the listed words, and a carve-out in other words.
+#122 replaced #99's original note that "a rewording that changes meaning without changing tokens
+passes". The Markdown parsing is frozen, and its edge cases are #132's.

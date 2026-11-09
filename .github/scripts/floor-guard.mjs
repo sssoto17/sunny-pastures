@@ -34,6 +34,24 @@ const SELF = new Set(['.github/scripts/floor-guard.mjs', '.github/scripts/floor-
 // A workflow line that runs a check: removing it, or letting the job fail quietly, weakens the bar.
 const WORKFLOW = /^\.github\/(workflows|actions)\/.+\.ya?ml$/;
 const CHECK_STEP = /floor-guard\.mjs|coverage-gate\.mjs|pnpm (typecheck|lint|test)\b|SIM_PROPERTY_RUNS/;
+// The checks a package.json script runs (#99, review of #134). CI runs the PR's own scripts, so a
+// script that loses one of these, or skips the ratchet outside `check:task`, is a removed check.
+const SCRIPT_LINE = /^\s*"([\w:.-]+)"\s*:\s*"(.*)",?\s*$/;
+const CHECK_CMD = /node \S*(?:floor-guard|coverage-gate|typecheck-reach)\.mjs|\btsc -b\b|\beslint\b|\bvitest run\b|pnpm (?:typecheck|lint|test|guard:floor|coverage:gate|check:fast)\b/g;
+const scriptChecks = (f) => {
+  const hits = [];
+  const byKey = (lines) => new Map(lines.map((l) => [SCRIPT_LINE.exec(l.text), l]).filter(([m]) => m).map(([m, l]) => [m[1], { value: m[2], line: l.line }]));
+  const was = byKey(f.removed);
+  const now = byKey(f.added);
+  for (const [key, old] of was) {
+    const value = now.get(key)?.value ?? '';
+    if ((old.value.match(CHECK_CMD) ?? []).some((cmd) => !value.includes(cmd))) hits.push(`${old.line} (old)`);
+  }
+  for (const [key, cur] of now) {
+    if (key !== 'check:task' && cur.value.includes('--skip-ratchet') && !(was.get(key)?.value ?? '').includes('--skip-ratchet')) hits.push(cur.line);
+  }
+  return hits;
+};
 const FREEZE = '2026-12-20'; // CONSTRAINTS.md, Exceptions: never past the feature freeze
 const MAX_EXCEPTION_DAYS = 30;
 
@@ -907,6 +925,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
       const count = (ls) => ls.reduce((n, l) => n + (l.text.match(ASSERTIONS)?.length ?? 0), 0);
       if (count(f.removed) > count(f.added)) weak('assertion-removed', f.path, `${f.removed.find((l) => ASSERTION.test(l.text))?.line} (old)`);
     }
+    if (basename(f.path) === 'package.json' && f.status !== 'added') for (const line of scriptChecks(f)) weak('check-removed', f.path, line);
     if (WORKFLOW.test(f.path)) {
       const before = f.oldPath ? oldContent(mergeBase, f.oldPath) ?? [] : [];
       const now = readFileSync(f.path, 'utf8').split('\n');

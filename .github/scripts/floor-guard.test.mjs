@@ -111,6 +111,28 @@ describe('floor guard, end to end', () => {
     });
   });
 
+  // Review of #134: CI runs the PR's own package.json scripts, so dropping a check from one (or
+  // skipping the ratchet outside `check:task`) weakens `ci / typecheck` or `check:full` quietly.
+  describe('package.json scripts', () => {
+    const SCRIPTS = (typecheck, full) => `{\n  "scripts": {\n    "typecheck": "${typecheck}",\n    "check:task": "pnpm test:related && pnpm coverage:gate --skip-ratchet",\n    "check:full": "${full}"\n  }\n}\n`;
+    const OK = SCRIPTS('tsc -b && node .github/scripts/typecheck-reach.mjs', 'pnpm test && pnpm coverage:gate');
+
+    it.each([
+      ['a check dropped from a script', SCRIPTS('tsc -b', 'pnpm test && pnpm coverage:gate')],
+      ['the ratchet skipped outside check:task', SCRIPTS('tsc -b && node .github/scripts/typecheck-reach.mjs', 'pnpm test && pnpm coverage:gate --skip-ratchet')],
+    ])('blocks %s', (_, content) => {
+      repo = makeRepo({ ...BASE, 'package.json': OK });
+      repo.write({ 'package.json': content });
+      expect(guard().out).toContain('[check-removed] package.json');
+    });
+
+    it('accepts an unrelated script edit', () => {
+      repo = makeRepo({ ...BASE, 'package.json': OK });
+      repo.write({ 'package.json': OK.replace('"check:full"', '"lint": "eslint .",\n    "check:full"') });
+      expect(guard().code).toBe(0);
+    });
+  });
+
   describe('workflows', () => {
     const CI = '.github/workflows/ci.yml';
     const STEPS = 'jobs:\n  test:\n    steps:\n      - run: pnpm test\n  floor:\n    steps:\n      - run: git show "origin/$BASE_REF:x" > "$dir/x"\n      - run: node guard.mjs\n';
