@@ -18,8 +18,9 @@ compare with a hand-written brief).
 
 ## Steps
 
-1. **Gather.** Run `scripts/today-gather.sh` from the repo root. `--help` explains every section
-   and column. On a non-zero exit, tell the admin its error and stop: write nothing.
+1. **Gather.** Run `scripts/today-gather.sh` from the top of the checkout you're in (normally the
+   main folder). `--help` explains every section and column. On a non-zero exit, tell the admin
+   its error and stop: write nothing.
 2. **Handoff.** If the `handoff` line says `present`, read that file. If it says `missing`, that's
    normal (`.remember/` is git-ignored); the agenda says so in one line.
 3. **Pick the briefs.** One per `ready` line with mode Manual, plus each issue named in the
@@ -29,7 +30,8 @@ compare with a hand-written brief).
    - the Retro inbox (title "Retro inbox"): it collects notes, it's never a lane;
    - mode Factory: it gets a prompt line in the agenda, not a brief.
 4. **Draft each brief** (next section) into `out/brief-<N>-<slug>.md`, `<slug>` two or three
-   words from the title, as in `brief-77-after-merge.md`. Create `out` if it's missing.
+   words naming the work, as in `brief-77-after-merge.md`; the same slug names the lane's
+   worktree. Create `out` if it's missing.
 5. **Write the agenda** (section below) to `out/today-<date>.md`. If that file exists, use
    `today-<date>-2.md`, then `-3`, and so on.
 6. **Reply** with the agenda's path and its "Launch" and "For the coordinator" sections.
@@ -41,7 +43,9 @@ accounted for under Leftovers or In flight.
 ## Drafting a brief
 
 Sources, all of them read before writing: the issue (`gh issue view <N> --json
-number,title,body,labels,milestone,comments`), its parent from the `ready` line (its body, and
+number,title,body,labels,milestone,comments`), its parent from the `ready` line, or for an issue
+named in the arguments from `gh api -X GET repos/sssoto17/sunny-pastures/issues/<N> --jq
+.parent_issue_url` (the parent's body, and
 above all its **Context** section, `docs/agents/issue-tracker.md` "Kickoff" step 3), and every
 file, ADR, issue and PR that either of them links. Read those so that "Read first" names the
 sections that matter, not just the files.
@@ -50,8 +54,8 @@ A brief carries only what those sources say. A judgement call, such as two lanes
 file, a criterion that contradicts a doc, or a decision the admin hasn't made, goes under **For
 the coordinator** and in the agenda's section of that name.
 
-The shape (from the hand-written briefs and #55's 9 Nov standard). Lines in `<>` are filled in;
-leave out a section with nothing to say, except Skills and Deliverable.
+The shape: lines in `<>` are filled in; leave out a section with nothing to say, except Skills
+and Deliverable.
 
 ```
 Build lane: #<N> "<title>" (<milestone, e.g. M2>, <week, e.g. Wk 2>, <priority>, under #<parent>;
@@ -99,11 +103,14 @@ Deliverable: one PR that closes #<N>. Run <the checks its criteria call for: the
 <path> is missing.">
 
 ## Launch
-<Each Ready item by priority, one entry each:>
+<Each Ready item, one entry each: Factory items first, so agents work while the admin designs
+(`workflow.md`, morning step 3), then Manual items by priority.>
+- #<N> <title> (Factory, ...): /implement #<N>
 - #<N> <title> (<mode>, <priority>, <size>): brief <path> (new | exists, not rewritten)
   /implement #<N> Read and follow <absolute brief path> first.
-- #<N> <title> (Factory, ...): /implement #<N>
 - #<N> Retro inbox: no lane.
+<Issues named in the arguments that aren't Ready, under "Also drafted", with their status and
+PR, and no launch line.>
 
 ## In flight
 <`week` items In progress or In review, with their PR from `worktrees` when there is one.>
@@ -113,8 +120,7 @@ Deliverable: one PR that closes #<N>. Run <the checks its criteria call for: the
 
 ## Leftovers
 - Merged worktrees: <each `worktrees` line in state merged, with its PR; "locked" means a session
-  may still hold it>. Clean up with <`scripts/after-merge.sh <name>` if that script exists in
-  the root, else `docs/diagrams/workflow.md`, evening step 3>.
+  may still hold it>. Cleanup is `docs/diagrams/workflow.md`, evening step 3.
 - Other worktrees without an open PR: <state none, closed or detached>.
 - Strays: <each `strays` line>: not a registered worktree; check what it holds before deleting.
 - Orphans: <each `orphans` line>: needs a workstream parent (`issue-tracker.md`, "Grouping").
@@ -123,5 +129,6 @@ Deliverable: one PR that closes #<N>. Run <the checks its criteria call for: the
 <Every judgement call from the briefs, plus what the handoff leaves open. "Nothing." if none.>
 ```
 
-Put each launch line in its own fenced block so it pastes in one piece. Every path and command
-you print is absolute (never `$TMPDIR`) and prints no secret (`AGENTS.md`).
+Put each launch line in its own fenced block so it pastes in one piece. In the agenda, file
+paths and commands are absolute (never `$TMPDIR`); inside a brief, repo files stay
+repo-relative, as the template writes them. Nothing you print shows a secret (`AGENTS.md`).

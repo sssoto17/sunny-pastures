@@ -20,20 +20,21 @@ usage() {
 usage: scripts/today-gather.sh [--date YYYY-MM-DD]
 
 Gathers what /today needs and prints it, read-only: it reads GitHub and git and writes nothing,
-not even a file. Run it from the main folder (from a worktree, "out" is that worktree's).
+not even a file. Run it from the main folder; from a worktree, "out" is that worktree's.
 --date picks the day (default: today in Europe/Copenhagen).
 
 Output: sections headed "== <name>", one tab-separated record per line, "-" for an empty field,
 in this order:
   today      date; week (the board's Week iteration that contains the date, or -); root (the
-             main folder); out (.scratch/ of this checkout); handoff (path, present|missing)
-  ready      every Ready item, by priority then number: #N, mode, priority, size, week,
-             parent (#N), an existing .scratch/brief-<N>-*.md, title
-  week       every item in this week's iteration, by number: #N, status, mode, priority, size,
-             title
+             main folder); out (.scratch/ of the checkout it runs in); handoff (path,
+             present|missing)
+  ready      every Ready issue, by priority (none last) then number: #N, mode, priority, size,
+             week, parent (#N), an existing <out>/brief-<N>-*.md, title
+  week       every issue in this week's iteration, by number: #N, status, mode, priority,
+             size, title
   orphans    open issues without a workstream parent (scripts/orphan-issues.sh): #N, title
-  worktrees  every worktree but the main folder: path, branch, the PR's state by branch
-             (merged|open|closed|none|detached), PR (#N), locked
+  worktrees  every worktree but the main folder: path, branch, the state of its PR into main
+             (open|merged|closed|none|detached; an open PR wins), PR (#N), locked
   strays     folders under .claude/worktrees/ that git doesn't list as worktrees
 
 Exit codes: 0 done; 2 bad arguments (nothing read); 3 GitHub or git couldn't be read, or
@@ -67,14 +68,25 @@ else
   today=$(TZ=$TZONE date +%F)
 fi
 
+# Any unexpected failure is exit 3, the documented "couldn't be read", never a bare 1.
+trap 'exit 3' ERR
+
 # --- where things are ---------------------------------------------------------------------------
-# The main folder holds the handoff and the worktrees; the output goes to the checkout this runs
-# in (the main folder, for the coordinator). --git-common-dir is the main folder's .git from any
-# worktree.
+# The main folder holds the handoff and the worktrees. The output goes to .scratch/ of the
+# checkout this runs in: the main folder for the coordinator, a worktree's own folder from a
+# worktree session. --git-common-dir is the main folder's .git from any worktree.
 common=$(git rev-parse --path-format=absolute --git-common-dir) || die 3 "not inside a git repository"
 root=$(cd "${common%/.git}" && pwd -P)
-top=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
+checkout=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
+out=$checkout/.scratch
 handoff=$root/.remember/remember.md
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# Sections are collected first and printed at the end, so a failed read prints no partial list.
+report=""
+add_section() { # name lines -> "== name", then the lines; an empty section is just its header
+  report+="== $1"$'\n'${2}${2:+$'\n'}
+}
 
 # --- the board ----------------------------------------------------------------------------------
 # One row per item, tab-separated: number, type (Issue/PullRequest/DraftIssue), status, mode,
@@ -85,50 +97,50 @@ BOARD_FILTER='"total\t\(.totalCount)", (.items[] | [(.content.number // "-"), (.
   (.status // "-"), (.mode // "-"), (.priority // "-"), (.size // "-"), (.week.title // "-"),
   (.week.startDate // "-"), (.week.duration // "-"), (.title // "-")] | @tsv)'
 LIMIT=1000
-board=$(gh project item-list "$PROJECT" --owner "$OWNER" --format json --limit "$LIMIT" --jq "$BOARD_FILTER") ||
+rows=$(gh project item-list "$PROJECT" --owner "$OWNER" --format json --limit "$LIMIT" --jq "$BOARD_FILTER") ||
   die 3 "could not read Project $PROJECT from GitHub (see gh's error above)"
 
-# Check the shape once, so the loops below can trust it.
-total="" rows=0
-while IFS=$'\t' read -r number type status mode priority size wtitle wstart wdur title; do
+# Parsed once into parallel arrays (item_*), one entry per board item, after checking the shape.
+item_number=() item_type=() item_status=() item_mode=() item_priority=() item_size=()
+item_week=() item_start=() item_days=() item_title=()
+total=""
+while IFS=$'\t' read -r number type status mode priority size wtitle wstart wdays title; do
   [[ -n $number ]] || continue
   if [[ $number == total ]]; then
     [[ -z $total && $type =~ ^[0-9]+$ ]] || die 3 "unexpected total line from GitHub, has the API changed? $type"
     total=$type
     continue
   fi
-  rows=$((rows + 1))
   [[ $number =~ ^[0-9]+$ || ($number == - && $type != Issue) ]] &&
-    [[ ($wstart == - && $wdur == -) || ($wstart =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && $wdur =~ ^[0-9]+$) ]] ||
-    die 3 "unexpected board row from GitHub, has the API changed? $number $type $wstart $wdur"
-done <<<"$board"
+    [[ ($wstart == - && $wdays == -) || ($wstart =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && $wdays =~ ^[0-9]+$) ]] ||
+    die 3 "unexpected board row from GitHub, has the API changed? $number $type $wstart $wdays"
+  item_number+=("$number") item_type+=("$type") item_status+=("$status") item_mode+=("$mode")
+  item_priority+=("$priority") item_size+=("$size") item_week+=("$wtitle") item_start+=("$wstart")
+  item_days+=("$wdays") item_title+=("$title")
+done <<<"$rows"
 [[ -n $total ]] || die 3 "unexpected answer from GitHub: no item count"
-((rows >= total)) || die 3 "the board has $total items but $rows were read; raise LIMIT in $0"
+((${#item_number[@]} >= total)) ||
+  die 3 "the board has $total items but ${#item_number[@]} were read; raise LIMIT in $0"
 
+# This week: the iteration whose dates contain the date (start <= date < start + days).
 week="-"
-while IFS=$'\t' read -r number type status mode priority size wtitle wstart wdur title; do
-  [[ $number == total || $wstart == - ]] && continue
-  if [[ ! $today < $wstart && $today < $(date -d "$wstart $wdur days" +%F) ]]; then
-    week=$wtitle
-    break
-  fi
-done <<<"$board"
+for i in "${!item_number[@]}"; do
+  start=${item_start[i]}
+  [[ $start != - && ! $today < $start && $today < $(date -d "$start ${item_days[i]} days" +%F) ]] || continue
+  week=${item_week[i]}
+  break
+done
 [[ $week != - ]] || echo "today-gather: no Week iteration on the board contains $today" >&2
 
-# Sections are collected first and printed at the end, so a failed read prints no partial list.
-report=""
-add_section() { # name lines -> "== name", then the lines; an empty section is just its header
-  report+="== $1"$'\n'${2}${2:+$'\n'}
-}
 add_section today "$(
-  printf 'date\t%s\nweek\t%s\nroot\t%s\nout\t%s\n' "$today" "$week" "$root" "$top/.scratch"
+  printf 'date\t%s\nweek\t%s\nroot\t%s\nout\t%s\n' "$today" "$week" "$root" "$out"
   printf 'handoff\t%s\t%s\n' "$handoff" "$([[ -f $handoff ]] && echo present || echo missing)"
 )"
 
 # --- ready --------------------------------------------------------------------------------------
-# Every Ready item, whatever its week, by priority then number: number, mode, priority, size,
-# week, parent ("#N" or "-"), the path of a brief already written for it (or "-"), title. The
-# parent comes from REST (item-list doesn't carry it): one GET per Ready item, a handful a day.
+# Every Ready issue, whatever its week, by priority (none last) then number: number, mode,
+# priority, size, week, parent ("#N" or "-"), the path of a brief already written for it (or
+# "-"), title. The parent comes from REST (item-list doesn't carry it): one GET per Ready item.
 parent_of() { # issue number -> "#N" or "-"
   local url
   url=$(gh api -X GET "repos/$OWNER/$REPO/issues/$1" --jq '.parent_issue_url // "-"') ||
@@ -143,114 +155,127 @@ parent_of() { # issue number -> "#N" or "-"
 }
 brief_of() { # issue number -> the first .scratch/brief-<N>-*.md in the output folder, or "-"
   local f
-  for f in "$top/.scratch/brief-$1-"*.md; do
+  for f in "$out/brief-$1-"*.md; do
     [[ -f $f ]] && { echo "$f"; return; }
   done
   echo -
 }
 ready=""
-while IFS=$'\t' read -r number type status mode priority size wtitle wstart wdur title; do
-  [[ $number == total || $status != Ready ]] && continue
-  if [[ $type != Issue ]]; then
-    echo "today-gather: skipped a Ready $type (only issues get a brief): $title" >&2
+for i in "${!item_number[@]}"; do
+  [[ ${item_status[i]} == Ready ]] || continue
+  if [[ ${item_type[i]} != Issue ]]; then
+    echo "today-gather: skipped a Ready ${item_type[i]} (only issues get a brief): ${item_title[i]}" >&2
     continue
   fi
+  number=${item_number[i]}
   parent=$(parent_of "$number") # a failed read exits here (set -e), with parent_of's code
-  ready+=$(printf '%s\t#%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$priority" "$number" "$mode" "$priority" \
-    "$size" "$wtitle" "$parent" "$(brief_of "$number")" "$title")$'\n'
-done <<<"$board"
-add_section ready "$(printf '%s' "$ready" | sort -t$'\t' -k1,1 -k2.2n | cut -f2-)"
+  sort_key=${item_priority[i]/#-/P9} # no priority sorts after P3
+  ready+=$(printf '%s\t#%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$sort_key" "$number" "${item_mode[i]}" \
+    "${item_priority[i]}" "${item_size[i]}" "${item_week[i]}" "$parent" "$(brief_of "$number")" \
+    "${item_title[i]}")$'\n'
+done
+add_section ready "$(printf '%s' "$ready" | LC_ALL=C sort -t$'\t' -k1,1 -k2.2n | cut -f2-)"
 
 # --- week ---------------------------------------------------------------------------------------
-# Every item in this week's iteration, by number: number, status, mode, priority, size, title.
-inweek=""
-while IFS=$'\t' read -r number type status mode priority size wtitle wstart wdur title; do
-  [[ $number == total || $week == - || $wtitle != "$week" ]] && continue
-  inweek+=$(printf '#%s\t%s\t%s\t%s\t%s\t%s' "$number" "$status" "$mode" "$priority" "$size" "$title")$'\n'
-done <<<"$board"
-add_section week "$(printf '%s' "$inweek" | sort -k1.2n)"
+# Every issue in this week's iteration, by number: number, status, mode, priority, size, title.
+# Drafts have no number, so they're left out.
+in_week=""
+for i in "${!item_number[@]}"; do
+  [[ $week != - && ${item_week[i]} == "$week" && ${item_type[i]} == Issue ]] || continue
+  in_week+=$(printf '#%s\t%s\t%s\t%s\t%s\t%s' "${item_number[i]}" "${item_status[i]}" \
+    "${item_mode[i]}" "${item_priority[i]}" "${item_size[i]}" "${item_title[i]}")$'\n'
+done
+add_section week "$(printf '%s' "$in_week" | LC_ALL=C sort -k1.2n)"
 
 # --- orphans ------------------------------------------------------------------------------------
 # Open issues without a workstream parent, as orphan-issues.sh (#76) prints them: "#N", tab,
 # title. Its exit 1 means "listed", not a failure.
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 orphan_code=0
-orphans=$(bash "$here/orphan-issues.sh") || orphan_code=$?
+orphans=$(bash "$script_dir/orphan-issues.sh") || orphan_code=$?
 ((orphan_code <= 1)) || die 3 "orphan-issues.sh failed with exit $orphan_code (see its error above)"
 add_section orphans "$orphans"
 
 # --- worktrees ----------------------------------------------------------------------------------
-# Every registered worktree but the main folder: path (from the main folder when inside it),
-# branch ("-" when detached), the state of the branch's PR (merged/open/closed/none, or
-# "detached"), the PR ("#N" or "-") and "locked" or "-". PRs are squash-merged, so the branch is
-# never an ancestor of main: "merged" is the PR's state, looked up by branch name. Removing a
-# merged worktree is scripts/after-merge.sh's job (#77), not this script's.
-wt_paths=() wt_branches=() wt_locks=()
+# Every registered worktree but the main folder (wt_*: physical path, branch or "-", "locked" or
+# "-"), from git worktree list's porcelain records.
+wt_path=() wt_branch=() wt_lock=()
 path="" branch="" lock="-"
-flush() {
+end_record() {
   if [[ -n $path && $path != "$root" ]]; then
-    wt_paths+=("$path") wt_branches+=("${branch:--}") wt_locks+=("$lock")
+    wt_path+=("$path") wt_branch+=("${branch:--}") wt_lock+=("$lock")
   fi
   path="" branch="" lock="-"
 }
 worktrees=$(git worktree list --porcelain) || die 3 "git worktree list failed"
 while IFS= read -r line; do
   case $line in
-    "worktree "*) flush; path=$(cd "${line#worktree }" 2>/dev/null && pwd -P || echo "${line#worktree }") ;;
+    "worktree "*) end_record; path=$(cd "${line#worktree }" 2>/dev/null && pwd -P || echo "${line#worktree }") ;;
     "branch refs/heads/"*) branch=${line#branch refs/heads/} ;;
     locked | "locked "*) lock=locked ;;
   esac
 done <<<"$worktrees"
-flush
+end_record
 
-# One read for every PR, then a pick per branch: merged, else open, else the newest closed.
+# The PR of each branch, from one read of every PR into main (pr_state, pr_number, keyed by head
+# branch). A branch with several PRs keeps the open one (the branch is still in use), else the
+# merged one, else the newest closed one. PRs are squash-merged, so the branch is never an
+# ancestor of main: "merged" is the PR's state. Removing a merged worktree is
+# scripts/after-merge.sh's job (#77), which checks the branch's commits again.
+state_rank() { case $1 in OPEN) echo 3 ;; MERGED) echo 2 ;; CLOSED) echo 1 ;; *) echo 0 ;; esac; }
+replaces() { # state number head -> does this PR replace the one kept so far for head?
+  local kept_state=${pr_state[$3]-} kept_number=${pr_number[$3]-0} new_rank kept_rank
+  [[ -n $kept_state ]] || return 0
+  new_rank=$(state_rank "$1") kept_rank=$(state_rank "$kept_state")
+  if ((new_rank != kept_rank)); then
+    ((new_rank > kept_rank))
+  else
+    (($2 > kept_number))
+  fi
+}
 declare -A pr_state=() pr_number=()
-if ((${#wt_paths[@]})); then
-  prs=$(gh pr list --repo "$OWNER/$REPO" --state all --limit "$LIMIT" --json number,state,headRefName \
-    --jq '.[] | [.headRefName, .state, .number] | @tsv') ||
+if ((${#wt_path[@]})); then
+  prs=$(gh pr list --repo "$OWNER/$REPO" --base main --state all --limit "$LIMIT" \
+    --json number,state,headRefName --jq '.[] | [.headRefName, .state, .number] | @tsv') ||
     die 3 "could not read the pull requests of $OWNER/$REPO from GitHub (see gh's error above)"
-  rank() { case $1 in MERGED) echo 3 ;; OPEN) echo 2 ;; CLOSED) echo 1 ;; *) echo 0 ;; esac; }
-  better() { # state number head -> does this PR beat the one picked so far for head?
-    local old=${pr_state[$3]-}
-    [[ -z $old ]] && return 0
-    (($(rank "$1") != $(rank "$old"))) && { (($(rank "$1") > $(rank "$old"))); return; }
-    (($2 > pr_number[$3]))
-  }
+  pr_count=0
   while IFS=$'\t' read -r head state number; do
     [[ -n $head ]] || continue
+    pr_count=$((pr_count + 1))
     [[ $number =~ ^[0-9]+$ ]] || die 3 "unexpected pull request row from GitHub, has the API changed? $head $state $number"
-    if better "$state" "$number" "$head"; then
+    if replaces "$state" "$number" "$head"; then
       pr_state[$head]=$state pr_number[$head]=$number
     fi
   done <<<"$prs"
+  ((pr_count < LIMIT)) ||
+    die 3 "$pr_count pull requests read, the --limit: some may be missing; raise LIMIT in $0"
 fi
 
-wts=""
-for i in "${!wt_paths[@]}"; do
-  p=${wt_paths[i]} b=${wt_branches[i]}
-  [[ $p == "$root"/* ]] && p=${p#"$root"/}
-  if [[ $b == - ]]; then
+worktree_lines=""
+for i in "${!wt_path[@]}"; do
+  wt=${wt_path[i]} wt_br=${wt_branch[i]}
+  [[ $wt == "$root"/* ]] && wt=${wt#"$root"/}
+  if [[ $wt_br == - ]]; then
     state=detached pr=-
-  elif [[ -n ${pr_state[$b]-} ]]; then
-    state=${pr_state[$b],,} pr="#${pr_number[$b]}"
+  elif [[ -n ${pr_state[$wt_br]-} ]]; then
+    state=${pr_state[$wt_br],,} pr="#${pr_number[$wt_br]}"
   else
     state=none pr=-
   fi
-  wts+=$(printf '%s\t%s\t%s\t%s\t%s' "$p" "$b" "$state" "$pr" "${wt_locks[i]}")$'\n'
+  worktree_lines+=$(printf '%s\t%s\t%s\t%s\t%s' "$wt" "$wt_br" "$state" "$pr" "${wt_lock[i]}")$'\n'
 done
-add_section worktrees "$(printf '%s' "$wts" | sort)"
+add_section worktrees "$(printf '%s' "$worktree_lines" | LC_ALL=C sort)"
 
 # --- strays -------------------------------------------------------------------------------------
 # Folders under .claude/worktrees/ that git doesn't list as worktrees (for example a worktree
 # removed by hand, or 4-local-supabase): paths from the main folder. Never touched here.
 strays=""
-for d in "$root/.claude/worktrees/"*/; do
-  [[ -d $d ]] || continue
-  d=$(cd "$d" && pwd -P)
+for folder in "$root/.claude/worktrees/"*/; do
+  [[ -d $folder ]] || continue
+  folder=$(cd "$folder" && pwd -P)
   registered=""
-  for p in "${wt_paths[@]}"; do [[ $p == "$d" ]] && registered=1; done
-  [[ -n $registered ]] || strays+=${d#"$root"/}$'\n'
+  for wt in "${wt_path[@]}"; do [[ $wt == "$folder" ]] && registered=1; done
+  [[ -n $registered ]] || strays+=${folder#"$root"/}$'\n'
 done
-add_section strays "$(printf '%s' "$strays" | sort)"
+add_section strays "$(printf '%s' "$strays" | LC_ALL=C sort)"
 
 printf '%s' "$report"
