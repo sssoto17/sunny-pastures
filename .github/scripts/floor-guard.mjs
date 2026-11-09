@@ -30,7 +30,7 @@ import { CannotRun, baseArg, enterRepo, git, oldContent, readChange } from './di
 // This file and its tests spell out the suppression and stub patterns, so those two scans skip
 // them; every other check still applies. CI runs the base branch's copy of this guard (ci.yml,
 // `guard / floor`), so a PR can't switch it off by editing it.
-const SELF = new Set(['.github/scripts/floor-guard.mjs', '.github/scripts/floor-guard.test.mjs']);
+const SELF = new Set(['.github/scripts/floor-guard.mjs', '.github/scripts/tests/floor-guard.test.mjs']);
 // A workflow line that runs a check: removing it, or letting the job fail quietly, weakens the bar.
 const WORKFLOW = /^\.github\/(workflows|actions)\/.+\.ya?ml$/;
 const CHECK_STEP = /floor-guard\.mjs|coverage-gate\.mjs|pnpm (typecheck|lint|test)\b|SIM_PROPERTY_RUNS/;

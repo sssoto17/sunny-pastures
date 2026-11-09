@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeRepo } from './test-repo.mjs';
 
-const SCRIPT = fileURLToPath(new URL('./typecheck-reach.mjs', import.meta.url));
-const ROOT = fileURLToPath(new URL('../..', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../typecheck-reach.mjs', import.meta.url));
+const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 const WORKSPACE = 'packages:\n  - apps/*\n  - packages/*\n';
 const solution = (refs) => `${JSON.stringify({ files: [], references: refs.map((path) => ({ path })) }, null, 2)}\n`;
