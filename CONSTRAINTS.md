@@ -31,7 +31,8 @@ issue that turns it into a check. Until those land, review enforces the floor.
 
 Checked in the diff against the merge base by the floor guard (`guard / floor`, #40), adapted from
 [`floor-guard.md`](.agents/skills/constraint-driven-development/references/floor-guard.md). It
-reports the rule and the location, never a matched value.
+reports the rule and the location, never a matched value. A change to this file is the one place
+it quotes text: see [Guarding the bar](#guarding-the-bar).
 
 **A weakened bar is blocked unless the same PR adds an [Exceptions](#exceptions) row.** That row
 changes this file, so the PR needs the admin's approval (a code-owned path, ADR-0002 area 2). A weakened bar is any
@@ -260,6 +261,29 @@ At review, compare the diff against the merge base for the five ways a bar gets 
 The floor guard (#40) catches all five in the diff. It blocks 1–3 unless the same PR adds an
 exception, and it always blocks 4. A change to this file (1 and 5) also needs the admin's
 approval through CODEOWNERS.
+
+**What the guard can judge in this file.** It compares each rule with its old version: a number
+moved the wrong way, a severity or a stage dropped, a listed item gone, a rule removed. It can't
+read what new words mean. So whenever this file changes, the guard also reports every changed
+rule, and every changed line outside a rule (a heading, a comment, a fence), with the old and new
+text side by side and the edit marked. The report goes to the guard's log, the job summary and a
+warning annotation on the changed line in the PR's Files changed tab (#122). A rule that gains a
+narrowing word (`except`, `unless`, `but not`, `only`, `may`, `other than`, `apart from` and a few
+more) or a new clause in a table's list cell is marked `warning [rule-narrowed]`. It warns rather
+than fails (admin, 9 Nov): the guard can't tell an approved carve-out from an unapproved one, and
+`guard / floor` is a required check with no bypass. ADR-0004 records the choice.
+
+**The admin's merge review reads every changed rule in that report**, including the ones the guard
+passes. What the guard still can't catch, and leaves to that review:
+
+- A rewording that flips the meaning with no narrowing word and no new clause, such as "must not
+  fall" becoming "must now fall".
+- A carve-out in words that aren't on the list, or inside a code span.
+- More than 10 changes at once: GitHub shows 10 annotations per step, so the last one points to the
+  job summary, which has them all.
+
+It errs the other way on one edit: a typo fixed inside a table's list cell reads as a removed item
+and fails as `rule-narrowed`, as it did before #122.
 
 ## Exceptions
 

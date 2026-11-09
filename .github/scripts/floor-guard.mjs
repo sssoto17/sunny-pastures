@@ -6,6 +6,11 @@
 //   - exit codes: 0 clean, 1 floor violation, 2 could not run (a 2 never reads as clean);
 //   - it reports the rule and the location, never the matched text;
 //   - tightening is silent, loosening is loud.
+// One addition (#122): when CONSTRAINTS.md changes, the change report quotes every changed rule,
+// old and new, with the edit marked, in the log, the job summary ($GITHUB_STEP_SUMMARY) and warning
+// annotations. It quotes only CONSTRAINTS.md, a prose file, never code. A rule that gains a
+// narrowing word or a new clause is marked `warning [rule-narrowed]` there: a warning for the
+// admin's merge review, never a failure (admin, 9 Nov; ADR-0004).
 //
 // Usage: node .github/scripts/floor-guard.mjs [--base <ref>]   (default base: origin/main)
 // FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date (tests only).
@@ -13,7 +18,7 @@
 // A weakened bar (silenced checker, easier test, moved threshold, loosened tool config) passes
 // only when the same PR adds an Exceptions row to CONSTRAINTS.md whose Path covers the file.
 // Unfinished work and invalid or expired exceptions always fail.
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CannotRun, baseArg, enterRepo, oldContent, readChange } from './diff.mjs';
@@ -171,7 +176,7 @@ export const parseRules = (lines) => {
       const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
       if (cells.every((c) => /^:?-+:?$/.test(c))) return;
       if (!headers) headers = cells;
-      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, text: line, cells, headers });
+      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, end: n, text: line, cells, headers });
       return;
     }
     const item = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
@@ -180,12 +185,13 @@ export const parseRules = (lines) => {
       // A label before a colon ("**Split size:** …") keys the item; without one it pairs by
       // similarity, like a paragraph, so a comma edit isn't a removed rule.
       const label = /^([^:\n]{1,60}):/.exec(item[1].replace(/\*\*/g, ''));
-      cur = { kind: 'item', section, sectionNo, key: label ? label[1].trim() : null, line: n, text: item[1] };
+      cur = { kind: 'item', section, sectionNo, key: label ? label[1].trim() : null, line: n, end: n, text: item[1] };
     } else if (cur && (cur.kind === 'para' || /^\s+\S/.test(line))) {
       cur.text += `\n${line}`;
+      cur.end = n;
     } else {
       flush();
-      cur = { kind: 'para', section, sectionNo, key: null, line: n, text: line };
+      cur = { kind: 'para', section, sectionNo, key: null, line: n, end: n, text: line };
     }
   });
   flush();
@@ -222,17 +228,28 @@ const PROSE_HEADER =/why|reason|covers|what is checked|notes?/i;
 // Numbers are judged by direction (compareNumbers), so list items compare with them masked.
 const norm = (s) => s.replace(/[`*]/g, '').replace(/\d+(\.\d+)*/g, 'N').replace(/\s+/g, ' ').replace(/[.:]+$/, '').trim().toLowerCase();
 const ticks = (t) => new Set([...t.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
-// What a rule lists: backticked tokens, plus the comma-separated items of a table's list cells.
+// A table's list cells: every cell but the key, prose columns and a ratchet's "Today".
+const isListCell = (r, i) => i > 0 && !PROSE_HEADER.test(r.headers[i] ?? '') && !/^today$/i.test(r.headers[i] ?? '');
+// A list cell's items: split at `,`, `;` and sentence ends, so an item appended before a full stop
+// ("`setImmediate`, `queueMicrotask`. `new Date()` …") leaves the next sentence intact.
+const segments = (r) => r.cells.flatMap((c, i) => (isListCell(r, i) ? c.split(/[,;]|\.(?=\s|$)/) : []));
+// What a rule lists: backticked tokens, plus the items of a table's list cells.
 const listed = (r) => {
   if (r.kind !== 'row') return new Set(ticks(r.text));
   const out = new Set();
   r.cells.forEach((c, i) => {
-    const h = r.headers[i] ?? '';
-    if (i === 0 || PROSE_HEADER.test(h) || /^today$/i.test(h)) return;
-    for (const t of ticks(c)) out.add(`\`${norm(t)}\``);
-    for (const item of c.split(/[,;]/)) if (norm(item)) out.add(norm(item));
+    if (isListCell(r, i)) for (const t of ticks(c)) out.add(`\`${norm(t)}\``);
   });
+  for (const item of segments(r)) if (norm(item)) out.add(norm(item));
   return out;
+};
+// The items of a row's list cells that are new in `now` and read as a clause: at least three
+// words outside code spans. A shorter new item ("`structuredClone`", "and `queueMicrotask`") is
+// an addition, which tightens (#122).
+const newClauses = (old, now) => {
+  if (now.kind !== 'row') return [];
+  const was = new Set(segments(old).map(norm));
+  return segments(now).filter((s) => !was.has(norm(s)) && (s.replace(/`[^`]*`/g, ' ').match(/[a-z]{2,}/gi) ?? []).length >= 3);
 };
 const cellOf = (r, header) => {
   const i = r.headers?.findIndex((h) => new RegExp(`^${header}$`, 'i').test(h)) ?? -1;
@@ -269,6 +286,24 @@ const STAGE_CELL = /^(edit|task end|ci|preview|gate)(\s*,\s*(edit|task end|ci|pr
 const stages = (t) =>
   new Set(t.split('|').map((c) => c.trim()).filter((c) => STAGE_CELL.test(c)).flatMap((c) => c.toLowerCase().split(/\s*,\s*/)));
 const WEAKER_SEVERITY = /_\(warn\)_|\(not required\)/;
+// Words that carve an exception out of a rule (#122). A rule that gains one may be narrowed, even
+// when every listed item survives: "…except in X" keeps them all and still lowers the bar. It's a
+// warning for the admin, not a failure (admin, 9 Nov): the list is a tripwire, not a parser, and
+// the change report shows every changed rule whether it trips or not.
+const NARROWING = /\bexcept\w*|\bunless\b|\bbut not\b|\bonly\b|\bmay\b|\bcan also\b|\bother than\b|\bapart from\b|\baside\b|\bbesides\b|\bsave for\b|\bexclud\w*|\bexempt\w*|\ballow\w*|\bpermit\w*|\bwaive\w*|\boptional\w*|\bno longer\b|\bas long as\b|\bprovided that\b|\b(does not|doesn't|do not|don't|need not|needn't) (apply|count)\b/g;
+// Code spans are names (`gitleaks:allow`, `istanbul ignore`), so adding one to a list isn't a
+// carve-out; a carve-out hidden in one still shows in the change report.
+const narrowings = (text) => text.replace(/`[^`]*`/g, ' ').replace(/[*_]/g, '').replace(/\s+/g, ' ').toLowerCase().match(NARROWING) ?? [];
+// The narrowing words `now` has more of than `old` (none, for a new rule).
+const addedNarrowing = (oldText, nowText) => {
+  const left = narrowings(oldText);
+  return narrowings(nowText).filter((w) => {
+    const i = left.indexOf(w);
+    if (i === -1) return true;
+    left.splice(i, 1);
+    return false;
+  });
+};
 
 const compareNumbers = (was, now) => {
   for (const dir of ['min', 'max', null]) {
@@ -304,8 +339,14 @@ const compareRule = (old, now) => {
   return null;
 };
 
+const keyOf = (r) => r.key ?? `${r.kind === 'item' ? 'list item' : r.kind === 'row' ? 'row' : 'paragraph'} in "${r.section}"`;
+
+// Compares CONSTRAINTS.md at the merge base with the working tree. Returns the findings, and every
+// rule that changed, was removed or was added, for the change report (#122). `narrows` lists why a
+// change may carve out an exception: the narrowing words it adds, and new clauses in a list cell.
 const constraintsFindings = (f, mergeBase) => {
   const out = [];
+  const changes = [];
   const before = parseRules(oldContent(mergeBase, f.oldPath ?? f.path) ?? []);
   const after = parseRules(readFileSync(f.path, 'utf8').split('\n'));
   const isException = (r) => r.kind === 'row' && (/^E\d+$/.test(r.key) || r.key === '_none_');
@@ -317,8 +358,12 @@ const constraintsFindings = (f, mergeBase) => {
     return !same;
   });
   for (const old of pending) {
-    // Dropping an exception, or the table's `_none_` placeholder, tightens: silent.
-    if (isException(old)) continue;
+    const key = keyOf(old);
+    // Dropping an exception, or the table's `_none_` placeholder, tightens: no finding, but reported.
+    if (isException(old)) {
+      changes.push({ kind: 'removed', old, key, narrows: [] });
+      continue;
+    }
     const candidates = after.filter((r) => !taken.has(r) && r.kind === old.kind && r.section === old.section);
     // Same key first; otherwise the most similar rule of the same kind (a reworded paragraph, an
     // item without a label, or one whose label changed).
@@ -330,16 +375,134 @@ const constraintsFindings = (f, mergeBase) => {
         if (s >= best) [best, now] = [s, r];
       }
     }
-    const key = old.key ?? `${old.kind === 'item' ? 'list item' : 'paragraph'} in "${old.section}"`;
     if (!now) {
       out.push({ rule: 'rule-removed', line: `${old.line} (old)`, key });
+      changes.push({ kind: 'removed', old, key, narrows: [] });
       continue;
     }
     taken.add(now);
+    const narrows = [...addedNarrowing(old.text, now.text).map((w) => `adds "${w}"`), ...newClauses(old, now).map(() => 'adds a clause to a list cell')];
+    changes.push({ kind: 'changed', old, now, key, narrows: [...new Set(narrows)] });
     const verdict = compareRule(old, now);
     if (verdict) out.push({ rule: verdict, line: now.line, key });
   }
-  return out;
+  // A new rule has no old text to lose items from, but it can still carve out an exception.
+  for (const r of after) {
+    if (taken.has(r)) continue;
+    const narrows = isException(r) ? [] : addedNarrowing('', r.text).map((w) => `adds "${w}"`);
+    changes.push({ kind: 'added', now: r, key: keyOf(r), narrows: [...new Set(narrows)] });
+  }
+  // Changed lines no rule covers: headings, table headers, HTML comments and fences. They hold no
+  // rule the guard can compare, but a comment or a fence can still tell an agent something.
+  const covered = (rules) => new Set(rules.flatMap((r) => Array.from({ length: r.end - r.line + 1 }, (_, k) => r.line + k)));
+  const inAfter = covered(after);
+  const inBefore = covered(before);
+  for (const a of f.added) {
+    if (a.text.trim() && !inAfter.has(a.line)) changes.push({ kind: 'other', now: { line: a.line, text: a.text }, narrows: [...new Set(addedNarrowing('', a.text).map((w) => `adds "${w}"`))] });
+  }
+  for (const r of f.removed) {
+    if (r.text.trim() && !inBefore.has(r.line)) changes.push({ kind: 'other', old: { line: r.line, text: r.text }, narrows: [] });
+  }
+  changes.sort((a, b) => (a.now ?? a.old).line - (b.now ?? b.old).line);
+  return { findings: out, changes };
+};
+
+// The change report's marks, in git's --word-diff style. Tokens keep their leading space, so
+// joining them gives back the text; `,` and `;` are tokens of their own, so "too" stays "too" when
+// "; …" is appended to it.
+const tokens = (t) => t.replace(/\s+/g, ' ').trim().match(/ ?[,;]| ?[^\s,;]+/g) ?? [];
+const wordDiff = (was, now) => {
+  const a = tokens(was);
+  const b = tokens(now);
+  const same = (x, y) => x.trim() === y.trim();
+  // Longest common subsequence, filled from the end so the walk below runs forwards.
+  const L = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) L[i][j] = same(a[i], b[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const ops = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && same(a[i], b[j])) ops.push(['=', a[i++], b[j++]]);
+    else if (j < b.length && (i === a.length || L[i][j + 1] >= L[i + 1][j])) ops.push(['+', null, b[j++]]);
+    else ops.push(['-', a[i++], null]);
+  }
+  // One side: unchanged tokens as they are, its own changed runs wrapped in marks.
+  const render = (pick, mark, open, close) => {
+    let out = '';
+    let run = '';
+    const flush = () => {
+      if (run) out += `${/^ */.exec(run)[0]}${open}${run.trimStart()}${close}`;
+      run = '';
+    };
+    for (const op of ops) {
+      const t = pick(op);
+      if (t === null) continue;
+      if (op[0] === mark) run += t;
+      else {
+        flush();
+        out += t;
+      }
+    }
+    flush();
+    return out.trim();
+  };
+  return { was: render((op) => op[1], '-', '[-', '-]'), now: render((op) => op[2], '+', '{+', '+}') };
+};
+
+const flat = (t) => t.replace(/\s+/g, ' ').trim();
+// One entry per changed rule: a heading line, then was/now lines. A changed row shows only the
+// cells that changed, each under its column's name.
+const reportEntries = (changes) =>
+  changes.map((c) => {
+    const where = c.now ? `CONSTRAINTS.md:${c.now.line}` : `CONSTRAINTS.md:${c.old.line} (old)`;
+    const head = `${c.kind}: ${where} ${c.kind === 'other' ? '(not a rule)' : `(rule "${c.key}")`}`;
+    const warn = c.narrows.length ? [`warning [rule-narrowed]: ${c.narrows.join(', ')}; check it isn't a carve-out`] : [];
+    if (!c.now) return { c, head, lines: [`was: [-${flat(c.old.text)}-]`] };
+    if (!c.old) return { c, head, lines: [...warn, `now: {+${flat(c.now.text)}+}`] };
+    const lines = [...warn];
+    if (c.old.kind === 'row' && c.old.cells.length === c.now.cells.length) {
+      c.now.cells.forEach((cell, k) => {
+        if (cell === c.old.cells[k]) return;
+        const d = wordDiff(c.old.cells[k], cell);
+        lines.push(`${c.now.headers[k] || `column ${k + 1}`}:`, `  was: ${d.was}`, `  now: ${d.now}`);
+      });
+    } else {
+      const d = wordDiff(c.old.text, c.now.text);
+      lines.push(`was: ${d.was}`, `now: ${d.now}`);
+    }
+    return { c, head, lines };
+  });
+
+// Workflow-command data escapes `%`, CR and LF; property values also escape `:` and `,`.
+const MAX_ANNOTATIONS = 10; // GitHub Actions: 10 warning annotations per step (REST docs, check runs)
+const escapeData = (s) => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+const escapeProp = (s) => escapeData(s).replace(/:/g, '%3A').replace(/,/g, '%2C');
+
+// The report of every changed CONSTRAINTS.md rule: for the log, the job summary, and warning
+// annotations, which GitHub shows on the PR's Files changed tab next to the changed line.
+const changeReport = (changes) => {
+  if (!changes.length) return null;
+  const entries = reportEntries(changes);
+  const narrowed = changes.filter((c) => c.narrows.length).length;
+  const intro = `CONSTRAINTS.md: ${changes.length} rule(s) changed${narrowed ? `, ${narrowed} may narrow a rule` : ''}. The admin reads each one at merge (CONSTRAINTS.md, "Guarding the bar"). {+…+} marks added text, [-…-] removed text.`;
+  const log = [`floor-guard: ${intro}`, ...entries.flatMap((e) => [`  ${e.head}`, ...e.lines.map((l) => `    ${l}`)])].join('\n');
+  // Every entry sits in one fence, longer than any run of tildes or backticks in the text.
+  const body = entries.flatMap((e) => [e.head, ...e.lines.map((l) => `  ${l}`), '']).join('\n');
+  const fence = '~'.repeat(Math.max(3, ...[...body.matchAll(/~+/g)].map((m) => m[0].length + 1)));
+  const summary = `### floor guard: CONSTRAINTS.md changes\n\n${intro}\n\n${fence}text\n${body}${fence}\n`;
+  // GitHub keeps only 10 warning annotations per step, so past 10 the last one points to the
+  // summary, and the possible narrowings go first.
+  const ranked = [...entries.filter((e) => e.c.narrows.length), ...entries.filter((e) => !e.c.narrows.length)];
+  const shown = ranked.length > MAX_ANNOTATIONS ? ranked.slice(0, MAX_ANNOTATIONS - 1) : ranked;
+  const annotations = shown.map((e) => {
+    const line = e.c.now ? `,line=${e.c.now.line}` : '';
+    const title = e.c.narrows.length ? 'CONSTRAINTS.md rule may be narrowed (admin reads)' : `CONSTRAINTS.md rule ${e.c.kind}`;
+    return `::warning file=CONSTRAINTS.md${line},title=${escapeProp(title)}::${escapeData([e.head, ...e.lines].join('\n'))}`;
+  });
+  if (shown.length < ranked.length) {
+    annotations.push(`::warning file=CONSTRAINTS.md,title=${escapeProp('CONSTRAINTS.md: more changes')}::${ranked.length - shown.length} more changed rules are in the job summary and the guard's log.`);
+  }
+  return { log, summary, annotations };
 };
 
 // Exceptions rows: | ID | Rule | Path | Reason | Owner | Expires |
@@ -371,6 +534,7 @@ export const globToRegExp = (glob) =>
 export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   const findings = []; // { rule, file, line, key?, waivable }
   const notices = [];
+  const ruleChanges = []; // CONSTRAINTS.md rules that changed, for the change report
   const push = (waivable) => (rule, file, line, key) => findings.push({ rule, file, line, key, waivable });
   const weak = push(true);
   const always = push(false);
@@ -381,7 +545,9 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       continue;
     }
     if (isConstraints(f.path)) {
-      for (const c of constraintsFindings(f, mergeBase)) weak(c.rule, f.path, c.line, c.key);
+      const r = constraintsFindings(f, mergeBase);
+      for (const c of r.findings) weak(c.rule, f.path, c.line, c.key);
+      ruleChanges.push(...r.changes);
     }
     if (isProse(f.path)) continue;
     const byLine = new Map(f.added.map((a) => [a.line, a.text]));
@@ -459,7 +625,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
     if (w) notices.push(`${f.rule} at ${f.file}:${f.line} waived by ${w.id}`);
     else blocking.push(f);
   }
-  return { blocking, notices };
+  return { blocking, notices, report: changeReport(ruleChanges) };
 };
 
 const HINTS = {
@@ -482,10 +648,16 @@ const main = () => {
   } catch {
     throw new CannotRun('CONSTRAINTS.md is missing');
   }
-  const { blocking, notices } = guard(changes, { mergeBase, today, constraintsNow });
+  const { blocking, notices, report } = guard(changes, { mergeBase, today, constraintsNow });
   for (const n of notices) console.log(`floor-guard: note: ${n}`);
+  if (report) {
+    console.log(report.log);
+    if (process.env.GITHUB_ACTIONS === 'true') for (const a of report.annotations) console.log(a);
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report.summary);
+  }
   if (blocking.length === 0) {
-    console.log('floor-guard: clean');
+    // A changed CONSTRAINTS.md is never reported as clean: the admin still reads it.
+    console.log(report ? 'floor-guard: no floor violations; CONSTRAINTS.md changed, so the admin reads the rules above' : 'floor-guard: clean');
     return 0;
   }
   console.error(`floor-guard: ${blocking.length} floor violation(s):`);
