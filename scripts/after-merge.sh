@@ -21,11 +21,13 @@ Run from the main folder, on main, after the worktree's PR has merged. <worktree
 (.claude/worktrees/77-after-merge) or a name under .claude/worktrees/ (77-after-merge).
 
 It fast-forwards main to origin/main (never switches branch, never merges), removes the worktree
-(its ignored files too, such as node_modules), runs git worktree prune and deletes the worktree's
-branch, then prints what it did.
+with its build output (node_modules/, coverage/, .next/, dist/, .fallow/, *.tsbuildinfo), runs
+git worktree prune and deletes the worktree's branch, then prints what it did.
 
 It refuses, changing nothing, unless the branch's PR into main has merged with the branch's
-commits, the worktree has no uncommitted work, and main can fast-forward.
+commits, the worktree has no uncommitted work and no other ignored files, and main can
+fast-forward. In the sandbox it stops before any change when a step would fail there, and prints
+the command to run outside it.
 
 Exit codes: 0 done; 1 a git or gh command failed; 2 refused, nothing changed; 3 needs the
 host: run the printed command outside the sandbox.
@@ -190,7 +192,7 @@ fi
 lane_status() { # status options...
   lane_git status --porcelain=v1 -z --no-renames --ignore-submodules=all "$@"
 }
-work=() placeholders=() ignored=()
+work=() placeholders=() disposable=() kept=()
 while IFS= read -r -d '' entry; do
   if [[ $entry == '?? '* ]] && is_placeholder "$path/${entry:3}"; then
     placeholders+=("${entry:3}")
@@ -203,13 +205,34 @@ if ((${#work[@]})); then
   die 2 "$path has uncommitted work; nothing changed. Commit and push it, or remove it yourself:
 $(list "${work[@]}")"
 fi
-# Ignored files (node_modules, a .env.local) go with the folder; name them in the output.
+
+# Ignored files go with the folder. Build output can (the admin's list, 9 Nov); anything else,
+# such as a .env.local or .scratch/ notes, may be someone's work, so refuse and name it.
+# Placeholders on ignored paths (.env, .env.local) count as placeholders.
+is_disposable() { # ignored entry from git status: a folder ends in /
+  case $1 in
+    node_modules/ | */node_modules/ | coverage/ | */coverage/ | .next/ | */.next/ | dist/ | \
+      */dist/ | .fallow/ | */.fallow/ | *.tsbuildinfo) return 0 ;;
+  esac
+  return 1
+}
 while IFS= read -r -d '' entry; do
-  if [[ $entry == '!! '* ]] && ! is_placeholder "$path/${entry:3}"; then
-    ignored+=("${entry:3}")
+  [[ $entry == '!! '* ]] || continue
+  entry=${entry:3}
+  if is_placeholder "$path/$entry"; then
+    placeholders+=("$entry")
+  elif is_disposable "$entry"; then
+    disposable+=("$entry")
+  else
+    kept+=("$entry")
   fi
-done < <(lane_status --untracked-files=normal --ignored)
+done < <(lane_status --untracked-files=normal --ignored=matching) # the path the pattern matched,
+# so pkg/node_modules/ shows as itself, not collapsed into pkg/ as the default mode does
 wait $! || die 1 "git status failed in $path; nothing changed"
+if ((${#kept[@]})); then
+  die 2 "$path has ignored files that aren't build output, and removing the worktree would delete them; nothing changed. Move or delete them yourself, then rerun:
+$(list "${kept[@]}")"
+fi
 
 # --- main ---------------------------------------------------------------------------------------
 git -C "$main" fetch --quiet origin main || die 1 "could not fetch origin main; nothing changed"
@@ -256,9 +279,30 @@ if ((${#blocked[@]})); then
 $(list "${blocked[@]}")")
 fi
 
-# Placeholders are mount points, so the worktree folder can't be deleted while they're mounted
-# ("Device or resource busy", 8 Nov). A mount can also hide a real file at the same path. Outside
-# the sandbox they're gone, and git status shows what's really there.
+# A mount point can't be deleted ("Device or resource busy", 7 and 8 Nov), and the sandbox mounts
+# placeholders in the session's folder and files such as commondir in the worktree's admin folder
+# (seen from a main-folder session, 9 Nov). Any mount in the worktree or its admin folder would
+# leave the removal half-done, so stop before changing anything. Outside the sandbox there are
+# none. AFTER_MERGE_MOUNTINFO is for the tests only.
+mounts=()
+mountinfo=${AFTER_MERGE_MOUNTINFO:-/proc/self/mountinfo}
+if [[ -r $mountinfo ]]; then
+  while read -r _ _ _ _ point _; do
+    point=$(printf '%b' "$point") # mountinfo escapes space, tab, newline and \ in octal
+    case $point in
+      "$path") mounts+=("the worktree folder itself") ;;
+      "$path"/*) mounts+=("${point#"$path"/}") ;;
+      "$admin" | "$admin"/*) mounts+=("${point#"$main"/}") ;;
+    esac
+  done <"$mountinfo"
+fi
+if ((${#mounts[@]})); then
+  host_reasons+=("the sandbox has mounts in the worktree or its admin folder, which can't be deleted from inside it:
+$(list "${mounts[@]}")")
+fi
+
+# Placeholders are such mounts. A mount can also hide a real file at the same path. Outside the
+# sandbox they're gone, and git status shows what's really there.
 if ((${#placeholders[@]})); then
   host_reasons+=("the worktree holds sandbox placeholders, which can't be deleted from inside the sandbox and may hide real files:
 $(list "${placeholders[@]}")")
@@ -293,7 +337,9 @@ fi
 finish_outside=()
 if removed=$(git -c core.fsmonitor=false -C "$main" worktree remove "$path" 2>&1); then
   echo "worktree: removed $path"
-  ((${#ignored[@]} == 0)) || printf 'worktree: with its ignored files:\n%s\n' "$(list "${ignored[@]}")"
+  if ((${#disposable[@]})); then
+    printf 'worktree: with its build output:\n%s\n' "$(list "${disposable[@]}")"
+  fi
 elif [[ -e $path/.git && -d $admin ]]; then
   die 1 "main is updated, but git worktree remove refused, so the worktree and branch stay:
 $(printf '%s\n' "$removed" | sed 's/^/  git: /')"

@@ -63,9 +63,10 @@ reset() {
   chmod -R u+w "$work" 2>/dev/null
   rm -rf "$work/origin.git" "$work/seed" "$work/main" "$work"/calls "$work"/prs \
     "$work"/fail-gh "$work"/placeholders "$work"/err
+  : >"$work/mountinfo"
   git init -q --bare "$work/origin.git"
   git clone -q "$work/origin.git" "$work/seed" 2>/dev/null
-  printf 'node_modules/\n' >"$work/seed/.gitignore"
+  printf 'node_modules/\ncoverage/\n*.tsbuildinfo\n.env*\n.scratch/\n' >"$work/seed/.gitignore"
   echo hello >"$work/seed/README.md"
   mkdir -p "$work/seed/.claude/hooks"
   echo '{}' >"$work/seed/.claude/settings.json"
@@ -101,7 +102,7 @@ merge_pr() {
 }
 
 run() { # args... -> runs the script from the main folder; sets code, out, err, calls
-  out=$(cd "$main" && PATH="$work/bin:$PATH" bash "$script" "$@" 2>"$work/err")
+  out=$(cd "$main" && PATH="$work/bin:$PATH" AFTER_MERGE_MOUNTINFO="$work/mountinfo" bash "$script" "$@" 2>"$work/err")
   code=$?
   err=$(cat "$work/err")
   calls=$(cat "$work/calls" 2>/dev/null || true)
@@ -173,9 +174,36 @@ for form in 9-lane abs; do
   if [[ $form == abs ]]; then case_ "$lane/"; else case_ "$form"; fi
   expect_code 0
   expect_tidied
-  expect_out "with its ignored files:"
+  expect_out "with its build output:"
   expect_out "node_modules/"
 done
+
+# All the build output on the admin's list goes, at any depth.
+reset
+merge_pr
+mkdir -p "$lane/coverage" "$lane/pkg/node_modules/x" && echo x >"$lane/coverage/index.html"
+echo x >"$lane/pkg/node_modules/x/f" && echo '{}' >"$lane/tsconfig.tsbuildinfo"
+case_ 9-lane
+expect_code 0
+expect_tidied
+expect_out "coverage/"
+expect_out "pkg/node_modules/"
+expect_out "tsconfig.tsbuildinfo"
+
+# Other ignored files may be someone's work: refuse, name them, change nothing.
+reset
+merge_pr
+echo "DATABASE_URL=placeholder" >"$lane/.env.local"
+mkdir -p "$lane/.scratch" "$lane/node_modules" && echo notes >"$lane/.scratch/notes.md"
+before=$(main_at)
+case_ 9-lane
+expect_code 2
+expect_err "ignored files that aren't build output"
+expect_err ".env.local"
+expect_err ".scratch/"
+assert "expected build output left out of the list" test "${err/node_modules/}" == "$err"
+expect_untouched "$before"
+assert "expected .env.local kept" test -f "$lane/.env.local"
 
 # Already up to date (someone pulled main by hand): still removes the worktree and branch.
 reset
@@ -227,6 +255,20 @@ printf '12\t%s\thttps://github.com/sssoto17/sunny-pastures/pull/12\n' "$updated"
 case_ 9-lane
 expect_code 0
 expect_tidied
+
+# Two merged PRs from the branch, and only the second carries its tip: the first merged an
+# earlier, unrelated head.
+reset
+first=$(git -C "$work/origin.git" rev-parse main)
+merge_pr
+{
+  printf '11\t%s\thttps://github.com/sssoto17/sunny-pastures/pull/11\n' "$first"
+  cat "$work/prs"
+} >"$work/prs.new" && mv "$work/prs.new" "$work/prs"
+case_ 9-lane
+expect_code 0
+expect_tidied
+expect_out "PR: #12 "
 
 # gh fails.
 reset
@@ -281,7 +323,7 @@ expect_untouched "$before"
 
 # Run from somewhere other than the main folder.
 args=("from the lane")
-out=$(cd "$lane" && PATH="$work/bin:$PATH" bash "$script" 9-lane 2>"$work/err")
+out=$(cd "$lane" && PATH="$work/bin:$PATH" AFTER_MERGE_MOUNTINFO="$work/mountinfo" bash "$script" 9-lane 2>"$work/err")
 code=$?
 err=$(cat "$work/err")
 expect_code 2
@@ -409,6 +451,47 @@ case_ 9-lane
 expect_code 2
 expect_err "notes.md"
 assert "expected placeholders left out of the list" test "${err/.mcp.json/}" == "$err"
+expect_untouched "$before"
+
+# A placeholder on an ignored path (.env.local, ignored by .env*) is still a placeholder.
+reset
+merge_pr
+: >"$lane/.env.local"
+printf '%s\n' "$lane/.env.local" >"$work/placeholders"
+before=$(main_at)
+case_ 9-lane
+expect_code 3
+expect_err "placeholders"
+expect_err ".env.local"
+expect_rerun
+expect_untouched "$before"
+
+# The sandbox mounts files in the worktree's admin folder (commondir, seen 9 Nov), so the admin
+# folder won't delete: stop before any change, not half-way.
+reset
+merge_pr
+admin=$(git -C "$lane" rev-parse --absolute-git-dir)
+printf '41 30 8:48 /null %s rw,nosuid - tmpfs none rw\n' "$admin/commondir" >"$work/mountinfo"
+before=$(main_at)
+case_ 9-lane
+expect_code 3
+expect_err "mounts in the worktree or its admin folder"
+expect_err ".git/worktrees/9-lane/commondir"
+expect_err "nothing changed"
+expect_rerun
+expect_untouched "$before"
+
+# The worktree folder itself is a mount (a lane session's own folder), listed among others.
+reset
+merge_pr
+{
+  printf '20 1 8:48 / /proc rw - proc proc rw\n'
+  printf '41 30 8:48 %s %s rw - ext4 /dev/sdd rw\n' "$lane" "$lane"
+} >"$work/mountinfo"
+before=$(main_at)
+case_ 9-lane
+expect_code 3
+expect_err "the worktree folder itself"
 expect_untouched "$before"
 
 # A symlink to /dev/null is a file someone made, not a placeholder.

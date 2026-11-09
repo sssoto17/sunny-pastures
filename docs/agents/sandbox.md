@@ -53,11 +53,14 @@ stops and prints the command to run outside the sandbox.
   as untracked files in the worktree. `git worktree remove --force` deregistered the worktree,
   but deleting the folder failed with "Device or resource busy" (the placeholder mounts), and
   the lane finished outside with `rm -rf` and `git worktree prune`. The same "Device or resource
-  busy" on `.git/worktrees/<name>` was seen on 7 Nov. Since #77, don't `--force` past
+  busy" on `.git/worktrees/<name>` was seen on 7 Nov: from a main-folder session the sandbox
+  bind-mounts files there too (`commondir`, `config.worktree`; seen 9 Nov), and a mount point
+  can't be deleted. So expect worktree removal to need the host. Don't `--force` past
   placeholders: a mount can hide a real file at the same path (an uncommitted
   `.claude/commands/x.md`, say), which `rm -rf` would then delete. Remove the worktree from
-  outside the sandbox, where `git status` shows what's really there; `after-merge.sh` stops and
-  says so when it sees placeholders.
+  outside the sandbox, where `git status` shows what's really there. `after-merge.sh` reads
+  `/proc/self/mountinfo` first: with any mount in the worktree or its admin folder, or any
+  placeholder, it stops before changing anything and prints one command to run outside.
 - **`git branch -D`** always tries to drop the branch's `branch.<name>` section from
   `.git/config`, so inside the sandbox it warns "could not lock config file .git/config". The
   warning is harmless: the ref is deleted. A branch created with `--no-track` (above) has no
@@ -74,8 +77,11 @@ paths. They don't exist on disk outside the sandbox.
 They can be told apart from real files reliably: each is a character device with `/dev/null`'s
 numbers (`stat -c '%F %t:%T'` prints `character special file 1:3`) and a mount point (listed in
 `/proc/self/mountinfo` with source `/null`). Git never checks out a device and making one needs
-root, so no real work looks like that. They appear only in the folder the session works in:
-checked 9 Nov (#77) from a lane session, its own worktree showed 19, and the other worktrees none.
+root, so no real work looks like that. Some sit on ignored paths (`.env`, `.env.local`,
+`.env.production`, ignored by `.env*`), so `git status` shows them only with `--ignored`; others
+are under `.git` (`config.lock`, and files in `.git/worktrees/<name>/`). They appear in the
+folder the session works in, not in other worktrees' folders (checked 9 Nov, #77, from a lane
+session).
 
 - Stage files by name (`git add docs/x.md`), never `git add -A` or `git add .`.
 - Don't delete them or add them to `.gitignore`.
