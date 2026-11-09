@@ -1,0 +1,16 @@
+// Fallow (CONSTRAINTS.md, "Tools are dependencies"). Loosening anything here is a moved threshold
+// that the floor guard reports.
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  // Duplication (CONSTRAINTS.md, duplication row; ADR-0005, section 3): exact copies of 50 tokens
+  // and 5 lines or more. `mild` matches token for token, so two loops of the same shape over
+  // different data aren't clones ("the same rule, not the same shape"). Fallow's built-in
+  // defaults leave out *.test.ts files, and the row covers the sim's tests too, so this config
+  // doesn't use them.
+  "duplicates": {
+    "mode": "mild",
+    "minTokens": 50,
+    "minLines": 5,
+    "ignoreDefaults": false
+  }
+}
