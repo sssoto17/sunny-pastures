@@ -175,6 +175,29 @@ const stringEnd = (text, i) => {
   }
   return -1;
 };
+// The value of a quoted string's body, with its escapes decoded as JavaScript (and JSON) decode
+// them; null for an escape it can't read, which then can't be judged.
+const ESCAPES = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v', 0: '\0' };
+const stringValue = (body) => {
+  let value = '';
+  for (let k = 0; k < body.length; k++) {
+    if (body[k] !== '\\') {
+      value += body[k];
+      continue;
+    }
+    const e = body[++k];
+    if (e === undefined) return null;
+    if (e === '\n') continue; // a line continuation
+    const hex = e === 'x' ? /^[0-9a-f]{2}/i.exec(body.slice(k + 1)) : e === 'u' ? /^(?:[0-9a-f]{4}|\{[0-9a-f]{1,6}\})/i.exec(body.slice(k + 1)) : null;
+    if (e === 'x' || e === 'u') {
+      if (!hex) return null;
+      value += String.fromCodePoint(parseInt(hex[0].replace(/[{}]/g, ''), 16));
+      k += hex[0].length;
+    } else if (e === '0' && /[0-9]/.test(body[k + 1] ?? '')) return null; // a legacy octal escape
+    else value += ESCAPES[e] ?? e;
+  }
+  return value;
+};
 // The end (exclusive) of a template's `${…}` expression that starts at `j`; -1 when it doesn't close.
 const expressionEnd = (text, j) => {
   let depth = 1;
@@ -193,7 +216,7 @@ const expressionEnd = (text, j) => {
 };
 // A file's code with its formatting removed:
 // - whitespace outside strings, except one space between two words;
-// - `'…'` read as `"…"` when it holds no escape and no other quote;
+// - a quoted string read as its value, so its quotes and escapes don't matter;
 // - trailing commas before a closing bracket.
 // Comments and template text stay exact, and the code inside a template's `${…}` is normalized
 // too. Null when the formatting can't be judged: a `/` that opens no comment (a regex or a
@@ -258,12 +281,13 @@ const normalizeCode = (text) => {
       continue;
     }
     if (c === "'" || c === '"') {
+      // A plain string compares by its value, so its quotes and escapes don't matter: `'it\'s'` and
+      // `"it's"` are the same string, and so are `'^(\\./)'` and `"^(\\./)"`.
       const end = stringEnd(text, i);
       if (end === -1) return null;
-      const body = text.slice(i + 1, end - 1);
-      // Only a plain string is re-quoted; one with an escape or the other quote stays as written.
-      if (body.includes('\\') || body.includes(c === "'" ? '"' : "'")) out += text.slice(i, end);
-      else out += `"${body}"`;
+      const value = stringValue(text.slice(i + 1, end - 1));
+      if (value === null) return null;
+      out += JSON.stringify(value);
       i = end;
       continue;
     }

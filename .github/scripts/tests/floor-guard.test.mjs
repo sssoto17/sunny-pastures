@@ -924,6 +924,17 @@ describe('floor guard, end to end', () => {
       expect(guard().out).toContain('[config-loosened] eslint.config.mjs');
     });
 
+    // A plain string compares by its value: Prettier re-quotes strings that hold escapes too.
+    it.each([
+      ['a string with backslash escapes', "'^(\\\\./|(\\\\.\\\\./)+)'", '"^(\\\\./|(\\\\.\\\\./)+)"'],
+      ['an escaped quote unescaped', "'it\\'s'", '"it\'s"'],
+    ])('passes %s re-quoted', (_, from, to) => {
+      const base = ESLINT.replace("      'no-x': 'error',\n", () => `      'no-x': ['error', ${from}],\n`);
+      repo = makeRepo({ ...configs, 'eslint.config.mjs': base });
+      repo.write({ 'eslint.config.mjs': base.replace(from, () => to) });
+      expect(guard()).toMatchObject({ code: 0 });
+    });
+
     it('passes a trailing comma dropped before the closing bracket', () => {
       const base = "export default {\n  test: {\n    include: [\n      'a/**',\n    ],\n  },\n};\n";
       repo = makeRepo({ ...configs, 'vitest.config.mts': base });
