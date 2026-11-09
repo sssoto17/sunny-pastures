@@ -4,7 +4,7 @@ Claude Code runs each Bash command in its own sandbox (bubblewrap on WSL2). Each
 hit in this repo, and each comes with the way around it. Commands that need the host go outside
 the sandbox: say which restriction blocks them, then retry with the sandbox disabled.
 
-Last checked: 2026-11-08.
+Last checked: 2026-11-09.
 
 ## Must run outside the sandbox
 
@@ -37,7 +37,9 @@ host" below. These habits keep `.git/config` out of it:
 
 ### When git does need the host
 
-Each case below was hit on 7 or 8 Nov. #77 (the post-merge script, still open) will handle the same cases.
+Each case below was hit on 7 or 8 Nov. After a merge, `scripts/after-merge.sh <worktree>` (#77)
+handles all three: it checks before changing anything, and when a step needs the host it
+stops and prints the command to run outside the sandbox.
 
 - **Updating the main folder when the change touches `.claude/settings.json`, hooks or skills**
   (`git merge --ff-only`, `git pull`). Those paths are write-denied in the main folder, so git
@@ -48,12 +50,17 @@ Each case below was hit on 7 or 8 Nov. #77 (the post-merge script, still open) w
   paths, run the update outside from the start.
 - **`git worktree remove`.** On 8 Nov (#71 cleanup) it refused, because the sandbox's `/dev/null`
   placeholders (`.bashrc`, `.mcp.json`, `.claude/*` and so on; see "Phantom files" below) showed
-  as untracked files in the worktree. Placeholders don't count as work to keep: if `git status`
-  lists nothing else, `git worktree remove --force` is safe. It deregistered the worktree, but
-  deleting the folder failed with "Device or resource busy" (the placeholder mounts). Finish
-  outside the sandbox: `rm -rf .claude/worktrees/<name>`, then `git worktree prune`, which also
-  clears a leftover `.git/worktrees/<name>`. The same "Device or resource busy" on
-  `.git/worktrees/<name>` was seen on 7 Nov; `git worktree prune` outside fixes it too.
+  as untracked files in the worktree. `git worktree remove --force` deregistered the worktree,
+  but deleting the folder failed with "Device or resource busy" (the placeholder mounts), and
+  the lane finished outside with `rm -rf` and `git worktree prune`. The same "Device or resource
+  busy" on `.git/worktrees/<name>` was seen on 7 Nov: from a main-folder session the sandbox
+  mounts that whole admin folder read-only, and bind-mounts the real `commondir` and
+  `config.worktree` in it read-only too (seen 9 Nov). A mount point can't be deleted. So expect worktree removal to need the host. Don't `--force` past
+  placeholders: a mount can hide a real file at the same path (an uncommitted
+  `.claude/commands/x.md`, say), which `rm -rf` would then delete. Remove the worktree from
+  outside the sandbox, where `git status` shows what's really there. `after-merge.sh` reads
+  `/proc/self/mountinfo` first: with any mount in the worktree or its admin folder, or any
+  placeholder, it stops before changing anything and prints one command to run outside.
 - **`git branch -D`** always tries to drop the branch's `branch.<name>` section from
   `.git/config`, so inside the sandbox it warns "could not lock config file .git/config". The
   warning is harmless: the ref is deleted. A branch created with `--no-track` (above) has no
@@ -66,6 +73,19 @@ Inside the sandbox, the repo root shows untracked entries that aren't real: `.ba
 `.profile`, `.gitconfig`, `.gitmodules`, `.env`, `.mcp.json`, `.idea`, `.vscode`, several
 `.claude/*` paths and so on. They are `/dev/null` placeholders the sandbox mounts over protected
 paths. They don't exist on disk outside the sandbox.
+
+They can be told apart from real files reliably: each is a character device with `/dev/null`'s
+numbers (`stat -c '%F %t:%T'` prints `character special file 1:3`) and a mount point (listed in
+`/proc/self/mountinfo` with source `/null`). Git never checks out a device and making one needs
+root, so no real work looks like that. Some sit on ignored paths (`.env`, `.env.local`,
+`.env.production`, ignored by `.env*`), so `git status` shows them only with `--ignored`; one
+is under `.git` (`config.lock`). They appear in the folder the session works in, not in other
+worktrees' folders (checked 9 Nov, #77, from a lane session).
+
+Not placeholders, but also mount points: protected real files and folders the sandbox mounts
+read-only, such as `.claude/settings.json`, `.claude/hooks/`, and from a main-folder session each
+worktree's `.git/worktrees/<name>/` with its `commondir` and `config.worktree`. These are regular
+files, not devices. Like placeholders, they can't be deleted from inside the sandbox.
 
 - Stage files by name (`git add docs/x.md`), never `git add -A` or `git add .`.
 - Don't delete them or add them to `.gitignore`.
