@@ -2045,9 +2045,9 @@ describe("floor guard helpers", () => {
 			source.indexOf("const keyOf"),
 		);
 		const emitted = new Set([
-			...[...source.matchAll(/\bweak\('([a-z]+(?:-[a-z]+)+)'/g)].map((m) => m[1]),
-			...[...source.matchAll(/\brule: '([a-z]+(?:-[a-z]+)+)'/g)].map((m) => m[1]),
-			...[...verdicts.matchAll(/'([a-z]+(?:-[a-z]+)+)'/g)].map((m) => m[1]),
+			...[...source.matchAll(/\bweak\(['"]([a-z]+(?:-[a-z]+)+)['"]/g)].map((m) => m[1]),
+			...[...source.matchAll(/\brule: ['"]([a-z]+(?:-[a-z]+)+)['"]/g)].map((m) => m[1]),
+			...[...verdicts.matchAll(/['"]([a-z]+(?:-[a-z]+)+)['"]/g)].map((m) => m[1]),
 		]);
 		expect([...WAIVABLE].sort()).toEqual([...emitted].sort());
 	});
