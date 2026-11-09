@@ -216,8 +216,9 @@ fixed seed:
 - **Added:** idempotent `advance`, and a JSON round trip (`JSON.parse(JSON.stringify(s))`
   deep-equals `s`).
 
-Each property runs 100 times at task end and 1,000 times in CI. The tests read the count from
-`SIM_PROPERTY_RUNS`, which `ci / test` sets (#40).
+Each property runs 100 times at task end and 1,000 times in CI. The root Vitest config reads the
+count from `SIM_PROPERTY_RUNS`, which `ci / test` sets (#40), and hands it to the tests with the
+fixed seed (`fc.assert(property, inject('fastCheck'))`), so no sim test reads the environment.
 
 **Pattern:** property-based testing (fast-check, fixed seed).
 

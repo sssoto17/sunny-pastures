@@ -6,5 +6,5 @@
     "sourceMap": false,
     "outDir": "node_modules/.cache/tsc/tools"
   },
-  "include": ["vitest.config.mts"]
+  "include": ["vitest.config.mts", "vitest.context.d.ts"]
 }

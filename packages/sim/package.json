@@ -1,0 +1,12 @@
+{
+  "name": "@sunny-pastures/sim",
+  "private": true,
+  "description": "The game rules as pure TypeScript: zero runtime dependencies, no I/O (ADR-0003).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2"
+  }
+}
