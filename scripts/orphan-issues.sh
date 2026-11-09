@@ -25,7 +25,9 @@ Every issue sits under a workstream parent (docs/agents/issue-tracker.md, "Group
   - the Retro inbox, found by its exact title "Retro inbox";
   - top-level parents: issues with no parent and at least one sub-issue, open or closed. A
     parent whose sub-issues are all closed still counts as one. A parent just framed, with no
-    sub-issue yet, is listed until its first ticket is added.
+    sub-issue yet, is listed until its first ticket is added. An issue labelled wayfinder:map
+    is never a top-level parent: a map sits under its workstream's parent, so a parentless map
+    is listed.
 Pull requests are never listed.
 
 Exit codes: 0 none found, 1 issues listed, 2 bad arguments (nothing read), 3 GitHub couldn't be
@@ -50,9 +52,10 @@ case $# in
 esac
 
 # One row per open issue or PR, tab-separated: number, kind (issue/pr), parent (parent/none),
-# sub-issue total (open and closed), labels joined by the unit separator \x1f, which no label name
-# contains in practice, unlike "," ("-" for none, since read collapses empty tab fields), title. GitHub leaves parent_issue_url out of an issue with no parent rather
-# than sending null (seen 9 Nov); .parent_issue_url is null either way.
+# sub-issue total (open and closed), labels joined by the unit separator \x1f, which no label
+# name contains in practice, unlike "," ("-" for none, since read collapses empty tab fields),
+# title. GitHub leaves parent_issue_url out of an issue with no parent rather than sending null
+# (seen 9 Nov); .parent_issue_url is null either way. Tested through jq in orphan-issues.test.sh.
 FILTER='.[] | [.number,
   (if has("pull_request") then "pr" else "issue" end),
   (if .parent_issue_url then "parent" else "none" end),
@@ -73,7 +76,11 @@ while IFS=$'\t' read -r number kind parent subs labels title; do
   [[ $kind == issue && $parent == none ]] || continue
   [[ $US$labels$US == *${US}idea$US* ]] && continue
   [[ $title == "Retro inbox" ]] && continue
-  ((subs > 0)) && continue
+  # A top-level parent has sub-issues; a wayfinder map has them too but always sits under its
+  # workstream's parent (issue-tracker.md, Kickoff step 2), so it never qualifies.
+  if ((subs > 0)) && [[ $US$labels$US != *${US}wayfinder:map$US* ]]; then
+    continue
+  fi
   orphans+=$(printf '%s\t%s' "$number" "$title")$'\n'
   found=$((found + 1))
 done <<<"$rows"

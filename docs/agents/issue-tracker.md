@@ -113,7 +113,8 @@ goal.
 Three kinds of issue have no parent: top-level parents themselves, `idea` issues (parked until
 picked up; they get a parent when retyped) and the Retro inbox (#55), which collects notes for
 every workstream. A **top-level parent** is an issue with no parent and at least one sub-issue,
-open or closed. So a parent just framed (**Kickoff** step 1) shows in the orphan list until its
+open or closed, that isn't a `wayfinder:map`: a map has sub-issues too, but it sits under its
+workstream's parent (**Kickoff** step 2), so a parentless map is listed. A parent just framed (**Kickoff** step 1) shows in the orphan list until its
 first ticket is added (step 4).
 
 `scripts/orphan-issues.sh` prints one `#<number>`, tab, title line per issue without a parent,

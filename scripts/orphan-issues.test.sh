@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Tests for orphan-issues.sh through its command line, with `gh` replaced by a fake on PATH.
-# The fake logs every call and never reaches GitHub. It serves $work/rows: the tab-separated rows
-# the script's --jq filter produces, one per open issue or PR.
-# The --jq filter itself runs only against the real API (see the PR's live run): gh evaluates it,
-# and these tests don't depend on jq.
-# Run: bash scripts/orphan-issues.test.sh
+# The fake logs every call and never reaches GitHub. Most cases serve $work/rows: the tab-separated
+# rows the script's --jq filter produces, one per open issue or PR. The filter cases instead serve
+# $work/page.json, a page of the REST answer, through the script's own --jq filter run by jq (gh
+# runs it with gojq; this filter uses nothing they differ on).
+# Run: bash scripts/orphan-issues.test.sh (needs jq)
 set -uo pipefail
 
 script="$(cd "$(dirname "$0")" && pwd)/orphan-issues.sh"
@@ -18,7 +18,8 @@ mkdir -p "$work/bin"
 # --- fake gh ----------------------------------------------------------------------------------
 # Each call appends its arguments to $work/calls, one per line, then a "--" line. `gh api` prints
 # $work/rows, unless $work/fail-api exists: then it prints that file to stderr and exits 1, as gh
-# does on an HTTP error.
+# does on an HTTP error. If $work/page.json exists, it runs the call's --jq filter over that file
+# instead, printing strings raw as gh does.
 cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
@@ -28,6 +29,12 @@ if [[ $1 == api ]]; then
   if [[ -f $dir/fail-api ]]; then
     cat "$dir/fail-api" >&2
     exit 1
+  fi
+  if [[ -f $dir/page.json ]]; then
+    while (($#)) && [[ $1 != --jq ]]; do shift; done
+    [[ -n ${2-} ]] || { echo "fake: no --jq filter given" >&2; exit 98; }
+    jq -r "$2" "$dir/page.json"
+    exit
   fi
   cat "$dir/rows"
   exit
@@ -48,7 +55,7 @@ row() { # number kind parent subs labels title
 }
 
 reset() { # rows... -> a fresh state serving those rows
-  rm -f "$work"/calls "$work"/rows "$work"/fail-api
+  rm -f "$work"/calls "$work"/rows "$work"/fail-api "$work"/page.json
   printf '%s' "$*" >"$work/rows"
 }
 
@@ -151,6 +158,15 @@ expect_out_is "#2${T}Not an idea
 #5${T}Comma in a label"
 expect_err "4 open issues without a workstream parent"
 
+# A wayfinder map has sub-issues (its tickets) but is never a top-level parent: Kickoff step 2
+# makes it a sub-issue of its workstream's parent. A parentless map is listed, open tickets or
+# not; a parented one isn't.
+reset "$(row 59 issue none 14 'design|area:ci-cd|wayfinder:map' 'Wayfinder: CI/CD')
+$(row 60 issue parent 3 'design|wayfinder:map' 'Wayfinder: parented')"
+case_
+expect_code 1
+expect_out_is "#59${T}Wayfinder: CI/CD"
+
 # The list is in ascending issue order, whatever order the pages arrive in (GitHub sends newest
 # first), so #78 and a person reading it get the same order on every run.
 reset "$(row 110 issue none 0 chore 'Newest')
@@ -182,6 +198,55 @@ reset ""
 case_
 expect_code 0
 expect_out_is ""
+
+# --- the --jq filter over a REST page ---------------------------------------------------------
+# The cases above serve rows the filter already produced; this one runs the script's own filter
+# over JSON shaped like GitHub's answer. It covers: a PR (has pull_request); an issue with no
+# parent_issue_url key at all (how GitHub sends a parentless issue, seen 9 Nov) and one with an
+# explicit null; one with sub_issues_summary missing (the // 0 default); one with no labels;
+# the label join (idea among others, a map, a comma inside a name); a parented issue; a
+# top-level parent; and the Retro inbox.
+# A missing jq is a failure, not a skip (CONSTRAINTS.md, "Guarding the bar").
+args=("--jq filter")
+if ! command -v jq >/dev/null; then
+  code="" out="" err="" calls=""
+  bad "jq is not installed: install it to run the --jq filter case"
+else
+  reset ""
+  cat >"$work/page.json" <<'JSON'
+[
+  {"number": 120, "title": "chore: a pull request", "pull_request": {"url": "x"},
+   "labels": [], "sub_issues_summary": {"total": 0, "completed": 0}},
+  {"number": 28, "title": "No parent key", "labels": [{"name": "bug"}, {"name": "area:db"}],
+   "sub_issues_summary": {"total": 0, "completed": 0}},
+  {"number": 31, "title": "Explicit null parent", "parent_issue_url": null, "labels": [],
+   "sub_issues_summary": {"total": 0, "completed": 0}},
+  {"number": 33, "title": "No sub-issue summary", "labels": [{"name": "design"}]},
+  {"number": 76, "title": "Parented", "parent_issue_url": "https://api.github.com/repos/o/r/issues/73",
+   "labels": [{"name": "chore"}], "sub_issues_summary": {"total": 0, "completed": 0}},
+  {"number": 1, "title": "Idea: a dashboard",
+   "labels": [{"name": "triage"}, {"name": "idea"}, {"name": "area:ui"}],
+   "sub_issues_summary": {"total": 0, "completed": 0}},
+  {"number": 5, "title": "Comma in a label", "labels": [{"name": "x,idea"}, {"name": "chore"}],
+   "sub_issues_summary": {"total": 0, "completed": 0}},
+  {"number": 73, "title": "Agent workflow", "labels": [{"name": "chore"}],
+   "sub_issues_summary": {"total": 9, "completed": 9}},
+  {"number": 59, "title": "Wayfinder: CI/CD",
+   "labels": [{"name": "design"}, {"name": "wayfinder:map"}],
+   "sub_issues_summary": {"total": 14, "completed": 5}},
+  {"number": 55, "title": "Retro inbox", "labels": [{"name": "chore"}],
+   "sub_issues_summary": {"total": 0, "completed": 0}}
+]
+JSON
+  run
+  expect_code 1
+  expect_out_is "#5${T}Comma in a label
+#28${T}No parent key
+#31${T}Explicit null parent
+#33${T}No sub-issue summary
+#59${T}Wayfinder: CI/CD"
+  expect_err "5 open issues without a workstream parent"
+fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))
