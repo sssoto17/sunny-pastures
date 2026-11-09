@@ -1426,6 +1426,14 @@ describe("floor guard, end to end", () => {
 				},
 			],
 			[
+				"a quoted prettier key in package.yaml",
+				(r) => r.write({ "package.yaml": '"prettier":\n  semi: false\n' }),
+			],
+			[
+				"a prettier key in package.yaml's flow form",
+				(r) => r.write({ "package.yaml": "{ name: x, prettier: { semi: false } }\n" }),
+			],
+			[
 				"a prettier key in package.yaml",
 				(r) => r.write({ "package.yaml": "prettier:\n  semi: false\n" }),
 			],

@@ -1372,9 +1372,12 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 			(PRETTIER_CONFIG.test(basename(f.oldPath)) || PRETTIER_CONFIG.test(basename(f.path)))
 		)
 			weak("config-loosened", f.path, "file");
+		// Any added line naming prettier, so a quoted, flow or explicit key can't slip past a line
+		// match (security review of #148). The floor job has no YAML parser, and the repo has no
+		// package.yaml, so the broad match costs nothing.
 		if (basename(f.path) === "package.yaml")
 			for (const a of f.added)
-				if (/^prettier\s*:/.test(a.text)) weak("config-loosened", f.path, a.line);
+				if (/prettier/i.test(a.text)) weak("config-loosened", f.path, a.line);
 		if (basename(f.path) === ".editorconfig" && f.added.length > 0)
 			weak("config-loosened", f.path, f.status === "added" ? "file" : f.added[0].line);
 		if (isConstraints(f.path)) {
