@@ -760,6 +760,34 @@ describe('floor guard, end to end', () => {
       expect(r.out).not.toContain('waived by');
     });
 
+    // Security review of #131: the waiver and expiry paths read IDs differently, and added rows
+    // weren't checked against today.
+    it.each([
+      ['an emphasis mark inside the ID', 'E*1', 'exception-invalid'],
+      ['a plain ID', 'E1', 'exception-expired'],
+    ])('refuses an added row that has already expired, with %s', (_, id, finding) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', 'packages/sim/src/a.ts', '2026-11-01', id)) });
+      const r = guard();
+      expect(r.out).toContain(`[${finding}] CONSTRAINTS.md`);
+      expect(r.out).toContain('[silenced-checker] packages/sim/src/a.ts');
+      expect(r.out).not.toContain('waived by');
+    });
+
+    // Waivers come only from the Exceptions table itself: its exact header, at the left margin.
+    it.each([
+      ['a table inside a list item', (r) => CONSTRAINTS.replace('| ID | Rule |', '- note\n\n  | ID | Rule |').replace('|---|---|---|---|---|---|\n| _none_ | | | | | |', `  |---|---|---|---|---|---|\n  ${r}`)],
+      ['a <pre> block', (r) => CONSTRAINTS.replace('| _none_ | | | | | |', '| _none_ | | | | | |\n\n<pre>\n\n| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n' + `${r}\n</pre>`)],
+      ['a second table with the same header', (r) => CONSTRAINTS.replace('| _none_ | | | | | |', `| _none_ | | | | | |\n\n| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n${r}`)],
+      ['a table with another header', (r) => CONSTRAINTS.replace('| _none_ | | | | | |', `| _none_ | | | | | |\n\n| ID | Rule | Path | Why | Who | Until |\n|---|---|---|---|---|---|\n${r}`)],
+    ])('does not waive with a row in %s', (_, place) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': place(rowFor('silenced-checker', 'packages/sim/src/a.ts')) });
+      const r = guard();
+      expect(r.out).toContain('[silenced-checker] packages/sim/src/a.ts');
+      expect(r.out).not.toContain('waived by');
+    });
+
     it('counts a closing-hash or setext heading as a second Exceptions heading', () => {
       setup();
       repo.write({ 'CONSTRAINTS.md': `${CONSTRAINTS}\nexceptions\n---\n\n## Exceptions ##\n` });

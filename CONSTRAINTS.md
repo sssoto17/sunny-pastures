@@ -331,10 +331,11 @@ What a row must hold, checked by the floor guard (#99):
   `exception-too-broad`.
 - **Expires** is a date the guard can read (`2026-11-30` or `30 Nov 2026`). Any other value fails
   every PR, as an expired row does.
-- The file has one `## Exceptions` heading. A second one fails every PR. Only a row in that table
-  waives anything; a row inside a code fence (backticks or `~~~`) or a comment never does. Expiry
-  and dates are checked on every line shaped like a row, wherever it sits, so no formatting hides
-  an expired row.
+- The file has one `## Exceptions` heading. A second one fails every PR. Only a row in that
+  section's one table with exactly the header above, written at the left margin, waives anything.
+  A row in a code fence (backticks or `~~~`), a comment, a `<pre>` block, a list item or another
+  table never does, and a row of the table without an `E<n>` ID fails. Expiry and dates are checked
+  on every line shaped like a row, wherever it sits, so no formatting hides an expired row.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|

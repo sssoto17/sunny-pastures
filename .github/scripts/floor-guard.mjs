@@ -145,16 +145,30 @@ export const parseRules = (lines) => {
   let cur = null;
   let fence = false;
   let comment = false;
+  let rawBlock = null;
+  let table = null; // the header line of the table being read: { line, text }
   const flush = () => {
     if (cur) rules.push(cur);
     cur = null;
   };
   lines.forEach((line = '', i) => {
     const n = i + 1;
-    // HTML comments hold no rules (and no exceptions).
+    // HTML comments hold no rules (and no exceptions), and neither do the raw HTML blocks that
+    // CommonMark keeps open across blank lines until their closing tag (`<pre>`, `<script>`,
+    // `<style>`, `<textarea>`): a table inside one renders as text.
     if (comment || /^\s*<!--/.test(line)) {
       flush();
       comment = !line.includes('-->');
+      return;
+    }
+    if (rawBlock) {
+      if (new RegExp(`</${rawBlock}>`, 'i').test(line)) rawBlock = null;
+      return;
+    }
+    const raw = /^ {0,3}<(pre|script|style|textarea)(?=[\s>]|$)/i.exec(line)?.[1];
+    if (raw) {
+      flush();
+      if (!new RegExp(`</${raw}>`, 'i').test(line)) rawBlock = raw;
       return;
     }
     // Fences and headings follow CommonMark, so the guard reads the file the way it renders (#99:
@@ -203,8 +217,11 @@ export const parseRules = (lines) => {
       flush();
       const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
       if (cells.every((c) => /^:?-+:?$/.test(c))) return;
-      if (!headers) headers = cells;
-      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, end: n, text: line, cells, headers });
+      if (!headers) {
+        headers = cells;
+        table = { line: n, text: line };
+      }
+      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, end: n, text: line, cells, headers, table });
       return;
     }
     const item = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
@@ -420,7 +437,7 @@ const constraintsFindings = (f, mergeBase) => {
   const changes = [];
   const before = parseRules(oldContent(mergeBase, f.oldPath ?? f.path) ?? []);
   const after = parseRules(readFileSync(f.path, 'utf8').split('\n'));
-  const isException = (r) => r.kind === 'row' && (/^E\d+$/.test(exceptionId(r.key)) || r.key === '_none_');
+  const isException = (r) => r.kind === 'row' && (isExceptionId(r.key) || r.key === '_none_');
   const taken = new Set();
   const unchanged = new Map(); // after rule → the old rule with the same section and text
   // Pair unchanged rules first, so a changed rule can't pair with one of them.
@@ -665,7 +682,10 @@ const tooBroad = (path) => {
   return !body || /[*?[\]{}]/.test(body);
 };
 // An Exceptions row's ID, without emphasis: `**E1**` is E1.
-const exceptionId = (cell = '') => cell.replace(/[*_`]/g, '').trim();
+// Emphasis only around it: `**E1**` is E1, but `E*1` is no ID at all.
+const exceptionId = (cell = '') => cell.trim().replace(/^[*_`]+|[*_`]+$/g, '');
+const isExceptionId = (cell) => /^E\d+$/.test(exceptionId(cell ?? ''));
+const EXCEPTIONS_HEADER = ['ID', 'Rule', 'Path', 'Reason', 'Owner', 'Expires'].join('|');
 export const globToRegExp = (glob) =>
   new RegExp(
     '^' +
@@ -746,16 +766,24 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
     const rules = parseRules(lines);
     const level2 = rules.headings.filter((h) => h.level === 2 && h.title.toLowerCase() === 'exceptions');
     const no = level2.length === 1 ? level2[0].no : null;
-    // Rows with up to 3 spaces of indent; more is an indented code block.
-    const waiving = rules.filter((r) => r.kind === 'row' && r.sectionNo === no && /^E\d+$/.test(exceptionId(r.key)) && /^ {0,3}\|/.test(r.text));
-    return { waiving, repeated: level2.slice(1) };
+    // Waivers come from one table only: the section's single table with exactly the Exceptions
+    // header, written at the left margin, rows included. A table indented into a list item, a second
+    // table with that header or a table with another header waives nothing (security review, #131).
+    const inSection = rules.filter((r) => r.kind === 'row' && r.sectionNo === no);
+    const tables = [...new Set(inSection.filter((r) => r.headers.join('|') === EXCEPTIONS_HEADER && /^\|/.test(r.table.text)).map((r) => r.table))];
+    const table = tables.length === 1 ? inSection.filter((r) => r.table === tables[0] && /^\|/.test(r.text)) : [];
+    // A row of the table with no E<n> ID (`E*1`, `X1`) would neither waive nor expire: it fails.
+    const malformed = table.filter((r) => !isExceptionId(r.key) && r.key !== '_none_');
+    return { waiving: table.filter((r) => isExceptionId(r.key)), malformed, repeated: level2.slice(1) };
   };
   // Expiry and validity read every row-shaped line in the file, whatever heading, fence or comment
-  // it sits in, so no formatting can hide an expired row from them (review of #99).
-  const rowLines = (lines) => lines.map((text, i) => ({ line: i + 1, text })).filter((l) => /^\s*\|\s*[*_`]*E\d+[*_`]*\s*\|/.test(l.text));
+  // it sits in, so no formatting can hide an expired row from them (review of #99). The ID is read
+  // the same way as for a waiver, so no row can waive without being checked (security review).
+  const rowLines = (lines) => lines.map((text, i) => ({ line: i + 1, text })).filter((l) => isExceptionId(/^\s*\|([^|]*)\|/.exec(l.text)?.[1]));
   const constraints = changes.find((f) => isConstraints(f.path));
   const now = exceptionRows(constraintsNow.split('\n'));
   for (const h of now.repeated) always('exceptions-heading-repeated', 'CONSTRAINTS.md', h.line);
+  for (const r of now.malformed) always('exception-invalid', 'CONSTRAINTS.md', r.line, r.key);
   const allNow = rowLines(constraintsNow.split('\n'));
   const before = constraints ? rowLines(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? []) : allNow;
   const rowsBefore = new Set(before.map((r) => r.text.trim()));
@@ -764,7 +792,8 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   const latest = Math.min(today + MAX_EXCEPTION_DAYS * 864e5, Date.parse(FREEZE));
   for (const a of addedRows) {
     const e = parseException(a.text);
-    if (e.expires === null) continue; // reported below, with every other row
+    // Reported below, with every other row: a date it can't read, or one already past.
+    if (e.expires === null || e.expires < today) continue;
     if (!e.path || !e.rules.length || e.rules.some((x) => !WAIVABLE.has(x))) always('exception-invalid', 'CONSTRAINTS.md', a.line, e.id);
     else if (tooBroad(e.path)) always('exception-too-broad', 'CONSTRAINTS.md', a.line, e.id);
     else if (e.expires > latest) always('exception-too-long', 'CONSTRAINTS.md', a.line, e.id);
