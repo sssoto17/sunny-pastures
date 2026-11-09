@@ -149,6 +149,167 @@ export const enclosingKey = (lines, n) => {
 // Tool configs that can weaken a check (CONSTRAINTS.md, Floor, last bullet). Returns the lines
 // of one changed file that loosen it. A config that didn't exist at the merge base has no bar
 // to lower, so only an explicit "off" or "false" counts there.
+// #138: formatting-only changes in a guarded config count as unchanged, so a formatter (Prettier,
+// #125) doesn't need Exceptions rows. Only JS, TS and JSON configs, by extension, where quotes and
+// whitespace outside strings carry no meaning. YAML (indentation is meaning) and files without an
+// extension are left to the exact checks (spec review of #141).
+const FORMATTED_CONFIG = /^(eslint\.config|vitest\.config|tsconfig.*|\.?fallowrc|\.?fallow|stryker\.(conf|config)|\.?lighthouserc)\.(c|m)?[jt]s$|^(tsconfig.*|\.?fallowrc|\.?fallow|\.?lighthouserc)\.jsonc?$/;
+// After a line break these end a statement (JavaScript's restricted productions): `return⏎x` isn't
+// `return x`, so a break there can't be formatting (spec review of #141).
+const RESTRICTED = /\b(return|throw|break|continue|yield)$/;
+// The end (exclusive) of the string or template literal that opens at `i`, honouring escapes and a
+// template's `${…}`, which may hold strings and templates of its own; -1 when it doesn't close. A
+// scan that stopped at the next quote misread escaped quotes (spec review of #141).
+const stringEnd = (text, i) => {
+  const quote = text[i];
+  let j = i + 1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === '\\') j += 2;
+    else if (c === quote) return j + 1;
+    else if (quote !== '`' && c === '\n') return -1;
+    else if (quote === '`' && c === '$' && text[j + 1] === '{') {
+      j = expressionEnd(text, j + 2);
+      if (j === -1) return -1;
+    } else j++;
+  }
+  return -1;
+};
+// The value of a quoted string's body, with its escapes decoded as JavaScript (and JSON) decode
+// them; null for an escape it can't read, which then can't be judged.
+const ESCAPES = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v', 0: '\0' };
+const stringValue = (body) => {
+  let value = '';
+  for (let k = 0; k < body.length; k++) {
+    if (body[k] !== '\\') {
+      value += body[k];
+      continue;
+    }
+    const e = body[++k];
+    if (e === undefined) return null;
+    if (e === '\n') continue; // a line continuation
+    const hex = e === 'x' ? /^[0-9a-f]{2}/i.exec(body.slice(k + 1)) : e === 'u' ? /^(?:[0-9a-f]{4}|\{[0-9a-f]{1,6}\})/i.exec(body.slice(k + 1)) : null;
+    if (e === 'x' || e === 'u') {
+      if (!hex) return null;
+      value += String.fromCodePoint(parseInt(hex[0].replace(/[{}]/g, ''), 16));
+      k += hex[0].length;
+    } else if (e === '0' && /[0-9]/.test(body[k + 1] ?? '')) return null; // a legacy octal escape
+    else value += ESCAPES[e] ?? e;
+  }
+  return value;
+};
+// The end (exclusive) of a template's `${…}` expression that starts at `j`; -1 when it doesn't close.
+const expressionEnd = (text, j) => {
+  let depth = 1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === "'" || c === '"' || c === '`') {
+      j = stringEnd(text, j);
+      if (j === -1) return -1;
+      continue;
+    }
+    if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return j + 1;
+    j++;
+  }
+  return -1;
+};
+// A file's code with its formatting removed:
+// - whitespace outside strings, except one space between two words;
+// - a quoted string read as its value, so its quotes and escapes don't matter;
+// - trailing commas before a closing bracket.
+// Comments and template text stay exact, and the code inside a template's `${…}` is normalized
+// too. Null when the formatting can't be judged: a `/` that opens no comment (a regex or a
+// division), an unclosed string or comment, or a line break that could end a statement.
+const normalizeCode = (text) => {
+  let out = '';
+  let i = 0;
+  let gap = false; // whitespace was skipped since the last character kept
+  let broke = false; // and it held a line break
+  while (i < text.length) {
+    const c = text[i];
+    if (/\s/.test(c)) {
+      gap = true;
+      if (c === '\n') broke = true;
+      i++;
+      continue;
+    }
+    if (broke && (RESTRICTED.test(out) || /^(\+\+|--)/.test(text.slice(i)))) return null;
+    // Whitespace between two word characters is a separator, not formatting (`new Foo` isn't
+    // `newFoo`), so one space stays. A trailing comma goes only outside strings, here at the
+    // closing bracket (doubt pass on #138).
+    if (gap && /[\w$]/.test(c) && /[\w$]$/.test(out)) out += ' ';
+    gap = false;
+    broke = false;
+    if (/[\]})]/.test(c) && out.endsWith(',')) out = out.slice(0, -1);
+    if (c === '/' && text[i + 1] === '/') {
+      const end = text.indexOf('\n', i);
+      const stop = end === -1 ? text.length : end;
+      out += `${text.slice(i, stop).trimEnd()}\n`;
+      i = stop;
+      continue;
+    }
+    if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      if (end === -1) return null;
+      out += text.slice(i, end + 2);
+      i = end + 2;
+      continue;
+    }
+    if (c === '/') return null;
+    if (c === '`') {
+      // A template literal: its text stays exactly as written, and each `${…}` expression is
+      // normalized like any other code, since a formatter re-quotes strings inside it.
+      const end = stringEnd(text, i);
+      if (end === -1) return null;
+      let token = '`';
+      let j = i + 1;
+      while (j < end - 1) {
+        if (text[j] === '\\') {
+          token += text.slice(j, j + 2);
+          j += 2;
+        } else if (text[j] === '$' && text[j + 1] === '{') {
+          const close = expressionEnd(text, j + 2);
+          const inner = normalizeCode(text.slice(j + 2, close - 1));
+          if (inner === null) return null;
+          token += `\${${inner}}`;
+          j = close;
+        } else token += text[j++];
+      }
+      out += `${token}\``;
+      i = end;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      // A plain string compares by its value, so its quotes and escapes don't matter: `'it\'s'` and
+      // `"it's"` are the same string, and so are `'^(\\./)'` and `"^(\\./)"`.
+      const end = stringEnd(text, i);
+      if (end === -1) return null;
+      const value = stringValue(text.slice(i + 1, end - 1));
+      if (value === null) return null;
+      out += JSON.stringify(value);
+      i = end;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  // A comma at the very end sits outside any string, since a string ends with its quote.
+  return out.endsWith(',') ? out.slice(0, -1) : out;
+};
+// A guarded config whose whole old text and whole new text normalize equal changed only formatting
+// (#138), so none of its changed lines count. Any other change keeps every finding in the file.
+// Reading the whole file, from its first character, knows whether a line sits in code, a string, a
+// template or a comment. Judging hunks or lines alone didn't: a formatter's changed boundary lines
+// hid a move between blocks, and a hunk could start inside a comment or template opened above it
+// (spec, admin and security reviews of #141). A PR that mixes a reformat with a content change in
+// the same config gets every finding, so a reformat goes in a PR of its own.
+const withoutFormatting = (f, mergeBase) => {
+  if (!FORMATTED_CONFIG.test(basename(f.path)) || f.status !== 'modified') return f;
+  const before = normalizeCode((oldContent(mergeBase, f.path) ?? []).join('\n'));
+  const after = normalizeCode(readFileSync(f.path, 'utf8'));
+  return before !== null && before === after ? { ...f, removed: [], added: [] } : f;
+};
 const configLoosening = (f, mergeBase) => {
   const name = basename(f.path);
   const hits = [];
@@ -977,7 +1138,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
         if (!kept) weak('property-runs-cut', f.path, `${r.line} (old)`);
       }
     }
-    for (const line of configLoosening(f, mergeBase)) weak('config-loosened', f.path, line);
+    for (const line of configLoosening(withoutFormatting(f, mergeBase), mergeBase)) weak('config-loosened', f.path, line);
   }
 
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.
