@@ -1,7 +1,7 @@
 // Seeded randomness (ADR-0003, section 7, D9): one mulberry32 stream per purpose, so a new draw in
 // one rule doesn't shift the draws in another. A stream's state is one unsigned 32-bit integer
 // that lives in the farm state; 32-bit maths here is by design, not on a time (section 10).
-import { stateHash } from './state-hash.js';
+import { stateHash } from '../hash/index.js';
 
 /** The purposes that draw random numbers, each from its own stream. */
 export type StreamPurpose = 'yields' | 'orders';

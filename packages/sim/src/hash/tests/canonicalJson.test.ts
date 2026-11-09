@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { canonicalJson } from './canonical-json.js';
+import { canonicalJson } from '../canonicalJson.js';
 
 describe('canonicalJson', () => {
   test('sorts object keys at every level', () => {

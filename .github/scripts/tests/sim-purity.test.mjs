@@ -148,7 +148,7 @@ describe('sim purity rules', () => {
   });
 
   test("leave the sim's own 32-bit maths alone (mulberry32, SHA-256)", async () => {
-    const results = await eslint.lintFiles(['packages/sim/src/random.ts', 'packages/sim/src/sha256.ts']);
+    const results = await eslint.lintFiles(['packages/sim/src/random/index.ts', 'packages/sim/src/hash/sha256.ts']);
     expect(results.flatMap((r) => r.messages)).toEqual([]);
   });
 

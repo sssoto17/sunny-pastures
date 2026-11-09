@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, inject, test } from 'vitest';
-import { stateHash } from './index.js';
-import { mulberry32 } from './random.js';
+import { stateHash } from '../../index.js';
+import { mulberry32 } from '../../random/index.js';
 
 const params = inject('fastCheck');
 

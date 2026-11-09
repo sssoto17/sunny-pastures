@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, inject, test } from 'vitest';
-import { assertSafeIntegers } from './invariants.js';
+import { assertSafeIntegers } from '../index.js';
 
 const params = inject('fastCheck');
 

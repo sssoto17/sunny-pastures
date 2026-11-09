@@ -1,4 +1,4 @@
-import { canonicalJson } from './canonical-json.js';
+import { canonicalJson } from './canonicalJson.js';
 import { sha256Hex } from './sha256.js';
 
 /**
