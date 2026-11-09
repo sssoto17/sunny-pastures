@@ -40,23 +40,31 @@ of:
 
 - A new suppression comment: `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error`, `eslint-disable`,
   `istanbul ignore`, `c8 ignore`, `v8 ignore`, `Stryker disable`, `nosemgrep`, `gitleaks:allow`,
-  `fallow-ignore-next-line`, `fallow-ignore-file`, `# noqa`, `# type: ignore`.
+  `fallow-ignore-next-line`, `fallow-ignore-file`, `# noqa`, `# type: ignore`. Every other
+  `fallow-ignore-*` form counts too (#99).
 - A skipped, focused or deleted test: `.skip`, `.only`, `.todo`, a removed test file, or
   assertions removed from a test that stayed. A moved or renamed test file is not a deletion: the
-  guard uses git's rename detection.
+  guard uses git's rename detection. A property test's run count (`numRuns`, `SIM_PROPERTY_RUNS`)
+  lowered, deleted, or turned from a variable into a literal counts too (#99).
 - A moved threshold: a number in this file lowered, a severity dropped, a check moved to a later
-  stage or removed.
+  stage or removed. In this file, numbers pair by what they count. A cap added in a unit the rule
+  didn't use, joined with "or" (`≤ 50 ms or 5 s`), counts as a loosening, and so does a new
+  number with no direction in a rule that had a cap or a floor (#99). A Dependabot PR that only
+  moves a GitHub Action's pinned commit SHA, opened by Dependabot from this repo with only its own
+  commits, isn't a removed check.
 - A tool config edit that excludes a path, ignores a finding or relaxes a rule. That counts as a
   moved threshold. The files: `.gitleaksignore` and `.gitleaks.toml`, `osv-scanner.toml`,
   `.semgrepignore`, coverage `exclude` in `vitest.config.*`, rules turned off in
-  `eslint.config.*`, `strict` options relaxed in any `tsconfig*.json`, Stryker ignore patterns,
+  `eslint.config.*`, `strict` options relaxed in any `tsconfig*.json` (or a new one with neither
+  `extends` nor `strict`, #99), Stryker ignore patterns,
   assertions turned off in `lighthouserc.*`, `disableRules` in the axe setup, and the Fallow
   config.
 
 Also blocked, with no exception possible:
 
 - Unimplemented stubs: `throw new Error("Not implemented")`, an empty `catch {}`, a `TODO`
-  standing in for the implementation.
+  standing in for the implementation. Also "not yet implemented" and "unimplemented" stubs, a
+  `catch` holding only a comment, and an empty `.catch(() => {})` (#99).
 - Secrets in source. Read them from env vars and keep placeholders in `.env.example`.
 - An expired row in [Exceptions](#exceptions).
 - An Exceptions row the guard can't accept: a date it can't read, a Rule it doesn't know, a Path

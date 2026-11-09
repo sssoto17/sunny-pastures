@@ -36,6 +36,8 @@ export const makeRepo = (files) => {
     delete outer.GITHUB_ACTIONS;
     delete outer.GITHUB_STEP_SUMMARY;
     delete outer.CI;
+    delete outer.GITHUB_ACTOR; // the SHA-bump exemption depends on it
+    delete outer.GITHUB_EVENT_PATH; // and so does the event payload
     const r = spawnSync('node', [script, ...base, ...args], {
       cwd: dir,
       env: { ...outer, ...GIT_ENV, ...env },
