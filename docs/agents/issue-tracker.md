@@ -82,33 +82,53 @@ The ids, for reading raw `gh project` output (the script doesn't use this table)
 | Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
 | Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
 
-When a skill publishes tickets, give each one a milestone, add it to the Project and set Track, Mode, Size, Priority and Week (both with `scripts/issue-fields.sh`), and add one type and one area label (see `triage-labels.md`). Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
+When a skill publishes tickets, make each one a sub-issue of its workstream parent (see **Grouping**), give it a milestone, add it to the Project and set Track, Mode, Size, Priority and Week (both with `scripts/issue-fields.sh`), and add one type and one area label (see `triage-labels.md`). Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
 
 ## Workstreams
 
-A **workstream** is one goal inside a milestone, worked as a set of tickets. Every workstream
-starts with the same kickoff, and how it's grouped depends on how many workstreams share its
-milestone.
+A **workstream** is one goal, worked as a set of tickets under a parent issue. It may span
+milestones. Every workstream starts with the same kickoff.
 
 ### Grouping
 
-The milestone is the default grouping: it already has the tickets, the due date and a progress bar.
+Every issue sits under a workstream parent (the admin's rule of 7 Nov, recorded in #55; written
+here by #76). The milestone still gives each ticket its due date; the parent groups tickets by
+goal.
 
-- **One workstream in a milestone** (for example M1, the persistence spike): no parent issue. The tickets go straight into the milestone, and the milestone description plays the parent's role.
-- **Several workstreams in a milestone**: each workstream gets a parent issue titled `<milestone>: <workstream>`, in the same milestone and on the Project with Track, Mode and Priority set, and with one type and one area label. Its body states the goal and an "Acceptance criteria" list, and links the ADRs and PRs it rests on. Its tickets are its sub-issues (see **Make an issue a sub-issue of a parent**). Size and Week stay on the tickets, not the parent.
+- **The parent** is an issue named for the workstream's goal, with no milestone prefix (for
+  example #72 "Sim properties", #58 "CI/CD pipeline"). It's in a milestone and on the Project
+  with Track, Mode and Priority set, and has one type and one area label. Its body states the
+  goal and an "Acceptance criteria" list, and links the ADRs and PRs it rests on. Size and Week
+  stay on the tickets, not the parent.
+- **It may span milestones**: its tickets keep their own milestones (#58 sits in M4 and has
+  tickets in M2, M3 and M4).
+- **Its tickets are its sub-issues** (see **Make an issue a sub-issue of a parent**). A new
+  ticket goes under the parent of the goal it serves. If no workstream fits, frame a new parent
+  first (**Kickoff** step 1), or ask the admin which one it belongs to.
+- **An issue found without a parent gets one**, whenever it's found, however long it's been
+  published. `scripts/orphan-issues.sh` lists the open issues with none; `/today` stage 1 (#78)
+  is to run it.
 - A parent is never worked directly. It closes when its last sub-issue closes.
-- Don't add parents afterwards to a milestone whose tickets are already published.
+
+Three kinds of issue have no parent: top-level parents themselves, `idea` issues (parked until
+picked up; they get a parent when retyped) and the Retro inbox (#55), which collects notes for
+every workstream.
+
+`scripts/orphan-issues.sh` prints one `#<number>`, tab, title line per issue without a parent,
+and exits 0 when there are none, 1 when it lists some, 2 on bad arguments and 3 when GitHub
+can't be read. It's read-only. `scripts/orphan-issues.sh --help` gives the exact exclusions.
+Tests: `bash scripts/orphan-issues.test.sh`.
 
 ### Kickoff
 
 Before any ticket exists, a workstream goes through design and idea refinement, in this order:
 
-1. **Frame it.** Create the parent issue (or fill in the milestone description) with the goal and the known constraints. It doesn't have to be complete yet.
+1. **Frame it.** Create the parent issue with the goal and the known constraints. It doesn't have to be complete yet.
 2. **Grill it.** Pick by scope:
    - `/grill-with-docs` when the open decisions fit in one session. It resolves them and writes `GLOSSARY.md` terms and ADRs as they settle.
    - `/wayfinder` when they don't: the workstream is too big or too foggy for one session. The wayfinder map is a sub-issue of the workstream's parent, so its decision tickets stay apart from the build tickets. Each decision ticket can run its own `/grill-with-docs`.
-3. **Set up context.** Run `/context-engineering` to decide what a fresh session needs to work any ticket: the ADRs, glossary terms and code areas to read first. The result goes into the parent (or milestone description) as a short **Context** section. Rules files such as `AGENTS.md` change only when the workstream opens a new area of the repo (for example `packages/sim` in M2 or `apps/web` in M3), and only with the admin's approval.
-4. **Ticket it.** Run `/to-tickets` from the grill's outcome. The tickets become sub-issues of the parent (or go straight into the milestone).
+3. **Set up context.** Run `/context-engineering` to decide what a fresh session needs to work any ticket: the ADRs, glossary terms and code areas to read first. The result goes into the parent as a short **Context** section. Rules files such as `AGENTS.md` change only when the workstream opens a new area of the repo (for example `packages/sim` in M2 or `apps/web` in M3), and only with the admin's approval.
+4. **Ticket it.** Run `/to-tickets` from the grill's outcome. The tickets become sub-issues of the parent.
 
 ## Priority
 
