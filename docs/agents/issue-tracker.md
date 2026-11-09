@@ -112,7 +112,9 @@ goal.
 
 Three kinds of issue have no parent: top-level parents themselves, `idea` issues (parked until
 picked up; they get a parent when retyped) and the Retro inbox (#55), which collects notes for
-every workstream.
+every workstream. A **top-level parent** is an issue with no parent and at least one sub-issue,
+open or closed. So a parent just framed (**Kickoff** step 1) shows in the orphan list until its
+first ticket is added (step 4).
 
 `scripts/orphan-issues.sh` prints one `#<number>`, tab, title line per issue without a parent,
 and exits 0 when there are none, 1 when it lists some, 2 on bad arguments and 3 when GitHub

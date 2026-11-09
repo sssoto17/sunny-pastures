@@ -39,10 +39,12 @@ chmod +x "$work/bin/gh"
 
 # --- fixtures ---------------------------------------------------------------------------------
 # One row as the --jq filter emits it: number, kind (issue/pr), parent (parent/none),
-# sub-issue total, labels joined by "," ("-" for none), title.
+# sub-issue total, labels joined by the unit separator \x1f ("-" for none), title. Fixtures
+# write the labels joined by "|" for readability; row() swaps in the separator.
 T=$'\t'
+US=$'\x1f'
 row() { # number kind parent subs labels title
-  printf '%s%s%s%s%s%s%s%s%s%s%s\n' "$1" "$T" "$2" "$T" "$3" "$T" "$4" "$T" "$5" "$T" "$6"
+  printf '%s%s%s%s%s%s%s%s%s%s%s\n' "$1" "$T" "$2" "$T" "$3" "$T" "$4" "$T" "${5//|/$US}" "$T" "$6"
 }
 
 reset() { # rows... -> a fresh state serving those rows
@@ -103,20 +105,20 @@ expect_call "api -X GET repos/sssoto17/sunny-pastures/issues -f state=open -f pe
 assert "expected exactly one gh call" test "$(call_lines | wc -l)" -eq 1
 
 # --- an issue without a parent is listed --------------------------------------------------------
-reset "$(row 28 issue none 0 bug,area:db 'Check transaction use under load')"
+reset "$(row 28 issue none 0 'bug|area:db' 'Check transaction use under load')"
 case_
 expect_code 1
 expect_out_is "#28${T}Check transaction use under load"
 
 # --- an issue with a parent is not listed; none left means exit 0 -------------------------------
-reset "$(row 76 issue parent 0 chore,area:tools 'Every issue sits under a workstream parent')"
+reset "$(row 76 issue parent 0 'chore|area:tools' 'Every issue sits under a workstream parent')"
 case_
 expect_code 0
 expect_out_is ""
 expect_err "every open issue has a workstream parent"
 
-reset "$(row 76 issue parent 0 chore,area:tools 'Parented')
-$(row 31 issue none 0 design,area:sim 'Orphan')"
+reset "$(row 76 issue parent 0 'chore|area:tools' 'Parented')
+$(row 31 issue none 0 'design|area:sim' 'Orphan')"
 case_
 expect_code 1
 expect_out_is "#31${T}Orphan"
@@ -126,26 +128,28 @@ expect_err "1 open issue without a workstream parent"
 # A top-level parent is an issue with no parent and at least one sub-issue, open or closed
 # (GitHub's sub_issues_summary.total counts both). One whose sub-issues are all closed is still a
 # parent: it waits to be closed, not parented.
-reset "$(row 1 issue none 0 triage,idea,area:ui 'Idea: admin dashboard')
-$(row 55 issue none 0 area:docs,chore 'Retro inbox')
-$(row 73 issue none 9 chore,area:tools 'Agent workflow')
-$(row 74 issue none 2 feature,area:api 'All sub-issues closed')
+reset "$(row 1 issue none 0 'triage|idea|area:ui' 'Idea: admin dashboard')
+$(row 55 issue none 0 'area:docs|chore' 'Retro inbox')
+$(row 73 issue none 9 'chore|area:tools' 'Agent workflow')
+$(row 74 issue none 2 'feature|area:api' 'All sub-issues closed')
 $(row 120 pr none 0 - 'chore: a pull request')"
 case_
 expect_code 0
 expect_out_is ""
 
-# Each rule is exact: a label that only contains "idea", a title that only contains "Retro inbox"
-# and an issue with no sub-issues are all still listed.
-reset "$(row 2 issue none 0 area:ideas 'Not an idea')
+# Each rule is exact: a label that only contains "idea" (even split at a comma inside its name),
+# a title that only contains "Retro inbox" and an issue with no sub-issues are all still listed.
+reset "$(row 2 issue none 0 'area:ideas|chore' 'Not an idea')
 $(row 3 issue none 0 chore 'Retro inbox follow-up')
-$(row 4 issue none 0 chore 'No sub-issues')"
+$(row 4 issue none 0 chore 'No sub-issues')
+$(row 5 issue none 0 'x,idea|chore' 'Comma in a label')"
 case_
 expect_code 1
 expect_out_is "#2${T}Not an idea
 #3${T}Retro inbox follow-up
-#4${T}No sub-issues"
-expect_err "3 open issues without a workstream parent"
+#4${T}No sub-issues
+#5${T}Comma in a label"
+expect_err "4 open issues without a workstream parent"
 
 # The list is in ascending issue order, whatever order the pages arrive in (GitHub sends newest
 # first), so #78 and a person reading it get the same order on every run.

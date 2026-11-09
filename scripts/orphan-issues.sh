@@ -6,20 +6,26 @@ set -euo pipefail
 
 OWNER=sssoto17
 REPO=sunny-pastures
+US=$'\x1f'
+
+# Any unexpected failure is exit 3, never 1, which means "issues listed".
+trap 'exit 3' ERR
 
 usage() {
   cat >&2 <<'EOF'
 usage: scripts/orphan-issues.sh
 
 Lists the open issues in sssoto17/sunny-pastures that have no parent issue, one per line:
-"#<number>", a tab, then the title, in ascending issue order. A summary goes to stderr, so
-stdout holds only the list.
+"#<number>", a tab, then the title, in ascending issue order. A title is printed as gh's @tsv
+escapes it (a backslash shows as \\, a tab as \t), so each issue stays on one line. A summary
+goes to stderr, so stdout holds only the list.
 
 Every issue sits under a workstream parent (docs/agents/issue-tracker.md, "Grouping"), except:
   - issues labelled idea;
   - the Retro inbox, found by its exact title "Retro inbox";
   - top-level parents: issues with no parent and at least one sub-issue, open or closed. A
-    parent whose sub-issues are all closed still counts as one.
+    parent whose sub-issues are all closed still counts as one. A parent just framed, with no
+    sub-issue yet, is listed until its first ticket is added.
 Pull requests are never listed.
 
 Exit codes: 0 none found, 1 issues listed, 2 bad arguments (nothing read), 3 GitHub couldn't be
@@ -44,14 +50,14 @@ case $# in
 esac
 
 # One row per open issue or PR, tab-separated: number, kind (issue/pr), parent (parent/none),
-# sub-issue total (open and closed), labels joined by "," ("-" for none, since read collapses
-# empty tab fields), title. GitHub leaves parent_issue_url out of an issue with no parent rather
+# sub-issue total (open and closed), labels joined by the unit separator \x1f, which no label name
+# contains in practice, unlike "," ("-" for none, since read collapses empty tab fields), title. GitHub leaves parent_issue_url out of an issue with no parent rather
 # than sending null (seen 9 Nov); .parent_issue_url is null either way.
 FILTER='.[] | [.number,
   (if has("pull_request") then "pr" else "issue" end),
   (if .parent_issue_url then "parent" else "none" end),
   (.sub_issues_summary.total // 0),
-  ([.labels[].name] | join(",") | if . == "" then "-" else . end),
+  ([.labels[].name] | join("\u001f") | if . == "" then "-" else . end),
   .title] | @tsv'
 
 rows=$(gh api -X GET "repos/$OWNER/$REPO/issues" -f state=open -f per_page=100 --paginate --jq "$FILTER") ||
@@ -65,7 +71,7 @@ while IFS=$'\t' read -r number kind parent subs labels title; do
     die 3 "unexpected row from GitHub, has the API changed? $number $kind $parent $subs"
   fi
   [[ $kind == issue && $parent == none ]] || continue
-  [[ ,$labels, == *,idea,* ]] && continue
+  [[ $US$labels$US == *${US}idea$US* ]] && continue
   [[ $title == "Retro inbox" ]] && continue
   ((subs > 0)) && continue
   orphans+=$(printf '%s\t%s' "$number" "$title")$'\n'
