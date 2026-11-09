@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, rmSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -529,6 +529,25 @@ describe('floor guard, end to end', () => {
         const r = summaryOf({ GITHUB_ACTIONS: 'true' });
         expect(r.out).toContain('Example key: [redacted]');
         expect(r.out + r.summary).not.toContain(key);
+      });
+
+      // `ci / test` runs these tests under Actions: the fixtures' reports must not reach its summary.
+      it("doesn't inherit the test run's GITHUB_ACTIONS or GITHUB_STEP_SUMMARY", () => {
+        realRepo();
+        repo.write({ 'CONSTRAINTS.md': edit(REAL, SECRETS, `${SECRETS} Now.`) });
+        const outer = join(repo.dir, '.outer-summary.md');
+        const saved = { a: process.env.GITHUB_ACTIONS, s: process.env.GITHUB_STEP_SUMMARY };
+        Object.assign(process.env, { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: outer });
+        try {
+          const r = guard();
+          expect(r.out).not.toContain('::stop-commands::');
+          expect(existsSync(outer)).toBe(false);
+        } finally {
+          if (saved.a === undefined) delete process.env.GITHUB_ACTIONS;
+          else process.env.GITHUB_ACTIONS = saved.a;
+          if (saved.s === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+          else process.env.GITHUB_STEP_SUMMARY = saved.s;
+        }
       });
 
       it('stays out of the log when CONSTRAINTS.md is unchanged', () => {
