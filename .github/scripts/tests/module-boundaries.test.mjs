@@ -92,6 +92,30 @@ describe('module privacy in packages/sim, merged with the purity ban', () => {
   );
 });
 
+describe('file and folder names (ADR-0005, section 5)', () => {
+  const NAMES = new Set(['check-file/filename-naming-convention', 'check-file/filename-blocklist', 'check-file/folder-naming-convention']);
+  const named = async (filePath) => (await lintSnippet('export const a = 1;\n', filePath, NAMES)).length;
+
+  it.each([
+    'packages/sim/src/hash/index.ts',
+    'packages/sim/src/hash/canonicalJson.ts',
+    'packages/sim/src/facilities/addOns/index.ts',
+    'packages/sim/src/hash/tests/canonicalJson.test.ts',
+  ])('accept %s', async (filePath) => {
+    expect(await named(filePath)).toBe(0);
+  });
+
+  it.each([
+    'packages/sim/src/hash/canonical-json.ts',
+    'packages/sim/src/hash/CanonicalJson.ts',
+    'packages/sim/src/add-ons/index.ts',
+    'packages/sim/src/hash/tests/sha256.spec.ts',
+    'packages/sim/src/hash/hash.types.ts',
+  ])('reject %s', async (filePath) => {
+    expect(await named(filePath)).toBeGreaterThan(0);
+  });
+});
+
 describe('lintSnippet', () => {
   it('throws on a snippet ESLint cannot parse, rather than report no findings', async () => {
     await expect(lintSnippet('import {', 'packages/sim/src/plots/index.ts', RULES)).rejects.toThrow('could not lint');

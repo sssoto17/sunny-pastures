@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { sha256Hex } from './sha256.js';
+import { sha256Hex } from '../sha256.js';
 
 // FIPS 180-2 examples (NIST), checked against node:crypto when recorded (#81).
 describe('sha256Hex', () => {

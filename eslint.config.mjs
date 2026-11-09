@@ -3,6 +3,7 @@
 import js from '@eslint/js';
 import vitest from '@vitest/eslint-plugin';
 import { defineConfig } from 'eslint/config';
+import checkFile from 'eslint-plugin-check-file';
 import tseslint from 'typescript-eslint';
 
 const nodeGlobals = {
@@ -145,6 +146,23 @@ export default defineConfig(
         'error',
         { restrictDefaultExports: { direct: true, named: true, defaultFrom: true, namedFrom: true, namespaceFrom: true } },
       ],
+    },
+  },
+  {
+    // File and folder names (ADR-0005, section 5): one lowercase word where possible, camelCase
+    // when a name needs more; `.test.ts` is the only suffix. Folders whose names a framework
+    // dictates (Next's app/) and React component names (PascalCase) are settled with apps/web, M3.
+    files: ['{apps,packages}/**/*.ts'],
+    ignores: ['apps/web/src/app/**'],
+    plugins: { 'check-file': checkFile },
+    rules: {
+      'check-file/filename-naming-convention': ['error', { '**/*.ts': 'CAMEL_CASE' }, { ignoreMiddleExtensions: true }],
+      'check-file/filename-blocklist': [
+        'error',
+        { '**/*.spec.ts': '*.test.ts', '**/*.types.ts': '*.ts' },
+        { errorMessage: '{{ target }}: .test.ts is the only suffix; types live in the index.ts or a types.ts sibling (ADR-0005, section 5).' },
+      ],
+      'check-file/folder-naming-convention': ['error', { '{apps,packages}/*/src/**/': 'CAMEL_CASE' }],
     },
   },
   {

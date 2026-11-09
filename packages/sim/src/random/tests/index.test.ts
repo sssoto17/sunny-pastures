@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, inject, test } from 'vitest';
-import { mulberry32, streamSeed } from './random.js';
-import { assertSafeIntegers } from './invariants.js';
+import { mulberry32, streamSeed } from '../index.js';
+import { assertSafeIntegers } from '../../state/index.js';
 
 const params = inject('fastCheck');
 const UINT32_END = 2 ** 32;
