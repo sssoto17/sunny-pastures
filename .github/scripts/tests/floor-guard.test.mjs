@@ -154,6 +154,39 @@ describe("floor guard, end to end", () => {
 			expect(guard().out).toContain("[check-removed] package.json");
 		});
 
+		// #125: the formatting and duplication checks run as scripts too.
+		describe("the formatting and duplication checks", () => {
+			const GLOB = "**/*.{ts,tsx,mts,mjs,js,json}";
+			const WITH = (fast, format, task) =>
+				`{\n  "scripts": {\n    "format:check": "prettier --check \\"${format}\\"",\n    "check:fast": "${fast}",\n    "check:task": "${task}"\n  }\n}\n`;
+			const FAST = "pnpm typecheck && pnpm format:check && pnpm guard:floor";
+			const TASK = "pnpm check:fast && pnpm dupes --changed-since origin/main";
+			const run = (content) => {
+				repo = makeRepo({ ...BASE, "package.json": WITH(FAST, GLOB, TASK) });
+				repo.write({ "package.json": content });
+				return guard();
+			};
+
+			it.each([
+				[
+					"format:check dropped from check:fast",
+					WITH("pnpm typecheck && pnpm guard:floor", GLOB, TASK),
+				],
+				["dupes dropped from check:task", WITH(FAST, GLOB, "pnpm check:fast")],
+				[
+					"prettier --check dropped from format:check",
+					WITH(FAST, GLOB, TASK).replace(`prettier --check \\"${GLOB}\\"`, "true"),
+				],
+				["a file type dropped from the formatting glob", WITH(FAST, "**/*.{ts,tsx}", TASK)],
+			])("blocks %s", (_, content) => {
+				expect(run(content).out).toContain("[check-removed] package.json");
+			});
+
+			it("accepts a wider formatting glob", () => {
+				expect(run(WITH(FAST, "**/*.{ts,tsx,mts,mjs,js,json,css}", TASK)).code).toBe(0);
+			});
+		});
+
 		it("accepts an unrelated script edit", () => {
 			repo = makeRepo({ ...BASE, "package.json": OK });
 			repo.write({
@@ -1300,6 +1333,122 @@ describe("floor guard, end to end", () => {
 		setup();
 		repo.write({ [path]: content });
 		expect(guard().out).toContain("[config-loosened]");
+	});
+
+	// #125: Prettier's ignore list and settings decide what the formatting check covers, so a widened
+	// ignore list or a loosened setting is a moved threshold too (admin, 9 Nov).
+	describe("Prettier's config", () => {
+		const RC =
+			'{\n  "semi": true,\n  "useTabs": true,\n  "printWidth": 100,\n  "plugins": ["@ianvs/prettier-plugin-sort-imports"],\n  "importOrder": ["<THIRD_PARTY_MODULES>", "", "^[.]"]\n}\n';
+		const IGNORE = "# prose\n*.md\n";
+		const run = (files) => {
+			repo = makeRepo({ ...BASE, ".prettierrc": RC, ".prettierignore": IGNORE });
+			repo.write(files);
+			return guard();
+		};
+
+		it.each([
+			["a path added to .prettierignore", { ".prettierignore": `${IGNORE}packages/sim/\n` }],
+			[
+				"an overrides block in .prettierrc",
+				{ ".prettierrc": RC.replace('"semi": true,', '"semi": true,\n  "overrides": [],') },
+			],
+			[
+				"requirePragma in .prettierrc",
+				{ ".prettierrc": RC.replace('"semi": true,', '"semi": true,\n  "requirePragma": true,') },
+			],
+			[
+				"the import-sort plugin dropped from .prettierrc",
+				{
+					".prettierrc": RC.replace('  "plugins": ["@ianvs/prettier-plugin-sort-imports"],\n', ""),
+				},
+			],
+			[
+				"a reformat mixed with an overrides block",
+				{
+					".prettierrc": RC.replaceAll("  ", "\t").replace(
+						'"semi": true,',
+						'"semi": true,\n\t"overrides": [],',
+					),
+				},
+			],
+		])("blocks %s", (_, files) => {
+			expect(run(files).out).toContain("[config-loosened]");
+		});
+
+		it.each([
+			[
+				"a comment, a blank line and a re-included path in .prettierignore",
+				{ ".prettierignore": `${IGNORE}\n# keep the fixtures formatted\n!docs/fixtures/\n` },
+			],
+			["a pure reformat of .prettierrc (#138)", { ".prettierrc": RC.replaceAll("  ", "\t") }],
+			[
+				"a reformat of .prettierrc that wraps an array",
+				{
+					".prettierrc": RC.replace(
+						'"plugins": ["@ianvs/prettier-plugin-sort-imports"]',
+						'"plugins": [\n    "@ianvs/prettier-plugin-sort-imports"\n  ]',
+					),
+				},
+			],
+		])("accepts %s", (_, files) => {
+			expect(run(files).code).toBe(0);
+		});
+
+		// Prettier reads its settings from other places too, so moving them is a way around the line
+		// checks (security review of #147).
+		it.each([
+			["deleting .prettierrc", (r) => rmSync(join(r.dir, ".prettierrc"))],
+			[
+				"renaming .prettierrc to .prettierrc.json",
+				(r) => renameSync(join(r.dir, ".prettierrc"), join(r.dir, ".prettierrc.json")),
+			],
+			[
+				"a nested .prettierrc",
+				(r) => r.write({ "packages/sim/.prettierrc": '{ "semi": false }\n' }),
+			],
+			[
+				"a new prettier.config.mjs",
+				(r) => r.write({ "prettier.config.mjs": "export default {};\n" }),
+			],
+			[
+				"a top-level prettier key in package.json",
+				(r) => r.write({ "package.json": '{\n  "prettier": { "semi": false }\n}\n' }),
+			],
+		])("blocks %s", (_, change) => {
+			repo = makeRepo({
+				...BASE,
+				".prettierrc": RC,
+				".prettierignore": IGNORE,
+				"package.json": "{}\n",
+			});
+			change(repo);
+			expect(guard().out).toContain("[config-loosened]");
+		});
+
+		it("accepts a prettier version bump in package.json's devDependencies", () => {
+			const pkg = (v) => `{\n  "devDependencies": {\n    "prettier": "${v}"\n  }\n}\n`;
+			repo = makeRepo({
+				...BASE,
+				".prettierrc": RC,
+				".prettierignore": IGNORE,
+				"package.json": pkg("3.9.10"),
+			});
+			repo.write({ "package.json": pkg("3.9.11") });
+			expect(guard().code).toBe(0);
+		});
+
+		// Its re-indented lines name `overrides` and `ignore`, which flag unless the whole file
+		// parses to the same JSON as before.
+		it("accepts a pure reformat of a .prettierrc that already has overrides (#138)", () => {
+			const withOverrides = RC.replace(
+				'"semi": true,',
+				'"semi": true,\n  "overrides": [{ "files": "*.md", "options": { "proseWrap": "ignore" } }],',
+			);
+			repo = makeRepo({ ...BASE, ".prettierrc": withOverrides, ".prettierignore": IGNORE });
+			repo.write({ ".prettierrc": withOverrides.replaceAll("  ", "\t") });
+			expect(guard().code).toBe(0);
+		});
 	});
 
 	// #138: a formatter (Prettier, #125) re-quotes, re-indents and re-wraps guarded configs. A line

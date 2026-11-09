@@ -43,7 +43,17 @@ const CHECK_STEP =
 // script that loses one of these, or skips the ratchet outside `check:task`, is a removed check.
 const SCRIPT_LINE = /^\s*"([\w:.-]+)"\s*:\s*"(.*)",?\s*$/;
 const CHECK_CMD =
-	/node \S*(?:floor-guard|coverage-gate|typecheck-reach)\.mjs|\btsc -b\b|\beslint\b|\bvitest run\b|pnpm (?:typecheck|lint|test|guard:floor|coverage:gate|check:fast)\b/g;
+	/node \S*(?:floor-guard|coverage-gate|typecheck-reach)\.mjs|\btsc -b\b|\beslint\b|\bvitest run\b|\bprettier --check\b|\bfallow dupes\b|pnpm (?:typecheck|lint|test|guard:floor|coverage:gate|check:fast|format:check|dupes)\b/g;
+// The file types a `prettier --check "**/*.{a,b}"` glob covers (#125), so a script that drops one
+// narrows the formatting check.
+const prettierTypes = (value) =>
+	/\bprettier --check\b/.test(value)
+		? new Set(
+				[...value.matchAll(/\*\.\{([\w,]+)\}|\*\.(\w+)\b/g)].flatMap((m) =>
+					(m[1] ?? m[2]).split(","),
+				),
+			)
+		: null;
 const scriptChecks = (f) => {
 	const hits = [];
 	const byKey = (lines) =>
@@ -57,7 +67,11 @@ const scriptChecks = (f) => {
 	const now = byKey(f.added);
 	for (const [key, old] of was) {
 		const value = now.get(key)?.value ?? "";
-		if ((old.value.match(CHECK_CMD) ?? []).some((cmd) => !value.includes(cmd)))
+		const types = [prettierTypes(old.value), prettierTypes(value)];
+		if (
+			(old.value.match(CHECK_CMD) ?? []).some((cmd) => !value.includes(cmd)) ||
+			(types[0] && types[1] && [...types[0]].some((t) => !types[1].has(t)))
+		)
 			hits.push(`${old.line} (old)`);
 	}
 	for (const [key, cur] of now) {
@@ -174,6 +188,11 @@ export const enclosingKey = (lines, n) => {
 // #125) doesn't need Exceptions rows. Only JS, TS and JSON configs, by extension, where quotes and
 // whitespace outside strings carry no meaning. YAML (indentation is meaning) and files without an
 // extension are left to the exact checks (spec review of #141).
+// Every file Prettier reads its settings from (#125). A new one, nested or at the root, overrides
+// .prettierrc for its folder, and a deleted or renamed one drops the settings, so each counts as
+// loosening the formatting check (security review of #147).
+const PRETTIER_CONFIG =
+	/^(\.prettierrc(\.(json5?|ya?ml|toml|[cm]?[jt]s))?|prettier\.config\.[cm]?[jt]s)$/;
 const FORMATTED_CONFIG =
 	/^(eslint\.config|vitest\.config|tsconfig.*|\.?fallowrc|\.?fallow|stryker\.(conf|config)|\.?lighthouserc)\.(c|m)?[jt]s$|^(tsconfig.*|\.?fallowrc|\.?fallow|\.?lighthouserc)\.jsonc?$/;
 // After a line break these end a statement (JavaScript's restricted productions): `return⏎x` isn't
@@ -333,6 +352,21 @@ const normalizeCode = (text) => {
 // (spec, admin and security reviews of #141). A PR that mixes a reformat with a content change in
 // the same config gets every finding, so a reformat goes in a PR of its own.
 const withoutFormatting = (f, mergeBase) => {
+	// .prettierrc has no extension and may be JSON or YAML, so it reads as unchanged only when both
+	// versions parse as JSON to the same value (#125).
+	if (basename(f.path) === ".prettierrc" && f.status === "modified") {
+		const parse = (text) => {
+			try {
+				return JSON.stringify(JSON.parse(text));
+			} catch {
+				return null;
+			}
+		};
+		const before = parse((oldContent(mergeBase, f.path) ?? []).join("\n"));
+		return before !== null && before === parse(readFileSync(f.path, "utf8"))
+			? { ...f, removed: [], added: [] }
+			: f;
+	}
 	if (!FORMATTED_CONFIG.test(basename(f.path)) || f.status !== "modified") return f;
 	const before = normalizeCode((oldContent(mergeBase, f.path) ?? []).join("\n"));
 	const after = normalizeCode(readFileSync(f.path, "utf8"));
@@ -342,8 +376,29 @@ const configLoosening = (f, mergeBase) => {
 	const name = basename(f.path);
 	const hits = [];
 	const newLines = () => readFileSync(f.path, "utf8").split("\n");
-	if (name === ".gitleaksignore" || name === ".semgrepignore") {
-		for (const a of f.added) if (a.text.trim() && !a.text.trim().startsWith("#")) hits.push(a.line);
+	if (name === ".gitleaksignore" || name === ".semgrepignore" || name === ".prettierignore") {
+		// A `!` line in .prettierignore re-includes a path, which widens the check (#125).
+		for (const a of f.added) {
+			const t = a.text.trim();
+			if (t && !t.startsWith("#") && !(name === ".prettierignore" && t.startsWith("!")))
+				hits.push(a.line);
+		}
+	} else if (PRETTIER_CONFIG.test(name)) {
+		if (f.status === "added" || (f.oldPath && basename(f.oldPath) !== name)) return ["file"];
+		// Prettier's settings (#125): an `overrides` block, an ignore-like key or `requirePragma`
+		// (which formats only files that ask for it) narrows the check, and so does dropping a plugin
+		// such as the import sorter.
+		for (const a of f.added)
+			if (/overrides|ignore|exclude|requirePragma|skip|disable/i.test(a.text)) hits.push(a.line);
+		const plugins = (lines) =>
+			new Set(
+				lines.flatMap((l) =>
+					[...l.text.matchAll(/["']([^"']*prettier-plugin[^"']*)["']/g)].map((m) => m[1]),
+				),
+			);
+		const kept = plugins(f.added);
+		for (const r of f.removed)
+			if ([...plugins([r])].some((p) => !kept.has(p))) hits.push(`${r.line} (old)`);
 	} else if (
 		/^(\.gitleaks\.toml|osv-scanner\.toml|stryker\.(conf|config)\..+|\.?lighthouserc(\..+)?|\.?fallowrc(\..+)?|\.?fallow\.(toml|json|jsonc))$/.test(
 			name,
@@ -1300,6 +1355,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 	for (const f of changes) {
 		if (f.status === "deleted") {
 			if (isTest(f.path)) weak("test-deleted", f.path, "file");
+			else if (PRETTIER_CONFIG.test(basename(f.path))) weak("config-loosened", f.path, "file");
 			// A deleted config that held a run count takes it with it (review of #133).
 			else if ((oldContent(mergeBase, f.path) ?? []).some(runCount))
 				weak("property-runs-cut", f.path, "file");
@@ -1335,6 +1391,28 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 		}
 		if (basename(f.path) === "package.json" && f.status !== "added")
 			for (const line of scriptChecks(f)) weak("check-removed", f.path, line);
+		// A top-level "prettier" key in any package.json takes over from .prettierrc for its folder
+		// (#125, security review of #147).
+		if (basename(f.path) === "package.json") {
+			const key = (text) => {
+				try {
+					return JSON.stringify(JSON.parse(text).prettier ?? null);
+				} catch {
+					return null;
+				}
+			};
+			const now = readFileSync(f.path, "utf8");
+			const was =
+				f.status === "added"
+					? "null"
+					: key((oldContent(mergeBase, f.oldPath ?? f.path) ?? []).join("\n"));
+			if (key(now) !== "null" && key(now) !== was)
+				weak(
+					"config-loosened",
+					f.path,
+					f.added.find((a) => /^\s*"prettier"\s*:\s*[{"[]/.test(a.text))?.line ?? "file",
+				);
+		}
 		if (WORKFLOW.test(f.path)) {
 			const before = f.oldPath ? (oldContent(mergeBase, f.oldPath) ?? []) : [];
 			const now = readFileSync(f.path, "utf8").split("\n");
