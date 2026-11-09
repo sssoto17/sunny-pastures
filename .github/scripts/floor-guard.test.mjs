@@ -170,11 +170,16 @@ describe('floor guard, end to end', () => {
     it.each([
       ['a SHA-only bump in the floor job by Dependabot', BUMP, DEPENDABOT, 0],
       ['a SHA-only bump in the floor job by anyone else', BUMP, { ...TODAY, GITHUB_ACTOR: 'sssoto17' }, 1],
+      ['a SHA-only bump committed by someone other than Dependabot', BUMP, { ...DEPENDABOT, COMMIT: 'yes' }, 1],
       ['another action in its place', PINNED.replace(`actions/checkout@${SHA_A}`, `actions/other@${SHA_B}`), DEPENDABOT, 1],
       ['a tag instead of a SHA', PINNED.replace(`@${SHA_A} # v7.0.1`, '@v7'), DEPENDABOT, 1],
-    ])('judge %s', (_, content, env, code) => {
+      // Review of #133: a bump in one job paired with a line deleted from, or added to, another.
+      ['a bump elsewhere hiding a floor-job deletion', `jobs:\n  test:\n    steps:\n      - uses: actions/checkout@${SHA_B} # v7.1.0\n      - run: pnpm test\n  floor:\n    steps:\n      - run: git show "origin/$BASE_REF:x" > "$dir/x"\n      - run: node guard.mjs\n`, DEPENDABOT, 1],
+      ['a second checkout added to the floor job', PINNED.replace(`      - uses: actions/checkout@${SHA_A} # v7.0.1\n`, `      - uses: actions/checkout@${SHA_B} # v7.1.0\n      - uses: actions/checkout@${SHA_B} # v7.1.0\n`), DEPENDABOT, 1],
+    ])('judge %s', (_, content, { COMMIT, ...env }, code) => {
       repo = makeRepo({ ...BASE, [CI]: PINNED });
       repo.write({ [CI]: content });
+      if (COMMIT) repo.commit(); // committed by "test", not dependabot[bot]
       const r = guard(env);
       expect(r.code).toBe(code);
       if (code) expect(r.out).toContain(`[check-removed] ${CI}`);
@@ -245,6 +250,22 @@ describe('floor guard, end to end', () => {
     expect(guard().out).toContain('[property-runs-cut]');
   });
 
+  // Review of #133: a run count held in a variable, one fooled by a comment, and one in a comment.
+  it.each([
+    ['a run count from a variable, deleted', 'fc.assert(p, { seed: 1, numRuns: simPropertyRuns });\n', 'fc.assert(p, { seed: 1 });\n'],
+    ['a run count from a variable, replaced by a literal', 'fc.assert(p, { numRuns: simPropertyRuns });\n', 'fc.assert(p, { numRuns: 1 });\n'],
+    ['a run count left only in a comment', '// SIM_PROPERTY_RUNS: 100 when unset\nconst runs = Number(env.SIM_PROPERTY_RUNS ?? 100);\n', '// SIM_PROPERTY_RUNS: 100 when unset\nconst runs = 1;\n'],
+    ['a run count cut behind a comment', 'fc.assert(p, { numRuns: 1000 });\n', 'fc.assert(p, { numRuns: N /* 1000 */ });\n'],
+  ])('blocks %s', (_, before, after) => {
+    setup();
+    repo.write({ 'packages/sim/src/p.test.ts': before });
+    repo.commit();
+    repo.git('switch', '-q', '-C', 'main');
+    repo.git('switch', '-q', '-c', 'cut');
+    repo.write({ 'packages/sim/src/p.test.ts': after });
+    expect(guard().out).toContain('[property-runs-cut]');
+  });
+
   it('accepts a run count that moved within its file', () => {
     setup();
     repo.write({ 'packages/sim/src/p.test.ts': 'fc.assert(a, { numRuns: 1000 });\nfc.assert(b);\n' });
@@ -268,6 +289,9 @@ describe('floor guard, end to end', () => {
     ['without extends or strict', '{\n  "compilerOptions": {\n    "target": "ES2022"\n  }\n}\n', 1],
     ['with extends', '{\n  "extends": "../../tsconfig.base.json"\n}\n', 0],
     ['with strict on', '{\n  "compilerOptions": {\n    "strict": true\n  }\n}\n', 0],
+    // Review of #133: an `extends` must point at a file that exists.
+    ['extending a file that does not exist', '{\n  "extends": "./nope.json"\n}\n', 1],
+    ['extending nothing', '{\n  "extends": []\n}\n', 1],
   ])('judges a new package tsconfig %s', (_, content, code) => {
     setup();
     repo.write({ 'packages/new/tsconfig.json': content });
@@ -289,10 +313,32 @@ describe('floor guard, end to end', () => {
     ['a multi-line catch holding only comments', 'try {\n  f();\n} catch (e) {\n  // ignore\n  /* really */\n}\n'],
     ['a "not yet implemented" stub', "throw new Error('Not yet implemented');\n"],
     ['an "unimplemented" stub', 'throw new TypeError(`unimplemented: ${x}`);\n'],
+    // Review of #133: the variants that still passed.
+    ['a stub without new', "throw Error('Not implemented');\n"],
+    ['an upper-case stub', "throw new Error('NOT IMPLEMENTED');\n"],
+    ['a hyphenated stub', "throw new Error('not-implemented');\n"],
+    ['a multi-line empty .catch', 'p.catch(() => {\n});\n'],
+    ['a multi-line .catch holding only a comment', 'p.catch(() => {\n  // ignore\n});\n'],
+    ['a .catch holding only a comment', 'p.catch(() => { /* x */ });\n'],
+    ['a .catch returning undefined', 'p.catch(() => undefined);\n'],
+    ['an async empty .catch', 'p.catch(async () => {});\n'],
+    ['an empty rejection handler in .then', 'p.then(f, () => {});\n'],
   ])('always blocks %s', (_, code) => {
     setup();
     repo.write({ 'packages/sim/src/s.ts': code, 'CONSTRAINTS.md': withException(row('E1', 'packages/sim/**', '2026-11-20')) });
     expect(guard().out).toContain('[unfinished-work]');
+  });
+
+  // Review of #133: unfinished work can't be waived, so a false positive blocks for good.
+  it.each([
+    ['a catch with a comment and a call', 'try { f(); } catch (e) {\n  /* log it */ report(e);\n}\n'],
+    ['a catch with code between comments', 'try { f(); } catch { /* a */ g(); /* b */ }\n'],
+    ['a message that mentions unimplemented', "throw new Error('Feature flag unimplemented-x is off');\n"],
+    ['a .catch that handles the error', 'p.catch((e) => { report(e); });\n'],
+  ])('does not count %s as unfinished work', (_, code) => {
+    setup();
+    repo.write({ 'packages/sim/src/s.ts': code });
+    expect(guard().code).toBe(0);
   });
 
   it.each([
@@ -335,9 +381,12 @@ describe('floor guard, end to end', () => {
       ['the split size raised in a paragraph', 'at most **400 changed lines**', 'at most **800 changed lines**', 'threshold-loosened'],
       // #99: numbers paired by position let a new number in front take the old one's place.
       ['the split size raised behind a new cap', 'at most **400 changed lines**', 'at most **under 10 files or 800 changed lines**', 'threshold-loosened'],
-      ['the split size raised in a new cap that took the old unit', 'at most **400 changed lines**', 'at most **10 changed files or 800 lines**', 'threshold-loosened'],
+      ['the split size raised in a new cap that took the old unit', 'at most **400 changed lines**', 'at most **10 changed files or 800 lines**', 'threshold-changed'],
       // Security review of B2: an extra cap in another unit was compared across units.
       ['a cap in a new unit next to the bench budget', 'largest content farm ≤ 50 ms', 'largest content farm ≤ 50 ms or 5 s', 'threshold-loosened'],
+      // Review of #133: the same number, counting something else.
+      ['the split size counted in files', 'at most **400 changed lines**', 'at most **400 changed files**', 'threshold-changed'],
+      ['the exception limit counted in weeks', 'no more than 30 days out', 'no more than 30 weeks out', 'threshold-changed'],
       ['a cap in a new unit next to the split size', 'at most **400 changed lines**', 'at most **400 changed lines or 20 files**', 'threshold-loosened'],
       ['the exception limit raised in a paragraph', 'no more than 30 days out', 'no more than 90 days out', 'threshold-loosened'],
       ['a suppression dropped from a continuation line', '`fallow-ignore-next-line`, `fallow-ignore-file`, ', '', 'rule-narrowed'],
@@ -355,6 +404,8 @@ describe('floor guard, end to end', () => {
       ['the split size lowered in the interview record', '- **Split size:** 400 changed lines', '- **Split size:** 300 changed lines'],
       ['the ratchet tolerance lowered', '| must not fall | 0.5 points |', '| must not fall | 0.2 points |'],
       ['a tighter cap of the same unit added next to the split size', 'at most **400 changed lines**', 'at most **400 changed lines, or 300 changed lines for a spike**'],
+      // Review of #133: "and" adds a second cap that must also hold, which tightens.
+      ['a cap in a new unit joined with "and"', 'at most **400 changed lines**', 'at most **400 changed lines and 20 files**'],
       ['a comma removed from an unlabelled list item', '- **Every failing check blocks the merge**, except', '- **Every failing check blocks the merge** except'],
     ])('stays silent for %s', (_, from, to) => {
       realRepo();
