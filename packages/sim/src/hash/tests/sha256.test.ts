@@ -1,9 +1,9 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { sha256Hex } from '../sha256.js';
 
 // FIPS 180-2 examples (NIST), checked against node:crypto when recorded (#81).
 describe('sha256Hex', () => {
-  test.each([
+  it.each([
     ['the empty message', '', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'],
     ['"abc"', 'abc', 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'],
     [
@@ -21,7 +21,7 @@ describe('sha256Hex', () => {
     expect(sha256Hex(message)).toBe(digest);
   });
 
-  test('throws on a lone surrogate, which has no UTF-8 encoding', () => {
+  it('throws on a lone surrogate, which has no UTF-8 encoding', () => {
     expect(() => sha256Hex('a\uD83D')).toThrow(/surrogate/);
     expect(() => sha256Hex('\uDE00a')).toThrow(/surrogate/);
     expect(() => sha256Hex('\uD83Da')).toThrow(/surrogate/);

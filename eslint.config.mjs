@@ -2,8 +2,8 @@
 // a path to `ignores`, is a moved threshold that the floor guard reports.
 import js from '@eslint/js';
 import vitest from '@vitest/eslint-plugin';
-import { defineConfig } from 'eslint/config';
 import checkFile from 'eslint-plugin-check-file';
+import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 const nodeGlobals = {
@@ -49,6 +49,27 @@ const SOURCE_PRIVACY = [
 const TEST_PRIVACY = MODULE_PRIVACY;
 const SOURCE_FILES = ['{apps,packages}/**/*.{ts,tsx}'];
 const TEST_FILES = ['{apps,packages}/**/*.test.{ts,tsx}', '{apps,packages}/**/tests/**'];
+
+// Names in code (ADR-0005, section 6, C9): camelCase, PascalCase for types, no UPPER_SNAKE
+// constants, and booleans start with is, has or can. Names that mirror an outside spec keep its
+// spelling (SHA-256's K and H0). Properties may be snake_case where data mirrors an outside shape
+// (a DB column, an API field); the sim mirrors none, so it passes camelCase only. The rule's
+// options are one list, so the sim block repeats it with its own property formats.
+const BOOLEAN = { types: ['boolean'], format: ['PascalCase'], prefix: ['is', 'has', 'can'] };
+const naming = (propertyFormats) => [
+  'error',
+  { selector: 'default', format: ['camelCase'] },
+  { selector: 'typeLike', format: ['PascalCase'] },
+  { selector: 'import', format: ['camelCase', 'PascalCase'] },
+  { selector: 'variable', filter: { regex: '^(K|H0)$', match: true }, format: null },
+  { selector: 'variable', format: ['camelCase'] },
+  { selector: 'variable', ...BOOLEAN },
+  // An unused leading parameter is named `_name`, so the used ones after it keep their place.
+  { selector: 'parameter', format: ['camelCase'], leadingUnderscore: 'allow' },
+  { selector: 'parameter', ...BOOLEAN, leadingUnderscore: 'allow' },
+  { selector: ['objectLiteralProperty', 'typeProperty'], format: propertyFormats },
+  { selector: ['objectLiteralProperty', 'typeProperty'], modifiers: ['requiresQuotes'], format: null },
+];
 
 // D16 (ADR-0003, section 10): 32-bit operators truncate times above 2^31 ms (about 24.9 days).
 // Lint sees a time only by its name, anywhere inside the operand (`(to - at) | 0` included):
@@ -128,6 +149,7 @@ export default defineConfig(
       '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'as', objectLiteralTypeAssertions: 'never' }],
       '@typescript-eslint/return-await': ['error', 'always'],
+      '@typescript-eslint/naming-convention': naming(['camelCase', 'snake_case']),
       'func-style': ['error', 'declaration', { allowArrowFunctions: true, overrides: { namedExports: 'declaration' } }],
       eqeqeq: ['error', 'always'],
       'no-warning-comments': ['error', { terms: ['todo', 'fixme'] }],
@@ -182,6 +204,8 @@ export default defineConfig(
       'vitest/expect-expect': ['error', { assertFunctionNames: ['expect', 'fc.assert'] }],
       'vitest/no-focused-tests': 'error',
       'vitest/no-disabled-tests': 'error',
+      // describe names the unit, and each it reads as a sentence (ADR-0005, C18).
+      'vitest/consistent-test-it': ['error', { fn: 'it', withinDescribe: 'it' }],
     },
   },
   {
@@ -195,6 +219,7 @@ export default defineConfig(
   {
     files: SIM_FILES,
     rules: {
+      '@typescript-eslint/naming-convention': naming(['camelCase']),
       'no-eval': 'error',
       'no-new-func': 'error',
       // Each reaches a banned call without naming it: globalThis.Math.random(), Reflect.get(…).

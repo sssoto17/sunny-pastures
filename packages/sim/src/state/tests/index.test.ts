@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { describe, expect, inject, test } from 'vitest';
+import { describe, expect, inject, it } from 'vitest';
 import { assertSafeIntegers } from '../index.js';
 
 const params = inject('fastCheck');
@@ -16,14 +16,14 @@ const unsafeNumber = fc.oneof(
 );
 
 describe('assertSafeIntegers', () => {
-  test('accepts a state whose numbers are all safe integers', () => {
+  it('accepts a state whose numbers are all safe integers', () => {
     const state = { time: 2 ** 31 + 5, coins: 0, rng: 0, plots: [{ grownAt: Number.MAX_SAFE_INTEGER }] };
     expect(() => {
       assertSafeIntegers(state);
     }).not.toThrow();
   });
 
-  test.each([
+  it.each([
     ['a fraction', 1.5],
     ['NaN', NaN],
     ['Infinity', Infinity],
@@ -36,7 +36,7 @@ describe('assertSafeIntegers', () => {
     }).toThrow('$.plots[1].grownAt');
   });
 
-  test('property: accepts any tree of safe integers, strings, booleans and null', () => {
+  it('property: accepts any tree of safe integers, strings, booleans and null', () => {
     fc.assert(
       fc.property(safeTree, (tree) => {
         assertSafeIntegers(tree);
@@ -45,7 +45,7 @@ describe('assertSafeIntegers', () => {
     );
   });
 
-  test('property: throws when one number anywhere is not a safe integer', () => {
+  it('property: throws when one number anywhere is not a safe integer', () => {
     fc.assert(
       fc.property(fc.array(safeTree), fc.nat(), unsafeNumber, (trees, index, bad) => {
         const state = [...trees];

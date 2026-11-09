@@ -1284,9 +1284,9 @@ describe('floor guard helpers', () => {
     const source = readFileSync(SCRIPT, 'utf8');
     const verdicts = source.slice(source.indexOf('const compareNumbers'), source.indexOf('const keyOf'));
     const emitted = new Set([
-      ...[...source.matchAll(/\bweak\('([a-z]+(?:-[a-z]+)+)'/g)].map((m) => m[1]),
-      ...[...source.matchAll(/\brule: '([a-z]+(?:-[a-z]+)+)'/g)].map((m) => m[1]),
-      ...[...verdicts.matchAll(/'([a-z]+(?:-[a-z]+)+)'/g)].map((m) => m[1]),
+      ...[...source.matchAll(/\bweak\(\s*['"]([a-z]+(?:-[a-z]+)+)['"]/g)].map((m) => m[1]),
+      ...[...source.matchAll(/\brule:\s*['"]([a-z]+(?:-[a-z]+)+)['"]/g)].map((m) => m[1]),
+      ...[...verdicts.matchAll(/['"]([a-z]+(?:-[a-z]+)+)['"]/g)].map((m) => m[1]),
     ]);
     expect([...WAIVABLE].sort()).toEqual([...emitted].sort());
   });
