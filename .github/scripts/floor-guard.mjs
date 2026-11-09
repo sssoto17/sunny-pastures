@@ -678,8 +678,12 @@ export const parseException = (text) => {
 const tooBroad = (path) => {
   // One file (`packages/sim/src/a.ts`) or one folder (`packages/sim/` or `packages/sim/**`): no
   // wildcard anywhere else, so `packages/*/src/**` and `apps/**/x.ts` fail (security review, #99).
-  const body = path.endsWith('/**') ? path.slice(0, -3) : path;
-  return !body || /[*?[\]{}]/.test(body);
+  const folder = path.endsWith('/**') || path.endsWith('/');
+  const body = path.replace(/\/\*\*$|\/$/, '');
+  if (!body || /[*?[\]{}]/.test(body)) return true;
+  // The widest folder is one package or a folder inside it (admin, 9 Nov): a folder needs two
+  // segments, so `packages/sim/` passes and `packages/**`, `apps/` and `docs/` don't.
+  return folder && body.split('/').filter(Boolean).length < 2;
 };
 // An Exceptions row's ID, without emphasis: `**E1**` is E1.
 // Emphasis only around it: `**E1**` is E1, but `E*1` is no ID at all.

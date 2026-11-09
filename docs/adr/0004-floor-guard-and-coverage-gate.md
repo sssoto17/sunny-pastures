@@ -141,3 +141,37 @@ the check for secrets (the admin, review of #129).
 - `floor-guard.mjs` now also holds a word diff and the workflow-command escaping. They stay in the
   file because CI copies only `floor-guard.mjs` and `diff.mjs` from the base branch, and a new
   module would need a floor-job change.
+
+## Exceptions rows (#99, decided 9 Nov)
+
+An Exceptions row lets one weakened bar through on one path for a limited time (`CONSTRAINTS.md`,
+Exceptions). The #40 review found rows that waived too much, never expired, or hid where a
+reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
+
+- **A row is scoped.** Its Rule column names the findings it waives, and nothing else on its Path
+  is waived. Its Path is one file, or one folder no wider than one package (admin, 9 Nov):
+  `packages/sim/` passes, while `packages/**`, `apps/` and any top-level folder don't. A waiver
+  across every package is in effect project-wide, and the sim is what the floor protects most.
+- **A row can't outlive its date.** An unreadable date fails every PR, as an expired one does, and
+  `FLOOR_GUARD_TODAY` is ignored in CI.
+- **A row can't hide.** Expiry reads every row-shaped line in the file, whatever heading, fence or
+  comment it sits in. Waivers come only from the one table with the Exceptions header, at the left
+  margin, under the one `## Exceptions` heading. Fences, headings and raw HTML blocks are read the
+  way CommonMark renders them.
+
+**Patterns.**
+- *Allowlist:* the Rule column takes only the names the guard emits as waivable findings, and a
+  test keeps the two lists equal.
+- *Fail closed:* anything the guard can't read is a failure, never a pass.
+- *Two readers, one strict and one wide:* the waiver reader takes only well-formed rows, and the
+  expiry reader checks every row-shaped line. A formatting trick can keep a row from waiving, but
+  it can't keep the row from expiring.
+
+**Alternatives considered.**
+- *A maintained Markdown parser (remark or markdown-it).* It would read the file exactly as it
+  renders. It's not adopted: the floor job runs with Node only and no install, so it would need a
+  dependency and a floor-job change (admin's call).
+- *Refusing any wildcard in a Path.* Too strict: a folder waiver for one package is a legitimate
+  case.
+- *Checking only added rows for a bad date.* That was the old behaviour, and an old row with a bad
+  date never expired.

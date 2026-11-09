@@ -800,6 +800,13 @@ describe('floor guard, end to end', () => {
       expect(guard().out).toContain('[exception-too-broad] CONSTRAINTS.md');
     });
 
+    // Admin, 9 Nov: the widest a Path may be is one package or a folder inside it.
+    it.each(['packages/**', 'packages/', 'apps/**', 'packages/*/src/a.ts', 'docs/'])('refuses the Path %s, wider than one package', (path) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', path)) });
+      expect(guard().out).toContain('[exception-too-broad] CONSTRAINTS.md');
+    });
+
     it.each(['packages/sim/**', 'packages/sim/', 'packages/sim/src/a.ts'])('accepts the Path %s, one folder or file', (path) => {
       setup();
       repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', path)) });
