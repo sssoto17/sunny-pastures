@@ -128,9 +128,9 @@ emit_word() {
         ;;
       *)
         toks+=("$word") kinds+=(W)
-        # A keyword or an assignment in command position leaves the next word there too.
-        [[ $cmd_pos == 1 && ($word =~ ^(if|then|elif|else|while|until|do|!|\{|time)$ ||
-          $word =~ ^[A-Za-z_][A-Za-z0-9_]*=) ]] || cmd_pos=0
+        # Only a keyword in command position leaves the next word there too. After an
+        # assignment (`x=1 [[`), `[[` and `((` are plain words, as in bash.
+        [[ $cmd_pos == 1 && $word =~ ^(if|then|elif|else|while|until|do|!|\{|time)$ ]] || cmd_pos=0
         ;;
     esac
     next_is=''
@@ -300,7 +300,8 @@ lex_command() {
         ;;
       '&')
         if [[ ${cmd:i+1:1} == '>' ]]; then # &> and &>> redirect stdout and stderr
-          emit_word; next_is=redirect_out redir_dup=0; i=$((i + 2)); [[ ${cmd:i:1} == '>' ]] && i=$((i + 1))
+          emit_word; next_is=redirect_out redir_dup=0 cmd_pos=0
+          i=$((i + 2)); [[ ${cmd:i:1} == '>' ]] && i=$((i + 1))
         else
           if [[ ${cmd:i+1:1} == '&' ]]; then emit_op '&&'; i=$((i + 2)); else emit_op ';'; i=$((i + 1)); fi
         fi
@@ -334,6 +335,7 @@ lex_command() {
       '<' | '>')
         [[ $word =~ ^[0-9]+$ ]] && word='' have_word=0 # the fd in 2>&1
         emit_word
+        cmd_pos=0 # after a redirect, `[[` and `((` are plain words, as in bash
         if [[ ${cmd:i:3} == '<<<' ]]; then
           next_is=redirect; i=$((i + 3))
         elif [[ ${cmd:i:2} == '<<' ]]; then

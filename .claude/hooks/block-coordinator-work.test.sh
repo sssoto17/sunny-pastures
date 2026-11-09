@@ -309,6 +309,12 @@ bash_tool 2 "$MAIN" 'echo [[ > docs/x.md ]]'         # `[[` as an argument: the 
 bash_tool 2 "$MAIN" 'echo if [[ > docs/x.md ]]'      # `if` as an argument isn't a keyword
 bash_tool 2 "$MAIN" 'printf %s do [[ >docs/x.md ]]'
 bash_tool 2 "$MAIN" 'echo then ((true) && git commit -m x)'
+bash_tool 2 "$MAIN" 'x=1 [[ > docs/x.md ]]'          # after an assignment, `[[` is a plain word
+bash_tool 2 "$MAIN" '>/dev/null [[ > docs/x.md ]]'   # after a redirect, too
+bash_tool 2 "$MAIN" '</dev/null [[ > docs/x.md ]]'
+bash_tool 2 "$MAIN" '>/tmp/a [[ > docs/x.md ]]'
+bash_tool 2 "$MAIN" '2>&1 [[ > docs/x.md ]]'
+bash_tool 2 "$MAIN" $'cat <<EOF [[ > docs/x.md ]]\nbody\nEOF'
 bash_tool 0 "$MAIN" 'if ! [[ a > b ]]; then echo no; fi'
 bash_tool 0 "$MAIN" 'while true; do [[ x > y ]] && break; done'
 bash_tool 0 "$MAIN" '{ (( n > 0 )); }'
