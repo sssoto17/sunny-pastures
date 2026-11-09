@@ -3,10 +3,10 @@ import { existsSync, readFileSync, rmSync, renameSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { WAIVABLE, enclosingKey, globToRegExp, parseDate } from './floor-guard.mjs';
+import { WAIVABLE, enclosingKey, globToRegExp, parseDate } from '../floor-guard.mjs';
 import { makeRepo } from './test-repo.mjs';
 
-const SCRIPT = fileURLToPath(new URL('./floor-guard.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../floor-guard.mjs', import.meta.url));
 const TODAY = { FLOOR_GUARD_TODAY: '2026-11-10' };
 
 const CONSTRAINTS = `# Constraints
@@ -87,7 +87,7 @@ describe('floor guard, end to end', () => {
   });
 
   describe("the guard's own files", () => {
-    const SELF_TEST = '.github/scripts/floor-guard.test.mjs';
+    const SELF_TEST = '.github/scripts/tests/floor-guard.test.mjs';
     const selfSetup = () => (repo = makeRepo({ ...BASE, [SELF_TEST]: "it('a', () => {\n  expect(1).toBe(1);\n  expect(2).toBe(2);\n});\n" }));
 
     it('are checked for skipped tests', () => {
@@ -149,7 +149,7 @@ describe('floor guard, end to end', () => {
 
     // Runs the real step from ci.yml, so the test breaks if the step changes shape.
     const takeGuardStep = () => {
-      const lines = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8').split('\n');
+      const lines = readFileSync(fileURLToPath(new URL('../../workflows/ci.yml', import.meta.url)), 'utf8').split('\n');
       const start = lines.findIndex((l) => l.includes('name: Take the guard from the base branch')) + 2;
       const end = lines.findIndex((l, i) => i >= start && !l.startsWith('          '));
       return lines.slice(start, end).map((l) => l.slice(10)).join('\n');
@@ -410,7 +410,7 @@ describe('floor guard, end to end', () => {
 
   // The cases the stack review of #94–#97 found passing clean, run against the real file.
   describe('the real CONSTRAINTS.md', () => {
-    const REAL = readFileSync(fileURLToPath(new URL('../../CONSTRAINTS.md', import.meta.url)), 'utf8');
+    const REAL = readFileSync(fileURLToPath(new URL('../../../CONSTRAINTS.md', import.meta.url)), 'utf8');
     const edit = (text, from, to) => {
       if (!text.includes(from)) throw new Error(`CONSTRAINTS.md no longer contains: ${from}`);
       return text.replace(from, to);

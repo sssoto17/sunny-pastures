@@ -8,7 +8,7 @@ import { ESLint } from 'eslint';
 import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 
-const root = fileURLToPath(new URL('../..', import.meta.url));
+const root = fileURLToPath(new URL('../../..', import.meta.url));
 const eslint = new ESLint({ cwd: root });
 const PURITY_RULES = new Set([
   'no-eval',

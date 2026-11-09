@@ -1,9 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { evaluate, parseLcov, recordedProjectCoverage } from './coverage-gate.mjs';
+import { evaluate, parseLcov, recordedProjectCoverage } from '../coverage-gate.mjs';
 import { makeRepo } from './test-repo.mjs';
 
-const SCRIPT = fileURLToPath(new URL('./coverage-gate.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../coverage-gate.mjs', import.meta.url));
 const ratchets = (today) => `| Metric | Today |\n|---|---|\n| Project coverage | ${today} |\n`;
 
 // A changed file whose lines 1..n were added, and an lcov entry with `covered` of them hit.
