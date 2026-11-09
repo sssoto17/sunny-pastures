@@ -2,11 +2,14 @@
 // in a file inside packages/sim and none of the rules fire outside it. It lives here because the
 // root Vitest include already runs .github/scripts tests, and it can't sit inside packages/sim:
 // it imports eslint and node:*.
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
+import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 
-const eslint = new ESLint({ cwd: fileURLToPath(new URL('../..', import.meta.url)) });
+const root = fileURLToPath(new URL('../..', import.meta.url));
+const eslint = new ESLint({ cwd: root });
 const PURITY_RULES = new Set(['no-restricted-imports', 'no-restricted-properties', 'no-restricted-syntax']);
 
 /** The purity findings for `code` linted as if it were the file at `filePath`, as "line rule". */
@@ -125,4 +128,30 @@ describe('sim purity rules', () => {
       '10 no-restricted-syntax',
     ]);
   });
+});
+
+// The other half of the guard: the sim's tsconfigs keep timers, fetch, crypto, performance and
+// node:* types out by compiling against ES2022 only, with no ambient types (#81). The floor guard
+// watches strict options, not `lib` or `types`, so adding "DOM" or "node" would otherwise pass.
+describe('sim tsconfigs', () => {
+  /** The compiler options after `extends` is resolved, as tsc sees them. */
+  const resolvedOptions = (file) => {
+    const host = {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: (d) => {
+        throw new Error(ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+      },
+    };
+    return ts.getParsedCommandLineOfConfigFile(join(root, file), {}, host).options;
+  };
+
+  test.each(['packages/sim/tsconfig.json', 'packages/sim/tsconfig.test.json'])(
+    '%s compiles against ES2022 only, with no ambient types',
+    (file) => {
+      const options = resolvedOptions(file);
+      expect(options.lib).toEqual(['lib.es2022.d.ts']);
+      expect(options.types).toEqual([]);
+      expect(options.noLib).toBeUndefined();
+    },
+  );
 });
