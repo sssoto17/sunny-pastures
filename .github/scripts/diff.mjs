@@ -49,6 +49,7 @@ export const parseDiff = (text) => {
   let inHeader = false;
   let oldLine = 0;
   let newLine = 0;
+  let hunk = 0; // which hunk of its file a line came from (#138: formatting pairs stay within one)
   for (const line of text.split('\n')) {
     if (line.startsWith('diff ')) {
       // `diff --git a/x b/x` names the file even when no ---/+++ follows (an empty new file).
@@ -62,6 +63,7 @@ export const parseDiff = (text) => {
       inHeader = false;
       const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
       if (!m) throw new CannotRun('unreadable hunk header');
+      hunk++;
       oldLine = Number(m[1]);
       newLine = Number(m[2]);
     } else if (inHeader) {
@@ -72,9 +74,9 @@ export const parseDiff = (text) => {
       else if (line.startsWith('rename from ')) cur.oldPath = line.slice(12);
       else if (line.startsWith('rename to ')) cur.path = line.slice(10);
     } else if (line.startsWith('+')) {
-      cur.added.push({ line: newLine++, text: line.slice(1) });
+      cur.added.push({ line: newLine++, text: line.slice(1), hunk });
     } else if (line.startsWith('-')) {
-      cur.removed.push({ line: oldLine++, text: line.slice(1) });
+      cur.removed.push({ line: oldLine++, text: line.slice(1), hunk });
     }
   }
   for (const f of files) {

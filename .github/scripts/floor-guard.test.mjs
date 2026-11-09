@@ -815,6 +815,62 @@ describe('floor guard, end to end', () => {
     expect(guard().out).toContain('[config-loosened]');
   });
 
+  // #138: a formatter (Prettier, #125) re-quotes, re-indents and re-wraps guarded configs. A line
+  // that only changed formatting counts as unchanged; any change in content still flags.
+  describe('formatting-only changes in guarded configs', () => {
+    const ESLINT = "export default [\n  {\n    files: ['a/**'],\n    rules: {\n      'no-x': 'error',\n      'max-lines': ['error', 300],\n    },\n  },\n  {\n    files: ['b/**'],\n    rules: {\n      'no-y': 'error'\n    },\n  },\n];\n";
+    const VITEST = "export default {\n  test: {\n    include: ['packages/*/src/**/*.test.ts', 'tools/**/*.test.ts'],\n    coverage: {\n      exclude: [\n        '**/*.test.ts',\n      ],\n    },\n  },\n};\n";
+    const configs = { ...BASE, 'eslint.config.mjs': ESLINT, 'vitest.config.mts': VITEST };
+    const run = (files) => {
+      repo = makeRepo(configs);
+      repo.write(files);
+      return guard();
+    };
+
+    it.each([
+      ['re-quoted', { 'eslint.config.mjs': ESLINT.replaceAll("'", '"') }],
+      ['re-indented', { 'eslint.config.mjs': ESLINT.replace(/^ {6}/gm, '        ') }],
+      ['given a trailing comma', { 'eslint.config.mjs': ESLINT.replace("'no-y': 'error'\n", "'no-y': 'error',\n") }],
+      ['with spaces changed', { 'eslint.config.mjs': ESLINT.replace("['error', 300]", "[ 'error' , 300 ]") }],
+      ['re-wrapped', { 'vitest.config.mts': VITEST.replace("    include: ['packages/*/src/**/*.test.ts', 'tools/**/*.test.ts'],\n", '    include: [\n      "packages/*/src/**/*.test.ts",\n      "tools/**/*.test.ts",\n    ],\n') }],
+      ['a re-indented exclude list', { 'vitest.config.mts': VITEST.replace("      exclude: [\n        '**/*.test.ts',\n      ],\n", "    exclude: [\n      '**/*.test.ts',\n    ],\n") }],
+    ])('passes a config %s', (_, files) => {
+      expect(run(files)).toMatchObject({ code: 0 });
+    });
+
+    it.each([
+      ['a severity changed', { 'eslint.config.mjs': ESLINT.replace("'no-x': 'error'", '"no-x": "warn"') }],
+      ['a rule renamed', { 'eslint.config.mjs': ESLINT.replace("'no-x': 'error'", '"no-z": "error"') }],
+      ['a number changed', { 'eslint.config.mjs': ESLINT.replace("['error', 300]", '["error", 400]') }],
+      ['an include item removed', { 'vitest.config.mts': VITEST.replace(", 'tools/**/*.test.ts'", '') }],
+      ['an include glob changed', { 'vitest.config.mts': VITEST.replace("'tools/**/*.test.ts'", '"tools/*.test.ts"') }],
+      ['an exclusion added while re-wrapping', { 'vitest.config.mts': VITEST.replace("      exclude: [\n        '**/*.test.ts',\n      ],\n", '      exclude: ["**/*.test.ts", "packages/sim/**"],\n') }],
+    ])('still flags %s', (_, files) => {
+      expect(run(files).out).toContain('[config-loosened]');
+    });
+
+    it('does not pair a rule moved into another config object', () => {
+      // Everything re-quoted, and `no-x` moved from the `a/**` object to the `b/**` one.
+      const moved = ESLINT.replace("      'no-x': 'error',\n", '').replace("      'no-y': 'error'\n", "      'no-x': 'error',\n      'no-y': 'error'\n").replaceAll("'", '"');
+      expect(run({ 'eslint.config.mjs': moved }).out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    it.each([
+      ['a template literal re-quoted', "      include: [`${root}/**/*.test.ts`],\n", '      include: ["${root}/**/*.test.ts"],\n'],
+      ['a regex whose quotes changed', "      'no-restricted-syntax': ['error', { selector: /'x'/ }],\n", "      'no-restricted-syntax': ['error', { selector: /\"x\"/ }],\n"],
+      ['a regex whose spaces changed', "      'no-restricted-syntax': ['error', { selector: /a b/ }],\n", "      'no-restricted-syntax': ['error', { selector: /ab/ }],\n"],
+      // Doubt pass on #138: whitespace between two words, and a comma inside a string, carry meaning.
+      ['two words joined', "      'no-x': ['error', new Rule()],\n", "      'no-x': ['error', newRule()],\n"],
+      ['a comma removed inside a string', "      'no-x': ['error', 'a,]'],\n", "      'no-x': ['error', 'a]'],\n"],
+    ])('does not treat %s as formatting', (_, before, after) => {
+      const base = before.includes('include') ? VITEST.replace("    include: ['packages/*/src/**/*.test.ts', 'tools/**/*.test.ts'],\n", before) : ESLINT.replace("      'no-x': 'error',\n", before);
+      const file = before.includes('include') ? 'vitest.config.mts' : 'eslint.config.mjs';
+      repo = makeRepo({ ...configs, [file]: base });
+      repo.write({ [file]: base.replace(before, after) });
+      expect(guard().out).toContain('[config-loosened]');
+    });
+  });
+
   it('accepts exclusions in a config that did not exist at the merge base, and tighter lint settings', () => {
     setup();
     repo.write({

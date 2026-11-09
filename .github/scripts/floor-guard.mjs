@@ -149,6 +149,78 @@ export const enclosingKey = (lines, n) => {
 // Tool configs that can weaken a check (CONSTRAINTS.md, Floor, last bullet). Returns the lines
 // of one changed file that loosen it. A config that didn't exist at the merge base has no bar
 // to lower, so only an explicit "off" or "false" counts there.
+// #138: formatting-only changes in a guarded config count as unchanged, so a formatter (Prettier,
+// #125) doesn't need Exceptions rows. Only JS, TS and JSON configs, where quotes and whitespace
+// outside strings carry no meaning.
+const FORMATTED_CONFIG = /^(eslint\.config\.|vitest\.config\.|tsconfig.*\.json$|\.?fallowrc\.json|stryker\.(conf|config)\.|\.?lighthouserc)/;
+// A line's (or a hunk's) code with its formatting removed: whitespace outside strings, `'…'` read
+// as `"…"` when it holds no escape and no other quote, and trailing commas. Template literals are
+// kept exactly. Null when the text has a `/` outside strings (a regex or a comment, where quotes
+// and spaces can matter) or an unclosed string: those lines only pair when they match exactly.
+const normalizeCode = (text) => {
+  let out = '';
+  let i = 0;
+  let gap = false; // whitespace was skipped since the last character kept
+  while (i < text.length) {
+    const c = text[i];
+    if (/\s/.test(c)) {
+      gap = true;
+      i++;
+      continue;
+    }
+    // Whitespace between two word characters is a separator, not formatting (`new Foo` isn't
+    // `newFoo`), so one space stays. A trailing comma goes only outside strings, here at the
+    // closing bracket (doubt pass on #138).
+    if (gap && /[\w$]/.test(c) && /[\w$]$/.test(out)) out += ' ';
+    gap = false;
+    if (/[\]})]/.test(c) && out.endsWith(',')) out = out.slice(0, -1);
+    if (c === '/') return null;
+    if (c === "'" || c === '"' || c === '`') {
+      const end = text.indexOf(c, i + 1);
+      if (end === -1) return null;
+      const body = text.slice(i + 1, end);
+      if (c === '`' || body.includes('\\') || body.includes(c === "'" ? '"' : "'")) out += text.slice(i, end + 1);
+      else out += `"${body}"`;
+      i = end + 1;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  // A comma at the very end sits outside any string, since a string ends with its quote.
+  return out.endsWith(',') ? out.slice(0, -1) : out;
+};
+// Removes the removed and added lines of `f` that differ only in formatting. Pairs stay within one
+// diff hunk and in order, so a line moved to another block, past lines that stayed, doesn't pair
+// (#138). A whole hunk whose normalized text is equal (a re-wrapped list) pairs as one.
+const withoutFormatting = (f) => {
+  if (!FORMATTED_CONFIG.test(basename(f.path)) || f.status === 'added') return f;
+  const key = (t) => normalizeCode(t) ?? `\0${t.trim()}`; // `\0`: an exact match only
+  const paired = new Set();
+  for (const hunk of new Set([...f.removed, ...f.added].map((l) => l.hunk))) {
+    const was = f.removed.filter((l) => l.hunk === hunk);
+    const now = f.added.filter((l) => l.hunk === hunk);
+    if (!was.length || !now.length) continue;
+    const whole = (ls) => normalizeCode(ls.map((l) => l.text).join('\n'));
+    if (whole(was) !== null && whole(was) === whole(now)) {
+      for (const l of [...was, ...now]) paired.add(l);
+      continue;
+    }
+    // Longest common subsequence of the lines' normalized keys.
+    const a = was.map((l) => key(l.text));
+    const b = now.map((l) => key(l.text));
+    const common = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) common[i][j] = a[i] === b[j] ? common[i + 1][j + 1] + 1 : Math.max(common[i + 1][j], common[i][j + 1]);
+    for (let i = 0, j = 0; i < a.length && j < b.length; ) {
+      if (a[i] === b[j]) {
+        paired.add(was[i++]);
+        paired.add(now[j++]);
+      } else if (common[i + 1][j] >= common[i][j + 1]) i++;
+      else j++;
+    }
+  }
+  return { ...f, removed: f.removed.filter((l) => !paired.has(l)), added: f.added.filter((l) => !paired.has(l)) };
+};
 const configLoosening = (f, mergeBase) => {
   const name = basename(f.path);
   const hits = [];
@@ -977,7 +1049,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
         if (!kept) weak('property-runs-cut', f.path, `${r.line} (old)`);
       }
     }
-    for (const line of configLoosening(f, mergeBase)) weak('config-loosened', f.path, line);
+    for (const line of configLoosening(withoutFormatting(f), mergeBase)) weak('config-loosened', f.path, line);
   }
 
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.
