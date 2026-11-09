@@ -1,0 +1,14 @@
+{
+  "//": "The sim's source. ES2022 with no DOM and no ambient types, so fetch, timers, performance, crypto and node:* fail to compile (MUST-10.1, #81). Tests compile in tsconfig.test.json, so Vitest's types never enter this program.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": "src",
+    "emitDeclarationOnly": true,
+    "sourceMap": false,
+    "outDir": "node_modules/.cache/tsc/src"
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

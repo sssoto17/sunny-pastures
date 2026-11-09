@@ -1,0 +1,13 @@
+{
+  "//": "The sim's tests: the same ES2022 lib and no ambient types as the source, plus the Vitest context types in vitest-env.d.ts.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "emitDeclarationOnly": true,
+    "sourceMap": false,
+    "outDir": "node_modules/.cache/tsc/test"
+  },
+  "include": ["src/**/*.test.ts", "vitest-env.d.ts"],
+  "references": [{ "path": "./tsconfig.json" }]
+}
