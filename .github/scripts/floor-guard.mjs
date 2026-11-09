@@ -191,13 +191,13 @@ const expressionEnd = (text, j) => {
   }
   return -1;
 };
-// A hunk's code with its formatting removed:
+// A file's code with its formatting removed:
 // - whitespace outside strings, except one space between two words;
-// - `'…'` read as `"…"` when it holds no other quote;
-// - trailing commas.
-// Comments and template literals stay as exact tokens. Null when the formatting can't be judged:
-// a `/` that opens no comment (a regex or a division), a string with a backslash (an escape can
-// move where it ends), an unclosed string or comment, or a line break that could end a statement.
+// - `'…'` read as `"…"` when it holds no escape and no other quote;
+// - trailing commas before a closing bracket.
+// Comments and template text stay exact, and the code inside a template's `${…}` is normalized
+// too. Null when the formatting can't be judged: a `/` that opens no comment (a regex or a
+// division), an unclosed string or comment, or a line break that could end a statement.
 const normalizeCode = (text) => {
   let out = '';
   let i = 0;
@@ -273,39 +273,18 @@ const normalizeCode = (text) => {
   // A comma at the very end sits outside any string, since a string ends with its quote.
   return out.endsWith(',') ? out.slice(0, -1) : out;
 };
-// Removes the lines of `f` in diff hunks that changed only formatting: a hunk counts when its whole
-// old text and its whole new text normalize equal (#138). Pairing single lines inside a hunk let a
-// formatter's changed boundary lines hide a move between blocks (scopes swapped, later-wins
-// overrides reordered), so a hunk with any change in content keeps every one of its lines (spec
-// review of #141).
-// Whether a line opens or closes a block comment outside strings (`'packages/*/src/**'` doesn't). An
-// unclosed string counts, to fail closed.
-const commentMarker = (text) => {
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === "'" || c === '"' || c === '`') {
-      const end = stringEnd(text, i);
-      if (end === -1) return true;
-      i = end - 1;
-    } else if ((c === '/' && text[i + 1] === '*') || (c === '*' && text[i + 1] === '/')) return true;
-  }
-  return false;
-};
-const withoutFormatting = (f) => {
-  if (!FORMATTED_CONFIG.test(basename(f.path)) || f.status === 'added') return f;
-  // A block comment can switch lines off without changing them, and its `/*` may sit in another
-  // hunk. So in a file whose changed lines open or close one, nothing pairs (admin's review of #141).
-  if ([...f.removed, ...f.added].some((l) => commentMarker(l.text))) return f;
-  const formattingOnly = new Set();
-  for (const hunk of new Set([...f.removed, ...f.added].map((l) => l.hunk))) {
-    const was = f.removed.filter((l) => l.hunk === hunk);
-    const now = f.added.filter((l) => l.hunk === hunk);
-    if (!was.length || !now.length) continue;
-    const before = normalizeCode(was.map((l) => l.text).join('\n'));
-    if (before !== null && before === normalizeCode(now.map((l) => l.text).join('\n'))) formattingOnly.add(hunk);
-  }
-  const keep = (l) => !formattingOnly.has(l.hunk);
-  return { ...f, removed: f.removed.filter(keep), added: f.added.filter(keep) };
+// A guarded config whose whole old text and whole new text normalize equal changed only formatting
+// (#138), so none of its changed lines count. Any other change keeps every finding in the file.
+// Reading the whole file, from its first character, knows whether a line sits in code, a string, a
+// template or a comment. Judging hunks or lines alone didn't: a formatter's changed boundary lines
+// hid a move between blocks, and a hunk could start inside a comment or template opened above it
+// (spec, admin and security reviews of #141). A PR that mixes a reformat with a content change in
+// the same config gets every finding, so a reformat goes in a PR of its own.
+const withoutFormatting = (f, mergeBase) => {
+  if (!FORMATTED_CONFIG.test(basename(f.path)) || f.status !== 'modified') return f;
+  const before = normalizeCode((oldContent(mergeBase, f.path) ?? []).join('\n'));
+  const after = normalizeCode(readFileSync(f.path, 'utf8'));
+  return before !== null && before === after ? { ...f, removed: [], added: [] } : f;
 };
 const configLoosening = (f, mergeBase) => {
   const name = basename(f.path);
@@ -1135,7 +1114,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
         if (!kept) weak('property-runs-cut', f.path, `${r.line} (old)`);
       }
     }
-    for (const line of configLoosening(withoutFormatting(f), mergeBase)) weak('config-loosened', f.path, line);
+    for (const line of configLoosening(withoutFormatting(f, mergeBase), mergeBase)) weak('config-loosened', f.path, line);
   }
 
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.

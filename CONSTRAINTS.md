@@ -61,7 +61,8 @@ of:
   config. In `eslint.config.*`, `vitest.config.*`, `tsconfig*.json`, and the Fallow, Stryker and
   Lighthouse configs written as JS, TS or JSON, a change that only reformats (quotes,
   indentation, trailing commas, re-wrapped lists) isn't a loosening; any change in content still
-  is (#138).
+  is (#138). The guard compares the whole file, so a reformat must be its own PR: mixed with a
+  content change in the same config, it keeps every finding.
 
 Also blocked, with no exception possible:
 

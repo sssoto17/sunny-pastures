@@ -891,6 +891,38 @@ describe('floor guard, end to end', () => {
       expect(run({ 'eslint.config.mjs': change(ESLINT) }).out).toContain('[config-loosened] eslint.config.mjs');
     });
 
+    // Re-review of #141: a dropped trailing comma joins the next line onto the item, which is new
+    // code (a member access, a tagged template), unless that line closes the list.
+    const LIST = (next) => `export default {\n  test: {\n    include: [\n      'a/**',\n${next}\n    ],\n  },\n};\n`;
+    it.each([
+      ['a member access', "      ['b/**'][0],"],
+      ['a tagged template', '      `b/**`,'],
+    ])('still flags a dropped comma that joins %s onto the item', (_, next) => {
+      repo = makeRepo({ ...configs, 'vitest.config.mts': LIST(next) });
+      repo.write({ 'vitest.config.mts': LIST(next).replace("      'a/**',", '      "a/**"') });
+      expect(guard().out).toContain('[config-loosened] vitest.config.mts');
+    });
+
+    it('still flags a rule commented out with // during a tab re-indent', () => {
+      const changed = tabbed(ESLINT).replace("\t\t\t'no-x': 'error',", "\t\t\t// 'no-x': 'error',");
+      expect(run({ 'eslint.config.mjs': changed }).out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    it("still flags a multi-line template literal's text re-indented with tabs", () => {
+      // The template's text is meaning: its lines are the selector, and indenting them changes it.
+      const base = ESLINT.replace("      'no-x': 'error',\n", () => "      'no-x': ['error', `Call\n        > Identifier`],\n");
+      repo = makeRepo({ ...configs, 'eslint.config.mjs': base });
+      repo.write({ 'eslint.config.mjs': tabbed(base) });
+      expect(guard().out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    it('passes a trailing comma dropped before the closing bracket', () => {
+      const base = "export default {\n  test: {\n    include: [\n      'a/**',\n    ],\n  },\n};\n";
+      repo = makeRepo({ ...configs, 'vitest.config.mts': base });
+      repo.write({ 'vitest.config.mts': base.replace("      'a/**',", '      "a/**"') });
+      expect(guard().code).toBe(0);
+    });
+
     it('still flags an include item wrapped in a block comment', () => {
       const changed = VITEST.replace("    include: ['packages/*/src/**/*.test.ts', 'tools/**/*.test.ts'],\n", '    include: [\n      "packages/*/src/**/*.test.ts",\n      /* "tools/**/*.test.ts", */\n    ],\n');
       expect(run({ 'vitest.config.mts': changed }).out).toContain('[config-loosened] vitest.config.mts');
