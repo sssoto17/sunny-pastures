@@ -16,7 +16,6 @@ export default defineConfig({
   test: {
     provide: { fastCheck: { seed: 0x5eed, numRuns: simPropertyRuns } },
     include: ['{apps,packages}/*/src/**/*.{test,spec}.{ts,tsx}', '.github/scripts/**/*.test.mjs'],
-    passWithNoTests: true,
     coverage: {
       provider: 'v8',
       reporter: ['lcov', 'text-summary'],

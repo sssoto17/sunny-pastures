@@ -1,6 +1,7 @@
 // The project's lint standard (CONSTRAINTS.md, "Lint"): 0 errors. Turning a rule off, or adding
 // a path to `ignores`, is a moved threshold that the floor guard reports.
 import js from '@eslint/js';
+import vitest from '@vitest/eslint-plugin';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
@@ -65,10 +66,70 @@ export default defineConfig(
     ignores: ['**/node_modules/', '**/coverage/', '**/dist/', '**/.next/', '.claude/', '.agents/'],
   },
   js.configs.recommended,
-  tseslint.configs.strict,
+  // Typed linting (ADR-0005, section 6): strictTypeChecked includes strict. The project service
+  // finds each file's tsconfig, the way an editor does.
+  tseslint.configs.strictTypeChecked,
+  tseslint.configs.stylisticTypeChecked,
+  {
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+  },
+  {
+    // JS and config files are in no type-checked program (vitest.config.mts is, but only for
+    // tsc), so the type-aware rules can't run on them.
+    files: ['**/*.mjs', '**/*.js', 'vitest.config.mts'],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
   {
     files: ['**/*.mjs', '**/*.js'],
     languageOptions: { globals: nodeGlobals },
+  },
+  {
+    // The code conventions (ADR-0005, section 6) for apps/ and packages/; .github/scripts is CI
+    // tooling and keeps its own style. What a config can't check is in docs/agents/code-style.md.
+    files: ['{apps,packages}/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/switch-exhaustiveness-check': 'error', // in neither preset (ADR-0005)
+      '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
+      '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'as', objectLiteralTypeAssertions: 'never' }],
+      '@typescript-eslint/return-await': ['error', 'always'],
+      'func-style': ['error', 'declaration', { allowArrowFunctions: true, overrides: { namedExports: 'declaration' } }],
+      eqeqeq: ['error', 'always'],
+      'no-warning-comments': ['error', { terms: ['todo', 'fixme'] }],
+      curly: ['error', 'multi-line'],
+      'no-else-return': 'error',
+      'prefer-destructuring': ['error', { object: true, array: false }],
+      'no-nested-ternary': 'error',
+      'prefer-template': 'error',
+      'prefer-spread': 'error',
+      'prefer-object-spread': 'error',
+    },
+  },
+  {
+    // Named exports only; a default export where React or Next needs one (ADR-0005, C6).
+    files: ['{apps,packages}/**/*.ts'],
+    ignores: ['apps/web/src/app/**'],
+    rules: {
+      'no-restricted-exports': [
+        'error',
+        { restrictDefaultExports: { direct: true, named: true, defaultFrom: true, namedFrom: true, namespaceFrom: true } },
+      ],
+    },
+  },
+  {
+    // An expected failure is returned, not logged and dropped (ADR-0005, C10).
+    files: ['packages/**'],
+    rules: { 'no-console': 'error' },
+  },
+  {
+    // Back up the Floor's ban on focused and skipped tests, and catch a test that asserts nothing.
+    files: ['**/*.test.{ts,tsx,mjs}', '**/tests/**'],
+    plugins: { vitest },
+    rules: {
+      // fc.assert throws on a counterexample, so a property with no expect inside still asserts.
+      'vitest/expect-expect': ['error', { assertFunctionNames: ['expect', 'fc.assert'] }],
+      'vitest/no-focused-tests': 'error',
+      'vitest/no-disabled-tests': 'error',
+    },
   },
   {
     files: SIM_FILES,

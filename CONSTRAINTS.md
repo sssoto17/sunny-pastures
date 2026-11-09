@@ -178,7 +178,9 @@ Each blocking CI job is a required status check on `main`. The ruleset comes fro
 
 Every tool named here (ESLint, Vitest and its v8 coverage, fast-check, Fallow, Stryker, Semgrep,
 gitleaks, Lighthouse CI, axe-core and any browser-test tool) needs the admin's approval and an
-exact pinned version (`AGENTS.md`). `minimumReleaseAge` in `pnpm-workspace.yaml` covers npm
+exact pinned version (`AGENTS.md`). So do the tools of the code style (ADR-0005, #125):
+`eslint-plugin-check-file`, `prettier`, `@ianvs/prettier-plugin-sort-imports` and
+`@vitest/eslint-plugin`. `minimumReleaseAge` in `pnpm-workspace.yaml` covers npm
 packages only. For binaries, container images and GitHub Actions, the 7-day rule is checked by
 hand, and Actions are pinned by commit SHA. `vitest bench` is built into Vitest, so the benchmark
 adds nothing.
@@ -361,6 +363,7 @@ the guard sees only the PR's own diff.
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
 | E1 | check-removed | `.github/workflows/ci.yml` | The floor job runs `actions/setup-node` directly instead of the PR's own `./.github/actions/setup` (#99, part 4). A follow-up PR removes this row once that merges | Soto | 2026-11-12 |
+| E2 | config-loosened | `eslint.config.mjs` | #125 part 2: `tseslint.configs.strict` is replaced by `strictTypeChecked`, which includes it, plus `stylisticTypeChecked` (ADR-0005, section 6). `disableTypeChecked` covers only JS and config files, where no typed rule ran before; the default-export rule's `ignores` keeps it out of Next's `app/`. No rule that ran before is turned off | Soto | 2026-11-23 |
 
 ## Interview record
 

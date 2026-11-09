@@ -85,7 +85,7 @@ function utf8(text: string): Uint8Array {
     if (cp >= 0xd800 && cp <= 0xdfff) {
       const low = text.charCodeAt(i + 1);
       if (cp > 0xdbff || !(low >= 0xdc00 && low <= 0xdfff)) {
-        throw new Error(`sha256: lone surrogate at index ${i}`);
+        throw new Error(`sha256: lone surrogate at index ${String(i)}`);
       }
       cp = 0x10000 + (cp - 0xd800) * 0x400 + (low - 0xdc00);
       i++;

@@ -3,12 +3,11 @@
 // root Vitest include already runs .github/scripts tests, and it can't sit inside packages/sim:
 // it imports eslint and node:*.
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
+import { lintSnippet, root } from './lint-snippet.mjs';
 
-const root = fileURLToPath(new URL('../../..', import.meta.url));
 const eslint = new ESLint({ cwd: root });
 const PURITY_RULES = new Set([
   'no-eval',
@@ -20,10 +19,7 @@ const PURITY_RULES = new Set([
 ]);
 
 /** The purity findings for `code` linted as if it were the file at `filePath`, as "line rule". */
-const purityFindings = async (code, filePath) => {
-  const [result] = await eslint.lintText(code, { filePath });
-  return result.messages.filter((m) => PURITY_RULES.has(m.ruleId)).map((m) => `${m.line} ${m.ruleId}`);
-};
+const purityFindings = (code, filePath) => lintSnippet(code, filePath, PURITY_RULES);
 
 // One banned construct per line, so each finding names its line.
 const BANNED = [
