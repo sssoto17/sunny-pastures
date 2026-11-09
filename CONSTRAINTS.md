@@ -330,14 +330,25 @@ What a row must hold, checked by the floor guard (#99):
   (`packages/sim/`, `packages/sim/**`, `.github/workflows/`), with no other wildcard. A waiver
   across every package is in effect project-wide, and the sim is what the floor protects most
   (admin, 9 Nov). So `**`, `**/*.ts`, `packages/**`, `packages/*/src/**`, `.github/` and any other
-  top-level folder fail as `exception-too-broad`.
-- **Expires** is a date the guard can read (`2026-11-30` or `30 Nov 2026`). Any other value fails
-  every PR, as an expired row does.
-- The file has one `## Exceptions` heading. A second one fails every PR. Only a row in that
-  section's one table with exactly the header above, written at the left margin, waives anything.
-  A row in a code fence (backticks or `~~~`), a comment, a `<pre>` block, a list item or another
-  table never does, and a row of the table without an `E<n>` ID fails. Expiry and dates are checked
-  on every line shaped like a row, wherever it sits, so no formatting hides an expired row.
+  top-level folder fail as `exception-too-broad`. A Path no file can have (a leading `/`, `//`, or a
+  `.` or `..` segment) fails as `exception-invalid`.
+- **Reason** and **Owner** aren't empty, and the **ID** is used once in the file.
+- **Expires** is a real calendar day the guard can read (`2026-11-30` or `30 Nov 2026`, not
+  `2026-11-31`). Any other value fails every PR, as an expired row does.
+- The file has one `## Exceptions` heading. A second one fails every PR.
+- Only a row in that section's one table waives anything. The table must have exactly the header
+  above, followed by its delimiter row, and be written at the left margin. A row anywhere else never
+  waives: in a code fence (backticks or `~~~`), a comment, an HTML block (`<pre>`, `<details>`,
+  `<div>`, …), a list item, a header without a delimiter row, or another table. A row of the table
+  without an `E<n>` ID fails.
+- Expiry, dates and repeated IDs are checked on every line shaped like a row, wherever it sits, with
+  or without its outer pipes and inside a blockquote, so no formatting hides an expired row.
+
+The guard reads this file with its own line parser, which follows CommonMark for the cases above.
+From 9 Nov that parser is frozen. Any further Markdown edge case is listed as a known miss and goes
+to the follow-up for a real Markdown parser (under #58), not into the line parser (admin, 9 Nov). A
+known miss already: an ID reused after its row was removed in an earlier PR isn't caught, because
+the guard sees only the PR's own diff.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|

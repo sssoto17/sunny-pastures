@@ -788,6 +788,64 @@ describe('floor guard, end to end', () => {
       expect(r.out).not.toContain('waived by');
     });
 
+    // Review of #131 at 3ba0c32 (admin, 9 Nov: fix all six; after this the Markdown parsing is
+    // frozen, and further edge cases go to the follow-up for a real parser).
+    const TABLE = '| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n| _none_ | | | | | |';
+    const OK_ROW = rowFor('silenced-checker', 'packages/sim/src/a.ts');
+    it.each([
+      ['a <details> block', `<details>\n| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n${OK_ROW}\n</details>`],
+      ['a hidden <div>', `<div hidden>\n| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n${OK_ROW}\n</div>`],
+      ['a table with no delimiter row', `| ID | Rule | Path | Reason | Owner | Expires |\n${OK_ROW}`],
+    ])('does not waive with the table inside %s', (_, table) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': CONSTRAINTS.replace(TABLE, table) });
+      const r = guard();
+      expect(r.out).toContain('[silenced-checker] packages/sim/src/a.ts');
+      expect(r.out).not.toContain('waived by');
+    });
+
+    it.each([
+      ['without its leading pipe', (l) => l.replace(/^\| /, '')],
+      ['in a blockquote', (l) => `> ${l}`],
+    ])('still fails an expired row written %s', (_, rewrite) => {
+      const expired = rowFor('silenced-checker', 'x', '2026-11-01');
+      repo = makeRepo({ ...BASE, 'CONSTRAINTS.md': withException(expired) });
+      repo.write({ 'CONSTRAINTS.md': withException(rewrite(expired)) });
+      expect(guard().out).toContain('[exception-expired] CONSTRAINTS.md');
+    });
+
+    it('fails an ID used twice', () => {
+      const first = rowFor('silenced-checker', 'apps/web/');
+      repo = makeRepo({ ...BASE, 'CONSTRAINTS.md': withException(first) });
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(`${first}\n${OK_ROW}`) });
+      const r = guard();
+      expect(r.out).toContain('[exception-invalid] CONSTRAINTS.md');
+      expect(r.out).not.toContain('waived by');
+    });
+
+    it.each(['2026-11-31', '00 Dec 2026', '2026-02-29'])('fails the impossible date %s', (date) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', 'packages/sim/src/a.ts', date)) });
+      const r = guard();
+      expect(r.out).toContain('[exception-invalid] CONSTRAINTS.md');
+      expect(r.out).not.toContain('waived by');
+    });
+
+    it.each([
+      ['Reason', '| E1 | silenced-checker | `packages/sim/src/a.ts` |  | Soto | 2026-11-30 |'],
+      ['Owner', '| E1 | silenced-checker | `packages/sim/src/a.ts` | reason |  | 2026-11-30 |'],
+    ])('fails a row with no %s', (_, r) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(r) });
+      expect(guard().out).toContain('[exception-invalid] CONSTRAINTS.md');
+    });
+
+    it.each(['./packages/sim/', 'packages//sim/', 'packages/../sim/', '/packages/sim/', '.'])('fails the Path %s, which can never match', (path) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', path)) });
+      expect(guard().out).toContain('[exception-invalid] CONSTRAINTS.md');
+    });
+
     it('counts a closing-hash or setext heading as a second Exceptions heading', () => {
       setup();
       repo.write({ 'CONSTRAINTS.md': `${CONSTRAINTS}\nexceptions\n---\n\n## Exceptions ##\n` });
