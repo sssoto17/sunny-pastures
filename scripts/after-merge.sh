@@ -212,9 +212,14 @@ fi
 is_disposable() { # ignored entry from git status: a folder ends in /
   case $1 in
     node_modules/ | */node_modules/ | coverage/ | */coverage/ | .next/ | */.next/ | dist/ | \
-      */dist/ | .fallow/ | */.fallow/ | *.tsbuildinfo) return 0 ;;
+      */dist/ | *.tsbuildinfo) return 0 ;;
+    # Fallow ignores its folder with its own .fallow/.gitignore ("*"), so git lists each file.
+    .fallow/ | */.fallow/ | .fallow/* | */.fallow/*) return 0 ;;
   esac
-  return 1
+  # An empty folder holds no work, such as the .claude/.cc-writes/ the harness leaves in every
+  # worktree.
+  [[ $1 == */ && -d $path/$1 && ! -L $path/${1%/} &&
+    -z $(find "$path/$1" -mindepth 1 -print -quit 2>/dev/null) ]]
 }
 while IFS= read -r -d '' entry; do
   [[ $entry == '!! '* ]] || continue
@@ -280,15 +285,16 @@ $(list "${blocked[@]}")")
 fi
 
 # A mount point can't be deleted ("Device or resource busy", 7 and 8 Nov), and the sandbox mounts
-# placeholders in the session's folder and files such as commondir in the worktree's admin folder
-# (seen from a main-folder session, 9 Nov). Any mount in the worktree or its admin folder would
+# placeholders in the session's folder, and from a main-folder session the worktree's admin
+# folder read-only, with commondir and config.worktree bind-mounted in it (9 Nov). Any mount in the worktree or its admin folder would
 # leave the removal half-done, so stop before changing anything. Outside the sandbox there are
 # none. AFTER_MERGE_MOUNTINFO is for the tests only.
 mounts=()
 mountinfo=${AFTER_MERGE_MOUNTINFO:-/proc/self/mountinfo}
 if [[ -r $mountinfo ]]; then
   while read -r _ _ _ _ point _; do
-    point=$(printf '%b' "$point") # mountinfo escapes space, tab, newline and \ in octal
+    # mountinfo escapes space, tab, newline and \ as \nnn; %b decodes \0nnn in every shell.
+    point=$(printf '%b' "${point//\\/\\0}")
     case $point in
       "$path") mounts+=("the worktree folder itself") ;;
       "$path"/*) mounts+=("${point#"$path"/}") ;;

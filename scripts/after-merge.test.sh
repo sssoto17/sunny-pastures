@@ -190,6 +190,29 @@ expect_out "coverage/"
 expect_out "pkg/node_modules/"
 expect_out "tsconfig.tsbuildinfo"
 
+# An empty ignored folder holds no work: the harness leaves .claude/.cc-writes/ (ignored through
+# info/exclude here) in every worktree, and an empty .scratch/ is the same. Both go.
+reset
+merge_pr
+printf '.claude/.cc-writes\n' >>"$main/.git/info/exclude"
+mkdir -p "$lane/.claude/.cc-writes" "$lane/.scratch"
+case_ 9-lane
+expect_code 0
+expect_tidied
+expect_out ".claude/.cc-writes/"
+
+# Fallow writes .fallow/.gitignore with "*", so git lists each file in it, not the folder.
+reset
+merge_pr
+mkdir -p "$lane/.fallow" "$lane/pkg/.fallow"
+echo '*' >"$lane/.fallow/.gitignore" && echo x >"$lane/.fallow/cache.bin"
+echo '*' >"$lane/pkg/.fallow/.gitignore"
+case_ 9-lane
+expect_code 0
+expect_tidied
+expect_out ".fallow/cache.bin"
+expect_out "pkg/.fallow/.gitignore"
+
 # Other ignored files may be someone's work: refuse, name them, change nothing.
 reset
 merge_pr
@@ -492,6 +515,16 @@ before=$(main_at)
 case_ 9-lane
 expect_code 3
 expect_err "the worktree folder itself"
+expect_untouched "$before"
+
+# mountinfo escapes space, tab, newline and backslash in octal: a\134b is a\b.
+reset
+merge_pr
+printf '41 30 8:48 /null %s rw - tmpfs none rw\n' "$lane/a\\134b\\040c" >"$work/mountinfo"
+before=$(main_at)
+case_ 9-lane
+expect_code 3
+expect_err 'a\b c'
 expect_untouched "$before"
 
 # A symlink to /dev/null is a file someone made, not a placeholder.
