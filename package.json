@@ -11,7 +11,7 @@
     "db:start": "supabase/db.sh start",
     "db:status": "supabase/db.sh status",
     "db:env": "supabase/db.sh env",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && node .github/scripts/typecheck-reach.mjs",
     "lint": "eslint .",
     "lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
     "test": "vitest run --coverage",
@@ -19,7 +19,7 @@
     "guard:floor": "node .github/scripts/floor-guard.mjs",
     "coverage:gate": "node .github/scripts/coverage-gate.mjs",
     "check:fast": "pnpm typecheck && pnpm lint:changed && pnpm guard:floor",
-    "check:task": "pnpm check:fast && pnpm test:related && pnpm coverage:gate",
+    "check:task": "pnpm check:fast && pnpm test:related && pnpm coverage:gate --skip-ratchet",
     "check:full": "pnpm typecheck && pnpm lint && pnpm guard:floor && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate"
   },
   "devDependencies": {

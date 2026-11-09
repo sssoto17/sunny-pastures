@@ -3,7 +3,7 @@
 // (CONSTRAINTS.md, "Enforced with numbers" and "Ratchets"). Reads the lcov the test run already
 // wrote and intersects it with the diff against the merge base; it never runs the tests again.
 //
-// Usage: node .github/scripts/coverage-gate.mjs [--base <ref>] [--lcov <path>]
+// Usage: node .github/scripts/coverage-gate.mjs [--base <ref>] [--lcov <path>] [--skip-ratchet]
 // Exit codes: 0 pass, 1 below a threshold, 2 could not run. A 2 never reads as a pass.
 //
 // lcov decides which files count: vitest.config.* holds the include and exclude lists, and with
@@ -40,16 +40,20 @@ export const parseLcov = (text, root) => {
   return files;
 };
 
-// The recorded project coverage from the "Ratchets" table, or null while it says "not yet".
+// The recorded project coverage from the "Ratchets" table, or null while it says "not yet". Only
+// "not yet" means no ratchet: any other cell it can't read can't run (exit 2), so a typo can't
+// switch the ratchet off (#99).
 export const recordedProjectCoverage = (constraints) => {
   const row = constraints.split('\n').find((l) => /^\|\s*Project coverage\s*\|/.test(l));
   if (!row) throw new CannotRun('CONSTRAINTS.md has no "Project coverage" row under Ratchets');
   const today = row.split('|')[2]?.trim() ?? '';
-  const m = /^(\d+(?:\.\d+)?)\s*%/.exec(today);
-  return m ? Number(m[1]) : null;
+  if (/^not yet\b/i.test(today)) return null;
+  const m = /^(\d+(?:\.\d+)?)\s*%$/.exec(today);
+  if (!m) throw new CannotRun(`the Project coverage "Today" cell is neither a percentage nor "not yet": ${JSON.stringify(today)}`);
+  return Number(m[1]);
 };
 
-export const evaluate = ({ changes, lcov, recorded }) => {
+export const evaluate = ({ changes, lcov, recorded, skipRatchet = false }) => {
   const groups = THRESHOLDS.map((t) => ({ ...t, executable: 0, covered: 0 }));
   for (const f of changes) {
     const lines = lcov.get(f.path);
@@ -81,7 +85,9 @@ export const evaluate = ({ changes, lcov, recorded }) => {
       if (hits > 0) hit++;
     }
   }
-  if (recorded === null) {
+  if (skipRatchet) {
+    report.push('project coverage ratchet: skipped (--skip-ratchet: a run of related tests only; CI checks it)');
+  } else if (recorded === null) {
     report.push('project coverage ratchet: no value recorded yet');
   } else if (found === 0) {
     failures.push(`project coverage ratchet: ${recorded}% recorded, but the lcov has no lines`);
@@ -115,7 +121,11 @@ const main = () => {
     console.log('coverage-gate: no lcov and no changed source files: pass');
     return 0;
   }
-  const { failures, report } = evaluate({ changes, lcov: parseLcov(readFileSync(lcovPath, 'utf8'), root), recorded });
+  // `check:task` runs only the tests related to the change (`vitest --changed`), so the lcov counts
+  // every other file at 0% and the project figure reads low. It passes --skip-ratchet; CI runs the
+  // whole suite and checks the ratchet (#99).
+  const skipRatchet = argv.includes('--skip-ratchet');
+  const { failures, report } = evaluate({ changes, lcov: parseLcov(readFileSync(lcovPath, 'utf8'), root), recorded, skipRatchet });
   for (const r of report) console.log(`coverage-gate: ${r}`);
   if (failures.length === 0) return 0;
   for (const f of failures) console.error(`coverage-gate: FAIL ${f}`);

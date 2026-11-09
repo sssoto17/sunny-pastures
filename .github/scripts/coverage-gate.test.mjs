@@ -47,6 +47,11 @@ describe('coverage gate', () => {
     expect(() => recordedProjectCoverage('no table')).toThrow();
   });
 
+  // #99: only "not yet" means no ratchet; anything else it can't read can't run.
+  it.each(['about 92%', 'TBD', '', '92.5', 'n/a'])('cannot run on a Today cell it cannot read: %j', (today) => {
+    expect(() => recordedProjectCoverage(ratchets(today))).toThrow(/Project coverage/);
+  });
+
   it('reads lcov with absolute or relative paths', () => {
     const lcov = parseLcov('SF:/repo/packages/sim/src/a.ts\nDA:1,3\nDA:2,0\nend_of_record\nSF:apps/web/src/b.ts\nDA:5,1\nend_of_record\n', '/repo');
     expect([...lcov.keys()]).toEqual(['packages/sim/src/a.ts', 'apps/web/src/b.ts']);
@@ -64,6 +69,23 @@ describe('coverage gate, end to end', () => {
     expect(repo.run(SCRIPT).code).toBe(0);
     repo.write({ 'packages/sim/src/a.ts': 'export const a = 1;\n' });
     expect(repo.run(SCRIPT).code).toBe(2);
+  });
+
+  it('exits 2 when the Today cell is unreadable', () => {
+    repo = makeRepo({ 'CONSTRAINTS.md': ratchets('TBD') });
+    repo.write({ 'coverage/lcov.info': 'SF:packages/sim/src/a.ts\nDA:1,1\nend_of_record\n' });
+    expect(repo.run(SCRIPT).code).toBe(2);
+  });
+
+  // #99: `check:task` runs only the related tests, so the lcov counts every untested file at 0%
+  // and the project figure reads low. It skips the ratchet; CI's full run checks it.
+  it('skips the project ratchet with --skip-ratchet, and says so', () => {
+    repo = makeRepo({ 'CONSTRAINTS.md': ratchets('95%') });
+    repo.write({ 'coverage/lcov.info': 'SF:packages/sim/src/a.ts\nDA:1,1\nDA:2,0\nend_of_record\n' });
+    expect(repo.run(SCRIPT).code).toBe(1);
+    const r = repo.run(SCRIPT, ['--skip-ratchet']);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('project coverage ratchet: skipped (--skip-ratchet');
   });
 
   it('intersects the lcov with the changed lines', () => {
