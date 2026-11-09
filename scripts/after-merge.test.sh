@@ -159,12 +159,13 @@ expect_code 0
 expect_tidied
 expect_out "main: fast-forwarded ${before:0:7}..$(origin_main | cut -c1-7) (1 commit)"
 expect_out "worktree: removed $lane"
+expect_out "worktrees: pruned"
 expect_out "branch: deleted $branch"
-assert "expected gh to be asked for the branch's merged PRs" \
-  contains "$calls" "pr list --repo sssoto17/sunny-pastures --head $branch --state merged"
+assert "expected gh to be asked for the branch's merged PRs into main" \
+  contains "$calls" "pr list --repo sssoto17/sunny-pastures --base main --head $branch --state merged"
 
 # A bare name means .claude/worktrees/<name>; an absolute path works too. Ignored files
-# (node_modules) aren't work to keep.
+# (node_modules) aren't work to keep, but the output names them.
 for form in 9-lane abs; do
   reset
   merge_pr
@@ -172,6 +173,8 @@ for form in 9-lane abs; do
   if [[ $form == abs ]]; then case_ "$lane/"; else case_ "$form"; fi
   expect_code 0
   expect_tidied
+  expect_out "with its ignored files:"
+  expect_out "node_modules/"
 done
 
 # Already up to date (someone pulled main by hand): still removes the worktree and branch.
@@ -191,7 +194,7 @@ merge_pr
 before=$(main_at)
 case_ 9-lane
 expect_code 2
-expect_err "no merged PR has $branch as its head"
+expect_err "no merged PR into main has $branch as its head"
 expect_err "nothing changed"
 expect_untouched "$before"
 
@@ -205,6 +208,25 @@ expect_code 2
 expect_err "PR #12 merged ${tip:0:7}"
 expect_err "nothing changed"
 expect_untouched "$before"
+
+# "Update branch" on GitHub (ADR-0002) put a merge commit on the PR after the lane's last push:
+# the merged head is past the local tip, with nothing lost. GitHub keeps it at refs/pull/N/head.
+reset
+git -C "$work/seed" pull -q --ff-only origin main
+echo other >"$work/seed/other.txt" && git -C "$work/seed" add other.txt
+git -C "$work/seed" commit -qm "another PR" && git -C "$work/seed" push -q origin main
+git -C "$work/seed" fetch -q origin "$branch" 2>/dev/null ||
+  git -C "$work/seed" fetch -q "$main/.git" "$branch"
+git -C "$work/seed" switch -q -c updated FETCH_HEAD
+git -C "$work/seed" merge -q --no-edit main
+updated=$(git -C "$work/seed" rev-parse HEAD)
+git -C "$work/seed" push -q origin "$updated:refs/pull/12/head"
+git -C "$work/seed" switch -q main
+merge_pr
+printf '12\t%s\thttps://github.com/sssoto17/sunny-pastures/pull/12\n' "$updated" >"$work/prs"
+case_ 9-lane
+expect_code 0
+expect_tidied
 
 # gh fails.
 reset
@@ -303,12 +325,10 @@ expect_untouched "$before"
 
 # --- needs the host ---------------------------------------------------------------------------
 # The command to run outside the sandbox: absolute paths, no variables like $TMPDIR.
-rerun="cd $main && scripts/after-merge.sh"
 expect_rerun() {
-  rerun="cd $main && scripts/after-merge.sh $lane"
   expect_err "outside the sandbox"
-  expect_err "$rerun"
-  assert 'expected no $ in the printed command' test "${rerun//\$/}" == "$rerun"
+  expect_err "cd $main && scripts/after-merge.sh $lane"
+  assert 'expected no $ anywhere in stderr' test "${err//\$/}" == "$err"
 }
 
 # The update touches .claude/settings.json and the sandbox can't write it (a read-only file).
@@ -344,13 +364,26 @@ expect_code 0
 expect_tidied
 assert "expected settings.json updated" test "$(cat "$main/.claude/settings.json")" == '{"changed": true}'
 
-# Other paths under .claude/ aren't host-only.
+# Only the paths the update touches are checked.
 reset
 merge_pr .claude/README.md=notes
 chmod a-w "$main/.claude/settings.json" "$main/.claude/hooks"
 case_ 9-lane
 expect_code 0
 expect_tidied
+
+# Any touched path counts, not only settings, hooks and skills: here a file the update adds
+# where the sandbox has a placeholder in the main folder.
+reset
+merge_pr .mcp.json='{}'
+: >"$main/.mcp.json"
+printf '%s\n' "$main/.mcp.json" >"$work/placeholders"
+before=$(main_at)
+case_ 9-lane
+expect_code 3
+expect_err ".mcp.json"
+expect_rerun
+expect_untouched "$before"
 
 # The worktree shows only sandbox placeholders: they can't be deleted from inside the sandbox,
 # and they can hide real files, so nothing changes and the rerun outside decides.
@@ -390,7 +423,8 @@ expect_untouched "$before"
 
 # --- the folder won't delete ------------------------------------------------------------------
 # Checks passed, main moved, but the folder couldn't be deleted (in the sandbox: "Device or
-# resource busy"; here: a folder without write permission). Print the rest to run outside.
+# resource busy"; here: a folder without write permission). git deregisters the worktree
+# anyway, so the branch goes; print the rest to run outside.
 reset
 merge_pr
 mkdir -p "$lane/node_modules/stuck" && echo x >"$lane/node_modules/stuck/f"
@@ -401,13 +435,70 @@ assert "expected main fast-forwarded" test "$(main_at)" == "$(origin_main)"
 expect_err "rm -rf $lane"
 expect_err "git -C $main worktree prune"
 expect_err "outside the sandbox"
-if has_branch; then expect_err "git -C $main branch -D $branch"; fi
+expect_out "branch: deleted $branch"
+assert "expected no branch -D to run outside" test "${err/branch -D/}" == "$err"
 chmod -R u+w "$lane"
 # The printed commands finish the job.
 rm -rf "$lane"
 git -C "$main" worktree prune
-has_branch && git -C "$main" branch -q -D "$branch"
 expect_tidied
+
+# --- refusals for the worktree's state --------------------------------------------------------
+reset
+merge_pr
+git -C "$main" worktree lock "$lane"
+before=$(main_at)
+case_ 9-lane
+expect_code 2
+expect_err "is locked"
+expect_untouched "$before"
+
+reset
+merge_pr
+git -C "$lane" switch -q --detach
+before=$(main_at)
+case_ 9-lane
+expect_code 2
+expect_err "detached HEAD"
+assert "expected main to stay at ${before:0:7}" test "$(main_at)" == "$before"
+assert "expected the worktree to stay registered" registered
+
+# --- the lane's folder can't make it run commands ---------------------------------------------
+# The lane controls its folder and, from the sandbox, .git/worktrees/. The script may run outside
+# the sandbox, so it must not let them point git at a config that runs a command (core.fsmonitor
+# runs on git status). Each case plants such a repo and checks the command never ran.
+plant() { # -> $work/evil: a repo whose config runs a command that touches $work/pwned
+  rm -rf "$work/evil" "$work/pwned"
+  git init -q "$work/evil"
+  git -C "$work/evil" config core.fsmonitor "touch $work/pwned; false"
+}
+expect_not_run() {
+  assert "expected the planted command not to run" test ! -e "$work/pwned"
+}
+
+# The worktree's .git file points somewhere else.
+reset
+merge_pr
+plant
+printf 'gitdir: %s\n' "$work/evil/.git" >"$lane/.git"
+before=$(main_at)
+case_ 9-lane
+expect_code 2
+expect_err "doesn't point back at"
+expect_not_run
+assert "expected main to stay at ${before:0:7}" test "$(main_at)" == "$before"
+
+# The worktree's admin folder in .git/worktrees/ points its commondir somewhere else.
+reset
+merge_pr
+plant
+admin=$(git -C "$lane" rev-parse --absolute-git-dir)
+printf '%s\n' "$work/evil/.git" >"$admin/commondir"
+before=$(main_at)
+case_ 9-lane
+expect_code 2
+expect_not_run
+assert "expected main to stay at ${before:0:7}" test "$(main_at)" == "$before"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))

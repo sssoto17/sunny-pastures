@@ -184,8 +184,9 @@ worktrees, the handoff), which a cloud routine can't see.
 
 1. Update the board: statuses, `blocked:*` labels with their reason.
 2. A light `retro` if you built something. Note any step you repeated by hand.
-3. Remove the worktrees whose PRs have merged: check `git worktree list`, then
-   `git worktree remove .claude/worktrees/<name>`. If it refuses or the folder won't delete, see
+3. Tidy up after the PRs that merged: check `git worktree list`, then from the main folder run
+   `scripts/after-merge.sh <name>` for each (it fast-forwards main, removes the worktree and
+   deletes the branch). If it exits 3, run the command it prints outside the sandbox; see
    `docs/agents/sandbox.md`, "When git does need the host".
 4. `remember:remember` handoff with the top 3 next.
 
