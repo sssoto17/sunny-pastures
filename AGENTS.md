@@ -38,6 +38,8 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   For the local stack, use `pnpm db:start` / `db:status` / `db:env`, never a bare `supabase start`
   or `supabase status`.
 - Read `CONSTRAINTS.md` before writing code. Do not weaken it to make a change pass.
+- Before writing TypeScript in `packages/` or `apps/`, read `docs/agents/code-style.md`: the
+  module layout and the conventions no config checks (ADR-0005).
 - Before running commands, read `docs/agents/sandbox.md`. It lists the sandbox pitfalls:
   `supabase` and localhost services have to run outside the sandbox. Most git commands run
   inside it; the exceptions are under "Git inside the sandbox" and "When git does need the host".
