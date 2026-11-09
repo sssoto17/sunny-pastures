@@ -171,3 +171,14 @@ _Avoid_: sync, rollback, correction
 **State hash**:
 A fingerprint of a farm's state, used to tell whether two copies of it agree exactly.
 _Avoid_: checksum, version
+
+### Code
+
+**Module**:
+A unit of code that hides its insides behind one interface, and can contain modules of its own.
+_Avoid_: component, service, package (for a module inside a package), add-on (that is the game's)
+
+**Interface**:
+Everything a caller must know to use a module correctly: its exports and their types, and its
+invariants, error modes and units.
+_Avoid_: API, public surface, signature (too narrow)
