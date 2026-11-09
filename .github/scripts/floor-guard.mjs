@@ -150,38 +150,121 @@ export const enclosingKey = (lines, n) => {
 // of one changed file that loosen it. A config that didn't exist at the merge base has no bar
 // to lower, so only an explicit "off" or "false" counts there.
 // #138: formatting-only changes in a guarded config count as unchanged, so a formatter (Prettier,
-// #125) doesn't need Exceptions rows. Only JS, TS and JSON configs, where quotes and whitespace
-// outside strings carry no meaning.
-const FORMATTED_CONFIG = /^(eslint\.config\.|vitest\.config\.|tsconfig.*\.json$|\.?fallowrc\.json|stryker\.(conf|config)\.|\.?lighthouserc)/;
-// A line's (or a hunk's) code with its formatting removed: whitespace outside strings, `'…'` read
-// as `"…"` when it holds no escape and no other quote, and trailing commas. Template literals are
-// kept exactly. Null when the text has a `/` outside strings (a regex or a comment, where quotes
-// and spaces can matter) or an unclosed string: those lines only pair when they match exactly.
+// #125) doesn't need Exceptions rows. Only JS, TS and JSON configs, by extension, where quotes and
+// whitespace outside strings carry no meaning. YAML (indentation is meaning) and files without an
+// extension are left to the exact checks (spec review of #141).
+const FORMATTED_CONFIG = /^(eslint\.config|vitest\.config|tsconfig.*|\.?fallowrc|\.?fallow|stryker\.(conf|config)|\.?lighthouserc)\.(c|m)?[jt]s$|^(tsconfig.*|\.?fallowrc|\.?fallow|\.?lighthouserc)\.jsonc?$/;
+// After a line break these end a statement (JavaScript's restricted productions): `return⏎x` isn't
+// `return x`, so a break there can't be formatting (spec review of #141).
+const RESTRICTED = /\b(return|throw|break|continue|yield)$/;
+// The end (exclusive) of the string or template literal that opens at `i`, honouring escapes and a
+// template's `${…}`, which may hold strings and templates of its own; -1 when it doesn't close. A
+// scan that stopped at the next quote misread escaped quotes (spec review of #141).
+const stringEnd = (text, i) => {
+  const quote = text[i];
+  let j = i + 1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === '\\') j += 2;
+    else if (c === quote) return j + 1;
+    else if (quote !== '`' && c === '\n') return -1;
+    else if (quote === '`' && c === '$' && text[j + 1] === '{') {
+      j = expressionEnd(text, j + 2);
+      if (j === -1) return -1;
+    } else j++;
+  }
+  return -1;
+};
+// The end (exclusive) of a template's `${…}` expression that starts at `j`; -1 when it doesn't close.
+const expressionEnd = (text, j) => {
+  let depth = 1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === "'" || c === '"' || c === '`') {
+      j = stringEnd(text, j);
+      if (j === -1) return -1;
+      continue;
+    }
+    if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return j + 1;
+    j++;
+  }
+  return -1;
+};
+// A hunk's code with its formatting removed:
+// - whitespace outside strings, except one space between two words;
+// - `'…'` read as `"…"` when it holds no other quote;
+// - trailing commas.
+// Comments and template literals stay as exact tokens. Null when the formatting can't be judged:
+// a `/` that opens no comment (a regex or a division), a string with a backslash (an escape can
+// move where it ends), an unclosed string or comment, or a line break that could end a statement.
 const normalizeCode = (text) => {
   let out = '';
   let i = 0;
   let gap = false; // whitespace was skipped since the last character kept
+  let broke = false; // and it held a line break
   while (i < text.length) {
     const c = text[i];
     if (/\s/.test(c)) {
       gap = true;
+      if (c === '\n') broke = true;
       i++;
       continue;
     }
+    if (broke && (RESTRICTED.test(out) || /^(\+\+|--)/.test(text.slice(i)))) return null;
     // Whitespace between two word characters is a separator, not formatting (`new Foo` isn't
     // `newFoo`), so one space stays. A trailing comma goes only outside strings, here at the
     // closing bracket (doubt pass on #138).
     if (gap && /[\w$]/.test(c) && /[\w$]$/.test(out)) out += ' ';
     gap = false;
+    broke = false;
     if (/[\]})]/.test(c) && out.endsWith(',')) out = out.slice(0, -1);
-    if (c === '/') return null;
-    if (c === "'" || c === '"' || c === '`') {
-      const end = text.indexOf(c, i + 1);
+    if (c === '/' && text[i + 1] === '/') {
+      const end = text.indexOf('\n', i);
+      const stop = end === -1 ? text.length : end;
+      out += `${text.slice(i, stop).trimEnd()}\n`;
+      i = stop;
+      continue;
+    }
+    if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
       if (end === -1) return null;
-      const body = text.slice(i + 1, end);
-      if (c === '`' || body.includes('\\') || body.includes(c === "'" ? '"' : "'")) out += text.slice(i, end + 1);
+      out += text.slice(i, end + 2);
+      i = end + 2;
+      continue;
+    }
+    if (c === '/') return null;
+    if (c === '`') {
+      // A template literal: its text stays exactly as written, and each `${…}` expression is
+      // normalized like any other code, since a formatter re-quotes strings inside it.
+      const end = stringEnd(text, i);
+      if (end === -1) return null;
+      let token = '`';
+      let j = i + 1;
+      while (j < end - 1) {
+        if (text[j] === '\\') {
+          token += text.slice(j, j + 2);
+          j += 2;
+        } else if (text[j] === '$' && text[j + 1] === '{') {
+          const close = expressionEnd(text, j + 2);
+          const inner = normalizeCode(text.slice(j + 2, close - 1));
+          if (inner === null) return null;
+          token += `\${${inner}}`;
+          j = close;
+        } else token += text[j++];
+      }
+      out += `${token}\``;
+      i = end;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      const end = stringEnd(text, i);
+      if (end === -1) return null;
+      const body = text.slice(i + 1, end - 1);
+      // Only a plain string is re-quoted; one with an escape or the other quote stays as written.
+      if (body.includes('\\') || body.includes(c === "'" ? '"' : "'")) out += text.slice(i, end);
       else out += `"${body}"`;
-      i = end + 1;
+      i = end;
       continue;
     }
     out += c;
@@ -190,41 +273,39 @@ const normalizeCode = (text) => {
   // A comma at the very end sits outside any string, since a string ends with its quote.
   return out.endsWith(',') ? out.slice(0, -1) : out;
 };
-// Removes the removed and added lines of `f` that differ only in formatting. Pairs stay within one
-// diff hunk and in order, so a line moved to another block, past lines that stayed, doesn't pair
-// (#138). A whole hunk whose normalized text is equal (a re-wrapped list) pairs as one.
-const withoutFormatting = (f, mergeBase) => {
+// Removes the lines of `f` in diff hunks that changed only formatting: a hunk counts when its whole
+// old text and its whole new text normalize equal (#138). Pairing single lines inside a hunk let a
+// formatter's changed boundary lines hide a move between blocks (scopes swapped, later-wins
+// overrides reordered), so a hunk with any change in content keeps every one of its lines (spec
+// review of #141).
+// Whether a line opens or closes a block comment outside strings (`'packages/*/src/**'` doesn't). An
+// unclosed string counts, to fail closed.
+const commentMarker = (text) => {
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "'" || c === '"' || c === '`') {
+      const end = stringEnd(text, i);
+      if (end === -1) return true;
+      i = end - 1;
+    } else if ((c === '/' && text[i + 1] === '*') || (c === '*' && text[i + 1] === '/')) return true;
+  }
+  return false;
+};
+const withoutFormatting = (f) => {
   if (!FORMATTED_CONFIG.test(basename(f.path)) || f.status === 'added') return f;
-  // A pair also needs the same enclosing array key (`include`, `exclude`, `ignores`) on both
-  // sides, a second safeguard beside the order (security review of #141).
-  const before = oldContent(mergeBase, f.oldPath ?? f.path) ?? [];
-  const after = readFileSync(f.path, 'utf8').split('\n');
-  const where = (lines, l) => enclosingKey(lines, l.line) ?? '';
-  const pairKey = (lines, l) => `${where(lines, l)}\u0001${normalizeCode(l.text) ?? `\0${l.text.trim()}`}`; // `\0`: an exact match only
-  const paired = new Set();
+  // A block comment can switch lines off without changing them, and its `/*` may sit in another
+  // hunk. So in a file whose changed lines open or close one, nothing pairs (admin's review of #141).
+  if ([...f.removed, ...f.added].some((l) => commentMarker(l.text))) return f;
+  const formattingOnly = new Set();
   for (const hunk of new Set([...f.removed, ...f.added].map((l) => l.hunk))) {
     const was = f.removed.filter((l) => l.hunk === hunk);
     const now = f.added.filter((l) => l.hunk === hunk);
     if (!was.length || !now.length) continue;
-    const whole = (ls) => normalizeCode(ls.map((l) => l.text).join('\n'));
-    if (whole(was) !== null && whole(was) === whole(now)) {
-      for (const l of [...was, ...now]) paired.add(l);
-      continue;
-    }
-    // Longest common subsequence of the lines' normalized keys.
-    const a = was.map((l) => pairKey(before, l));
-    const b = now.map((l) => pairKey(after, l));
-    const common = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-    for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) common[i][j] = a[i] === b[j] ? common[i + 1][j + 1] + 1 : Math.max(common[i + 1][j], common[i][j + 1]);
-    for (let i = 0, j = 0; i < a.length && j < b.length; ) {
-      if (a[i] === b[j]) {
-        paired.add(was[i++]);
-        paired.add(now[j++]);
-      } else if (common[i + 1][j] >= common[i][j + 1]) i++;
-      else j++;
-    }
+    const before = normalizeCode(was.map((l) => l.text).join('\n'));
+    if (before !== null && before === normalizeCode(now.map((l) => l.text).join('\n'))) formattingOnly.add(hunk);
   }
-  return { ...f, removed: f.removed.filter((l) => !paired.has(l)), added: f.added.filter((l) => !paired.has(l)) };
+  const keep = (l) => !formattingOnly.has(l.hunk);
+  return { ...f, removed: f.removed.filter(keep), added: f.added.filter(keep) };
 };
 const configLoosening = (f, mergeBase) => {
   const name = basename(f.path);
@@ -1054,7 +1135,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
         if (!kept) weak('property-runs-cut', f.path, `${r.line} (old)`);
       }
     }
-    for (const line of configLoosening(withoutFormatting(f, mergeBase), mergeBase)) weak('config-loosened', f.path, line);
+    for (const line of configLoosening(withoutFormatting(f), mergeBase)) weak('config-loosened', f.path, line);
   }
 
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.

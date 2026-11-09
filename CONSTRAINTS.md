@@ -58,8 +58,10 @@ of:
   `eslint.config.*`, `strict` options relaxed in any `tsconfig*.json` (or a new one with neither
   `extends` nor `strict`, #99), Stryker ignore patterns,
   assertions turned off in `lighthouserc.*`, `disableRules` in the axe setup, and the Fallow
-  config. A change that only reformats one of these files (quotes, indentation, trailing commas,
-  re-wrapped lists) isn't a loosening; any change in content still is (#138).
+  config. In `eslint.config.*`, `vitest.config.*`, `tsconfig*.json`, and the Fallow, Stryker and
+  Lighthouse configs written as JS, TS or JSON, a change that only reformats (quotes,
+  indentation, trailing commas, re-wrapped lists) isn't a loosening; any change in content still
+  is (#138).
 
 Also blocked, with no exception possible:
 
