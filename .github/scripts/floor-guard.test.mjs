@@ -163,14 +163,19 @@ describe('floor guard, end to end', () => {
     const SHA_A = 'a'.repeat(40);
     const SHA_B = 'b'.repeat(40);
     const PINNED = STEPS.replace('  floor:\n    steps:\n', `  floor:\n    steps:\n      - uses: actions/checkout@${SHA_A} # v7.0.1\n`);
+    // Security review of #133: any SHA can be an imposter commit from a fork, so only Dependabot's
+    // own PRs get the exemption (GITHUB_ACTOR, set by the runner).
+    const DEPENDABOT = { ...TODAY, GITHUB_ACTOR: 'dependabot[bot]' };
+    const BUMP = PINNED.replace(`@${SHA_A} # v7.0.1`, `@${SHA_B} # v7.1.0`);
     it.each([
-      ['a SHA-only bump in the floor job', PINNED.replace(`@${SHA_A} # v7.0.1`, `@${SHA_B} # v7.1.0`), 0],
-      ['another action in its place', PINNED.replace(`actions/checkout@${SHA_A}`, `actions/other@${SHA_B}`), 1],
-      ['a tag instead of a SHA', PINNED.replace(`@${SHA_A} # v7.0.1`, '@v7'), 1],
-    ])('judge %s', (_, content, code) => {
+      ['a SHA-only bump in the floor job by Dependabot', BUMP, DEPENDABOT, 0],
+      ['a SHA-only bump in the floor job by anyone else', BUMP, { ...TODAY, GITHUB_ACTOR: 'sssoto17' }, 1],
+      ['another action in its place', PINNED.replace(`actions/checkout@${SHA_A}`, `actions/other@${SHA_B}`), DEPENDABOT, 1],
+      ['a tag instead of a SHA', PINNED.replace(`@${SHA_A} # v7.0.1`, '@v7'), DEPENDABOT, 1],
+    ])('judge %s', (_, content, env, code) => {
       repo = makeRepo({ ...BASE, [CI]: PINNED });
       repo.write({ [CI]: content });
-      const r = guard();
+      const r = guard(env);
       expect(r.code).toBe(code);
       if (code) expect(r.out).toContain(`[check-removed] ${CI}`);
     });

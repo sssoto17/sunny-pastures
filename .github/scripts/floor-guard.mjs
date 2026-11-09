@@ -809,7 +809,7 @@ export const globToRegExp = (glob) =>
       '$',
   );
 
-export const guard = (changes, { mergeBase, today, constraintsNow }) => {
+export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = false }) => {
   const findings = []; // { rule, file, line, key?, waivable }
   const notices = [];
   const ruleChanges = []; // CONSTRAINTS.md rules that changed, for the change report
@@ -851,8 +851,10 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       // weekly bump, #69) counts as kept on both sides (#99). Another action, or a tag instead
       // of a SHA, is still a change.
       const pinnedAction = (t) => /^\s*-?\s*uses:\s*([\w.-]+\/[\w./-]+)@[0-9a-f]{40}\s*(#.*)?$/.exec(t)?.[1] ?? null;
-      const bumpedFrom = new Set(f.added.map((a) => pinnedAction(a.text)).filter(Boolean));
-      const bumpedTo = new Set(f.removed.map((r) => pinnedAction(r.text)).filter(Boolean));
+      // Dependabot's PRs only (security review of #133): any 40-hex SHA can be an imposter commit
+      // from a fork, served under the original repo's name. GITHUB_ACTOR is set by the runner.
+      const bumpedFrom = new Set(dependabot ? f.added.map((a) => pinnedAction(a.text)).filter(Boolean) : []);
+      const bumpedTo = new Set(dependabot ? f.removed.map((r) => pinnedAction(r.text)).filter(Boolean) : []);
       const kept = new Set(f.added.map((a) => a.text.trim()));
       const gone = new Set(f.removed.map((r) => r.text.trim()));
       for (const r of f.removed) {
@@ -964,7 +966,7 @@ const HINTS = {
   // #99: name the real route. `guard / floor` is in ruleset `main checks`, which has no bypass, so
   // the admin's bypass merge (ruleset `main`) can't get a red guard through.
   'check-removed':
-    "A workflow step that runs a check was removed, a job was allowed to fail, or the floor job changed. `guard / floor` has no bypass (ruleset `main checks`), so the routes are: keep the step; add an Exceptions row for `check-removed` on the workflow file in this PR (admin approval); or the admin lifts `main checks` for that one merge (ADR-0004). A Dependabot bump that only moves an action's pinned SHA passes on its own.",
+    "A workflow step that runs a check was removed, a job was allowed to fail, or the floor job changed. `guard / floor` has no bypass (ruleset `main checks`), so the routes are: keep the step; add an Exceptions row for `check-removed` on the workflow file in this PR (admin approval); or the admin lifts `main checks` for that one merge (ADR-0004). A Dependabot PR that only moves an action's pinned SHA passes on its own.",
 };
 
 const main = () => {
@@ -984,7 +986,7 @@ const main = () => {
   } catch {
     throw new CannotRun('CONSTRAINTS.md is missing');
   }
-  const { blocking, notices, report } = guard(changes, { mergeBase, today, constraintsNow });
+  const { blocking, notices, report } = guard(changes, { mergeBase, today, constraintsNow, dependabot: process.env.GITHUB_ACTOR === 'dependabot[bot]' });
   for (const n of notices) console.log(`floor-guard: note: ${n}`);
   if (report) {
     if (process.env.GITHUB_ACTIONS === 'true') {
