@@ -807,7 +807,7 @@ describe('floor guard, end to end', () => {
       expect(guard().out).toContain('[exception-too-broad] CONSTRAINTS.md');
     });
 
-    it.each(['packages/sim/**', 'packages/sim/', 'packages/sim/src/a.ts'])('accepts the Path %s, one folder or file', (path) => {
+    it.each(['packages/sim/**', 'packages/sim/', 'packages/sim/src/a.ts', 'packages/sim/src/'])('accepts the Path %s, one folder or file', (path) => {
       setup();
       repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', path)) });
       expect(guard().out).toContain('waived by E1');

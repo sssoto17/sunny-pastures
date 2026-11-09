@@ -326,10 +326,10 @@ What a row must hold, checked by the floor guard (#99):
   this file's `rule-removed`, `rule-narrowed`, `threshold-*`, `severity-dropped` and
   `stage-moved`. A finding the row doesn't name stays blocked, even on its Path. Any other name
   fails the row, so `unfinished-work` and the `exception-*` findings can't be waived.
-- **Path** is one file (`packages/sim/src/a.ts`), or one folder no wider than one package
-  (`packages/sim/`, `packages/sim/**`, or a folder inside it), with no other wildcard. A waiver
+- **Path** is one file (`packages/sim/src/a.ts`), or one folder with at least two segments
+  (`packages/sim/`, `packages/sim/**`, `.github/workflows/`), with no other wildcard. A waiver
   across every package is in effect project-wide, and the sim is what the floor protects most
-  (admin, 9 Nov). So `**`, `**/*.ts`, `packages/**`, `packages/*/src/**`, `apps/` and any other
+  (admin, 9 Nov). So `**`, `**/*.ts`, `packages/**`, `packages/*/src/**`, `.github/` and any other
   top-level folder fail as `exception-too-broad`.
 - **Expires** is a date the guard can read (`2026-11-30` or `30 Nov 2026`). Any other value fails
   every PR, as an expired row does.

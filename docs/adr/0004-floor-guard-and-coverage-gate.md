@@ -149,9 +149,10 @@ Exceptions). The #40 review found rows that waived too much, never expired, or h
 reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
 
 - **A row is scoped.** Its Rule column names the findings it waives, and nothing else on its Path
-  is waived. Its Path is one file, or one folder no wider than one package (admin, 9 Nov):
-  `packages/sim/` passes, while `packages/**`, `apps/` and any top-level folder don't. A waiver
-  across every package is in effect project-wide, and the sim is what the floor protects most.
+  is waived. Its Path is one file, or one folder with at least two literal segments, wherever it
+  sits (admin, 9 Nov). So `packages/sim/`, `.github/workflows/` and `docs/adr/` pass, while
+  `packages/**`, `.github/`, `docs/` and any other top-level folder don't. A waiver across every
+  package is in effect project-wide, and the sim is what the floor protects most.
 - **A row can't outlive its date.** An unreadable date fails every PR, as an expired one does, and
   `FLOOR_GUARD_TODAY` is ignored in CI.
 - **A row can't hide.** Expiry reads every row-shaped line in the file, whatever heading, fence or
