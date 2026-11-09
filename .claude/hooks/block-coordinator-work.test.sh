@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2088 # a literal `~` in a path is test input: the hook must see it unexpanded
+# shellcheck disable=SC2088,SC2016 # `~`, `$HOME` and backticks are test input: the hook must see them unexpanded
 # Tests for block-coordinator-work.sh, through its hook interface: PreToolUse JSON on stdin,
 # exit 0 (allow) or 2 (deny, message on stderr). Run: bash .claude/hooks/block-coordinator-work.test.sh
 set -uo pipefail
@@ -127,6 +127,184 @@ bash_tool 0 "$MAIN" $'gh issue create --title t --body-file - <<\'EOF\'\nThen gi
 bash_tool 0 "$WT" 'git commit -m x'
 bash_tool 0 "$WT" 'gh pr create --title t --body b --label review:admin'
 bash_tool 0 "$WT/docs" 'git add x && git commit -m x && git push origin chore/75-x'
+
+# --- Bash writes to repo files: independent review of #115 ---------------------------------------
+# Output redirects
+bash_tool 2 "$MAIN" 'echo x > docs/x.md' 'docs/x.md'
+bash_tool 2 "$MAIN" 'echo x >> AGENTS.md'
+bash_tool 2 "$MAIN" 'printf x >| docs/x.md'
+bash_tool 2 "$MAIN" 'ls &> docs/ls.txt'
+bash_tool 2 "$MAIN" 'ls &>> docs/ls.txt'
+bash_tool 2 "$MAIN" 'make 2> docs/err.log'
+bash_tool 2 "$MAIN" 'ls >& docs/ls.txt'
+bash_tool 2 "$MAIN" '> docs/x.md'
+bash_tool 2 "$MAIN" '{ echo a; echo b; } > docs/x.md'
+bash_tool 2 "$MAIN" '( echo a ) > docs/x.md'
+bash_tool 2 "$MAIN" $'cat > docs/x.md <<\'EOF\'\nhello\nEOF'
+bash_tool 2 "$MAIN" "echo x > $MAIN/docs/x.md"
+bash_tool 2 "$MAIN" 'echo x > "docs/a b.md"'
+bash_tool 2 "$MAIN" 'echo x > ~/sunny-pastures/docs/x.md'
+bash_tool 2 "$MAIN" 'echo x > "$HOME/sunny-pastures/docs/x.md"'
+bash_tool 2 "$MAIN" 'echo x > .scratch/../docs/x.md'
+bash_tool 2 "$MAIN/docs" 'echo x > x.md'
+bash_tool 2 "$MAIN" 'cd docs && echo x > x.md'
+bash_tool 2 "$MAIN" '( cd .claude/worktrees/16-x && echo x > docs/x.md )'
+bash_tool 2 "$MAIN" "echo x > $WT/docs/x.md"
+bash_tool 2 "$MAIN" 'git log | grep x > docs/x.md'
+# tee, sed -i, perl -i
+bash_tool 2 "$MAIN" 'echo x | tee docs/x.md'
+bash_tool 2 "$MAIN" 'echo x | tee -a .scratch/log docs/x.md'
+bash_tool 2 "$MAIN" "sed -i 's/a/b/' docs/x.md" '`sed -i`'
+bash_tool 2 "$MAIN" "sed -i.bak 's/a/b/' docs/x.md"
+bash_tool 2 "$MAIN" "sed -Ei 's/a/b/' docs/x.md"
+bash_tool 2 "$MAIN" "sed -e 's/a/b/' -i docs/x.md"
+bash_tool 2 "$MAIN" "sed --in-place=.bak -e 's/a/b/' AGENTS.md"
+bash_tool 2 "$MAIN" "sed -i -e 's/a/b/' .scratch/x.md docs/x.md"
+bash_tool 2 "$MAIN" "perl -pi -e 's/a/b/' docs/x.md"
+bash_tool 2 "$MAIN" "perl -i.bak -pe 's/a/b/' docs/x.md"
+bash_tool 2 "$MAIN" "perl -0777 -i -pe 's/a/b/g' AGENTS.md"
+# cp, mv, install, ln, rm, touch, truncate
+bash_tool 2 "$MAIN" 'cp .scratch/x.md docs/x.md'
+bash_tool 2 "$MAIN" 'cp -r .scratch/dir docs/'
+bash_tool 2 "$MAIN" 'cp -t docs .scratch/x.md'
+bash_tool 2 "$MAIN" 'cp --target-directory=docs .scratch/x.md'
+bash_tool 2 "$MAIN" 'mv .scratch/x.md docs/x.md'
+bash_tool 2 "$MAIN" 'mv docs/x.md .scratch/x.md' # the source is removed
+bash_tool 2 "$MAIN" 'install -m 644 .scratch/x.md docs/x.md'
+bash_tool 2 "$MAIN" 'ln -s ../AGENTS.md docs/x.md'
+bash_tool 2 "$MAIN" 'ln -sf /etc/hosts docs/hosts'
+bash_tool 2 "$MAIN" 'rm docs/x.md'
+bash_tool 2 "$MAIN" 'rm -rf packages/sim'
+bash_tool 2 "$MAIN" 'rm -rf .claude/worktrees/16-x/docs'
+bash_tool 2 "$MAIN" 'rm -rf .claude/worktrees'
+bash_tool 2 "$MAIN" 'touch docs/x.md'
+bash_tool 2 "$MAIN" 'truncate -s 0 docs/x.md'
+# git apply and patch
+bash_tool 2 "$MAIN" 'git apply .scratch/fix.patch' '`git apply`'
+bash_tool 2 "$MAIN" 'git apply --stat --apply .scratch/fix.patch'
+bash_tool 2 "$MAIN" "git -C $WT apply .scratch/fix.patch"
+bash_tool 2 "$MAIN" 'patch -p1 < .scratch/fix.patch'
+bash_tool 2 "$MAIN" 'patch docs/x.md .scratch/fix.patch'
+bash_tool 2 "$MAIN" "patch -d $WT -p1 -i .scratch/fix.patch"
+
+# The coordinator's own writes from the main folder keep working
+bash_tool 0 "$MAIN" 'git status > /dev/null'
+bash_tool 0 "$MAIN" 'git fetch 2>/dev/null'
+bash_tool 0 "$MAIN" 'pnpm db:status &> /dev/null'
+bash_tool 0 "$MAIN" 'echo oops >&2'
+bash_tool 0 "$MAIN" 'echo oops 1>&2'
+bash_tool 0 "$MAIN" 'git log 2>&1 | tail -3'
+bash_tool 0 "$MAIN" 'exec 3>&-'
+bash_tool 0 "$MAIN" 'gh pr view 115 --json body > "$TMPDIR/pr.json"'
+bash_tool 0 "$MAIN" 'gh pr view 115 > $TMPDIR/pr.txt'
+bash_tool 0 "$MAIN" 'gh pr diff 115 > "${TMPDIR:-/tmp}/115.diff"'
+bash_tool 0 "$MAIN" 'echo x > /tmp/claude-1000/scratchpad/x.md'
+bash_tool 0 "$MAIN" 'echo x > ~/notes.md'
+bash_tool 0 "$MAIN" 'echo x > "$(mktemp)"'
+bash_tool 0 "$MAIN" $'cat > .scratch/brief-75.md <<\'EOF\'\nBrief: echo > docs/x.md and sed -i there.\nEOF'
+bash_tool 0 "$MAIN" $'cat <<\'EOF\' > .scratch/brief-75.md\nBrief\nEOF'
+bash_tool 0 "$MAIN" "cat > $MAIN/.scratch/brief.md < /dev/null"
+bash_tool 0 "$MAIN/docs" 'echo x > ../.scratch/x.md'
+bash_tool 0 "$MAIN" 'echo "- 10:40 merged #115" >> .remember/now.md'
+bash_tool 0 "$MAIN" 'gh issue view 75 | tee .scratch/75.md'
+bash_tool 0 "$MAIN" 'git log | tee -a "$TMPDIR/log" | head'
+bash_tool 0 "$MAIN" 'wc -l < docs/spec.md'
+bash_tool 0 "$MAIN" 'diff <(git show origin/main:AGENTS.md) AGENTS.md'
+bash_tool 0 "$MAIN" "sed -n '1,20p' docs/spec.md"
+bash_tool 0 "$MAIN" "sed 's/a/b/' docs/spec.md > .scratch/spec.md"
+bash_tool 0 "$MAIN" "sed -i 's/a/b/' .scratch/brief.md"
+bash_tool 0 "$MAIN" "perl -ne 'print if /x/' docs/spec.md"
+bash_tool 0 "$MAIN" "perl -MList::Util=sum -ne 'print' docs/spec.md"
+bash_tool 0 "$MAIN" "perl -pi -e 's/a/b/' .scratch/brief.md"
+bash_tool 0 "$MAIN" 'cp docs/spec.md .scratch/'
+bash_tool 0 "$MAIN" 'cp -r docs "$TMPDIR/docs"'
+bash_tool 0 "$MAIN" 'mv .scratch/a.md .scratch/b.md'
+bash_tool 0 "$MAIN" 'ln -sf /etc/hosts .scratch/hosts'
+bash_tool 0 "$MAIN" 'rm -f .scratch/brief-75.md'
+bash_tool 0 "$MAIN" 'rm -rf "$TMPDIR/x"'
+bash_tool 0 "$MAIN" 'rm -rf .claude/worktrees/16-x && git worktree prune' # the evening routine (sandbox.md)
+bash_tool 0 "$MAIN" 'touch .scratch/x.md'
+bash_tool 0 "$MAIN" "touch -d '1 day ago' .remember/x.md"
+bash_tool 0 "$MAIN" 'truncate -s 0 .scratch/log'
+bash_tool 0 "$MAIN" 'git apply --check .scratch/fix.patch'
+bash_tool 0 "$MAIN" 'git apply --stat .scratch/fix.patch'
+bash_tool 0 "$MAIN" 'git -C /tmp/other apply .scratch/fix.patch'
+bash_tool 0 "$MAIN" 'patch --dry-run -p1 < .scratch/fix.patch'
+bash_tool 0 "$MAIN" 'patch -o .scratch/x.md docs/spec.md .scratch/fix.patch'
+bash_tool 0 "$MAIN" 'patch -d /tmp/other -p1 < .scratch/fix.patch'
+bash_tool 0 "$MAIN" 'git fetch origin && git merge --ff-only origin/main'
+bash_tool 0 "$MAIN" 'git worktree remove --force .claude/worktrees/16-x'
+bash_tool 0 "$MAIN" 'git worktree prune'
+bash_tool 0 "$MAIN" 'scripts/issue-fields.sh 75 --priority P1 --size S'
+bash_tool 0 "$MAIN" 'bash scripts/orphan-issues.sh'
+bash_tool 0 "$MAIN" 'scripts/after-merge.sh .claude/worktrees/75-coordinator-guard'
+bash_tool 0 "$MAIN" 'cd /tmp && echo x > notes.md'
+bash_tool 0 /tmp 'echo x > notes.md'
+
+# --- commit and PR forms through wrappers, `-c` shells and the API ----------------------------
+bash_tool 2 "$MAIN" 'timeout 60 git commit -m x'
+bash_tool 2 "$MAIN" 'timeout -k 5 -s TERM 60 git commit -m x'
+bash_tool 2 "$MAIN" 'nice git commit -m x'
+bash_tool 2 "$MAIN" 'nice -n 5 git commit -m x'
+bash_tool 2 "$MAIN" 'env -i PATH=/usr/bin git commit -m x'
+bash_tool 2 "$MAIN" 'env -u GIT_DIR git commit -m x'
+bash_tool 2 "$MAIN" 'echo x | xargs git commit -m'
+bash_tool 2 "$MAIN" 'printf "%s\n" a | xargs -I{} git commit -m {}'
+bash_tool 2 "$MAIN" 'stdbuf -oL git commit -m x'
+bash_tool 2 "$MAIN" 'sudo -u soto git commit -m x'
+bash_tool 2 "$MAIN" 'bash -c "git commit -m x"'
+bash_tool 2 "$MAIN" "sh -c 'git add . && git commit -m x'"
+bash_tool 2 "$MAIN" "bash -lc 'gh pr create --fill'"
+bash_tool 2 "$MAIN" "bash -o pipefail -c 'git commit -m x | tail -1'"
+bash_tool 2 "$MAIN" "zsh -c 'echo x > docs/x.md'"
+bash_tool 2 "$MAIN" "timeout 30 bash -c 'sed -i s/a/b/ docs/x.md'"
+bash_tool 2 "$MAIN" 'gh api -X POST repos/sssoto17/sunny-pastures/pulls -f title=t -f head=x -f base=main' '`gh api`'
+bash_tool 2 "$MAIN" 'gh api --method POST /repos/sssoto17/sunny-pastures/pulls --input .scratch/pr.json'
+bash_tool 2 "$MAIN" 'gh api --method=post repos/{owner}/{repo}/pulls -f title=t'
+bash_tool 2 "$MAIN" 'gh api repos/{owner}/{repo}/pulls -f title=t -f head=x -f base=main'
+bash_tool 2 "$MAIN" 'gh api repos/{owner}/{repo}/pulls -F draft=true -f title=t'
+bash_tool 2 "$MAIN" "gh api graphql -f query='mutation { createPullRequest(input: {}) { clientMutationId } }'"
+bash_tool 0 "$MAIN" 'timeout 60 git fetch'
+bash_tool 0 "$MAIN" 'nice -n 5 pnpm check:fast'
+bash_tool 0 "$MAIN" "bash -c 'git status && git log -1'"
+bash_tool 0 "$MAIN" "bash -c 'cat > .scratch/x.md' < /dev/null"
+bash_tool 0 "$MAIN" "sh -c 'cd .claude/worktrees/16-x && git status'"
+bash_tool 0 "$MAIN" 'xargs -n1 echo < .scratch/list'
+bash_tool 0 "$MAIN" 'bash scripts/issue-fields.sh 75'
+bash_tool 0 "$MAIN" 'gh api repos/{owner}/{repo}/pulls'
+bash_tool 0 "$MAIN" 'gh api repos/{owner}/{repo}/pulls -X GET -f state=open'
+bash_tool 0 "$MAIN" 'gh api repos/{owner}/{repo}/pulls/115/comments -f body=x'
+bash_tool 0 "$MAIN" 'gh api -X POST repos/{owner}/{repo}/pulls/115/reviews -f event=COMMENT -f body=x'
+bash_tool 0 "$MAIN" 'gh api repos/{owner}/{repo}/issues -f title=t -f body=b'
+bash_tool 0 "$MAIN" "gh api graphql -f query='query { viewer { login } }'"
+bash_tool 0 "$WT" "bash -c 'git commit -m x && gh pr create --fill'"
+bash_tool 0 "$WT" "sed -i 's/a/b/' docs/x.md && echo x > docs/y.md"
+
+# --- symlinks: the real path decides --------------------------------------------------------------
+REAL=$(mktemp -d "${TMPDIR:-/tmp}/coordinator-test.XXXXXX")
+trap 'rm -rf "$REAL"' EXIT
+REAL=$(cd "$REAL" && pwd -P)
+mkdir -p "$REAL/repo/.scratch" "$REAL/repo/docs" "$REAL/out"
+: >"$REAL/repo/AGENTS.md"
+ln -s ../AGENTS.md "$REAL/repo/.scratch/agents-link"
+ln -s ../docs "$REAL/repo/.scratch/docs-link"
+ln -s "$REAL/out" "$REAL/repo/.scratch/out-link"
+ln -s "$REAL/repo/AGENTS.md" "$REAL/out/agents-link"
+real_file() { CLAUDE_PROJECT_DIR=$REAL/repo file_tool "$@"; }
+real_bash() { CLAUDE_PROJECT_DIR=$REAL/repo bash_tool "$@"; }
+real_file 2 "$REAL/repo" Write "$REAL/repo/.scratch/agents-link"
+real_file 2 "$REAL/repo" Write "$REAL/repo/.scratch/docs-link/new.md"
+real_file 2 "$REAL/repo" Write "$REAL/out/agents-link"
+real_file 0 "$REAL/repo" Write "$REAL/repo/.scratch/new.md"
+real_file 0 "$REAL/repo" Write "$REAL/repo/.scratch/out-link/new.md"
+real_bash 2 "$REAL/repo" 'echo x > .scratch/agents-link'
+real_bash 2 "$REAL/repo" "sed -i 's/a/b/' .scratch/docs-link/x.md"
+real_bash 0 "$REAL/repo" 'echo x > .scratch/new.md'
+
+# --- no repo to guard: CLAUDE_PROJECT_DIR unset and cwd outside any git repo ----------------------
+mkdir -p "$REAL/no-repo"
+CLAUDE_PROJECT_DIR='' file_tool 0 "$REAL/no-repo" Write "$REAL/no-repo/x.md"
+CLAUDE_PROJECT_DIR='' bash_tool 0 "$REAL/no-repo" 'echo x > x.md && git commit -m x'
 
 # --- hook input edge cases ------------------------------------------------------------------
 bs=$'\x5c' # a backslash; typing the escape literally gets it decoded on the way into this file

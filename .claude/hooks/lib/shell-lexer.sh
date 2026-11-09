@@ -104,8 +104,9 @@ parse_git_args() {
 }
 
 # --- Lexer ----------------------------------------------------------------------------------
-# lex_command splits its argument into tokens: kinds[k] is W (a word, quotes removed) or O (an
-# operator: `&&`, `||`, `;` for any other command separator, `(` or `)`). Quoted text, `$( … )`,
+# lex_command splits its argument into tokens: kinds[k] is W (a word, quotes removed), R (the
+# target of an output redirect) or O (an operator: `&&`, `||`, `;` for any other command
+# separator, `(` or `)`). Quoted text, `$( … )`,
 # backticks, comments, redirect targets and heredoc bodies never become command words, so a
 # commit message that mentions `git checkout` passes.
 
@@ -114,6 +115,9 @@ emit_word() {
     case $next_is in
       heredoc) heredocs+=("$( ((heredoc_strip)) && printf -- -)$word") ;;
       redirect) ;;
+      redirect_out) # a file the command writes; `>&2` and `2>&1` duplicate a descriptor instead
+        ((redir_dup)) && [[ $word =~ ^([0-9]+|-)$ ]] || toks+=("$word") kinds+=(R)
+        ;;
       *) toks+=("$word") kinds+=(W) ;;
     esac
     next_is=''
@@ -121,7 +125,8 @@ emit_word() {
   word=''
   have_word=0
 }
-emit_op() { emit_word; toks+=("$1") kinds+=(O); }
+# An operator is never a redirect target: `>(cmd)` and `<(cmd)` are process substitutions.
+emit_op() { emit_word; next_is=''; toks+=("$1") kinds+=(O); }
 
 # At cmd[i] == "'": append the quoted text to $word and move past the closing quote.
 lex_squote() {
@@ -224,7 +229,8 @@ lex_command() {
   kinds=()
   word=''
   have_word=0
-  next_is=''   # '' | redirect | heredoc: what the next word is for
+  next_is=''   # '' | redirect | redirect_out | heredoc: what the next word is for
+  redir_dup=0  # the redirect was `>&`: a target of digits or `-` is a descriptor, not a file
   heredocs=()  # pending heredoc delimiters, "-DELIM" when <<- strips tabs
   heredoc_strip=0
   local c rest
@@ -242,7 +248,7 @@ lex_command() {
         ;;
       '&')
         if [[ ${cmd:i+1:1} == '>' ]]; then # &> and &>> redirect stdout and stderr
-          emit_word; next_is=redirect; i=$((i + 2)); [[ ${cmd:i:1} == '>' ]] && i=$((i + 1))
+          emit_word; next_is=redirect_out redir_dup=0; i=$((i + 2)); [[ ${cmd:i:1} == '>' ]] && i=$((i + 1))
         else
           if [[ ${cmd:i+1:1} == '&' ]]; then emit_op '&&'; i=$((i + 2)); else emit_op ';'; i=$((i + 1)); fi
         fi
@@ -257,7 +263,11 @@ lex_command() {
           next_is=heredoc heredoc_strip=0; i=$((i + 2))
           [[ ${cmd:i:1} == - ]] && heredoc_strip=1 && i=$((i + 1))
         else
-          next_is=redirect; i=$((i + 1))
+          # `>`, `>>`, `>|`, `>&` and `<>` write to their target; `<` and `<&` only read it.
+          next_is=redirect redir_dup=0
+          [[ $c == '>' || ${cmd:i+1:1} == '>' ]] && next_is=redirect_out
+          i=$((i + 1))
+          [[ ${cmd:i:1} == '&' ]] && redir_dup=1
           [[ ${cmd:i:1} == [\>\&\|] ]] && i=$((i + 1))
         fi
         ;;
@@ -289,26 +299,69 @@ lex_command() {
 }
 
 # --- Walk -----------------------------------------------------------------------------------
-# One simple command (its words in "$@") run in directory dir[depth]. Skips what can precede the
-# command name, then sets `here` (its directory), `name` (the command's basename) and `negated`,
-# and calls the hook's check_command with the remaining words. A `cd`/`pushd`/`popd` then moves
-# dir[depth], after calling the hook's check_cd (if defined) with cd_target set and REPLY the
-# resolved directory.
+# Drop words[0], a wrapper command, and its options; $1 lists its short options that take a value.
+drop_opts() {
+  local takes=$1 w
+  words=("${words[@]:1}")
+  while ((${#words[@]})) && [[ ${words[0]} == -?* ]]; do
+    w=${words[0]}
+    words=("${words[@]:1}")
+    [[ $w == -- ]] && break
+    [[ -n $takes && $w =~ ^-[$takes]$ ]] && words=("${words[@]:1}") # its value is the next word
+  done
+}
+
+# The words after a shell's name: set REPLY to the command string of `-c`, or return 1.
+shell_c_string() {
+  local w has_c=0
+  while (($#)); do
+    w=$1
+    shift
+    case $w in
+      -o | +o | -O | +O) shift ;;
+      --) ((has_c && $#)) && REPLY=$1 && return 0; return 1 ;;
+      --*) ;;
+      [-+]?*) [[ $w == -*c* ]] && has_c=1 ;;
+      *) ((has_c)) && REPLY=$w && return 0; return 1 ;;
+    esac
+  done
+  return 1
+}
+
+# One simple command (its words in "$@", its output redirect targets in cmd_redirs) run in
+# directory dir[depth]. Skips what can precede the command name (keywords, assignments, wrappers
+# such as `timeout 60` or `env -i`), then sets `here` (its directory), `name` (the command's
+# basename) and `negated`, and calls the hook's check_command with the remaining words. The
+# command string of `bash -c` / `sh -c` is walked too, as a subshell. A `cd`/`pushd`/`popd` then
+# moves dir[depth], after calling the hook's check_cd (if defined) with cd_target set and REPLY
+# the resolved directory.
 visit_command() {
   local words=("$@")
   negated=0
   while ((${#words[@]})); do
     case ${words[0]} in
       '!') negated=1 words=("${words[@]:1}") ;;
-      '{' | '}' | if | then | elif | else | do | while | until | command | builtin | \
-        exec | nohup | time | env) words=("${words[@]:1}") ;;
+      '{' | '}' | if | then | elif | else | do | while | until) words=("${words[@]:1}") ;;
+      command | builtin | nohup | time) drop_opts '' ;;
+      exec) drop_opts a ;;
+      env) drop_opts uCS ;;
+      nice) drop_opts n ;;
+      timeout) drop_opts sk; words=("${words[@]:1}") ;; # and its duration
+      xargs) drop_opts IdELnPsa ;;
+      stdbuf) drop_opts ioe ;;
+      sudo) drop_opts ugpCDhrtTU ;;
       *)
         if [[ ${words[0]} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then words=("${words[@]:1}"); else break; fi
         ;;
     esac
   done
-  ((${#words[@]})) || return 0
-  here=${dir[depth]} name=${words[0]##*/}
+  ((${#words[@]} || ${#cmd_redirs[@]})) || return 0
+  here=${dir[depth]} name=${words[0]:-}
+  name=${name##*/}
+  if [[ $name =~ ^(ba|z|da|k)?sh$ ]] && shell_c_string "${words[@]:1}"; then
+    # A child shell: its cd ends with it, like a subshell's. A deny inside exits 2.
+    (lex_command "($REPLY"$'\n'")"; walk_commands "$here"; exit 0) || exit $?
+  fi
   check_command "${words[@]}"
   case $name in
     cd | pushd | popd)
@@ -360,13 +413,14 @@ walk_commands() {
   base=("$1")
   or_seen=(0)
   local cur=() k
+  cmd_redirs=()
   for ((k = 0; k < ${#toks[@]}; k++)); do
-    if [[ ${kinds[k]} == W ]]; then
-      cur+=("${toks[k]}")
-      continue
-    fi
-    ((${#cur[@]})) && visit_command "${cur[@]}"
-    cur=()
+    case ${kinds[k]} in
+      W) cur+=("${toks[k]}"); continue ;;
+      R) cmd_redirs+=("${toks[k]}"); continue ;;
+    esac
+    ((${#cur[@]} || ${#cmd_redirs[@]})) && visit_command "${cur[@]}"
+    cur=() cmd_redirs=()
     case ${toks[k]} in
       '(')
         depth=$((depth + 1))
@@ -377,5 +431,6 @@ walk_commands() {
       '||') settle; or_seen[depth]=1 ;;
     esac
   done
-  ((${#cur[@]})) && visit_command "${cur[@]}"
+  ((${#cur[@]} || ${#cmd_redirs[@]})) && visit_command "${cur[@]}"
+  return 0
 }

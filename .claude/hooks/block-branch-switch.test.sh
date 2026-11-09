@@ -180,6 +180,15 @@ deny "$MAIN" 'g\it switch feature'
 deny "$MAIN" '"g"it checkout feature'
 deny "$MAIN" "c'd' .claude/worktrees/16-x"
 
+# --- shared lexer (#75): wrappers and `-c` shells are looked through ---------------------------
+deny "$MAIN" 'timeout 60 git switch feature'
+deny "$MAIN" 'env -i PATH=/usr/bin git checkout feature'
+deny "$MAIN" "bash -c 'git switch feature'"
+deny "$MAIN" "sh -c 'cd docs && git checkout feature'"
+allow "$MAIN" "bash -c 'cd .claude/worktrees/16-x && git switch feature'"
+allow "$MAIN" "bash -c 'cd .claude/worktrees/16-x'" # a child shell's cd ends with it
+allow "$MAIN" 'git status > .scratch/status.txt 2>&1'
+
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
   err=$(timeout 5 bash "$hook" <<<"$2" 2>&1 >/dev/null)
