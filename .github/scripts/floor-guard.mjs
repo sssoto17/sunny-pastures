@@ -59,16 +59,19 @@ const STUBS = new RegExp(
 );
 // A stub that throws instead of doing the work: the message starts with "not implemented", "not
 // yet implemented" (spaces or hyphens) or "unimplemented", in any case, with or without `new`.
-const STUB_THROW = /throw\s+(?:new\s+)?\w*Error\(\s*['"`]\s*(?:not[\s-]+(?:yet[\s-]+)?implemented|unimplemented)\b/i;
-// A line holding only a comment, for a multi-line `catch` with nothing else in it. A line that
-// opens a block comment and then has code (`/* log */ report(e);`) isn't one (review of #133).
-const COMMENT_ONLY = new RegExp(String.raw`^\s*(?:\/\/.*|(?:${BLOCK_COMMENT}\s*)+|\*(?!\/).*|\/\*(?:(?!\*\/).)*)$`);
-// Whether the block opened on line `n` (1-based) closes with nothing but blank or comment lines.
+// A `NotImplementedError` is the same stub by name (independent review of #133).
+const STUB_THROW = /throw\s+(?:new\s+)?(?:NotImplemented\w*|\w*Error\(\s*['"`]\s*(?:not[\s-]+(?:yet[\s-]+)?implemented|unimplemented)\b)/i;
+// Whether the block opened on line `n` (1-based) holds nothing but blanks and comments before its
+// closing `}`. The lines are read together, so a block comment may span several of them, and a
+// line that opens a comment and then has code (`/* log */ report(e);`) isn't empty (reviews of
+// #133).
 const emptyBlockAfter = (lines, n) => {
+  let text = '';
   for (let i = n; i < lines.length; i++) {
-    const l = lines[i] ?? '';
-    if (/^\s*\}/.test(l)) return true;
-    if (l.trim() && !COMMENT_ONLY.test(l)) return false;
+    text += `${lines[i] ?? ''}\n`;
+    if (text.lastIndexOf('/*') > text.lastIndexOf('*/')) continue; // inside a block comment
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, '');
+    if (code.trim()) return /^\s*\}/.test(code);
   }
   return false;
 };
@@ -81,6 +84,12 @@ const ASSERTIONS = /\b(expect|assert)\b/g;
 const RUN_COUNT = /\b(numRuns|SIM_PROPERTY_RUNS)\b(?:\D{0,20}?(\d+))?/;
 // A line of JS or TS without its comments.
 const stripComments = (t) => t.replace(/\/\*(?:(?!\*\/).)*(?:\*\/|$)/g, ' ').replace(/\/\/.*$/, '');
+// A property-test run count on a line of code: its key, and its value, or null when it comes from
+// a variable (review of #133). Comments neither hold a count nor hide one.
+const runCount = (t) => {
+  const m = RUN_COUNT.exec(stripComments(t));
+  return m ? { key: m[1], n: m[2] === undefined ? null : Number(m[2]) } : null;
+};
 const STRICT_KEYS =
   /"(strict\w*|noImplicit\w+|noUnused\w+|noUnchecked\w+|noFallthroughCasesInSwitch|noPropertyAccessFromIndexSignature|exactOptionalPropertyTypes|alwaysStrict|useUnknownInCatchVariables|allowUnreachableCode|allowUnusedLabels)"\s*:\s*(true|false)/;
 
@@ -150,10 +159,11 @@ const configLoosening = (f, mergeBase) => {
     // Its `extends` must name a file that exists (review of #133): `"./nope.json"` or `[]` extends
     // nothing. A package name (`@tsconfig/node20`) isn't resolved here and counts as an extends.
     if (f.status === 'added') {
-      const text = readFileSync(f.path, 'utf8');
+      // Read without comments, so `// "strict": true` doesn't count (independent review of #133).
+      const text = readFileSync(f.path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:"])\/\/.*$/gm, '$1');
       const value = /"extends"\s*:\s*("(?:[^"\\]|\\.)*"|\[[^\]]*\])/.exec(text)?.[1];
       const targets = value ? [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]) : [];
-      const resolves = (t) => !/^\.{1,2}\//.test(t) || [t, `${t}.json`].some((p) => existsSync(join(dirname(f.path), p)));
+      const resolves = (t) => t.trim() !== '' && (!/^\.{1,2}\//.test(t) || [t, `${t}.json`].some((p) => existsSync(join(dirname(f.path), p))));
       const extendsReal = targets.length > 0 && targets.every(resolves);
       if (!extendsReal && !/"strict"\s*:\s*true/.test(text)) hits.push(1);
     }
@@ -346,7 +356,7 @@ const ruleNumbers = (r) => {
 };
 const PROSE_HEADER =/why|reason|covers|what is checked|notes?/i;
 // Numbers are judged by direction (compareNumbers), so list items compare with them masked.
-const norm = (s) => s.replace(/[`*]/g, '').replace(/\d+(\.\d+)*/g, 'N').replace(/\s+/g, ' ').replace(/[.:]+$/, '').trim().toLowerCase();
+const norm = (s) => s.replace(/[`*]/g, '').replace(/(?<![A-Za-z])\d+(\.\d+)*/g, 'N').replace(/\s+/g, ' ').replace(/[.:]+$/, '').trim().toLowerCase();
 const ticks = (t) => new Set([...t.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
 // A table's list cells: every cell but the key, prose columns and a ratchet's "Today".
 const isListCell = (r, i) => i > 0 && !PROSE_HEADER.test(r.headers[i] ?? '') && !/^today$/i.test(r.headers[i] ?? '');
@@ -489,24 +499,44 @@ const narrowingLabels = (oldText, nowText) => [
 // only then the next unused one, so a rewording that changes the unit still pairs. A new number
 // added in front ("under 10 files or 800 changed lines") can't take an old one's place (#99).
 const compareNumbers = (was, now) => {
+  const capped = was.some((x) => x.dir);
   for (const dir of ['min', 'max', null]) {
     const before = was.filter((x) => x.dir === dir);
     const after = now.filter((x) => x.dir === dir);
     const used = new Set();
-    const take = (pick) => {
-      const n = after.find((x) => !used.has(x) && pick(x));
-      if (n) used.add(n);
-      return n;
-    };
-    const paired = before.map((b) => take((x) => x.unit === b.unit));
-    for (const [i, b] of before.entries()) {
-      const n = paired[i] ?? take(() => true);
-      if (!n) return 'threshold-removed';
-      // Paired by position across two named units: the number now counts something else, so it
-      // can't be judged by size ("30 days" becoming "30 weeks", review of #133).
-      if (!paired[i] && b.unit && n.unit && n.unit !== b.unit) return 'threshold-changed';
-      if (n.n !== b.n && (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : true)) return dir ? 'threshold-loosened' : 'threshold-changed';
+    const loosens = (o, n) => n !== o && (dir === 'min' ? n < o : dir === 'max' ? n > o : true);
+    // Within one unit, old and new are compared as sorted lists, so reordering a rule's numbers
+    // isn't a change ("LCP ≤ 2500 ms, …, TBT ≤ 200 ms", independent review of #133). Caps pair
+    // smallest first and floors largest first, so the extra new numbers, the loosest, are left
+    // over for the check below.
+    const order = (a, b) => (dir === 'min' ? b - a : a - b);
+    const unpaired = [];
+    for (const unit of new Set(before.map((b) => b.unit))) {
+      const olds = before.filter((b) => b.unit === unit).sort((a, b) => order(a.n, b.n));
+      const news = after.filter((x) => !used.has(x) && x.unit === unit).sort((a, b) => order(a.n, b.n));
+      for (const [i, b] of olds.entries()) {
+        const n = news[i];
+        if (!n) {
+          unpaired.push(b);
+          continue;
+        }
+        used.add(n);
+        if (loosens(b.n, n.n)) return dir ? 'threshold-loosened' : 'threshold-changed';
+      }
     }
+    // An old number with no new one of its unit pairs with the next unused one. Across two named
+    // units it now counts something else, so it can't be judged by size ("30 days" becoming "30
+    // weeks", review of #133).
+    for (const b of unpaired) {
+      const n = after.find((x) => !used.has(x));
+      if (!n) return 'threshold-removed';
+      used.add(n);
+      if (b.unit && n.unit && n.unit !== b.unit) return 'threshold-changed';
+      if (loosens(b.n, n.n)) return dir ? 'threshold-loosened' : 'threshold-changed';
+    }
+    // A new number with no direction in a rule that had a cap or a floor can't be judged, so it's a
+    // change ("400 changed lines; 900 for docs", #99's own fallback, independent review of #133).
+    if (!dir && capped && after.some((x) => !used.has(x) && x.via !== 'and')) return 'threshold-changed';
     // A new number left over in a capped rule is compared only with old numbers of its own unit:
     // looser than all of them is a loosening ("10 changed files or 800 lines" for "400 changed
     // lines"). A cap in a unit the rule didn't use ("≤ 50 ms or 5 s") can't be compared, and a new
@@ -851,6 +881,8 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
   for (const f of changes) {
     if (f.status === 'deleted') {
       if (isTest(f.path)) weak('test-deleted', f.path, 'file');
+      // A deleted config that held a run count takes it with it (review of #133).
+      else if ((oldContent(mergeBase, f.path) ?? []).some(runCount)) weak('property-runs-cut', f.path, 'file');
       continue;
     }
     if (isConstraints(f.path)) {
@@ -867,7 +899,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
       if (!SELF.has(f.path)) {
         if (SUPPRESSIONS.test(text)) weak('silenced-checker', f.path, line);
         if (STUBS.test(text) || STUB_THROW.test(text)) always('unfinished-work', f.path, line);
-        else if (OPEN_CATCH.test(text) && emptyBlockAfter(fileLines(), line)) always('unfinished-work', f.path, line);
+        else if (OPEN_CATCH.test(stripComments(text)) && emptyBlockAfter(fileLines(), line)) always('unfinished-work', f.path, line);
       }
       if (isTest(f.path) && SKIPS.test(text)) weak('test-made-easier', f.path, line);
     }
@@ -908,30 +940,23 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
         if (loosens && !gone.has(a.text.trim()) && !bumped.has(bumpKey(now, a))) weak('check-removed', f.path, a.line);
       }
     }
-    // Run counts, read from code with its comments stripped, so a comment can neither hold a count
-    // nor hide one (review of #133). A count may be a literal or a variable.
-    const runCount = (t) => {
-      const m = RUN_COUNT.exec(stripComments(t));
-      return m ? { key: m[1], n: m[2] === undefined ? null : Number(m[2]) } : null;
-    };
-    for (const r of f.removed) {
-      const was = runCount(r.text);
-      if (!was) continue;
-      const cut = () => weak('property-runs-cut', f.path, `${r.line} (old)`);
-      const newCount = f.added.map((a) => runCount(a.text)).find((c) => c?.key === was.key);
-      const inFile = fileLines().map(runCount).filter((c) => c?.key === was.key);
-      if (was.n === null) {
-        // A count from a variable: replaced by a literal can't be compared, and gone is a cut.
-        if (newCount?.n != null || !inFile.length) cut();
-        continue;
+    // Run counts (#99): the file's counts, old against new, one to one, read from code without its
+    // comments. Each old literal needs its own new literal at least as high, and each old count
+    // taken from a variable needs one that's still there. A count lowered, deleted (it falls back to
+    // a default the guard can't see), or turned from a variable into a literal is a cut (reviews
+    // of #133).
+    const removedKeys = new Map(f.removed.map((r) => [runCount(r.text)?.key, r]).filter(([k]) => k));
+    if (removedKeys.size) {
+      const before = (oldContent(mergeBase, f.oldPath ?? f.path) ?? []).map(runCount).filter(Boolean);
+      const now = fileLines().map(runCount).filter(Boolean);
+      for (const [key, r] of removedKeys) {
+        const literals = (cs) => cs.filter((c) => c.key === key && c.n !== null).map((c) => c.n).sort((a, b) => b - a);
+        const variables = (cs) => cs.filter((c) => c.key === key && c.n === null).length;
+        const was = literals(before);
+        const is = literals(now);
+        const kept = variables(now) >= variables(before) && is.length >= was.length && was.every((n, i) => is[i] >= n);
+        if (!kept) weak('property-runs-cut', f.path, `${r.line} (old)`);
       }
-      if (newCount?.n != null && newCount.n < was.n) {
-        cut();
-        continue;
-      }
-      // Deleted outright, or moved to a variable (#99): the count falls back to a default the guard
-      // can't see. It counts as kept only if the file still sets it to at least the old value.
-      if (newCount?.n == null && !inFile.some((c) => c.n !== null && c.n >= was.n)) cut();
     }
     for (const line of configLoosening(f, mergeBase)) weak('config-loosened', f.path, line);
   }
@@ -1037,8 +1062,20 @@ const main = () => {
   }
   // Dependabot's PR only when the runner's actor is Dependabot and every commit in the PR is its
   // own: GITHUB_ACTOR is whoever pushed the commit the run is for (security review of #133).
+  // The event payload also has to name Dependabot as the PR's author, from a branch of this repo,
+  // not a fork (independent review of #133): GITHUB_ACTOR is only the latest event's actor.
   const authors = git(['log', '--no-merges', '--format=%an', `${mergeBase}..HEAD`])?.split('\n').filter(Boolean) ?? ['?'];
-  const dependabot = process.env.GITHUB_ACTOR === 'dependabot[bot]' && authors.every((a) => a === 'dependabot[bot]');
+  const pullRequest = () => {
+    try {
+      return JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? '', 'utf8')).pull_request ?? null;
+    } catch {
+      return null; // no event file: not a Dependabot PR
+    }
+  };
+  const pr = pullRequest();
+  const sameRepo = Boolean(pr?.head?.repo?.full_name) && pr.head.repo.full_name === pr.base?.repo?.full_name;
+  const dependabot =
+    process.env.GITHUB_ACTOR === 'dependabot[bot]' && pr?.user?.login === 'dependabot[bot]' && sameRepo && authors.every((a) => a === 'dependabot[bot]');
   const { blocking, notices, report } = guard(changes, { mergeBase, today, constraintsNow, dependabot });
   for (const n of notices) console.log(`floor-guard: note: ${n}`);
   if (report) {
