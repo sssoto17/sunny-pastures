@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, rmSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -240,6 +240,13 @@ describe('floor guard, end to end', () => {
       return text.replace(from, to);
     };
     const realRepo = (text = REAL) => (repo = makeRepo({ 'CONSTRAINTS.md': text }));
+    // The line a passage starts on in the real file, so the tests survive edits above it.
+    const lineOf = (needle) => {
+      const n = REAL.split('\n').findIndex((l) => l.includes(needle)) + 1;
+      if (!n) throw new Error(`CONSTRAINTS.md no longer contains: ${needle}`);
+      return n;
+    };
+    const PURITY = lineOf('| Boundaries: sim purity');
 
     it.each([
       ['the split size raised in a paragraph', 'at most **400 changed lines**', 'at most **800 changed lines**', 'threshold-loosened'],
@@ -301,6 +308,277 @@ describe('floor guard, end to end', () => {
       expect(guard().code).toBe(0);
       repo.write({ 'CONSTRAINTS.md': edit(REAL, '| Types | 0 type errors | Any error is a bug or a lie | `tsc -b` (incremental) | edit, CI | `ci / typecheck` | #40 |', '| Types | 0 type errors | Any error is a bug or a lie | `tsc -b` (incremental) | edit, CI | `ci / typecheck` | #41 |') });
       expect(guard().code).toBe(0);
+    });
+
+    // #122: PR #121 added the test allowance behind a `;`, so every old item survived (830ac11).
+    const ALLOWANCE = '; test files in `packages/sim` (`*.test.ts`) may also import `vitest` and `fast-check` and nothing else from outside the sim, and stay banned from `node:*` and from the calls above (admin, 9 Nov, #81)';
+
+    // A narrowing is a warning for the admin, never a failure (admin, 9 Nov): the guard can't tell
+    // an approved carve-out from an unapproved one, and a red required check has no bypass.
+    // An entry's reasons, in two tiers (admin, 9 Nov): `warning [rule-narrowed]` for strong signals,
+    // `note [check]` for weak ones. Each comes right after the entry's head, warning first.
+    const reasons = (r, head) => {
+      expect(r.code).toBe(0);
+      expect(r.out).not.toContain('floor-guard: clean');
+      const lines = r.out.split('\n');
+      const at = lines.findIndex((l) => l.includes(head));
+      expect(at, `no report entry for ${head}`).toBeGreaterThan(-1);
+      const next = lines.slice(at + 1, at + 3);
+      return { warning: next.find((l) => l.includes('warning [rule-narrowed]: ')), note: next.find((l) => l.includes('note [check]: ')) };
+    };
+    const warned = (r, head) => {
+      const { warning } = reasons(r, head);
+      expect(warning, `no warning for ${head}`).toBeDefined();
+      return warning;
+    };
+    const noted = (r, head) => {
+      const { warning, note } = reasons(r, head);
+      expect(warning, `a weak signal warned for ${head}`).toBeUndefined();
+      expect(note, `no note for ${head}`).toBeDefined();
+      return note;
+    };
+    const TIER = { warning: warned, note: noted };
+
+    it("warns on PR #121's real rewording of the purity row", () => {
+      realRepo(edit(REAL, ALLOWANCE, ''));
+      repo.write({ 'CONSTRAINTS.md': REAL });
+      const head = `changed: CONSTRAINTS.md:${PURITY} (rule "Boundaries: sim purity (MUST-10.1)")`;
+      const r = guard();
+      expect(warned(r, head)).toContain('adds a clause to a list cell');
+      expect(reasons(r, head).note).toContain('adds "may"');
+    });
+
+    const SECRETS = '- Secrets in source. Read them from env vars and keep placeholders in `.env.example`.';
+    it.each([
+      ['added to a list item', SECRETS, SECRETS.replace('in source.', 'in source, except in test fixtures.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'warning', 'except'],
+      ['added to a paragraph', 'Each blocking CI job is a required status check on `main`.', 'Each blocking CI job is a required status check on `main`, unless it runs on preview deploys.', `changed: CONSTRAINTS.md:${lineOf('Each blocking CI job')}`, 'warning', 'unless'],
+      ['added as a new list item', SECRETS, `${SECRETS}\n- Test files may use \`@ts-ignore\`.`, `added: CONSTRAINTS.md:${lineOf(SECRETS) + 1}`, 'note', 'may'],
+    ])('flags a carve-out %s', (_, from, to, head, tier, word) => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, from, to) });
+      expect(TIER[tier](guard(), head)).toContain(`adds "${word}"`);
+    });
+
+    // Review of #129 (admin, 9 Nov): carve-outs the first word list missed.
+    const LINT_ROW = lineOf('| Lint |');
+    it.each([
+      ['"blocked unless" made "warned unless"', 'A weakened bar is blocked unless', 'A weakened bar is warned unless', 'changed: CONSTRAINTS.md:37', 'warning', 'adds "warned"'],
+      ['a new sentence in a list item', SECRETS, SECRETS.replace('in source.', 'in source. Fixtures are okay.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'note', 'adds a clause'],
+      ['"fine" in a new sentence', SECRETS, SECRETS.replace('in source.', 'in source. Fixtures are fine.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'note', 'adds "fine"'],
+      ['", ignoring" a path', SECRETS, SECRETS.replace('in source.', 'in source, ignoring `tools/`.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'warning', 'adds "ignoring"'],
+      ['"outside" a path', SECRETS, SECRETS.replace('in source.', 'in source outside `tools/`.'), `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'note', 'adds "outside"'],
+      ['a new row', '| Lint |', '| Lint: generated | Generated files are linted by hand | n/a | `eslint .` | CI | `ci / lint` | #40 |\n| Lint |', `added: CONSTRAINTS.md:${LINT_ROW}`, 'note', 'adds a rule'],
+      ['a footnote', '## Stages\n', '## Stages\n\n[^1]: Agents run the bench on Fridays.\n', 'added: CONSTRAINTS.md:', 'warning', 'adds a footnote'],
+      ['an inline HTML comment', SECRETS, `${SECRETS} <!-- agents read this -->`, `changed: CONSTRAINTS.md:${lineOf(SECRETS)}`, 'warning', 'adds an HTML comment'],
+    ])('flags %s', (_, from, to, head, tier, label) => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, from, to) });
+      expect(TIER[tier](guard(), head)).toContain(label);
+    });
+
+    it('titles the annotation by tier, so a note never reads as a narrowing', () => {
+      realRepo();
+      // A negation in a new rule is a prohibition, not a flip: still only a note.
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, SECRETS, `${SECRETS}\n- New rule: no stubs, never.`) });
+      const notes = guard({ ...TODAY, GITHUB_ACTIONS: 'true' }).out.split('\n').filter((l) => l.startsWith('::warning'));
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toContain('title=CONSTRAINTS.md rule to check (admin reads)::');
+    });
+
+    // Review of #129: a rule moved between lists has the same text, so it paired as unchanged and
+    // the guard logged `clean`. Moving the secrets rule into the waivable list makes it waivable.
+    it('reports and warns on a rule moved out of the no-exception list', () => {
+      realRepo();
+      const moved = edit(edit(REAL, `${SECRETS}\n`, ''), '- A new suppression comment:', `${SECRETS}\n- A new suppression comment:`);
+      repo.write({ 'CONSTRAINTS.md': moved });
+      const r = guard();
+      const warning = warned(r, 'moved: CONSTRAINTS.md:41 (rule "list item in "Floor (always enforced)"")');
+      expect(warning).toContain('moves from "Also blocked, with no exception possible:" to "A weakened bar is any of:"');
+      expect(r.out).toContain(`from: CONSTRAINTS.md:${lineOf(SECRETS)} (old)`);
+    });
+
+    it('reports a rule reordered within its list, without a warning', () => {
+      realRepo();
+      const expired = '- An expired row in [Exceptions](#exceptions).\n';
+      repo.write({ 'CONSTRAINTS.md': edit(edit(REAL, expired, ''), `${SECRETS}\n`, `${expired}${SECRETS}\n`) });
+      const r = guard();
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('moved: CONSTRAINTS.md:');
+      expect(r.out).not.toContain('rule-narrowed');
+    });
+
+    it('stays quiet for a blank-line-only edit', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, '## Stages\n', '## Stages\n\n') });
+      expect(guard().out).toContain('floor-guard: clean');
+    });
+
+    const PURITY_TAIL = '`new Date()` with no arguments is banned too;';
+    it.each([
+      ['a clause of several words', '; sim tests import `vitest` freely;'],
+      ['a two-word clause', ', tests aside;'.replace('aside', 'excused')],
+    ])('warns on %s added to a list cell, even without a narrowing word', (_, tail) => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, PURITY_TAIL, `\`new Date()\` with no arguments is banned too${tail}`) });
+      expect(warned(guard(), `changed: CONSTRAINTS.md:${PURITY}`)).toContain('adds a clause to a list cell');
+    });
+
+    it('warns on a dropped negation', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, 'One automatic retry, never more.', 'One automatic retry, more.') });
+      expect(warned(guard(), 'changed: CONSTRAINTS.md:')).toContain('drops "never"');
+    });
+
+    // CONSTRAINTS.md, "Guarding the bar", names this as what the guard can't catch: it passes, but
+    // it's in the report.
+    it('passes a meaning change it cannot judge, and still reports it', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, 'Only the admin loosens anything.', 'Only the agent loosens anything.') });
+      const r = guard();
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('Only the {+agent+} loosens anything.');
+      expect(r.out).not.toContain('rule-narrowed');
+    });
+
+    // Review of #122: splitting list cells at full stops let a new sentence in between two items.
+    it('still fails a sentence slipped in before a full stop', () => {
+      realRepo();
+      repo.write({ 'CONSTRAINTS.md': edit(REAL, '`setImmediate`. `new Date()`', '`setImmediate`. Tests are fine. `new Date()`') });
+      const r = guard();
+      expect(r.code).toBe(1);
+      expect(r.out).toContain(`[rule-narrowed] CONSTRAINTS.md:${PURITY}`);
+    });
+
+    // Each case: [the text at the merge base, the text in the PR], as edits of the real file.
+    const typo = (right, wrong) => [edit(REAL, right, wrong), REAL];
+    const tighten = (from, to) => [REAL, edit(REAL, from, to)];
+    it.each([
+      ['a typo fixed in a list item', typo('keep placeholders in', 'keep placehodlers in')],
+      ['a typo fixed in a prose cell', typo('| Any error is a bug or a lie |', '| Any eror is a bug or a lie |')],
+      ['a reworded Why cell', tighten('| Any error is a bug or a lie |', '| Each error is either a bug or a lie |')],
+      ['an item added to a list cell', tighten('`fetch`, `setTimeout`,', '`fetch`, `queueMicrotask`, `setTimeout`,')],
+      ['an item added to a list', tighten('`fallow-ignore-file`, `# noqa`', '`fallow-ignore-file`, `fallow-ignore-next-file`, `# noqa`')],
+      ['a suppression named with a narrowing word', tighten('`gitleaks:allow`,', '`gitleaks:allow`, `trufflehog:allow`,')],
+    ])('does not flag %s as narrowing', (_, [base, change]) => {
+      realRepo(base);
+      repo.write({ 'CONSTRAINTS.md': change });
+      const r = guard();
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('changed: CONSTRAINTS.md:');
+      expect(r.out).not.toContain('rule-narrowed');
+    });
+
+    // #122: every changed rule goes in front of the admin, even when nothing is flagged.
+    describe('the change report', () => {
+      const summaryOf = (env = {}) => {
+        const file = join(repo.dir, '.summary.md');
+        const r = guard({ ...TODAY, GITHUB_STEP_SUMMARY: file, ...env });
+        return { ...r, summary: readFileSync(file, 'utf8') };
+      };
+
+      it('shows a clean change with its old and new text, the edit marked', () => {
+        const [base, change] = typo('| Any error is a bug or a lie |', '| Any eror is a bug or a lie |');
+        realRepo(base);
+        repo.write({ 'CONSTRAINTS.md': change });
+        const r = summaryOf();
+        expect(r.code).toBe(0);
+        expect(r.out).toContain(`changed: CONSTRAINTS.md:${lineOf('| Types |')} (rule "Types")`);
+        expect(r.out).toContain('was: Any [-eror-] is a bug or a lie');
+        expect(r.out).toContain('now: Any {+error+} is a bug or a lie');
+        expect(r.summary).toContain(`CONSTRAINTS.md:${lineOf('| Types |')}`);
+        expect(r.summary).toContain('now: Any {+error+} is a bug or a lie');
+      });
+
+      it("marks #121's added clause, and reports added and removed rules", () => {
+        const SPARE = '| Spare | 1 spare row | n/a | `spare` | CI | `ci / spare` | #1 |\n';
+        realRepo(edit(edit(REAL, ALLOWANCE, ''), '| Lint |', `${SPARE}| Lint |`));
+        // The new list item moves every later line down by one.
+        repo.write({ 'CONSTRAINTS.md': edit(REAL, SECRETS, `${SECRETS}\n- New rule: blocked.`) });
+        const r = summaryOf({ GITHUB_ACTIONS: 'true' });
+        expect(r.out).toContain('banned too{+; test files in');
+        // The spare row sat where Lint sits now.
+        expect(r.out).toContain(`removed: CONSTRAINTS.md:${lineOf('| Lint |')} (old) (rule "Spare")`);
+        expect(r.out).toContain(`added: CONSTRAINTS.md:${lineOf(SECRETS) + 1} (rule "New rule")`);
+        expect(r.out).toContain('now: {+New rule: blocked.+}');
+        const purity = r.out.split('\n').find((l) => l.startsWith(`::warning file=CONSTRAINTS.md,line=${PURITY + 1},`));
+        expect(purity).toMatch(/title=CONSTRAINTS\.md rule may be narrowed \(admin reads\)::.*banned too\{\+; test files in/);
+      });
+
+      it('shows changed text that is no rule: comments, fences, headings', () => {
+        realRepo();
+        repo.write({ 'CONSTRAINTS.md': edit(edit(REAL, '## Stages\n', '## Stages\n\n<!-- agents may skip the bench -->\n\n```\nskip it\n```\n'), '### Timing checks', '### Timing') });
+        // Renaming a heading also unpairs its rules (rule-removed, a failure); only the report is checked here.
+        const r = guard();
+        expect(r.out).toMatch(/other: CONSTRAINTS\.md:\d+ \(not a rule\)\n +warning \[rule-narrowed\]: adds an HTML comment.*\n +note \[check\]: adds text outside the rules, adds "may".*\n +now: \{\+<!-- agents may skip the bench -->\+\}/);
+        expect(r.out).toContain('now: {+skip it+}');
+        expect(r.out).toContain('was: [-### Timing checks-]');
+        expect(r.out).toContain('now: {+### Timing+}');
+      });
+
+      // GitHub keeps 10 warning annotations per step (REST docs, check runs, checked 9 Nov).
+      it('fits GitHub\'s 10 annotations, pointing to the summary for the rest', () => {
+        realRepo();
+        repo.write({ 'CONSTRAINTS.md': REAL.replaceAll('| #40 |', '| #140 |').replaceAll('| #41 |', '| #141 |').replaceAll('| #43 |', '| #143 |') });
+        const notes = guard({ ...TODAY, GITHUB_ACTIONS: 'true' }).out.split('\n').filter((l) => l.startsWith('::warning'));
+        expect(notes).toHaveLength(10);
+        expect(notes[9]).toMatch(/^::warning file=CONSTRAINTS\.md,title=[^:]+::\d+ more changed rules are in the job summary/);
+      });
+
+      // The report quotes text a PR wrote, so under Actions it must not run as a workflow command.
+      it('prints quoted text inside a stop-commands block, and the annotations after it', () => {
+        realRepo();
+        // A rule's own text, and a table header that the report prints on a line of its own (review
+        // of #122: the runner trims leading spaces before it reads a command).
+        const header = edit(REAL, '| Required check | Enforced by |\n|---', '| Required check | ::error file=x.ts::pwned |\n|---');
+        const injected = edit(edit(header, '| `ci / typecheck` | #40 |', '| `ci / typecheck` | #41 |'), SECRETS, `${SECRETS}\n- Injected:\n::error::pwned\n\n::add-mask::x`);
+        repo.write({ 'CONSTRAINTS.md': injected });
+        const lines = guard({ ...TODAY, GITHUB_ACTIONS: 'true' }).out.split('\n');
+        const open = lines.findIndex((l) => l.startsWith('::stop-commands::'));
+        const token = lines[open]?.slice('::stop-commands::'.length);
+        expect(token).toMatch(/^[0-9a-f-]{36}$/);
+        const close = lines.indexOf(`::${token}::`);
+        expect(close).toBeGreaterThan(open);
+        const outside = lines.filter((l, i) => (i < open || i > close) && l.trim().startsWith('::'));
+        expect(outside.length).toBeGreaterThan(0);
+        expect(outside.every((l) => l.startsWith('::warning file=CONSTRAINTS.md'))).toBe(true);
+        const inside = lines.slice(open + 1, close);
+        expect(inside.join('\n')).toContain('::error::pwned');
+        expect(inside.some((l) => l.trim().startsWith('::error file=x.ts::pwned'))).toBe(true);
+      });
+
+      it('redacts key-like text it quotes', () => {
+        realRepo();
+        const key = `ghp_${'a1B2'.repeat(9)}`; // assembled, so no scanner reads a key in this file
+        repo.write({ 'CONSTRAINTS.md': edit(REAL, SECRETS, `${SECRETS}\n- Example key: ${key}.`) });
+        const r = summaryOf({ GITHUB_ACTIONS: 'true' });
+        expect(r.out).toContain('Example key: [redacted]');
+        expect(r.out + r.summary).not.toContain(key);
+      });
+
+      // `ci / test` runs these tests under Actions: the fixtures' reports must not reach its summary.
+      it("doesn't inherit the test run's GITHUB_ACTIONS or GITHUB_STEP_SUMMARY", () => {
+        realRepo();
+        repo.write({ 'CONSTRAINTS.md': edit(REAL, SECRETS, `${SECRETS} Now.`) });
+        const outer = join(repo.dir, '.outer-summary.md');
+        const saved = { a: process.env.GITHUB_ACTIONS, s: process.env.GITHUB_STEP_SUMMARY };
+        Object.assign(process.env, { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: outer });
+        try {
+          const r = guard();
+          expect(r.out).not.toContain('::stop-commands::');
+          expect(existsSync(outer)).toBe(false);
+        } finally {
+          if (saved.a === undefined) delete process.env.GITHUB_ACTIONS;
+          else process.env.GITHUB_ACTIONS = saved.a;
+          if (saved.s === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+          else process.env.GITHUB_STEP_SUMMARY = saved.s;
+        }
+      });
+
+      it('stays out of the log when CONSTRAINTS.md is unchanged', () => {
+        setup();
+        repo.write({ 'packages/sim/src/b.ts': 'export const b = 2;\n' });
+        expect(guard().out).not.toContain('was:');
+      });
     });
 
     const NOT_YET = 'not yet: recorded after the first `packages/sim` PR';

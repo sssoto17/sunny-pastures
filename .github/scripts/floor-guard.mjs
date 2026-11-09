@@ -5,7 +5,14 @@
 //   - input: the diff from the merge base to the working tree, plus untracked files;
 //   - exit codes: 0 clean, 1 floor violation, 2 could not run (a 2 never reads as clean);
 //   - it reports the rule and the location, never the matched text;
-//   - tightening is silent, loosening is loud.
+//   - tightening is silent, loosening is loud: silent means no finding.
+// One addition (#122): when CONSTRAINTS.md changes, the change report quotes every changed rule,
+// tightenings included, old and new, with the edit marked, in the log, the job summary
+// ($GITHUB_STEP_SUMMARY) and warning annotations, and the guard no longer logs `clean`. It quotes
+// only CONSTRAINTS.md, a prose file, never code, with key-like text redacted. A possible carve-out
+// (a narrowing word, a negation, a new clause, comment, footnote or rule, a rule moved to another
+// list) is marked there, `warning [rule-narrowed]` for a strong signal and `note [check]` for a
+// weak one: for the admin's merge review, never a failure (admin, 9 Nov; ADR-0004).
 //
 // Usage: node .github/scripts/floor-guard.mjs [--base <ref>]   (default base: origin/main)
 // FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date (tests only).
@@ -13,7 +20,8 @@
 // A weakened bar (silenced checker, easier test, moved threshold, loosened tool config) passes
 // only when the same PR adds an Exceptions row to CONSTRAINTS.md whose Path covers the file.
 // Unfinished work and invalid or expired exceptions always fail.
-import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CannotRun, baseArg, enterRepo, oldContent, readChange } from './diff.mjs';
@@ -171,7 +179,7 @@ export const parseRules = (lines) => {
       const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
       if (cells.every((c) => /^:?-+:?$/.test(c))) return;
       if (!headers) headers = cells;
-      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, text: line, cells, headers });
+      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, end: n, text: line, cells, headers });
       return;
     }
     const item = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
@@ -180,12 +188,13 @@ export const parseRules = (lines) => {
       // A label before a colon ("**Split size:** …") keys the item; without one it pairs by
       // similarity, like a paragraph, so a comma edit isn't a removed rule.
       const label = /^([^:\n]{1,60}):/.exec(item[1].replace(/\*\*/g, ''));
-      cur = { kind: 'item', section, sectionNo, key: label ? label[1].trim() : null, line: n, text: item[1] };
+      cur = { kind: 'item', section, sectionNo, key: label ? label[1].trim() : null, line: n, end: n, text: item[1] };
     } else if (cur && (cur.kind === 'para' || /^\s+\S/.test(line))) {
       cur.text += `\n${line}`;
+      cur.end = n;
     } else {
       flush();
-      cur = { kind: 'para', section, sectionNo, key: null, line: n, text: line };
+      cur = { kind: 'para', section, sectionNo, key: null, line: n, end: n, text: line };
     }
   });
   flush();
@@ -222,17 +231,30 @@ const PROSE_HEADER =/why|reason|covers|what is checked|notes?/i;
 // Numbers are judged by direction (compareNumbers), so list items compare with them masked.
 const norm = (s) => s.replace(/[`*]/g, '').replace(/\d+(\.\d+)*/g, 'N').replace(/\s+/g, ' ').replace(/[.:]+$/, '').trim().toLowerCase();
 const ticks = (t) => new Set([...t.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
-// What a rule lists: backticked tokens, plus the comma-separated items of a table's list cells.
+// A table's list cells: every cell but the key, prose columns and a ratchet's "Today".
+const isListCell = (r, i) => i > 0 && !PROSE_HEADER.test(r.headers[i] ?? '') && !/^today$/i.test(r.headers[i] ?? '');
+// A list cell's items, split at `,` and `;` only. Splitting at sentence ends too would let a new
+// sentence slip in between two items without removing either, so an item appended right before a
+// full stop still reads as a removed item and fails (closed).
+const segments = (r) => r.cells.flatMap((c, i) => (isListCell(r, i) ? c.split(/[,;]/) : []));
+// What a rule lists: backticked tokens, plus the items of a table's list cells.
 const listed = (r) => {
   if (r.kind !== 'row') return new Set(ticks(r.text));
   const out = new Set();
   r.cells.forEach((c, i) => {
-    const h = r.headers[i] ?? '';
-    if (i === 0 || PROSE_HEADER.test(h) || /^today$/i.test(h)) return;
-    for (const t of ticks(c)) out.add(`\`${norm(t)}\``);
-    for (const item of c.split(/[,;]/)) if (norm(item)) out.add(norm(item));
+    if (isListCell(r, i)) for (const t of ticks(c)) out.add(`\`${norm(t)}\``);
   });
+  for (const item of segments(r)) if (norm(item)) out.add(norm(item));
   return out;
+};
+// The items of a row's list cells that are new in `now` and read as a clause: two or more words
+// outside code spans ("not tests"). A new item of one word or none ("`structuredClone`", "and
+// `queueMicrotask`") is an addition, which tightens (#122). It only warns, so it errs towards
+// warning.
+const newClauses = (old, now) => {
+  if (now.kind !== 'row') return [];
+  const was = new Set(segments(old).map(norm));
+  return segments(now).filter((s) => !was.has(norm(s)) && (s.replace(/`[^`]*`/g, ' ').match(/[a-z]{2,}/gi) ?? []).length >= 2);
 };
 const cellOf = (r, header) => {
   const i = r.headers?.findIndex((h) => new RegExp(`^${header}$`, 'i').test(h)) ?? -1;
@@ -269,6 +291,64 @@ const STAGE_CELL = /^(edit|task end|ci|preview|gate)(\s*,\s*(edit|task end|ci|pr
 const stages = (t) =>
   new Set(t.split('|').map((c) => c.trim()).filter((c) => STAGE_CELL.test(c)).flatMap((c) => c.toLowerCase().split(/\s*,\s*/)));
 const WEAKER_SEVERITY = /_\(warn\)_|\(not required\)/;
+// Words that carve an exception out of a rule (#122). A rule that gains one may be narrowed, even
+// when every listed item survives: "…except in X" keeps them all and still lowers the bar. It's a
+// warning for the admin, not a failure (admin, 9 Nov): the list is a tripwire, not a parser, and
+// the change report shows every changed rule whether it trips or not.
+const NARROWING = /\bexcept\w*|\bunless\b|\bbut not\b|\bonly\b|\bmay\b|\bcan also\b|\bother than\b|\bapart from\b|\baside\b|\bbesides\b|\bsave for\b|\bexclud\w*|\bexempt\w*|\ballow\w*|\bpermit\w*|\bwaive\w*|\boptional\w*|\bwarn\w*|\bskip\w*|\bignor\w*|\boutside\b|\bfine\b|\bno longer\b|\bas long as\b|\bprovided that\b|\b(does not|doesn't|do not|don't|need not|needn't) (apply|count)\b/g;
+// A negation added or dropped flips a rule ("is blocked" / "is not blocked"), so both directions warn.
+const NEGATION = /\b(not|no|never|none|nothing|nor|cannot|can't|mustn't|isn't|aren't|won't)\b/g;
+// Code spans are names (`gitleaks:allow`, `istanbul ignore`), so adding one to a list isn't a
+// carve-out; a carve-out hidden in one still shows in the change report.
+const wordsMatching = (re, text) => text.replace(/`[^`]*`/g, ' ').replace(/[*_]/g, '').replace(/\s+/g, ' ').toLowerCase().match(re) ?? [];
+// The matches `b` has more of than `a`, counted (so a rule that already says "only" can keep it).
+const surplus = (re, a, b) => {
+  const left = wordsMatching(re, a);
+  return wordsMatching(re, b).filter((w) => {
+    const i = left.indexOf(w);
+    if (i === -1) return true;
+    left.splice(i, 1);
+    return false;
+  });
+};
+// Places to hide text the rendered file doesn't show, or shows somewhere else.
+const HIDING = [
+  [/<!--/g, 'adds an HTML comment'],
+  [/\[\^[^\]\s]+\]/g, 'adds a footnote'],
+];
+// A rule's clauses: split at `,`, `;` and full stops. Only the warning uses this split; the
+// blocking check (listed) splits list cells at `,` and `;` only.
+const clausesOf = (t) => t.split(/[,;]|\.(?=\s|$)/).map((s) => s.trim()).filter(Boolean);
+const wordCount = (s) => (s.replace(/`[^`]*`/g, ' ').match(/[a-z]{2,}/gi) ?? []).length;
+// Clauses of `nowText` that are new: not in `oldText`, and not an edit of an old clause (as similar
+// as a reworded paragraph, and not two or more words longer). A typo fix pairs with its old clause;
+// "Fixtures are okay." doesn't pair with anything.
+const proseClauses = (oldText, nowText) => {
+  const was = clausesOf(oldText);
+  const is = clausesOf(nowText);
+  const wasSet = new Set(was.map(norm));
+  const isSet = new Set(is.map(norm));
+  const gone = was.filter((c) => !isSet.has(norm(c)));
+  return is.filter((c) => {
+    if (wasSet.has(norm(c))) return false;
+    const i = gone.findIndex((g) => similarity(g, c) >= 0.5 && wordCount(c) - wordCount(g) < 2);
+    if (i > -1) {
+      gone.splice(i, 1);
+      return false;
+    }
+    return wordCount(c) >= 2;
+  });
+};
+// Why a change from `oldText` to `nowText` may carve out an exception ('' for a new rule). A
+// negation only flips a rule that existed: in a new rule it's usually a prohibition, which tightens.
+const narrowingLabels = (oldText, nowText) => [
+  ...new Set([
+    ...surplus(NARROWING, oldText, nowText).map((w) => `adds "${w}"`),
+    ...(oldText ? surplus(NEGATION, oldText, nowText).map((w) => `adds "${w}"`) : []),
+    ...surplus(NEGATION, nowText, oldText).map((w) => `drops "${w}"`),
+    ...HIDING.filter(([re]) => surplus(re, oldText, nowText).length).map(([, label]) => label),
+  ]),
+];
 
 const compareNumbers = (was, now) => {
   for (const dir of ['min', 'max', null]) {
@@ -304,21 +384,36 @@ const compareRule = (old, now) => {
   return null;
 };
 
+const keyOf = (r) => r.key ?? `${r.kind === 'item' ? 'list item' : r.kind === 'row' ? 'row' : 'paragraph'} in "${r.section}"`;
+
+// Compares CONSTRAINTS.md at the merge base with the working tree. Returns the findings, and every
+// rule that changed, moved, was removed or was added, and every other changed line, for the change
+// report (#122). `narrows` lists why a change may carve out an exception (narrowingLabels, new
+// clauses, a new rule, a move to another list).
 const constraintsFindings = (f, mergeBase) => {
   const out = [];
+  const changes = [];
   const before = parseRules(oldContent(mergeBase, f.oldPath ?? f.path) ?? []);
   const after = parseRules(readFileSync(f.path, 'utf8').split('\n'));
   const isException = (r) => r.kind === 'row' && (/^E\d+$/.test(r.key) || r.key === '_none_');
   const taken = new Set();
+  const unchanged = new Map(); // after rule → the old rule with the same section and text
   // Pair unchanged rules first, so a changed rule can't pair with one of them.
   const pending = before.filter((old) => {
     const same = after.find((r) => !taken.has(r) && r.section === old.section && r.text === old.text);
-    if (same) taken.add(same);
+    if (same) {
+      taken.add(same);
+      unchanged.set(same, old);
+    }
     return !same;
   });
   for (const old of pending) {
-    // Dropping an exception, or the table's `_none_` placeholder, tightens: silent.
-    if (isException(old)) continue;
+    const key = keyOf(old);
+    // Dropping an exception, or the table's `_none_` placeholder, tightens: no finding, but reported.
+    if (isException(old)) {
+      changes.push({ kind: 'removed', old, key, narrows: [] });
+      continue;
+    }
     const candidates = after.filter((r) => !taken.has(r) && r.kind === old.kind && r.section === old.section);
     // Same key first; otherwise the most similar rule of the same kind (a reworded paragraph, an
     // item without a label, or one whose label changed).
@@ -330,16 +425,186 @@ const constraintsFindings = (f, mergeBase) => {
         if (s >= best) [best, now] = [s, r];
       }
     }
-    const key = old.key ?? `${old.kind === 'item' ? 'list item' : 'paragraph'} in "${old.section}"`;
     if (!now) {
       out.push({ rule: 'rule-removed', line: `${old.line} (old)`, key });
+      changes.push({ kind: 'removed', old, key, narrows: [] });
       continue;
     }
     taken.add(now);
+    const clauses = now.kind === 'row' ? newClauses(old, now).length && 'adds a clause to a list cell' : proseClauses(old.text, now.text).length && 'adds a clause';
+    changes.push({ kind: 'changed', old, now, key, narrows: [...narrowingLabels(old.text, now.text), ...(clauses ? [clauses] : [])] });
     const verdict = compareRule(old, now);
     if (verdict) out.push({ rule: verdict, line: now.line, key });
   }
-  return out;
+  // A new rule has no old text to lose items from, but it can be a carve-out on its own.
+  for (const r of after) {
+    if (taken.has(r)) continue;
+    changes.push({ kind: 'added', now: r, key: keyOf(r), narrows: isException(r) ? [] : ['adds a rule', ...narrowingLabels('', r.text)] });
+  }
+  // Every other changed line. A line outside any rule (a heading, a table header, an HTML comment,
+  // a fence) holds nothing the guard can compare, but it can still tell an agent something. A line
+  // of a rule whose text didn't change means the rule moved, perhaps into another list.
+  const ruleAt = (rules, n) => rules.find((r) => r.line <= n && n <= r.end);
+  const at = (c, side) => (c[side] ? [c[side].line, c[side].end ?? c[side].line] : null);
+  const reported = (side, n) => changes.some((c) => at(c, side) && at(c, side)[0] <= n && n <= at(c, side)[1]);
+  const moves = new Set();
+  for (const a of f.added) {
+    if (!a.text.trim() || reported('now', a.line)) continue;
+    const r = ruleAt(after, a.line);
+    if (r && unchanged.has(r)) moves.add(r);
+    else if (!r) changes.push({ kind: 'other', now: { line: a.line, text: a.text }, narrows: ['adds text outside the rules', ...narrowingLabels('', a.text)] });
+  }
+  for (const d of f.removed) {
+    if (!d.text.trim() || reported('old', d.line)) continue;
+    const old = ruleAt(before, d.line);
+    const now = old && [...unchanged].find(([, o]) => o === old)?.[0];
+    if (now) moves.add(now);
+    else if (!old) changes.push({ kind: 'other', old: { line: d.line, text: d.text }, narrows: [] });
+  }
+  for (const now of moves) {
+    const old = unchanged.get(now);
+    const from = contextOf(before, old);
+    const to = contextOf(after, now);
+    changes.push({ kind: 'moved', old, now, key: keyOf(now), from, to, narrows: from === to ? [] : [`moves from "${from}" to "${to}"`] });
+  }
+  changes.sort((a, b) => (a.now ?? a.old).line - (b.now ?? b.old).line);
+  return { findings: out, changes };
+};
+
+// What a rule sits under: the last sentence of the paragraph that introduces its list ("Also
+// blocked, with no exception possible:"), or its section's title.
+const contextOf = (rules, r) => {
+  const i = rules.indexOf(r);
+  for (let k = i - 1; k >= 0 && rules[k].sectionNo === r.sectionNo; k--) {
+    if (rules[k].kind === 'para') return flat(rules[k].text).split(/(?<=[.!?])\s+/).pop().slice(-80);
+    if (rules[k].kind !== r.kind) break;
+  }
+  return r.section;
+};
+
+// The change report's marks, in git's --word-diff style. Tokens keep their leading space, so
+// joining them gives back the text; `,` and `;` are tokens of their own, so "too" stays "too" when
+// "; …" is appended to it.
+const tokens = (t) => t.replace(/\s+/g, ' ').trim().match(/ ?[,;]| ?[^\s,;]+/g) ?? [];
+const wordDiff = (was, now) => {
+  const a = tokens(was);
+  const b = tokens(now);
+  const same = (x, y) => x.trim() === y.trim();
+  // Longest common subsequence, filled from the end so the walk below runs forwards.
+  const common = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) common[i][j] = same(a[i], b[j]) ? common[i + 1][j + 1] + 1 : Math.max(common[i + 1][j], common[i][j + 1]);
+  const ops = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && same(a[i], b[j])) ops.push(['=', a[i++], b[j++]]);
+    else if (j < b.length && (i === a.length || common[i][j + 1] >= common[i + 1][j])) ops.push(['+', null, b[j++]]);
+    else ops.push(['-', a[i++], null]);
+  }
+  // One side: unchanged tokens as they are, its own changed runs wrapped in marks.
+  const render = (pick, mark, open, close) => {
+    let out = '';
+    let run = '';
+    const flush = () => {
+      if (run) out += `${/^ */.exec(run)[0]}${open}${run.trimStart()}${close}`;
+      run = '';
+    };
+    for (const op of ops) {
+      const t = pick(op);
+      if (t === null) continue;
+      if (op[0] === mark) run += t;
+      else {
+        flush();
+        out += t;
+      }
+    }
+    flush();
+    return out.trim();
+  };
+  return { was: render((op) => op[1], '-', '[-', '-]'), now: render((op) => op[2], '+', '{+', '+}') };
+};
+
+const flat = (t) => t.replace(/\s+/g, ' ').trim();
+// Two tiers (admin, 9 Nov), so a real carve-out stands out on a PR where most changes trip
+// something. Weak reasons are common in honest edits: a new rule or new text, a new clause in prose,
+// and everyday words. Every other reason (a move to another list, a carve-out phrase, a negation, a
+// hidden comment or footnote, a new clause in a list cell) is strong.
+// `warn…` stays strong: "blocked unless" becoming "warned unless" drops a severity.
+const WEAK_WORD = /^(only|may|can also|fine|outside|skip\w*)$/;
+const WEAK_REASON = new Set(['adds a rule', 'adds text outside the rules', 'adds a clause']);
+const isStrong = (reason) => {
+  const word = /^adds "(.+)"$/.exec(reason)?.[1];
+  return word ? !WEAK_WORD.test(word) : !WEAK_REASON.has(reason);
+};
+const tierOf = (c) => (c.narrows.some(isStrong) ? 'strong' : c.narrows.length ? 'weak' : null);
+// One entry per changed rule: a heading line, then was/now lines. A changed row shows only the
+// cells that changed, each under its column's name.
+const reportEntries = (changes) =>
+  changes.map((c) => {
+    const where = c.now ? `CONSTRAINTS.md:${c.now.line}` : `CONSTRAINTS.md:${c.old.line} (old)`;
+    const head = `${c.kind}: ${where} ${c.kind === 'other' ? '(not a rule)' : `(rule "${c.key}")`}`;
+    const strong = c.narrows.filter(isStrong);
+    const weak = c.narrows.filter((r) => !isStrong(r));
+    const warn = [
+      ...(strong.length ? [`warning [rule-narrowed]: ${strong.join(', ')}; check it isn't a carve-out`] : []),
+      ...(weak.length ? [`note [check]: ${weak.join(', ')}`] : []),
+    ];
+    if (!c.now) return { c, head, lines: [`was: [-${flat(c.old.text)}-]`] };
+    if (!c.old) return { c, head, lines: [...warn, `now: {+${flat(c.now.text)}+}`] };
+    if (c.kind === 'moved') return { c, head, lines: [...warn, `from: CONSTRAINTS.md:${c.old.line} (old), under "${c.from}"`, `to: under "${c.to}"`, `text: ${flat(c.now.text)}`] };
+    const lines = [...warn];
+    if (c.old.kind === 'row' && c.old.cells.length === c.now.cells.length) {
+      c.now.cells.forEach((cell, k) => {
+        if (cell === c.old.cells[k]) return;
+        const d = wordDiff(c.old.cells[k], cell);
+        lines.push(`${c.now.headers[k] || `column ${k + 1}`}:`, `  was: ${d.was}`, `  now: ${d.now}`);
+      });
+    } else {
+      const d = wordDiff(c.old.text, c.now.text);
+      lines.push(`was: ${d.was}`, `now: ${d.now}`);
+    }
+    return { c, head, lines };
+  });
+
+// Workflow-command data escapes `%`, CR and LF; property values also escape `:` and `,`.
+// The report quotes the file, so a key pasted into it would reach the log. Any unbroken run of 24
+// or more key-like characters with both a letter and a digit is replaced; this file's own words
+// and paths have no such run. gitleaks (`guard / secrets`, #42) is the check meant for secrets.
+const KEY_LIKE = /[A-Za-z0-9_+/=-]{24,}/g;
+const redact = (s) => s.replace(KEY_LIKE, (m) => (/[A-Za-z]/.test(m) && /\d/.test(m) ? '[redacted]' : m));
+const MAX_ANNOTATIONS = 10; // GitHub Actions: 10 warning annotations per step (REST docs, check runs)
+const escapeData = (s) => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+const escapeProp = (s) => escapeData(s).replace(/:/g, '%3A').replace(/,/g, '%2C');
+
+// The report of every changed CONSTRAINTS.md rule: for the log, the job summary, and warning
+// annotations, which GitHub shows on the PR's Files changed tab next to the changed line.
+const changeReport = (changes) => {
+  if (!changes.length) return null;
+  const entries = reportEntries(changes).map((e) => ({ ...e, head: redact(e.head), lines: e.lines.map(redact) }));
+  const narrowed = changes.filter((c) => tierOf(c) === 'strong').length;
+  const toCheck = changes.filter((c) => tierOf(c) === 'weak').length;
+  const counts = [narrowed && `${narrowed} may narrow a rule`, toCheck && `${toCheck} to check`].filter(Boolean);
+  const intro = `CONSTRAINTS.md: ${changes.length} rule(s) changed${counts.map((s) => `, ${s}`).join('')}. The admin reads each one at merge (CONSTRAINTS.md, "Guarding the bar"). {+…+} marks added text, [-…-] removed text.`;
+  const log = [`floor-guard: ${intro}`, ...entries.flatMap((e) => [`  ${e.head}`, ...e.lines.map((l) => `    ${l}`)])].join('\n');
+  // Every entry sits in one fence, longer than any run of tildes or backticks in the text.
+  const body = entries.flatMap((e) => [e.head, ...e.lines.map((l) => `  ${l}`), '']).join('\n');
+  const fence = '~'.repeat(Math.max(3, ...[...body.matchAll(/~+/g)].map((m) => m[0].length + 1)));
+  const summary = `### floor guard: CONSTRAINTS.md changes\n\n${intro}\n\n${fence}text\n${body}${fence}\n`;
+  // GitHub keeps only 10 warning annotations per step, so past 10 the last one points to the
+  // summary, and the possible narrowings go first, then the ones to check.
+  const rank = { strong: 0, weak: 1, null: 2 };
+  const ranked = [...entries].sort((a, b) => rank[tierOf(a.c)] - rank[tierOf(b.c)]);
+  const shown = ranked.length > MAX_ANNOTATIONS ? ranked.slice(0, MAX_ANNOTATIONS - 1) : ranked;
+  const TITLES = { strong: 'CONSTRAINTS.md rule may be narrowed (admin reads)', weak: 'CONSTRAINTS.md rule to check (admin reads)' };
+  const annotations = shown.map((e) => {
+    const line = e.c.now ? `,line=${e.c.now.line}` : '';
+    const title = TITLES[tierOf(e.c)] ?? `CONSTRAINTS.md rule ${e.c.kind}`;
+    return `::warning file=CONSTRAINTS.md${line},title=${escapeProp(title)}::${escapeData([e.head, ...e.lines].join('\n'))}`;
+  });
+  if (shown.length < ranked.length) {
+    annotations.push(`::warning file=CONSTRAINTS.md,title=${escapeProp('CONSTRAINTS.md: more changes')}::${ranked.length - shown.length} more changed rules are in the job summary and the guard's log.`);
+  }
+  return { log, summary, annotations };
 };
 
 // Exceptions rows: | ID | Rule | Path | Reason | Owner | Expires |
@@ -371,6 +636,7 @@ export const globToRegExp = (glob) =>
 export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   const findings = []; // { rule, file, line, key?, waivable }
   const notices = [];
+  const ruleChanges = []; // CONSTRAINTS.md rules that changed, for the change report
   const push = (waivable) => (rule, file, line, key) => findings.push({ rule, file, line, key, waivable });
   const weak = push(true);
   const always = push(false);
@@ -381,7 +647,9 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       continue;
     }
     if (isConstraints(f.path)) {
-      for (const c of constraintsFindings(f, mergeBase)) weak(c.rule, f.path, c.line, c.key);
+      const result = constraintsFindings(f, mergeBase);
+      for (const c of result.findings) weak(c.rule, f.path, c.line, c.key);
+      ruleChanges.push(...result.changes);
     }
     if (isProse(f.path)) continue;
     const byLine = new Map(f.added.map((a) => [a.line, a.text]));
@@ -459,7 +727,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
     if (w) notices.push(`${f.rule} at ${f.file}:${f.line} waived by ${w.id}`);
     else blocking.push(f);
   }
-  return { blocking, notices };
+  return { blocking, notices, report: changeReport(ruleChanges) };
 };
 
 const HINTS = {
@@ -482,10 +750,25 @@ const main = () => {
   } catch {
     throw new CannotRun('CONSTRAINTS.md is missing');
   }
-  const { blocking, notices } = guard(changes, { mergeBase, today, constraintsNow });
+  const { blocking, notices, report } = guard(changes, { mergeBase, today, constraintsNow });
   for (const n of notices) console.log(`floor-guard: note: ${n}`);
+  if (report) {
+    if (process.env.GITHUB_ACTIONS === 'true') {
+      // The report quotes text the PR wrote. Inside a stop-commands block with an unguessable
+      // token, no line of it can run as a workflow command; the annotations come after the block.
+      const token = randomUUID();
+      console.log(`::stop-commands::${token}`);
+      console.log(report.log);
+      console.log(`::${token}::`);
+      for (const a of report.annotations) console.log(a);
+    } else {
+      console.log(report.log);
+    }
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report.summary);
+  }
   if (blocking.length === 0) {
-    console.log('floor-guard: clean');
+    // A changed CONSTRAINTS.md is never reported as clean: the admin still reads it.
+    console.log(report ? 'floor-guard: no floor violations; CONSTRAINTS.md changed, so the admin reads the rules above' : 'floor-guard: clean');
     return 0;
   }
   console.error(`floor-guard: ${blocking.length} floor violation(s):`);

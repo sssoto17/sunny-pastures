@@ -26,11 +26,17 @@ export const makeRepo = (files) => {
     git('add', '-A');
     git('commit', '-q', '--allow-empty', '-m', 'change');
   };
+  // Under Actions the test run itself has GITHUB_ACTIONS and GITHUB_STEP_SUMMARY set. The scripts
+  // under test must not inherit them: they'd write the fixtures' reports into the real job summary.
+  // A test that needs them passes them in `env`.
   const run = (script, args = [], env = {}) => {
     const base = args.includes('--base') ? [] : ['--base', 'main'];
+    const outer = { ...process.env };
+    delete outer.GITHUB_ACTIONS;
+    delete outer.GITHUB_STEP_SUMMARY;
     const r = spawnSync('node', [script, ...base, ...args], {
       cwd: dir,
-      env: { ...process.env, ...GIT_ENV, ...env },
+      env: { ...outer, ...GIT_ENV, ...env },
       encoding: 'utf8',
     });
     return { code: r.status, out: r.stdout + r.stderr };
