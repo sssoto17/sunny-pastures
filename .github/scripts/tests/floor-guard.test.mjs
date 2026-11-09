@@ -825,6 +825,179 @@ describe('floor guard, end to end', () => {
     expect(guard().out).toContain('[config-loosened]');
   });
 
+  // #138: a formatter (Prettier, #125) re-quotes, re-indents and re-wraps guarded configs. A line
+  // that only changed formatting counts as unchanged; any change in content still flags.
+  describe('formatting-only changes in guarded configs', () => {
+    const ESLINT = "export default [\n  {\n    files: ['a/**'],\n    rules: {\n      'no-x': 'error',\n      'max-lines': ['error', 300],\n    },\n  },\n  {\n    files: ['b/**'],\n    rules: {\n      'no-y': 'error'\n    },\n  },\n];\n";
+    const VITEST = "export default {\n  test: {\n    include: ['packages/*/src/**/*.test.ts', 'tools/**/*.test.ts'],\n    coverage: {\n      exclude: [\n        '**/*.test.ts',\n      ],\n    },\n  },\n};\n";
+    const configs = { ...BASE, 'eslint.config.mjs': ESLINT, 'vitest.config.mts': VITEST };
+    const run = (files) => {
+      repo = makeRepo(configs);
+      repo.write(files);
+      return guard();
+    };
+
+    it.each([
+      ['re-quoted', { 'eslint.config.mjs': ESLINT.replaceAll("'", '"') }],
+      ['re-indented', { 'eslint.config.mjs': ESLINT.replace(/^ {6}/gm, '        ') }],
+      ['given a trailing comma', { 'eslint.config.mjs': ESLINT.replace("'no-y': 'error'\n", "'no-y': 'error',\n") }],
+      ['with spaces changed', { 'eslint.config.mjs': ESLINT.replace("['error', 300]", "[ 'error' , 300 ]") }],
+      ['re-wrapped', { 'vitest.config.mts': VITEST.replace("    include: ['packages/*/src/**/*.test.ts', 'tools/**/*.test.ts'],\n", '    include: [\n      "packages/*/src/**/*.test.ts",\n      "tools/**/*.test.ts",\n    ],\n') }],
+      ['a re-indented exclude list', { 'vitest.config.mts': VITEST.replace("      exclude: [\n        '**/*.test.ts',\n      ],\n", "    exclude: [\n      '**/*.test.ts',\n    ],\n") }],
+    ])('passes a config %s', (_, files) => {
+      expect(run(files)).toMatchObject({ code: 0 });
+    });
+
+    it.each([
+      ['a severity changed', { 'eslint.config.mjs': ESLINT.replace("'no-x': 'error'", '"no-x": "warn"') }],
+      ['a rule renamed', { 'eslint.config.mjs': ESLINT.replace("'no-x': 'error'", '"no-z": "error"') }],
+      ['a number changed', { 'eslint.config.mjs': ESLINT.replace("['error', 300]", '["error", 400]') }],
+      ['an include item removed', { 'vitest.config.mts': VITEST.replace(", 'tools/**/*.test.ts'", '') }],
+      ['an include glob changed', { 'vitest.config.mts': VITEST.replace("'tools/**/*.test.ts'", '"tools/*.test.ts"') }],
+      ['an exclusion added while re-wrapping', { 'vitest.config.mts': VITEST.replace("      exclude: [\n        '**/*.test.ts',\n      ],\n", '      exclude: ["**/*.test.ts", "packages/sim/**"],\n') }],
+    ])('still flags %s', (_, files) => {
+      expect(run(files).out).toContain('[config-loosened]');
+    });
+
+    // Security review of #141: a move inside one hunk, with every line re-indented so the hunk spans
+    // both blocks.
+    it('does not pair a glob moved from include to exclude within one hunk', () => {
+      const base = "export default {\n  test: {\n    include: [\n      'a/**',\n      'b/**',\n    ],\n    exclude: [\n      'c/**',\n    ],\n  },\n};\n";
+      const moved = "export default {\n  test: {\n      include: [\n          'a/**',\n      ],\n      exclude: [\n          'b/**',\n          'c/**',\n      ],\n  },\n};\n";
+      repo = makeRepo({ ...configs, 'vitest.config.mts': base });
+      repo.write({ 'vitest.config.mts': moved });
+      expect(guard().out).toContain('[config-loosened] vitest.config.mts');
+    });
+
+    it('does not pair a rule moved between config objects within one hunk', () => {
+      const reindented = ESLINT.replace(/^( +)/gm, '$1$1');
+      const moved = reindented.replace("            'no-x': 'error',\n", '').replace("            'no-y': 'error'\n", "            'no-x': 'error',\n            'no-y': 'error'\n");
+      expect(run({ 'eslint.config.mjs': moved }).out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    // Spec review of #141: a formatter changes the boundary lines too, so line pairing let these
+    // through. Only a whole hunk that normalizes equal counts as formatting now.
+    const SCOPES = "export default [\n  {\n    files: ['legacy/**'],\n    rules: {\n      'no-x': 'off',\n    },\n  },\n  {\n    files: ['**/*.ts'],\n    rules: {\n      'no-x': 'error',\n    },\n  },\n];\n";
+    const tabbed = (t) => t.replace(/^( {2})+/gm, (s) => '\t'.repeat(s.length / 2));
+    it.each([
+      ['override scopes swapped during a tab re-indent', SCOPES, tabbed(SCOPES.replace("['legacy/**']", 'TMP').replace("['**/*.ts']", "['legacy/**']").replace('TMP', "['**/*.ts']"))],
+      ['later-wins overrides swapped while re-quoted', "export default [\n  { rules: { 'max-lines': [2, 1000] } },\n  { rules: { 'max-lines': ['error', 300] } },\n];\n", 'export default [\n  { rules: { "max-lines": ["error", 300] } },\n  { rules: { "max-lines": [2, 1000] } },\n];\n'],
+      ['a string with escaped quotes respaced', "export default [{ rules: { 'no-restricted-syntax': ['error', 'CallExpression[callee.name=\\'eval\\']'] } }];\n", "export default [{ rules: { 'no-restricted-syntax': ['error', 'CallExpression[callee.name=\\' eval \\']'] } }];\n"],
+      ['a line break after return', "export default (t) => {\n  return t.configs.strict;\n};\n", "export default (t) => {\n  return\n  t.configs.strict;\n};\n"],
+    ])('still flags %s', (_, base, changed) => {
+      repo = makeRepo({ ...configs, 'eslint.config.mjs': base });
+      repo.write({ 'eslint.config.mjs': changed });
+      expect(guard().out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    // Admin's review of #141: a block comment can switch lines off without changing them.
+    it.each([
+      ['rules wrapped in a block comment, in one hunk', (t) => t.replace("      'no-x': 'error',\n      'max-lines': ['error', 300],\n", '      /*\n      "no-x": "error",\n      "max-lines": ["error", 300],\n      */\n')],
+      // `/*` and `*/` added as hunks of their own, unchanged lines between them and the re-quoted one.
+      ['a rules block commented out from other hunks', (t) => t.replace("    rules: {\n      'no-x': 'error',\n      'max-lines': ['error', 300],\n    },\n", '    /*\n    rules: {\n      "no-x": "error",\n      \'max-lines\': [\'error\', 300],\n    },\n    */\n')],
+    ])('still flags %s', (_, change) => {
+      expect(run({ 'eslint.config.mjs': change(ESLINT) }).out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    // Re-review of #141: a dropped trailing comma joins the next line onto the item, which is new
+    // code (a member access, a tagged template), unless that line closes the list.
+    const LIST = (next) => `export default {\n  test: {\n    include: [\n      'a/**',\n${next}\n    ],\n  },\n};\n`;
+    it.each([
+      ['a member access', "      ['b/**'][0],"],
+      ['a tagged template', '      `b/**`,'],
+    ])('still flags a dropped comma that joins %s onto the item', (_, next) => {
+      repo = makeRepo({ ...configs, 'vitest.config.mts': LIST(next) });
+      repo.write({ 'vitest.config.mts': LIST(next).replace("      'a/**',", '      "a/**"') });
+      expect(guard().out).toContain('[config-loosened] vitest.config.mts');
+    });
+
+    it('still flags a rule commented out with // during a tab re-indent', () => {
+      const changed = tabbed(ESLINT).replace("\t\t\t'no-x': 'error',", "\t\t\t// 'no-x': 'error',");
+      expect(run({ 'eslint.config.mjs': changed }).out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    it("still flags a multi-line template literal's text re-indented with tabs", () => {
+      // The template's text is meaning: its lines are the selector, and indenting them changes it.
+      const base = ESLINT.replace("      'no-x': 'error',\n", () => "      'no-x': ['error', `Call\n        > Identifier`],\n");
+      repo = makeRepo({ ...configs, 'eslint.config.mjs': base });
+      repo.write({ 'eslint.config.mjs': tabbed(base) });
+      expect(guard().out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    // A plain string compares by its value: Prettier re-quotes strings that hold escapes too.
+    it.each([
+      ['a string with backslash escapes', "'^(\\\\./|(\\\\.\\\\./)+)'", '"^(\\\\./|(\\\\.\\\\./)+)"'],
+      ['an escaped quote unescaped', "'it\\'s'", '"it\'s"'],
+    ])('passes %s re-quoted', (_, from, to) => {
+      const base = ESLINT.replace("      'no-x': 'error',\n", () => `      'no-x': ['error', ${from}],\n`);
+      repo = makeRepo({ ...configs, 'eslint.config.mjs': base });
+      repo.write({ 'eslint.config.mjs': base.replace(from, () => to) });
+      expect(guard()).toMatchObject({ code: 0 });
+    });
+
+    it('passes a trailing comma dropped before the closing bracket', () => {
+      const base = "export default {\n  test: {\n    include: [\n      'a/**',\n    ],\n  },\n};\n";
+      repo = makeRepo({ ...configs, 'vitest.config.mts': base });
+      repo.write({ 'vitest.config.mts': base.replace("      'a/**',", '      "a/**"') });
+      expect(guard().code).toBe(0);
+    });
+
+    it('still flags an include item wrapped in a block comment', () => {
+      const changed = VITEST.replace("    include: ['packages/*/src/**/*.test.ts', 'tools/**/*.test.ts'],\n", '    include: [\n      "packages/*/src/**/*.test.ts",\n      /* "tools/**/*.test.ts", */\n    ],\n');
+      expect(run({ 'vitest.config.mts': changed }).out).toContain('[config-loosened] vitest.config.mts');
+    });
+
+    it('still flags a selector narrowed beside escaped quotes', () => {
+      const base = ESLINT.replace("      'no-x': 'error',\n", () => "      'no-x': ['error', '\\'', '[a] [b]', '\\''],\n");
+      repo = makeRepo({ ...configs, 'eslint.config.mjs': base });
+      repo.write({ 'eslint.config.mjs': base.replace("'[a] [b]'", "'[a][b]'") });
+      expect(guard().out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    it('passes a whole config re-indented with tabs and re-quoted, comments included', () => {
+      const withComment = ESLINT.replace('  {\n    files: [\'a/**\'],', "  // the a scope\n  {\n    files: ['a/**'],");
+      repo = makeRepo({ ...configs, 'eslint.config.mjs': withComment });
+      repo.write({ 'eslint.config.mjs': tabbed(withComment).replaceAll("'", '"') });
+      expect(guard().code).toBe(0);
+    });
+
+    it("passes a string re-quoted inside a template's expression", () => {
+      // A replacer function: in a replacement string, "$`" would mean the text before the match.
+      const base = ESLINT.replace("      'no-x': 'error',\n", () => "      'no-x': ['error', `^${names.join('|')}$`],\n");
+      repo = makeRepo({ ...configs, 'eslint.config.mjs': base });
+      repo.write({ 'eslint.config.mjs': base.replace("names.join('|')", 'names.join("|")') });
+      expect(guard()).toMatchObject({ code: 0 });
+    });
+
+    it('leaves a YAML config to the exact checks', () => {
+      // A re-indent alone moves `uses-http2: off` into `assertions`: in YAML, indentation is meaning.
+      repo = makeRepo({ ...configs, '.lighthouserc.yml': 'ci:\n  assert:\n    assertions:\n      a: error\n  uses-http2: off\n' });
+      repo.write({ '.lighthouserc.yml': 'ci:\n  assert:\n    assertions:\n      a: error\n      uses-http2: off\n' });
+      expect(guard().out).toContain('[config-loosened] .lighthouserc.yml');
+    });
+
+    it('does not pair a rule moved into another config object', () => {
+      // Everything re-quoted, and `no-x` moved from the `a/**` object to the `b/**` one.
+      const moved = ESLINT.replace("      'no-x': 'error',\n", '').replace("      'no-y': 'error'\n", "      'no-x': 'error',\n      'no-y': 'error'\n").replaceAll("'", '"');
+      expect(run({ 'eslint.config.mjs': moved }).out).toContain('[config-loosened] eslint.config.mjs');
+    });
+
+    it.each([
+      ['a template literal re-quoted', "      include: [`${root}/**/*.test.ts`],\n", '      include: ["${root}/**/*.test.ts"],\n'],
+      ['a regex whose quotes changed', "      'no-restricted-syntax': ['error', { selector: /'x'/ }],\n", "      'no-restricted-syntax': ['error', { selector: /\"x\"/ }],\n"],
+      ['a regex whose spaces changed', "      'no-restricted-syntax': ['error', { selector: /a b/ }],\n", "      'no-restricted-syntax': ['error', { selector: /ab/ }],\n"],
+      // Doubt pass on #138: whitespace between two words, and a comma inside a string, carry meaning.
+      ['two words joined', "      'no-x': ['error', new Rule()],\n", "      'no-x': ['error', newRule()],\n"],
+      ['a comma removed inside a string', "      'no-x': ['error', 'a,]'],\n", "      'no-x': ['error', 'a]'],\n"],
+    ])('does not treat %s as formatting', (_, before, after) => {
+      const base = before.includes('include') ? VITEST.replace("    include: ['packages/*/src/**/*.test.ts', 'tools/**/*.test.ts'],\n", before) : ESLINT.replace("      'no-x': 'error',\n", before);
+      const file = before.includes('include') ? 'vitest.config.mts' : 'eslint.config.mjs';
+      repo = makeRepo({ ...configs, [file]: base });
+      repo.write({ [file]: base.replace(before, after) });
+      expect(guard().out).toContain('[config-loosened]');
+    });
+  });
+
   it('accepts exclusions in a config that did not exist at the merge base, and tighter lint settings', () => {
     setup();
     repo.write({

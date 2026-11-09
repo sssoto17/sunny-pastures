@@ -58,7 +58,11 @@ of:
   `eslint.config.*`, `strict` options relaxed in any `tsconfig*.json` (or a new one with neither
   `extends` nor `strict`, #99), Stryker ignore patterns,
   assertions turned off in `lighthouserc.*`, `disableRules` in the axe setup, and the Fallow
-  config.
+  config. In `eslint.config.*`, `vitest.config.*`, `tsconfig*.json`, and the Fallow, Stryker and
+  Lighthouse configs written as JS, TS or JSON, a change that only reformats (quotes,
+  indentation, trailing commas, re-wrapped lists) isn't a loosening; any change in content still
+  is (#138). The guard compares the whole file, so a reformat must be its own PR: mixed with a
+  content change in the same config, it keeps every finding.
 
 Also blocked, with no exception possible:
 
@@ -364,7 +368,6 @@ the guard sees only the PR's own diff.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| E1 | check-removed | `.github/workflows/ci.yml` | The floor job runs `actions/setup-node` directly instead of the PR's own `./.github/actions/setup` (#99, part 4). A follow-up PR removes this row once that merges | Soto | 2026-11-12 |
 | E2 | config-loosened | `eslint.config.mjs` | #125 part 2: `tseslint.configs.strict` is replaced by `strictTypeChecked`, which includes it, plus `stylisticTypeChecked` (ADR-0005, section 6). `disableTypeChecked` covers only JS and config files, where no typed rule ran before; the default-export rule's `ignores` keeps it out of Next's `app/`. No rule that ran before is turned off | Soto | 2026-11-23 |
 | E3 | config-loosened | `vitest.config.mts` | #125 part 2: `coverage.exclude` adds `**/tests/**`, so test helpers aren't counted as source. Every source file stays under `coverage.include`, since source never sits in a `tests/` folder (ADR-0005, section 4) | Soto | 2026-11-23 |
 | E4 | config-loosened | `packages/sim/tsconfig.json` | #125 part 2: `exclude` adds `src/**/tests/**`, which `tsconfig.test.json` now compiles, with the same strict options (ADR-0005, section 4) | Soto | 2026-11-23 |
