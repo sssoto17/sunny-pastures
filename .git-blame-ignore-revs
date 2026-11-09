@@ -1,0 +1,6 @@
+# Commits that only reformat code, skipped by `git blame` so a line keeps its real author.
+# GitHub's blame view reads this file on its own. Locally, git blame takes
+# `--ignore-revs-file .git-blame-ignore-revs`, or `blame.ignoreRevsFile` set to this file.
+
+# style: format the repo with Prettier (#125) (#145)
+5974fb3dad329856fe913f202b02a38fd28ec949
