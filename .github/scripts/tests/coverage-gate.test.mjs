@@ -96,6 +96,12 @@ describe('coverage gate, end to end', () => {
     expect(r.out).toContain('project coverage ratchet: skipped (--skip-ratchet');
   });
 
+  it('treats a changed tests/ helper as test code when there is no lcov (ADR-0005, section 4)', () => {
+    repo = makeRepo({ 'CONSTRAINTS.md': ratchets('not yet') });
+    repo.write({ 'packages/sim/src/state/tests/farms.ts': 'export const farm = {};\n' });
+    expect(repo.run(SCRIPT).code).toBe(0);
+  });
+
   it('intersects the lcov with the changed lines', () => {
     repo = makeRepo({ 'CONSTRAINTS.md': ratchets('not yet'), 'packages/sim/src/a.ts': 'export const a = 1;\n' });
     repo.write({ 'packages/sim/src/a.ts': 'export const a = 1;\nexport const b = 2;\n' });

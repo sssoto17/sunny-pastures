@@ -520,6 +520,8 @@ describe('floor guard, end to end', () => {
 
     // #122: PR #121 added the test allowance behind a `;`, so every old item survived (830ac11).
     const ALLOWANCE = '; test files in `packages/sim` (`*.test.ts`) may also import `vitest` and `fast-check` and nothing else from outside the sim, and stay banned from `node:*` and from the calls above (admin, 9 Nov, #81)';
+    // #125 appended a clause after it; the replays strip it, so they replay #121's edit alone.
+    const AFTER_121 = edit(REAL, "; every file in a module's `tests/` folder counts as a test file here, test helpers included", '');
 
     // A narrowing is a warning for the admin, never a failure (admin, 9 Nov): the guard can't tell
     // an approved carve-out from an unapproved one, and a red required check has no bypass.
@@ -548,8 +550,8 @@ describe('floor guard, end to end', () => {
     const TIER = { warning: warned, note: noted };
 
     it("warns on PR #121's real rewording of the purity row", () => {
-      realRepo(edit(REAL, ALLOWANCE, ''));
-      repo.write({ 'CONSTRAINTS.md': REAL });
+      realRepo(edit(AFTER_121, ALLOWANCE, ''));
+      repo.write({ 'CONSTRAINTS.md': AFTER_121 });
       const head = `changed: CONSTRAINTS.md:${PURITY} (rule "Boundaries: sim purity (MUST-10.1)")`;
       const r = guard();
       expect(warned(r, head)).toContain('adds a clause to a list cell');
@@ -699,9 +701,9 @@ describe('floor guard, end to end', () => {
 
       it("marks #121's added clause, and reports added and removed rules", () => {
         const SPARE = '| Spare | 1 spare row | n/a | `spare` | CI | `ci / spare` | #1 |\n';
-        realRepo(edit(edit(REAL, ALLOWANCE, ''), '| Lint |', `${SPARE}| Lint |`));
+        realRepo(edit(edit(AFTER_121, ALLOWANCE, ''), '| Lint |', `${SPARE}| Lint |`));
         // The new list item moves every later line down by one.
-        repo.write({ 'CONSTRAINTS.md': edit(REAL, SECRETS, `${SECRETS}\n- New rule: blocked.`) });
+        repo.write({ 'CONSTRAINTS.md': edit(AFTER_121, SECRETS, `${SECRETS}\n- New rule: blocked.`) });
         const r = summaryOf({ GITHUB_ACTIONS: 'true' });
         expect(r.out).toContain('banned too{+; test files in');
         // The spare row sat where Lint sits now.

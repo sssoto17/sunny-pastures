@@ -15,12 +15,39 @@ const nodeGlobals = {
 // fetch, timers, performance, crypto and node:* types; these rules catch what tsc can't. Fallow
 // boundaries (#41, M3) add the import-escape and call checks.
 const SIM_FILES = ['packages/sim/**'];
-const SIM_TEST_FILES = ['packages/sim/**/*.test.ts'];
+const SIM_TEST_FILES = ['packages/sim/**/*.test.ts', 'packages/sim/**/tests/**'];
 
 // Every import that isn't relative: bare packages, scoped packages and node:*.
 const nonRelativeImport = (allowed, message) => ({
-  patterns: [{ regex: `^(?!\\.\\.?(/|$)${allowed.map((name) => `|${name}$`).join('')})`, message }],
+  regex: `^(?!\\.\\.?(/|$)${allowed.map((name) => `|${name}$`).join('')})`,
+  message,
 });
+
+// Module privacy (ADR-0005, sections 1 and 4): a module is a folder, and code outside it imports
+// only its index.js. The patterns read the import string, so they see the folders an import walks
+// into: after `./` or `../`, entering a folder and naming anything but its index.js reaches past
+// the entry (`../hash/sha256.js`), or into a child module (`../facilities/addOns/index.js`).
+// Test code may also enter another module's tests/ folder; source never enters any tests/.
+const RELATIVE_START = '^(\\./|(\\.\\./)+)';
+const MODULE_PRIVACY = [
+  {
+    // `./a/../b.js` and `../hash/../hash/sha256.js` would walk around the patterns below.
+    regex: '^(?!(\\./|(\\.\\./)+)([^./][^/]*/)*[^./][^/]*$)\\.',
+    message: 'Write the relative path in its shortest form: ./ or ../ first, then folder names (ADR-0005, section 1).',
+  },
+  {
+    regex: `${RELATIVE_START}[^./][^/]*/(?!index\\.js$|tests/)`,
+    message: "Import another module only through its index.js, never a file or child module inside it (ADR-0005, section 1).",
+  },
+];
+const SOURCE_PRIVACY = [
+  ...MODULE_PRIVACY,
+  { regex: '(^|/)tests(/|$)', message: 'Source never imports a tests/ folder (ADR-0005, section 4).' },
+];
+// Test code: MODULE_PRIVACY already lets it into another module's tests/ (`../../state/tests/x.js`).
+const TEST_PRIVACY = MODULE_PRIVACY;
+const SOURCE_FILES = ['{apps,packages}/**/*.{ts,tsx}'];
+const TEST_FILES = ['{apps,packages}/**/*.test.{ts,tsx}', '{apps,packages}/**/tests/**'];
 
 // D16 (ADR-0003, section 10): 32-bit operators truncate times above 2^31 ms (about 24.9 days).
 // Lint sees a time only by its name, anywhere inside the operand (`(to - at) | 0` included):
@@ -132,6 +159,14 @@ export default defineConfig(
     },
   },
   {
+    files: SOURCE_FILES,
+    rules: { 'no-restricted-imports': ['error', { patterns: SOURCE_PRIVACY }] },
+  },
+  {
+    files: TEST_FILES,
+    rules: { 'no-restricted-imports': ['error', { patterns: TEST_PRIVACY }] },
+  },
+  {
     files: SIM_FILES,
     rules: {
       'no-eval': 'error',
@@ -144,9 +179,10 @@ export default defineConfig(
         { name: 'Function', message: 'Function builds code the purity rules cannot see (MUST-10.1).' },
         { name: 'eval', message: 'eval runs code the purity rules cannot see (MUST-10.1).' },
       ],
+      // A later block's options replace an earlier block's, so module privacy is merged in here.
       'no-restricted-imports': [
         'error',
-        nonRelativeImport([], 'The sim imports only its own files (MUST-10.1): no packages, no node:*.'),
+        { patterns: [nonRelativeImport([], 'The sim imports only its own files (MUST-10.1): no packages, no node:*.'), ...SOURCE_PRIVACY] },
       ],
       'no-restricted-properties': [
         'error',
@@ -163,7 +199,7 @@ export default defineConfig(
     rules: {
       'no-restricted-imports': [
         'error',
-        nonRelativeImport(['vitest', 'fast-check'], 'Sim tests import only vitest, fast-check and sim files (#81).'),
+        { patterns: [nonRelativeImport(['vitest', 'fast-check'], 'Sim tests import only vitest, fast-check and sim files (#81).'), ...TEST_PRIVACY] },
       ],
       // A later block's options replace an earlier block's, so the sim selectors are repeated here.
       'no-restricted-syntax': [

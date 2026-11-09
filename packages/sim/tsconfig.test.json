@@ -8,6 +8,6 @@
     "sourceMap": false,
     "outDir": "node_modules/.cache/tsc/test"
   },
-  "include": ["src/**/*.test.ts", "../../vitest.context.d.ts"],
+  "include": ["src/**/*.test.ts", "src/**/tests/**/*", "../../vitest.context.d.ts"],
   "references": [{ "path": "./tsconfig.json" }]
 }

@@ -82,7 +82,7 @@ the thresholds).
 | Lint | 0 errors from the project config | The config is the standard; a warning nobody fixes is noise | `eslint .` | edit, CI | `ci / lint` | #40 |
 | Coverage: `packages/sim` | Changed lines ≥ 90% covered | The sim is the research contribution, and a pure module with no I/O is cheap to cover | Vitest coverage (v8) lcov ∩ `git diff` | task end, CI | `ci / test` | #40 |
 | Coverage: rest of `apps/` and `packages/` | Changed lines ≥ 80% covered | High enough that new logic needs a test; the rest leaves room for defensive branches that unit tests can't reach without contortions | Vitest coverage (v8) lcov ∩ `git diff` | task end, CI | `ci / test` | #40 |
-| Boundaries: sim purity (MUST-10.1) | 0 violations. `packages/sim` imports nothing outside itself and no `node:*`, and calls none of `Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `crypto.randomUUID`, `fetch`, `setTimeout`, `setInterval`, `setImmediate`. `new Date()` with no arguments is banned too; test files in `packages/sim` (`*.test.ts`) may also import `vitest` and `fast-check` and nothing else from outside the sim, and stay banned from `node:*` and from the calls above (admin, 9 Nov, #81) | The determinism claim depends on it, and the spec asks for a check, not review | Fallow boundaries with `boundaries.calls.forbidden`; ESLint `no-restricted-syntax` for argument-less `new Date()`, since Fallow checks direct callees, not constructors | edit, CI | `ci / boundaries` | #41 |
+| Boundaries: sim purity (MUST-10.1) | 0 violations. `packages/sim` imports nothing outside itself and no `node:*`, and calls none of `Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `crypto.randomUUID`, `fetch`, `setTimeout`, `setInterval`, `setImmediate`. `new Date()` with no arguments is banned too; test files in `packages/sim` (`*.test.ts`) may also import `vitest` and `fast-check` and nothing else from outside the sim, and stay banned from `node:*` and from the calls above (admin, 9 Nov, #81); every file in a module's `tests/` folder counts as a test file here, test helpers included | The determinism claim depends on it, and the spec asks for a check, not review | Fallow boundaries with `boundaries.calls.forbidden`; ESLint `no-restricted-syntax` for argument-less `new Date()`, since Fallow checks direct callees, not constructors | edit, CI | `ci / boundaries` | #41 |
 | Boundaries: server-only (`AGENTS.md`) | 0 violations: client code never imports `apps/web/src/server/` | `AGENTS.md` makes `src/server/` server-only | Fallow boundaries | edit, CI | `ci / boundaries` | #41 (once `apps/web` exists, M3) |
 | Sim speed | `advance()` across 30 days on the largest content farm ≤ 50 ms; `apply()` ≤ 1 ms per call | Offline catch-up runs inside a request with a 300 ms p95 budget (BASE-04), so the sim may use at most a sixth of it | `vitest bench` (built in), farm read from content data; see [Timing checks](#timing-checks) | task end, CI | `ci / bench` | #41 |
 | Determinism (MUST-17.1) | The same recorded action script gives the same state hash in two separate runs | The research question's core claim | ADR-0001's step-0 gate, run in CI | CI | `ci / determinism` | #48 |
@@ -97,8 +97,9 @@ the thresholds).
 | Browsers and widths (BASE-02) | Latest 2 Chrome, Firefox and Safari; desktop and 360 px | Already in the spec | browser tests (tool decided in #44) | CI | `ci / ui` | the follow-up issue #44 creates when it decides |
 | Prediction (BASE-05) | Shows ≤ 100 ms after a tap (MUST-12.1) | Already in the spec | browser timing test (tool decided in #44) | CI | `ci / ui` | the follow-up issue #44 creates when it decides |
 
-**What counts for coverage.** Only source files under `apps/` and `packages/`. Tests, config files,
-generated code and `tools/` are excluded, and the exclusion list lives in `vitest.config.*` (so
+**What counts for coverage.** Only source files under `apps/` and `packages/`. Tests and test
+helpers (everything in a `tests/` folder, ADR-0005), config files, generated code and `tools/` are
+excluded, and the exclusion list lives in `vitest.config.*` (so
 widening it is a moved threshold). A PR with no executable changed lines passes. Coverage comes
 from the unit and property tests in the same Vitest run. The acceptance tests run over HTTP against
 a separate stack and don't count.
@@ -364,6 +365,8 @@ the guard sees only the PR's own diff.
 |---|---|---|---|---|---|
 | E1 | check-removed | `.github/workflows/ci.yml` | The floor job runs `actions/setup-node` directly instead of the PR's own `./.github/actions/setup` (#99, part 4). A follow-up PR removes this row once that merges | Soto | 2026-11-12 |
 | E2 | config-loosened | `eslint.config.mjs` | #125 part 2: `tseslint.configs.strict` is replaced by `strictTypeChecked`, which includes it, plus `stylisticTypeChecked` (ADR-0005, section 6). `disableTypeChecked` covers only JS and config files, where no typed rule ran before; the default-export rule's `ignores` keeps it out of Next's `app/`. No rule that ran before is turned off | Soto | 2026-11-23 |
+| E3 | config-loosened | `vitest.config.mts` | #125 part 2: `coverage.exclude` adds `**/tests/**`, so test helpers aren't counted as source. Every source file stays under `coverage.include`, since source never sits in a `tests/` folder (ADR-0005, section 4) | Soto | 2026-11-23 |
+| E4 | config-loosened | `packages/sim/tsconfig.json` | #125 part 2: `exclude` adds `src/**/tests/**`, which `tsconfig.test.json` now compiles, with the same strict options (ADR-0005, section 4) | Soto | 2026-11-23 |
 
 ## Interview record
 
