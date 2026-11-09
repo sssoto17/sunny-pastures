@@ -31,7 +31,8 @@ issue that turns it into a check. Until those land, review enforces the floor.
 
 Checked in the diff against the merge base by the floor guard (`guard / floor`, #40), adapted from
 [`floor-guard.md`](.agents/skills/constraint-driven-development/references/floor-guard.md). It
-reports the rule and the location, never a matched value.
+reports the rule and the location, never a matched value. A change to this file is the one place
+it quotes text: see [Guarding the bar](#guarding-the-bar).
 
 **A weakened bar is blocked unless the same PR adds an [Exceptions](#exceptions) row.** That row
 changes this file, so the PR needs the admin's approval (a code-owned path, ADR-0002 area 2). A weakened bar is any
@@ -261,6 +262,49 @@ The floor guard (#40) catches all five in the diff. It blocks 1–3 unless the s
 exception, and it always blocks 4. A change to this file (1 and 5) also needs the admin's
 approval through CODEOWNERS.
 
+**What the guard can judge in this file.** It compares each rule with its old version: a number
+moved the wrong way, a severity or a stage dropped, a listed item gone, a rule removed. It can't
+read what new words mean. So whenever this file changes, the guard also reports every changed or
+moved rule, and every changed line outside a rule (a heading, a comment, a fence), with the old and
+new text side by side and the edit marked. Only a blank-line edit passes with no report. The report
+goes to the guard's log, the job summary and a warning annotation on the changed line in the PR's
+Files changed tab (#122). GitHub shows 10 annotations per step, so with more changes the last one
+points to the job summary, which has them all. Long key-like text in the quotes is redacted.
+
+Each entry names its reasons, in two tiers (admin, 9 Nov), so a real carve-out stands out. These
+are marked `warning [rule-narrowed]`, and their annotation says "may be narrowed":
+
+- A rule moved under another list's introduction, such as from "Also blocked, with no exception
+  possible:" to "A weakened bar is any of:".
+- A rule that gains a carve-out phrase: `except`, `unless`, `but not`, `other than`, `apart from`,
+  `excluding`, `exempt`, `ignore`, `allow`, `warn` and a few more.
+- A rule that gains or drops a negation (`not`, `never`, …).
+- A rule that gains an HTML comment, a footnote, or a clause in a table's list cell.
+
+These are common in honest edits, so they're marked `note [check]`, and their annotation says "to
+check":
+
+- A new rule, or new text outside the rules.
+- A new clause in a list item or a paragraph.
+- Everyday words: `only`, `may`, `can also`, `fine`, `outside`, `skip`.
+
+That warning isn't a _warn_ row and doesn't break "Every failing check blocks the merge": it rides
+on a review that happens anyway, because every PR that touches this file carries `review:admin`.
+It warns rather than fails (admin, 9 Nov): the guard can't tell an approved carve-out from an
+unapproved one, and `guard / floor` is a required check with no bypass, so a failure could only be
+cleared by an Exceptions row that expires. ADR-0004 records the choice.
+
+**The admin's merge review reads every changed rule in that report**, including the ones the guard
+passes. What the guard still can't catch, and leaves to that review:
+
+- A rewording that changes the meaning with none of the words above and no new clause, such as
+  "Only the admin loosens anything" becoming "Only the agent loosens anything".
+- A carve-out in words that aren't on the list, or inside a code span.
+
+It errs the other way on two edits, which fail as `rule-narrowed`, as they did before #122: a typo
+fixed inside a table's list cell, and an item appended to a list cell right before a full stop.
+Both read as a removed item.
+
 ## Exceptions
 
 An exception lets one weakened bar through on one path for a limited time. The row is added in the
@@ -326,3 +370,15 @@ Decided in the coordinator's review of PR #57 (7 Nov):
 - **Weakened bar before the guard:** the bot also requests changes unless an Exceptions row is
   added (D1), until `guard / floor` is a required check.
 - **Test lines:** count at full weight toward the split size.
+
+Decided while building #122 (9 Nov), for [Guarding the bar](#guarding-the-bar):
+
+- **Changes to this file:** the floor guard reports every one, old and new side by side, in its
+  log, the job summary and annotations on the PR. A PR comment would have needed a floor-job change.
+- **Carve-outs:** a narrowing word, a negation or a new clause warns as `rule-narrowed` and doesn't
+  fail. A failure could only be cleared by an expiring Exceptions row, since `guard / floor` has no
+  bypass, and the admin reads every PR that touches this file anyway.
+- **Two tiers:** strong signals (a move to another list, a carve-out phrase, a negation, a hidden
+  comment or footnote, a clause in a list cell) stay `warning [rule-narrowed]`. Weak ones (a new
+  rule or text, a clause in prose, everyday words) become `note [check]`, so the warning stays
+  rare enough to stop at.
