@@ -163,6 +163,12 @@ const configLoosening = (f, mergeBase) => {
 // item (with its continuation lines) and paragraph is a rule. Rows and list items pair by section
 // and key (first cell, or the text before the first colon); paragraphs pair with the most similar
 // paragraph in the same section. Numbers carry a direction read from the words around them.
+// CommonMark 0.31, HTML blocks: type 6 opens with one of these block tags; type 7 is any other
+// complete open or closing tag alone on its line. Both end at a blank line.
+const BLOCK_TAGS =
+  'address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul';
+const HTML_BLOCK_6 = new RegExp(`^ {0,3}</?(?:${BLOCK_TAGS})(?=[\\s/>]|$)`, 'i');
+const HTML_BLOCK_7 = /^ {0,3}(?:<[A-Za-z][\w-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>|<\/[A-Za-z][\w-]*\s*>)\s*$/;
 export const parseRules = (lines) => {
   const rules = [];
   // Every heading in order, so a caller can tell the first `## Exceptions` from a later one.
@@ -174,7 +180,9 @@ export const parseRules = (lines) => {
   let fence = false;
   let comment = false;
   let rawBlock = null;
+  let htmlBlock = false;
   let table = null; // the header line of the table being read: { line, text }
+  let pending = null; // a possible header row, until the next line shows a delimiter row
   const flush = () => {
     if (cur) rules.push(cur);
     cur = null;
@@ -197,6 +205,19 @@ export const parseRules = (lines) => {
     if (raw) {
       flush();
       if (!new RegExp(`</${raw}>`, 'i').test(line)) rawBlock = raw;
+      return;
+    }
+    // CommonMark HTML blocks of types 6 and 7 run until a blank line: one that opens with a block
+    // tag (`<details>`, `<div hidden>`), or a complete tag alone on its line, which can't interrupt
+    // a paragraph. A table inside one renders as raw text (review of #131).
+    if (htmlBlock) {
+      if (!line.trim()) htmlBlock = false;
+      return;
+    }
+    if (HTML_BLOCK_6.test(line) || (cur?.kind !== 'para' && HTML_BLOCK_7.test(line))) {
+      flush();
+      headers = null;
+      htmlBlock = true;
       return;
     }
     // Fences and headings follow CommonMark, so the guard reads the file the way it renders (#99:
@@ -244,14 +265,23 @@ export const parseRules = (lines) => {
     if (line.trim().startsWith('|')) {
       flush();
       const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
-      if (cells.every((c) => /^:?-+:?$/.test(c))) return;
+      const delimiter = cells.every((c) => /^:?-+:?$/.test(c));
+      // A table starts only where a header row is followed at once by a delimiter row (GFM);
+      // without one, the lines are a paragraph and hold no rows (review of #131).
       if (!headers) {
-        headers = cells;
-        table = { line: n, text: line };
+        if (delimiter && pending) {
+          headers = pending.cells;
+          table = pending.table;
+          pending = null;
+        } else {
+          pending = delimiter ? null : { cells, table: { line: n, text: line } };
+        }
+        return;
       }
-      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, end: n, text: line, cells, headers, table });
+      if (!delimiter) rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, end: n, text: line, cells, headers, table });
       return;
     }
+    pending = null;
     const item = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
     if (item) {
       flush();
@@ -705,13 +735,20 @@ const changeReport = (changes) => {
 
 // Exceptions rows: | ID | Rule | Path | Reason | Owner | Expires |
 const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+// A real calendar day only: `Date.UTC` rolls `2026-11-31` over to 1 Dec, so the result must give
+// back the same year, month and day (review of #131).
+const utcDay = (y, mo, d) => {
+  const t = Date.UTC(y, mo, d);
+  const back = new Date(t);
+  return back.getUTCFullYear() === y && back.getUTCMonth() === mo && back.getUTCDate() === d ? t : null;
+};
 export const parseDate = (s) => {
   const t = s.replace(/[`*_]/g, '').trim();
   let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
-  if (m) return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (m) return utcDay(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   m = /^(\d{1,2}) ([A-Za-z]{3})[a-z]* (\d{4})$/.exec(t);
   const month = m ? MONTHS[m[2].toLowerCase()] : undefined;
-  if (m && month !== undefined) return Date.UTC(Number(m[3]), month, Number(m[1]));
+  if (m && month !== undefined) return utcDay(Number(m[3]), month, Number(m[1]));
   return null;
 };
 // The findings an Exceptions row can waive, by the name its Rule column uses (#99). Unfinished work
@@ -723,9 +760,19 @@ export const WAIVABLE = new Set([
 ]);
 // A Rule cell names one or more findings, as `silenced-checker` or "silenced checker".
 const ruleNames = (cell) => cell.split(/[,;]/).map((s) => s.replace(/[`*_]/g, '').trim().toLowerCase().replace(/\s+/g, '-')).filter(Boolean);
+// The cells of a row-shaped line: blockquote markers and the outer pipes are optional, as GFM
+// renders a row without them (review of #131).
+const rowCells = (text) => text.trim().replace(/^(?:>\s*)+/, '').replace(/^\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim());
 export const parseException = (text) => {
-  const cells = text.trim().split('|').slice(1, -1).map((c) => c.trim());
-  return { id: exceptionId(cells[0]), rules: ruleNames(cells[1] ?? ''), path: (cells[2] ?? '').replace(/`/g, ''), expires: parseDate(cells[5] ?? '') };
+  const cells = rowCells(text);
+  return {
+    id: exceptionId(cells[0]),
+    rules: ruleNames(cells[1] ?? ''),
+    path: (cells[2] ?? '').replace(/`/g, ''),
+    reason: cells[3] ?? '',
+    owner: cells[4] ?? '',
+    expires: parseDate(cells[5] ?? ''),
+  };
 };
 // A Path names one file or folder, so its first segment is literal: `**`, `*/**` and `**/*.ts`
 // would each waive a rule across the repo.
@@ -739,6 +786,9 @@ const tooBroad = (path) => {
   // segments, so `packages/sim/` passes and `packages/**`, `apps/` and `docs/` don't.
   return folder && body.split('/').filter(Boolean).length < 2;
 };
+// A Path no file can have: a leading `/`, an empty segment, or a `.` or `..` segment. Paths are
+// relative to the repo's top and have none of these.
+const neverMatches = (path) => /^\//.test(path) || /\/\//.test(path) || /(^|\/)\.{1,2}(\/|$)/.test(path);
 // An Exceptions row's ID, without emphasis: `**E1**` is E1.
 // Emphasis only around it: `**E1**` is E1, but `E*1` is no ID at all.
 const exceptionId = (cell = '') => cell.trim().replace(/^[*_`]+|[*_`]+$/g, '');
@@ -846,7 +896,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   // Expiry and validity read every row-shaped line in the file, whatever heading, fence or comment
   // it sits in, so no formatting can hide an expired row from them (review of #99). The ID is read
   // the same way as for a waiver, so no row can waive without being checked (security review).
-  const rowLines = (lines) => lines.map((text, i) => ({ line: i + 1, text })).filter((l) => isExceptionId(/^\s*\|([^|]*)\|/.exec(l.text)?.[1]));
+  const rowLines = (lines) => lines.map((text, i) => ({ line: i + 1, text })).filter((l) => l.text.includes('|') && isExceptionId(rowCells(l.text)[0]));
   const constraints = changes.find((f) => isConstraints(f.path));
   const now = exceptionRows(constraintsNow.split('\n'));
   for (const h of now.repeated) always('exceptions-heading-repeated', 'CONSTRAINTS.md', h.line);
@@ -855,13 +905,24 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   const before = constraints ? rowLines(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? []) : allNow;
   const rowsBefore = new Set(before.map((r) => r.text.trim()));
   const addedRows = now.waiving.filter((r) => !rowsBefore.has(r.text.trim()));
+  // An ID used twice in the file fails, every row of it, and neither one waives (review of #131).
+  // An ID reused after its row was removed in an earlier PR needs the history: a known limit.
+  const ids = allNow.map((r) => ({ line: r.line, id: parseException(r.text).id }));
+  const repeatedIds = new Set(ids.filter((x, i) => ids.findIndex((y) => y.id === x.id) !== i).map((x) => x.id));
+  for (const x of ids) if (repeatedIds.has(x.id)) always('exception-invalid', 'CONSTRAINTS.md', x.line, x.id);
+  // CONSTRAINTS.md asks every row for a reason and an owner.
+  for (const r of now.waiving) {
+    const e = parseException(r.text);
+    if (!e.reason || !e.owner) always('exception-invalid', 'CONSTRAINTS.md', r.line, e.id);
+  }
   const waivers = [];
   const latest = Math.min(today + MAX_EXCEPTION_DAYS * 864e5, Date.parse(FREEZE));
   for (const a of addedRows) {
     const e = parseException(a.text);
-    // Reported below, with every other row: a date it can't read, or one already past.
-    if (e.expires === null || e.expires < today) continue;
-    if (!e.path || !e.rules.length || e.rules.some((x) => !WAIVABLE.has(x))) always('exception-invalid', 'CONSTRAINTS.md', a.line, e.id);
+    // Reported above or below, with every other row: a repeated ID, no reason or owner, a date it
+    // can't read, or one already past.
+    if (repeatedIds.has(e.id) || !e.reason || !e.owner || e.expires === null || e.expires < today) continue;
+    if (!e.path || neverMatches(e.path) || !e.rules.length || e.rules.some((x) => !WAIVABLE.has(x))) always('exception-invalid', 'CONSTRAINTS.md', a.line, e.id);
     else if (tooBroad(e.path)) always('exception-too-broad', 'CONSTRAINTS.md', a.line, e.id);
     else if (e.expires > latest) always('exception-too-long', 'CONSTRAINTS.md', a.line, e.id);
     else {

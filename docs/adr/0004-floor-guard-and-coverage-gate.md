@@ -153,12 +153,29 @@ reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
   sits (admin, 9 Nov). So `packages/sim/`, `.github/workflows/` and `docs/adr/` pass, while
   `packages/**`, `.github/`, `docs/` and any other top-level folder don't. A waiver across every
   package is in effect project-wide, and the sim is what the floor protects most.
-- **A row can't outlive its date.** An unreadable date fails every PR, as an expired one does, and
-  `FLOOR_GUARD_TODAY` is ignored in CI.
-- **A row can't hide.** Expiry reads every row-shaped line in the file, whatever heading, fence or
-  comment it sits in. Waivers come only from the one table with the Exceptions header, at the left
-  margin, under the one `## Exceptions` heading. Fences, headings and raw HTML blocks are read the
-  way CommonMark renders them.
+- **A row is complete and unique.** It has a reason and an owner, and its ID appears once in the
+  file.
+- **A row can't outlive its date.** An unreadable date, or an impossible one (`2026-11-31`), fails
+  every PR, as an expired one does. `FLOOR_GUARD_TODAY` is ignored in CI.
+- **A row can't hide.** Expiry, dates and repeated IDs are read from every row-shaped line in the
+  file, whatever heading, fence, comment, HTML block or blockquote it sits in, with or without its
+  outer pipes. Waivers come only from the one table with the Exceptions header and its delimiter
+  row, at the left margin, under the one `## Exceptions` heading.
+- **What the line parser follows.** It follows CommonMark for these constructs:
+  - fences: backticks or tildes, indent of at most 3 spaces, and a bare closer;
+  - ATX headings with an optional closing `#` run, and setext headings;
+  - HTML comments;
+  - HTML blocks of types 1 (`<pre>`, `<script>`, `<style>`, `<textarea>`), 6 (block tags such as
+    `<details>` or `<div>`) and 7 (a complete tag alone on its line);
+  - GFM tables, which need a delimiter row.
+
+  **It's frozen from 9 Nov (admin).** The review of #131 found a new edge case on each round, the
+  same pattern as #115's shell lexer. So any further case is listed as a known miss and goes to the
+  follow-up for a real Markdown parser, #132 (under #58).
+- **Known misses.**
+  - An ID reused after its row was removed in an earlier PR: the guard sees one diff, not the
+    history.
+  - Anything CommonMark or GFM renders differently from the cases above.
 
 **Patterns.**
 - *Allowlist:* the Rule column takes only the names the guard emits as waivable findings, and a
@@ -171,7 +188,7 @@ reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
 **Alternatives considered.**
 - *A maintained Markdown parser (remark or markdown-it).* It would read the file exactly as it
   renders. It's not adopted: the floor job runs with Node only and no install, so it would need a
-  dependency and a floor-job change (admin's call).
+  dependency and a floor-job change. It moved to #132 (admin, 9 Nov).
 - *Refusing any wildcard in a Path.* Too strict: a folder waiver for one package is a legitimate
   case.
 - *Checking only added rows for a bad date.* That was the old behaviour, and an old row with a bad
