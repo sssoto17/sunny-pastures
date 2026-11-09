@@ -7,6 +7,7 @@
 # the session. Reads the raw hook JSON on stdin, so it needs no jq; shared parts are in
 # lib/shell-lexer.sh. Tests: block-coordinator-work.test.sh next to this file.
 set -uo pipefail
+# Without the lib the hook exits 1: Claude Code reports the error and lets the call through.
 # shellcheck source-path=SCRIPTDIR source=lib/shell-lexer.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/shell-lexer.sh" || exit 1
 
@@ -52,7 +53,13 @@ check_command() {
       [[ $git_sub == commit ]] && deny_bash 'git commit'
       ;;
     gh)
-      [[ ${2:-} == pr && ${3:-} =~ ^(create|new)$ ]] && deny_bash 'gh pr create'
+      # Skip the flags gh accepts before the command: `gh -R <repo> pr create`.
+      local args=("${@:2}")
+      while ((${#args[@]})) && [[ ${args[0]} == -* ]]; do
+        [[ ${args[0]} =~ ^(-R|--repo)$ ]] && args=("${args[@]:1}")
+        args=("${args[@]:1}")
+      done
+      [[ ${args[0]:-} == pr && ${args[1]:-} =~ ^(create|new)$ ]] && deny_bash 'gh pr create'
       ;;
   esac
   return 0

@@ -7,6 +7,7 @@
 # jq; the JSON reader and the shell lexer are in lib/shell-lexer.sh. Tests:
 # block-branch-switch.test.sh next to this file.
 set -uo pipefail
+# Without the lib the hook exits 1: Claude Code reports the error and lets the call through.
 # shellcheck source-path=SCRIPTDIR source=lib/shell-lexer.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/shell-lexer.sh" || exit 1
 

@@ -103,6 +103,12 @@ bash_tool 2 "$MAIN" 'gh pr create --title t --body b --label review:admin' 'brie
 bash_tool 2 "$MAIN" 'gh pr new --fill'
 bash_tool 2 "$MAIN" "( cd $WT && gh pr create --fill )"
 bash_tool 2 "$MAIN" 'git fetch; gh pr create --head chore/75-x --fill'
+# gh takes the repo flag before the command too (spec review of #75)
+bash_tool 2 "$MAIN" 'gh -R sssoto17/sunny-pastures pr create --fill'
+bash_tool 2 "$MAIN" 'gh --repo sssoto17/sunny-pastures pr create --fill'
+bash_tool 2 "$MAIN" 'gh --repo=sssoto17/sunny-pastures pr new --fill'
+bash_tool 0 "$MAIN" 'gh -R sssoto17/sunny-pastures issue create --title t --body b'
+bash_tool 0 "$MAIN" 'gh -R sssoto17/sunny-pastures pr view 75'
 
 # --- Bash: the coordinator keeps the board and reads freely ---------------------------------------
 bash_tool 0 "$MAIN" 'gh issue create --title t --body b --label chore'
