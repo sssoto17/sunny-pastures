@@ -59,6 +59,8 @@ Also blocked, with no exception possible:
   standing in for the implementation.
 - Secrets in source. Read them from env vars and keep placeholders in `.env.example`.
 - An expired row in [Exceptions](#exceptions).
+- An Exceptions row the guard can't accept: a date it can't read, a Rule it doesn't know, a Path
+  wider than one folder, or a second `## Exceptions` heading (#99).
 
 ## Enforced with numbers
 
@@ -315,6 +317,38 @@ project). The admin approves the PR, because it changes this file.
 IDs run `E1`, `E2`, …, and are never reused. The floor guard reads rows matching `| E<n> |` and
 fails every PR once a row's expiry date has passed, until the row is removed or the admin renews
 it.
+
+What a row must hold, checked by the floor guard (#99):
+
+- **Rule** names the findings it waives, as the guard prints them, separated by commas. The
+  waivable ones are the weakened-bar findings: `silenced-checker`, `test-made-easier`,
+  `test-deleted`, `assertion-removed`, `property-runs-cut`, `config-loosened`, `check-removed`, and
+  this file's `rule-removed`, `rule-narrowed`, `threshold-*`, `severity-dropped` and
+  `stage-moved`. A finding the row doesn't name stays blocked, even on its Path. Any other name
+  fails the row, so `unfinished-work` and the `exception-*` findings can't be waived.
+- **Path** is one file (`packages/sim/src/a.ts`), or one folder with at least two segments
+  (`packages/sim/`, `packages/sim/**`, `.github/workflows/`), with no other wildcard. A waiver
+  across every package is in effect project-wide, and the sim is what the floor protects most
+  (admin, 9 Nov). So `**`, `**/*.ts`, `packages/**`, `packages/*/src/**`, `.github/` and any other
+  top-level folder fail as `exception-too-broad`. A Path no file can have (a leading `/`, `//`, or a
+  `.` or `..` segment) fails as `exception-invalid`.
+- **Reason** and **Owner** aren't empty, and the **ID** is used once in the file.
+- **Expires** is a real calendar day the guard can read (`2026-11-30` or `30 Nov 2026`, not
+  `2026-11-31`). Any other value fails every PR, as an expired row does.
+- The file has one `## Exceptions` heading. A second one fails every PR.
+- Only a row in that section's one table waives anything. The table must have exactly the header
+  above, followed by its delimiter row, and be written at the left margin. A row anywhere else never
+  waives: in a code fence (backticks or `~~~`), a comment, an HTML block (`<pre>`, `<details>`,
+  `<div>`, …), a list item, a header without a delimiter row, or another table. A row of the table
+  without an `E<n>` ID fails.
+- Expiry, dates and repeated IDs are checked on every line shaped like a row, wherever it sits, with
+  or without its outer pipes and inside a blockquote, so no formatting hides an expired row.
+
+The guard reads this file with its own line parser, which follows CommonMark for the cases above.
+From 9 Nov that parser is frozen. Any further Markdown edge case is listed as a known miss and goes
+to the follow-up for a real Markdown parser, #132, not into the line parser (admin, 9 Nov). A
+known miss already: an ID reused after its row was removed in an earlier PR isn't caught, because
+the guard sees only the PR's own diff.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|

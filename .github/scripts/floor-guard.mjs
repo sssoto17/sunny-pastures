@@ -15,11 +15,12 @@
 // weak one: for the admin's merge review, never a failure (admin, 9 Nov; ADR-0004).
 //
 // Usage: node .github/scripts/floor-guard.mjs [--base <ref>]   (default base: origin/main)
-// FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date (tests only).
+// FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date, for tests; it's ignored in CI.
 //
 // A weakened bar (silenced checker, easier test, moved threshold, loosened tool config) passes
-// only when the same PR adds an Exceptions row to CONSTRAINTS.md whose Path covers the file.
-// Unfinished work and invalid or expired exceptions always fail.
+// only when the same PR adds an Exceptions row to CONSTRAINTS.md whose Rule names the finding and
+// whose Path, one file or one folder, covers the file. Unfinished work and invalid, too broad or
+// expired exceptions always fail, and so does a second `## Exceptions` heading.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -134,6 +135,12 @@ const configLoosening = (f, mergeBase) => {
 // item (with its continuation lines) and paragraph is a rule. Rows and list items pair by section
 // and key (first cell, or the text before the first colon); paragraphs pair with the most similar
 // paragraph in the same section. Numbers carry a direction read from the words around them.
+// CommonMark 0.31, HTML blocks: type 6 opens with one of these block tags; type 7 is any other
+// complete open or closing tag alone on its line. Both end at a blank line.
+const BLOCK_TAGS =
+  'address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul';
+const HTML_BLOCK_6 = new RegExp(`^ {0,3}</?(?:${BLOCK_TAGS})(?=[\\s/>]|$)`, 'i');
+const HTML_BLOCK_7 = /^ {0,3}(?:<[A-Za-z][\w-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>|<\/[A-Za-z][\w-]*\s*>)\s*$/;
 export const parseRules = (lines) => {
   const rules = [];
   // Every heading in order, so a caller can tell the first `## Exceptions` from a later one.
@@ -144,29 +151,82 @@ export const parseRules = (lines) => {
   let cur = null;
   let fence = false;
   let comment = false;
+  let rawBlock = null;
+  let htmlBlock = false;
+  let table = null; // the header line of the table being read: { line, text }
+  let pending = null; // a possible header row, until the next line shows a delimiter row
   const flush = () => {
     if (cur) rules.push(cur);
     cur = null;
   };
   lines.forEach((line = '', i) => {
     const n = i + 1;
-    // HTML comments hold no rules (and no exceptions).
+    // HTML comments hold no rules (and no exceptions), and neither do the raw HTML blocks that
+    // CommonMark keeps open across blank lines until their closing tag (`<pre>`, `<script>`,
+    // `<style>`, `<textarea>`): a table inside one renders as text.
     if (comment || /^\s*<!--/.test(line)) {
       flush();
       comment = !line.includes('-->');
       return;
     }
-    if (/^\s*```/.test(line)) {
-      flush();
-      fence = !fence;
+    if (rawBlock) {
+      if (new RegExp(`</${rawBlock}>`, 'i').test(line)) rawBlock = null;
       return;
     }
-    if (fence) return;
-    if (/^#{1,6} /.test(line)) {
+    const raw = /^ {0,3}<(pre|script|style|textarea)(?=[\s>]|$)/i.exec(line)?.[1];
+    if (raw) {
+      flush();
+      if (!new RegExp(`</${raw}>`, 'i').test(line)) rawBlock = raw;
+      return;
+    }
+    // CommonMark HTML blocks of types 6 and 7 run until a blank line: one that opens with a block
+    // tag (`<details>`, `<div hidden>`), or a complete tag alone on its line, which can't interrupt
+    // a paragraph. A table inside one renders as raw text (review of #131).
+    if (htmlBlock) {
+      if (!line.trim()) htmlBlock = false;
+      return;
+    }
+    if (HTML_BLOCK_6.test(line) || (cur?.kind !== 'para' && HTML_BLOCK_7.test(line))) {
       flush();
       headers = null;
-      section = line.replace(/^#+\s*/, '').trim();
-      sectionNo = headings.push({ no: headings.length + 1, level: /^#+/.exec(line)[0].length, title: section });
+      htmlBlock = true;
+      return;
+    }
+    // Fences and headings follow CommonMark, so the guard reads the file the way it renders (#99:
+    // `~~~` fences and look-alike lines hid Exceptions rows). A fence opens with three or more
+    // backticks or tildes, indented at most 3 spaces; a backtick opener's info string has no
+    // backtick. It closes only on a line of the same character, at least as long, with nothing
+    // after it but spaces.
+    const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      const closer = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
+      if (closer && closer[0] === fence[0] && closer.length >= fence.length) fence = false;
+      return;
+    }
+    if (opener && !(opener[1][0] === '`' && opener[2].includes('`'))) {
+      flush();
+      fence = opener[1];
+      return;
+    }
+    const heading = (level, title) => {
+      flush();
+      headers = null;
+      section = title;
+      sectionNo = headings.push({ no: headings.length + 1, level, title: section, line: n });
+    };
+    // An ATX heading: up to 3 spaces, 1–6 `#`, then a space or the line's end; a closing run of
+    // `#` isn't part of the title.
+    const atx = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    if (atx) {
+      heading(atx[1].length, (atx[2] ?? '').replace(/^#+$/, '').trim());
+      return;
+    }
+    // A setext heading: one line of paragraph text underlined with `=` (level 1) or `-` (level 2).
+    const setext = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
+    if (setext && cur?.kind === 'para' && !cur.text.includes('\n')) {
+      const title = cur.text.trim();
+      cur = null;
+      heading(setext[1][0] === '=' ? 1 : 2, title);
       return;
     }
     if (!line.trim()) {
@@ -177,11 +237,23 @@ export const parseRules = (lines) => {
     if (line.trim().startsWith('|')) {
       flush();
       const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
-      if (cells.every((c) => /^:?-+:?$/.test(c))) return;
-      if (!headers) headers = cells;
-      else rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, end: n, text: line, cells, headers });
+      const delimiter = cells.every((c) => /^:?-+:?$/.test(c));
+      // A table starts only where a header row is followed at once by a delimiter row (GFM);
+      // without one, the lines are a paragraph and hold no rows (review of #131).
+      if (!headers) {
+        if (delimiter && pending) {
+          headers = pending.cells;
+          table = pending.table;
+          pending = null;
+        } else {
+          pending = delimiter ? null : { cells, table: { line: n, text: line } };
+        }
+        return;
+      }
+      if (!delimiter) rules.push({ kind: 'row', section, sectionNo, key: cells[0], line: n, end: n, text: line, cells, headers, table });
       return;
     }
+    pending = null;
     const item = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
     if (item) {
       flush();
@@ -395,7 +467,7 @@ const constraintsFindings = (f, mergeBase) => {
   const changes = [];
   const before = parseRules(oldContent(mergeBase, f.oldPath ?? f.path) ?? []);
   const after = parseRules(readFileSync(f.path, 'utf8').split('\n'));
-  const isException = (r) => r.kind === 'row' && (/^E\d+$/.test(r.key) || r.key === '_none_');
+  const isException = (r) => r.kind === 'row' && (isExceptionId(r.key) || r.key === '_none_');
   const taken = new Set();
   const unchanged = new Map(); // after rule → the old rule with the same section and text
   // Pair unchanged rules first, so a changed rule can't pair with one of them.
@@ -609,19 +681,65 @@ const changeReport = (changes) => {
 
 // Exceptions rows: | ID | Rule | Path | Reason | Owner | Expires |
 const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+// A real calendar day only: `Date.UTC` rolls `2026-11-31` over to 1 Dec, so the result must give
+// back the same year, month and day (review of #131).
+const utcDay = (y, mo, d) => {
+  const t = Date.UTC(y, mo, d);
+  const back = new Date(t);
+  return back.getUTCFullYear() === y && back.getUTCMonth() === mo && back.getUTCDate() === d ? t : null;
+};
 export const parseDate = (s) => {
   const t = s.replace(/[`*_]/g, '').trim();
   let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
-  if (m) return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (m) return utcDay(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   m = /^(\d{1,2}) ([A-Za-z]{3})[a-z]* (\d{4})$/.exec(t);
   const month = m ? MONTHS[m[2].toLowerCase()] : undefined;
-  if (m && month !== undefined) return Date.UTC(Number(m[3]), month, Number(m[1]));
+  if (m && month !== undefined) return utcDay(Number(m[3]), month, Number(m[1]));
   return null;
 };
+// The findings an Exceptions row can waive, by the name its Rule column uses (#99). Unfinished work
+// and the exception-* findings are never waivable.
+export const WAIVABLE = new Set([
+  'silenced-checker', 'test-made-easier', 'test-deleted', 'assertion-removed', 'property-runs-cut',
+  'config-loosened', 'check-removed', 'rule-removed', 'rule-narrowed', 'threshold-removed',
+  'threshold-loosened', 'threshold-changed', 'severity-dropped', 'stage-moved',
+]);
+// A Rule cell names one or more findings, as `silenced-checker` or "silenced checker".
+const ruleNames = (cell) => cell.split(/[,;]/).map((s) => s.replace(/[`*_]/g, '').trim().toLowerCase().replace(/\s+/g, '-')).filter(Boolean);
+// The cells of a row-shaped line: blockquote markers and the outer pipes are optional, as GFM
+// renders a row without them (review of #131).
+const rowCells = (text) => text.trim().replace(/^(?:>\s*)+/, '').replace(/^\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim());
 export const parseException = (text) => {
-  const cells = text.trim().split('|').slice(1, -1).map((c) => c.trim());
-  return { id: cells[0], path: (cells[2] ?? '').replace(/`/g, ''), expires: parseDate(cells[5] ?? '') };
+  const cells = rowCells(text);
+  return {
+    id: exceptionId(cells[0]),
+    rules: ruleNames(cells[1] ?? ''),
+    path: (cells[2] ?? '').replace(/`/g, ''),
+    reason: cells[3] ?? '',
+    owner: cells[4] ?? '',
+    expires: parseDate(cells[5] ?? ''),
+  };
 };
+// A Path names one file or folder, so its first segment is literal: `**`, `*/**` and `**/*.ts`
+// would each waive a rule across the repo.
+const tooBroad = (path) => {
+  // One file (`packages/sim/src/a.ts`) or one folder (`packages/sim/` or `packages/sim/**`): no
+  // wildcard anywhere else, so `packages/*/src/**` and `apps/**/x.ts` fail (security review, #99).
+  const folder = path.endsWith('/**') || path.endsWith('/');
+  const body = path.replace(/\/\*\*$|\/$/, '');
+  if (!body || /[*?[\]{}]/.test(body)) return true;
+  // The widest folder is one package or a folder inside it (admin, 9 Nov): a folder needs two
+  // segments, so `packages/sim/` passes and `packages/**`, `apps/` and `docs/` don't.
+  return folder && body.split('/').filter(Boolean).length < 2;
+};
+// A Path no file can have: a leading `/`, an empty segment, or a `.` or `..` segment. Paths are
+// relative to the repo's top and have none of these.
+const neverMatches = (path) => /^\//.test(path) || /\/\//.test(path) || /(^|\/)\.{1,2}(\/|$)/.test(path);
+// An Exceptions row's ID, without emphasis: `**E1**` is E1.
+// Emphasis only around it: `**E1**` is E1, but `E*1` is no ID at all.
+const exceptionId = (cell = '') => cell.trim().replace(/^[*_`]+|[*_`]+$/g, '');
+const isExceptionId = (cell) => /^E\d+$/.test(exceptionId(cell ?? ''));
+const EXCEPTIONS_HEADER = ['ID', 'Rule', 'Path', 'Reason', 'Owner', 'Expires'].join('|');
 export const globToRegExp = (glob) =>
   new RegExp(
     '^' +
@@ -696,34 +814,68 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.
   // Rows come from the parsed Exceptions table only, never from raw diff lines, so a row-shaped
   // line in a code fence, a comment or another table can't waive anything.
-  // Only the first level-2 `## Exceptions` heading counts; a later or deeper one is ignored.
+  // Only a level-2 `## Exceptions` heading holds waivers, and the file has exactly one: a second
+  // one fails (#99), since an earlier empty one once hid the real table. Titles match without case.
   const exceptionRows = (lines) => {
     const rules = parseRules(lines);
-    const no = rules.headings.find((h) => h.level === 2 && h.title === 'Exceptions')?.no;
-    return no ? rules.filter((r) => r.kind === 'row' && r.sectionNo === no && /^E\d+$/.test(r.key)) : [];
+    const level2 = rules.headings.filter((h) => h.level === 2 && h.title.toLowerCase() === 'exceptions');
+    const no = level2.length === 1 ? level2[0].no : null;
+    // Waivers come from one table only: the section's single table with exactly the Exceptions
+    // header, written at the left margin, rows included. A table indented into a list item, a second
+    // table with that header or a table with another header waives nothing (security review, #131).
+    const inSection = rules.filter((r) => r.kind === 'row' && r.sectionNo === no);
+    const tables = [...new Set(inSection.filter((r) => r.headers.join('|') === EXCEPTIONS_HEADER && /^\|/.test(r.table.text)).map((r) => r.table))];
+    const table = tables.length === 1 ? inSection.filter((r) => r.table === tables[0] && /^\|/.test(r.text)) : [];
+    // A row of the table with no E<n> ID (`E*1`, `X1`) would neither waive nor expire: it fails.
+    const malformed = table.filter((r) => !isExceptionId(r.key) && r.key !== '_none_');
+    return { waiving: table.filter((r) => isExceptionId(r.key)), malformed, repeated: level2.slice(1) };
   };
+  // Expiry and validity read every row-shaped line in the file, whatever heading, fence or comment
+  // it sits in, so no formatting can hide an expired row from them (review of #99). The ID is read
+  // the same way as for a waiver, so no row can waive without being checked (security review).
+  const rowLines = (lines) => lines.map((text, i) => ({ line: i + 1, text })).filter((l) => l.text.includes('|') && isExceptionId(rowCells(l.text)[0]));
   const constraints = changes.find((f) => isConstraints(f.path));
-  const rowsNow = exceptionRows(constraintsNow.split('\n'));
-  const rowsBefore = new Set(constraints ? exceptionRows(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? []).map((r) => r.text.trim()) : rowsNow.map((r) => r.text.trim()));
-  const addedRows = rowsNow.filter((r) => !rowsBefore.has(r.text.trim()));
+  const now = exceptionRows(constraintsNow.split('\n'));
+  for (const h of now.repeated) always('exceptions-heading-repeated', 'CONSTRAINTS.md', h.line);
+  for (const r of now.malformed) always('exception-invalid', 'CONSTRAINTS.md', r.line, r.key);
+  const allNow = rowLines(constraintsNow.split('\n'));
+  const before = constraints ? rowLines(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? []) : allNow;
+  const rowsBefore = new Set(before.map((r) => r.text.trim()));
+  const addedRows = now.waiving.filter((r) => !rowsBefore.has(r.text.trim()));
+  // An ID used twice in the file fails, every row of it, and neither one waives (review of #131).
+  // An ID reused after its row was removed in an earlier PR needs the history: a known limit.
+  const ids = allNow.map((r) => ({ line: r.line, id: parseException(r.text).id }));
+  const repeatedIds = new Set(ids.filter((x, i) => ids.findIndex((y) => y.id === x.id) !== i).map((x) => x.id));
+  for (const x of ids) if (repeatedIds.has(x.id)) always('exception-invalid', 'CONSTRAINTS.md', x.line, x.id);
+  // CONSTRAINTS.md asks every row for a reason and an owner.
+  for (const r of now.waiving) {
+    const e = parseException(r.text);
+    if (!e.reason || !e.owner) always('exception-invalid', 'CONSTRAINTS.md', r.line, e.id);
+  }
   const waivers = [];
   const latest = Math.min(today + MAX_EXCEPTION_DAYS * 864e5, Date.parse(FREEZE));
   for (const a of addedRows) {
     const e = parseException(a.text);
-    if (e.expires === null || !e.path) always('exception-invalid', 'CONSTRAINTS.md', a.line, e.id);
+    // Reported above or below, with every other row: a repeated ID, no reason or owner, a date it
+    // can't read, or one already past.
+    if (repeatedIds.has(e.id) || !e.reason || !e.owner || e.expires === null || e.expires < today) continue;
+    if (!e.path || neverMatches(e.path) || !e.rules.length || e.rules.some((x) => !WAIVABLE.has(x))) always('exception-invalid', 'CONSTRAINTS.md', a.line, e.id);
+    else if (tooBroad(e.path)) always('exception-too-broad', 'CONSTRAINTS.md', a.line, e.id);
     else if (e.expires > latest) always('exception-too-long', 'CONSTRAINTS.md', a.line, e.id);
     else {
       waivers.push({ ...e, re: globToRegExp(e.path) });
-      notices.push(`new exception ${e.id} on ${e.path}`);
+      notices.push(`new exception ${e.id} on ${e.path} for ${e.rules.join(', ')}`);
     }
   }
-  for (const r of rowsNow) {
+  // Every row, new or old: a date the guard can't read would otherwise never expire.
+  for (const r of allNow) {
     const e = parseException(r.text);
-    if (e.expires !== null && e.expires < today) always('exception-expired', 'CONSTRAINTS.md', r.line, e.id);
+    if (e.expires === null) always('exception-invalid', 'CONSTRAINTS.md', r.line, e.id);
+    else if (e.expires < today) always('exception-expired', 'CONSTRAINTS.md', r.line, e.id);
   }
   const blocking = [];
   for (const f of findings) {
-    const w = f.waivable && waivers.find((x) => x.re.test(f.file));
+    const w = f.waivable && waivers.find((x) => x.re.test(f.file) && x.rules.includes(f.rule));
     if (w) notices.push(`${f.rule} at ${f.file}:${f.line} waived by ${w.id}`);
     else blocking.push(f);
   }
@@ -741,7 +893,12 @@ const HINTS = {
 const main = () => {
   const mergeBase = enterRepo(baseArg(process.argv));
   const changes = readChange(mergeBase);
-  const todayEnv = process.env.FLOOR_GUARD_TODAY;
+  // FLOOR_GUARD_TODAY is for tests. In CI the real date always counts (#99), so a workflow edit
+  // can't set the clock back on an expired row. Any non-empty GITHUB_ACTIONS or CI but "false" is CI.
+  const set = (v) => Boolean(v) && v !== 'false' && v !== '0';
+  const inCI = set(process.env.GITHUB_ACTIONS) || set(process.env.CI);
+  if (inCI && process.env.FLOOR_GUARD_TODAY) console.log('floor-guard: note: FLOOR_GUARD_TODAY is ignored in CI');
+  const todayEnv = inCI ? undefined : process.env.FLOOR_GUARD_TODAY;
   const today = todayEnv ? parseDate(todayEnv) : Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
   if (today === null) throw new CannotRun('FLOOR_GUARD_TODAY is not a YYYY-MM-DD date');
   let constraintsNow;
