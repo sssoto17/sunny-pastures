@@ -14,7 +14,8 @@
 # `sort -o`, `prettier --write`, `lint --fix`, `git restore`/`checkout -- <path>`, `git stash
 # pop`, `python3`/`node -e`), `$( … )` bodies, and targets behind unknown variables. Paths
 # outside the repo (session memory, the scratchpad, $TMPDIR) stay writable, as do reads,
-# `gh issue create`, `git fetch`/`merge` and `git worktree`. Worktree sessions are unaffected.
+# `gh issue create`, `git fetch`/`merge` and `git worktree`. Worktree sessions and remote ones
+# (cloud sessions, routines, GitHub Actions jobs; see remote_session in the lib) are unaffected.
 # Exit 2 blocks the tool call and stderr goes back to the session. Reads the raw hook JSON on
 # stdin, so it needs no jq; shared parts are in lib/shell-lexer.sh. Tests:
 # block-coordinator-work.test.sh next to this file.
@@ -24,6 +25,7 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/shell-lexer.sh" || exit 1
 
 input=$(cat)
+remote_session && exit 0
 
 cwd=$(json_field cwd) || exit 0
 in_worktree "$cwd" && exit 0

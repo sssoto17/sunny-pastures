@@ -1,6 +1,7 @@
 # shellcheck shell=bash disable=SC2034,SC2154 # shares globals with the hooks: $input in, git_sub, here, … out
 # Sourced by the PreToolUse hooks in .claude/hooks/; not run on its own. Shared parts:
 # - json_field: read a string field from the raw hook JSON in $input, without jq.
+# - remote_session: a cloud session, routine or GitHub Actions job, which the hooks skip.
 # - in_worktree, normalize_path, resolve_path: textual path checks (no filesystem access).
 # - lex_command: split a Bash command into words and operators, so quoted text, `$( … )`,
 #   comments, redirect targets and heredoc bodies never count as commands.
@@ -44,6 +45,13 @@ json_field() {
   s=${s//$'\2'/\"}
   s=${s//$'\1'/\\}
   printf '%s' "$s"
+}
+
+# A remote session: a Claude Code cloud session or routine (CLAUDE_CODE_REMOTE=true, documented
+# in the hooks reference) or a GitHub Actions job such as the factory or the reviewer
+# (GITHUB_ACTIONS=true). Its checkout is its own, so there is no main folder to protect.
+remote_session() {
+  [[ ${CLAUDE_CODE_REMOTE:-} == true || ${GITHUB_ACTIONS:-} == true ]]
 }
 
 # A path in a worktree: under .claude/worktrees/<name>, with no `..` stepping back out.
@@ -204,6 +212,15 @@ lex_heredoc_delim() {
   heredocs+=("$( ((strip)) && printf -- -)$delim")
 }
 
+# Is the next word in command position: first, after an operator, or after a keyword? Only
+# there are `[[` and `((` the test and arithmetic commands; elsewhere they're plain text.
+at_command_start() {
+  local k=$((${#toks[@]} - 1))
+  ((k < 0)) && return 0
+  [[ ${kinds[k]} == O ]] && return 0
+  [[ ${kinds[k]} == W && ${toks[k]} =~ ^(if|then|elif|else|while|until|do|!|\{|time)$ ]]
+}
+
 # At cmd[i] == '[[' starting a word: if a closing ` ]]` ends a word later on, move past it and
 # keep the test as one opaque word (`>` and `<` inside it compare, they don't redirect).
 lex_dbracket() {
@@ -224,7 +241,7 @@ lex_dbracket() {
         ;;
     esac
     if [[ ${cmd:j:2} == ']]' && ${cmd:j-1:1} == [[:space:]] ]] &&
-      { ((j + 2 >= n)) || [[ ${cmd:j+2:1} == [[:space:]\;\&\|\)] ]]; }; then
+      { ((j + 2 >= n)) || [[ ${cmd:j+2:1} == [[:space:]\;\&\|\)\<\>] ]]; }; then
       word+='[[ … ]]'
       i=$((j + 2))
       return 0
@@ -287,20 +304,29 @@ lex_command() {
         fi
         ;;
       '(')
-        if ((!have_word)) && [[ ${cmd:i+1:1} == '(' ]]; then
-          # `(( … ))` arithmetic: one opaque word, like `$(( … ))` (its `>` compares)
+        local i0=$i
+        if ((!have_word)) && [[ ${cmd:i+1:1} == '(' ]] && at_command_start; then
+          # `(( … ))` arithmetic: one opaque word, like `$(( … ))` (its `>` compares). Only if
+          # it closes with `))`; `((cd x) && y)` is two subshells.
           have_word=1
           lex_subst
-          [[ ${cmd:i:1} == ')' ]] && i=$((i + 1))
+          if [[ ${cmd:i:1} == ')' ]]; then
+            i=$((i + 1))
+          else
+            i=$i0 word='' have_word=0
+            emit_op "$c"; i=$((i + 1))
+          fi
         else
           emit_op "$c"; i=$((i + 1))
         fi
         ;;
       ')') emit_op "$c"; i=$((i + 1)) ;;
       '[')
-        have_word=1
-        if [[ $word == '' && ${cmd:i:3} == '[['[[:space:]] ]] && lex_dbracket; then :; else
-          word+=$c; i=$((i + 1))
+        if ((!have_word)) && [[ ${cmd:i:3} == '[['[[:space:]] ]] && at_command_start &&
+          lex_dbracket; then
+          have_word=1
+        else
+          have_word=1 word+=$c i=$((i + 1))
         fi
         ;;
       '<' | '>')

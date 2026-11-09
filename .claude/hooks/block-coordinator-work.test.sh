@@ -8,6 +8,7 @@ hook="$(dirname "$0")/block-coordinator-work.sh"
 MAIN=/home/dev/sunny-pastures
 WT=$MAIN/.claude/worktrees/75-coordinator-guard
 export CLAUDE_PROJECT_DIR=$MAIN HOME=/home/dev
+unset CLAUDE_CODE_REMOTE GITHUB_ACTIONS # set in cloud sessions and CI; tested below
 pass=0
 fail=0
 
@@ -303,6 +304,15 @@ bash_tool 0 "$MAIN" "awk '\$1 > 3' .scratch/data"
 bash_tool 2 "$MAIN" '(( n > 0 )) && echo x > docs/x.md'
 bash_tool 2 "$MAIN" '[[ a > b ]] && git commit -m x'
 bash_tool 2 "$MAIN" 'if (( n > 0 )); then sed -i s/a/b/ docs/x.md; fi'
+# security review of 099a3b7: only a real test or arithmetic command is opaque
+bash_tool 2 "$MAIN" 'echo [[ > docs/x.md ]]'         # `[[` as an argument: the redirect is real
+bash_tool 2 "$MAIN" '((true) && git commit -m x)'    # nested subshells, not arithmetic
+bash_tool 2 "$MAIN" '((cd docs) && echo x > x.md)'
+bash_tool 2 "$MAIN" '[[ a ]]>docs/x.md'
+bash_tool 2 "$MAIN" $'[[ a ]]\ngit commit -m x'
+bash_tool 0 "$MAIN" '[[ a ]]<.scratch/x'
+bash_tool 0 "$MAIN" '! [[ a > b ]] && echo no'
+bash_tool 0 "$MAIN" 'if ! (( n > 0 )); then echo none; fi'
 
 # --- re-review of #115: sed -i / perl -i through xargs has no operand to check ---------------------
 bash_tool 2 "$MAIN" "grep -rl foo docs | xargs sed -i 's/foo/bar/'" 'xargs'
@@ -344,6 +354,14 @@ real_bash 2 "$REAL/repo" 'unlink docs/x.md'
 mkdir -p "$REAL/no-repo"
 CLAUDE_PROJECT_DIR='' file_tool 0 "$REAL/no-repo" Write "$REAL/no-repo/x.md"
 CLAUDE_PROJECT_DIR='' bash_tool 0 "$REAL/no-repo" 'echo x > x.md && git commit -m x'
+
+# --- remote sessions aren't the local coordinator: cloud sessions, routines, Actions jobs --------
+CLAUDE_CODE_REMOTE=true bash_tool 0 "$MAIN" 'git commit -m x && gh pr create --fill'
+CLAUDE_CODE_REMOTE=true file_tool 0 "$MAIN" Edit "$MAIN/docs/retros/2026-11-15.md"
+GITHUB_ACTIONS=true bash_tool 0 "$MAIN" "sed -i 's/a/b/' docs/x.md && git commit -am x"
+GITHUB_ACTIONS=true file_tool 0 "$MAIN" Write "$MAIN/packages/sim/src/index.ts"
+CLAUDE_CODE_REMOTE=false bash_tool 2 "$MAIN" 'git commit -m x'
+GITHUB_ACTIONS=1 file_tool 2 "$MAIN" Write "$MAIN/AGENTS.md"
 
 # --- hook input edge cases ------------------------------------------------------------------
 bs=$'\x5c' # a backslash; typing the escape literally gets it decoded on the way into this file

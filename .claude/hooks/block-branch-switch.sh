@@ -2,9 +2,10 @@
 # PreToolUse hook on Bash: keep the main folder on `main` and keep the coordinating session's
 # working directory in it. Denies a branch switch (`git checkout <branch>`, `git switch`,
 # `gh pr checkout`) whose directory is not inside .claude/worktrees/<name>, whatever the session's
-# cwd, and a top-level `cd`/`pushd` into .claude/worktrees/ from the main folder. Exit 2 blocks the
-# command and stderr goes back to the session. Reads the raw hook JSON on stdin, so it needs no
-# jq; the JSON reader and the shell lexer are in lib/shell-lexer.sh. Tests:
+# cwd, and a top-level `cd`/`pushd` into .claude/worktrees/ from the main folder. Remote sessions
+# (cloud sessions, routines, GitHub Actions jobs) have no main folder and are skipped. Exit 2
+# blocks the command and stderr goes back to the session. Reads the raw hook JSON on stdin, so it
+# needs no jq; the JSON reader and the shell lexer are in lib/shell-lexer.sh. Tests:
 # block-branch-switch.test.sh next to this file.
 set -uo pipefail
 # Without the lib the hook exits 1: Claude Code reports the error and lets the call through.
@@ -12,6 +13,7 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/shell-lexer.sh" || exit 1
 
 input=$(cat)
+remote_session && exit 0
 
 cwd=$(json_field cwd) || exit 0
 command=$(json_field command) || exit 0

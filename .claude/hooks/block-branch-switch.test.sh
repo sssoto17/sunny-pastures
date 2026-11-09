@@ -9,6 +9,7 @@ MAIN=/home/dev/sunny-pastures
 WT=$MAIN/.claude/worktrees/16-branch-guard-hook
 pass=0
 fail=0
+unset CLAUDE_CODE_REMOTE GITHUB_ACTIONS # set in cloud sessions and CI; tested below
 
 # JSON-encode a string the way the harness does (backslash, quote, newline, tab).
 json_str() {
@@ -190,7 +191,13 @@ allow "$MAIN" "bash -c 'cd .claude/worktrees/16-x'" # a child shell's cd ends wi
 allow "$MAIN" 'git status > .scratch/status.txt 2>&1'
 deny "$MAIN" '(( n > 0 )) && git switch feature'
 deny "$MAIN" '[[ a > b ]] && git checkout feature'
+deny "$MAIN" '((true) && git switch feature)'
 allow "$MAIN" 'if (( $(git rev-list --count HEAD..origin/main) > 0 )); then git status; fi'
+
+# --- remote sessions have no main folder to protect (#75) --------------------------------------
+CLAUDE_CODE_REMOTE=true allow "$MAIN" 'git checkout -b claude/retro-2026-11-15'
+GITHUB_ACTIONS=true allow "$MAIN" 'git switch -c factory/80-x'
+CLAUDE_CODE_REMOTE=false deny "$MAIN" 'git switch feature'
 
 # --- hook input edge cases ------------------------------------------------------------------
 check_raw() { # expected-code raw-json label
