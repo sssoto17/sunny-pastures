@@ -11,13 +11,13 @@ const safeTree = fc.anything({
 
 /** Numbers that are not safe integers. */
 const unsafeNumber = fc.oneof(
-  fc.constantFrom(NaN, Infinity, -Infinity, 2 ** 53, -(2 ** 53), 0.5),
+  fc.constantFrom(NaN, Infinity, -Infinity, 2 ** 53, -(2 ** 53), 0.5, -0),
   fc.double({ noNaN: true }).filter((n) => !Number.isSafeInteger(n)),
 );
 
 describe('assertSafeIntegers', () => {
   test('accepts a state whose numbers are all safe integers', () => {
-    const state = { time: 2 ** 31 + 5, coins: 0, rng: -0, plots: [{ grownAt: Number.MAX_SAFE_INTEGER }] };
+    const state = { time: 2 ** 31 + 5, coins: 0, rng: 0, plots: [{ grownAt: Number.MAX_SAFE_INTEGER }] };
     expect(() => assertSafeIntegers(state)).not.toThrow();
   });
 
@@ -27,6 +27,7 @@ describe('assertSafeIntegers', () => {
     ['Infinity', Infinity],
     ['2^53', 2 ** 53],
     ['-(2^53)', -(2 ** 53)],
+    ['-0, which a JSON round trip turns into 0', -0],
   ])('throws on %s, naming where it is', (_name, bad) => {
     expect(() => assertSafeIntegers({ plots: [{ ok: 1 }, { grownAt: bad }] })).toThrow('$.plots[1].grownAt');
   });
