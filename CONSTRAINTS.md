@@ -316,6 +316,18 @@ IDs run `E1`, `E2`, …, and are never reused. The floor guard reads rows matchi
 fails every PR once a row's expiry date has passed, until the row is removed or the admin renews
 it.
 
+What a row must hold, checked by the floor guard (#99):
+
+- **Rule** names the findings it waives, as the guard prints them (`silenced-checker`,
+  `config-loosened`, …), separated by commas. A finding the row doesn't name stays blocked, even
+  on its Path. A name the guard doesn't know fails the row.
+- **Path** is one file or folder, so its first segment has no wildcard: `packages/sim/**` is a
+  path, `**` and `**/*.ts` fail as `exception-too-broad`.
+- **Expires** is a date the guard can read (`2026-11-30` or `30 Nov 2026`). Any other value fails
+  every PR, as an expired row does.
+- The file has one `## Exceptions` heading. A second one fails every PR, and a row inside a code
+  fence (backticks or `~~~`) or a comment is never read.
+
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
 | _none_ | | | | | |

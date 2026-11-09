@@ -666,6 +666,77 @@ describe('floor guard, end to end', () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain('[exception-expired] CONSTRAINTS.md');
   });
+
+  // #99: the gaps the #40 review found in Exceptions rows.
+  describe('Exceptions rows (#99)', () => {
+    const rowFor = (rule, path, expires = '2026-11-30', id = 'E1') => `| ${id} | ${rule} | \`${path}\` | reason | Soto | ${expires} |`;
+    const TS_IGNORE = { 'packages/sim/src/a.ts': '// @ts-ignore\n' };
+
+    it.each([
+      ['its own rule', 'silenced-checker', 0],
+      ['its rule in words', 'silenced checker', 0],
+      ['one of several rules', 'config-loosened, silenced-checker', 0],
+      ['another rule only', 'test-made-easier', 1],
+    ])('waives a finding when the Rule column names %s', (_, rule, code) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor(rule, 'packages/sim/src/a.ts')) });
+      const r = guard();
+      expect(r.code).toBe(code);
+      if (code) expect(r.out).toContain('[silenced-checker] packages/sim/src/a.ts');
+    });
+
+    it('refuses a Rule column that names no rule the guard knows', () => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor('anything goes', 'packages/sim/src/a.ts')) });
+      expect(guard().out).toContain('[exception-invalid] CONSTRAINTS.md');
+    });
+
+    it.each(['**', '*/**', '**/*.ts', '*'])('refuses the Path %s, which reaches past one folder', (path) => {
+      setup();
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', path)) });
+      const r = guard();
+      expect(r.out).toContain('[exception-too-broad] CONSTRAINTS.md');
+      expect(r.out).toContain('[silenced-checker] packages/sim/src/a.ts');
+    });
+
+    it('fails every change while a row has a date it cannot read', () => {
+      repo = makeRepo({ ...BASE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', 'x', 'soon')) });
+      repo.write({ 'packages/sim/src/b.ts': 'export const b = 2;\n' });
+      expect(guard().out).toContain('[exception-invalid] CONSTRAINTS.md');
+    });
+
+    it('ignores FLOOR_GUARD_TODAY under Actions', () => {
+      repo = makeRepo({ ...BASE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', 'x', '2026-11-01')) });
+      expect(guard({ FLOOR_GUARD_TODAY: '2026-10-20' }).code).toBe(0);
+      // Under Actions the real date counts, and 1 Nov 2026 has passed.
+      const r = guard({ FLOOR_GUARD_TODAY: '2026-10-20', GITHUB_ACTIONS: 'true' });
+      expect(r.out).toContain('[exception-expired] CONSTRAINTS.md');
+      expect(r.out).toContain('FLOOR_GUARD_TODAY is ignored under Actions');
+    });
+
+    it('does not waive with a row inside a ~~~ fence', () => {
+      setup();
+      const fenced = CONSTRAINTS.replace('## Floor\n', `~~~\n## Exceptions\n\n| ID | Rule | Path | Reason | Owner | Expires |\n|---|---|---|---|---|---|\n${rowFor('silenced-checker', 'packages/sim/src/a.ts')}\n~~~\n\n## Floor\n`);
+      repo.write({ ...TS_IGNORE, 'CONSTRAINTS.md': fenced });
+      const r = guard();
+      expect(r.out).toContain('[silenced-checker] packages/sim/src/a.ts');
+      expect(r.out).not.toContain('waived by');
+    });
+
+    it('fails a second level-2 Exceptions heading', () => {
+      setup();
+      repo.write({ 'CONSTRAINTS.md': `${CONSTRAINTS}\n## Exceptions\n\nMore.\n` });
+      expect(guard().out).toContain('[exceptions-heading-repeated] CONSTRAINTS.md');
+    });
+
+    it('still reports an expired row behind an earlier, empty Exceptions heading', () => {
+      repo = makeRepo({ ...BASE, 'CONSTRAINTS.md': withException(rowFor('silenced-checker', 'x', '2026-11-05')) });
+      repo.write({ 'CONSTRAINTS.md': withException(rowFor('silenced-checker', 'x', '2026-11-05')).replace('## Floor\n', '## Exceptions\n\n## Floor\n') });
+      const r = guard();
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('[exception-expired] CONSTRAINTS.md');
+    });
+  });
 });
 
 describe('floor guard helpers', () => {

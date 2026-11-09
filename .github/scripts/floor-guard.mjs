@@ -156,9 +156,12 @@ export const parseRules = (lines) => {
       comment = !line.includes('-->');
       return;
     }
-    if (/^\s*```/.test(line)) {
+    // A fence opens with three or more backticks or tildes and closes with the same character, at
+    // least as many times (CommonMark). A `~~~` fence hid an Exceptions row before #99.
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker && (!fence || (marker[0] === fence[0] && marker.length >= fence.length))) {
       flush();
-      fence = !fence;
+      fence = fence ? false : marker;
       return;
     }
     if (fence) return;
@@ -166,7 +169,7 @@ export const parseRules = (lines) => {
       flush();
       headers = null;
       section = line.replace(/^#+\s*/, '').trim();
-      sectionNo = headings.push({ no: headings.length + 1, level: /^#+/.exec(line)[0].length, title: section });
+      sectionNo = headings.push({ no: headings.length + 1, level: /^#+/.exec(line)[0].length, title: section, line: n });
       return;
     }
     if (!line.trim()) {
@@ -618,10 +621,22 @@ export const parseDate = (s) => {
   if (m && month !== undefined) return Date.UTC(Number(m[3]), month, Number(m[1]));
   return null;
 };
+// The findings an Exceptions row can waive, by the name its Rule column uses (#99). Unfinished work
+// and the exception-* findings are never waivable.
+const WAIVABLE = new Set([
+  'silenced-checker', 'test-made-easier', 'test-deleted', 'assertion-removed', 'property-runs-cut',
+  'config-loosened', 'check-removed', 'rule-removed', 'rule-narrowed', 'threshold-removed',
+  'threshold-loosened', 'threshold-changed', 'severity-dropped', 'stage-moved',
+]);
+// A Rule cell names one or more findings, as `silenced-checker` or "silenced checker".
+const ruleNames = (cell) => cell.split(/[,;]/).map((s) => s.replace(/[`*_]/g, '').trim().toLowerCase().replace(/\s+/g, '-')).filter(Boolean);
 export const parseException = (text) => {
   const cells = text.trim().split('|').slice(1, -1).map((c) => c.trim());
-  return { id: cells[0], path: (cells[2] ?? '').replace(/`/g, ''), expires: parseDate(cells[5] ?? '') };
+  return { id: cells[0], rules: ruleNames(cells[1] ?? ''), path: (cells[2] ?? '').replace(/`/g, ''), expires: parseDate(cells[5] ?? '') };
 };
+// A Path names one file or folder, so its first segment is literal: `**`, `*/**` and `**/*.ts`
+// would each waive a rule across the repo.
+const tooBroad = (path) => /[*?[]/.test(path.split('/')[0]);
 export const globToRegExp = (glob) =>
   new RegExp(
     '^' +
@@ -696,34 +711,43 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
   // Exceptions: added rows waive weak findings on their path; every row must still be valid.
   // Rows come from the parsed Exceptions table only, never from raw diff lines, so a row-shaped
   // line in a code fence, a comment or another table can't waive anything.
-  // Only the first level-2 `## Exceptions` heading counts; a later or deeper one is ignored.
+  // Only a level-2 `## Exceptions` heading holds waivers, and the file has exactly one: a second
+  // one fails (#99), since an earlier empty one once hid the real table. Expiry and validity are
+  // checked on rows under every heading called Exceptions, so a row can't be hidden from them.
   const exceptionRows = (lines) => {
     const rules = parseRules(lines);
-    const no = rules.headings.find((h) => h.level === 2 && h.title === 'Exceptions')?.no;
-    return no ? rules.filter((r) => r.kind === 'row' && r.sectionNo === no && /^E\d+$/.test(r.key)) : [];
+    const level2 = rules.headings.filter((h) => h.level === 2 && h.title === 'Exceptions');
+    const titled = new Set(rules.headings.filter((h) => h.title === 'Exceptions').map((h) => h.no));
+    const rows = (nos) => rules.filter((r) => r.kind === 'row' && nos.has(r.sectionNo) && /^E\d+$/.test(r.key));
+    return { waiving: level2.length === 1 ? rows(new Set([level2[0].no])) : [], all: rows(titled), repeated: level2.slice(1) };
   };
   const constraints = changes.find((f) => isConstraints(f.path));
-  const rowsNow = exceptionRows(constraintsNow.split('\n'));
-  const rowsBefore = new Set(constraints ? exceptionRows(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? []).map((r) => r.text.trim()) : rowsNow.map((r) => r.text.trim()));
-  const addedRows = rowsNow.filter((r) => !rowsBefore.has(r.text.trim()));
+  const now = exceptionRows(constraintsNow.split('\n'));
+  for (const h of now.repeated) always('exceptions-heading-repeated', 'CONSTRAINTS.md', h.line);
+  const rowsBefore = new Set(constraints ? exceptionRows(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? []).all.map((r) => r.text.trim()) : now.all.map((r) => r.text.trim()));
+  const addedRows = now.waiving.filter((r) => !rowsBefore.has(r.text.trim()));
   const waivers = [];
   const latest = Math.min(today + MAX_EXCEPTION_DAYS * 864e5, Date.parse(FREEZE));
   for (const a of addedRows) {
     const e = parseException(a.text);
-    if (e.expires === null || !e.path) always('exception-invalid', 'CONSTRAINTS.md', a.line, e.id);
+    if (e.expires === null) continue; // reported below, with every other row
+    if (!e.path || !e.rules.length || e.rules.some((x) => !WAIVABLE.has(x))) always('exception-invalid', 'CONSTRAINTS.md', a.line, e.id);
+    else if (tooBroad(e.path)) always('exception-too-broad', 'CONSTRAINTS.md', a.line, e.id);
     else if (e.expires > latest) always('exception-too-long', 'CONSTRAINTS.md', a.line, e.id);
     else {
       waivers.push({ ...e, re: globToRegExp(e.path) });
-      notices.push(`new exception ${e.id} on ${e.path}`);
+      notices.push(`new exception ${e.id} on ${e.path} for ${e.rules.join(', ')}`);
     }
   }
-  for (const r of rowsNow) {
+  // Every row, new or old: a date the guard can't read would otherwise never expire.
+  for (const r of now.all) {
     const e = parseException(r.text);
-    if (e.expires !== null && e.expires < today) always('exception-expired', 'CONSTRAINTS.md', r.line, e.id);
+    if (e.expires === null) always('exception-invalid', 'CONSTRAINTS.md', r.line, e.id);
+    else if (e.expires < today) always('exception-expired', 'CONSTRAINTS.md', r.line, e.id);
   }
   const blocking = [];
   for (const f of findings) {
-    const w = f.waivable && waivers.find((x) => x.re.test(f.file));
+    const w = f.waivable && waivers.find((x) => x.re.test(f.file) && x.rules.includes(f.rule));
     if (w) notices.push(`${f.rule} at ${f.file}:${f.line} waived by ${w.id}`);
     else blocking.push(f);
   }
@@ -741,7 +765,11 @@ const HINTS = {
 const main = () => {
   const mergeBase = enterRepo(baseArg(process.argv));
   const changes = readChange(mergeBase);
-  const todayEnv = process.env.FLOOR_GUARD_TODAY;
+  // FLOOR_GUARD_TODAY is for tests. Under Actions the real date always counts (#99), so a workflow
+  // edit can't set the clock back on an expired row.
+  const inActions = process.env.GITHUB_ACTIONS === 'true';
+  if (inActions && process.env.FLOOR_GUARD_TODAY) console.log('floor-guard: note: FLOOR_GUARD_TODAY is ignored under Actions');
+  const todayEnv = inActions ? undefined : process.env.FLOOR_GUARD_TODAY;
   const today = todayEnv ? parseDate(todayEnv) : Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
   if (today === null) throw new CannotRun('FLOOR_GUARD_TODAY is not a YYYY-MM-DD date');
   let constraintsNow;
