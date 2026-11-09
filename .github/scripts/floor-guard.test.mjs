@@ -201,11 +201,64 @@ describe('floor guard, end to end', () => {
     expect(guard().out).toContain('[property-runs-cut]');
   });
 
+  // #99: deleting the run count outright falls back to the library default.
+  it.each([
+    ['numRuns', 'fc.assert(prop, { numRuns: 1000 });\n', 'fc.assert(prop);\n'],
+    ['SIM_PROPERTY_RUNS', "const runs = Number(process.env.SIM_PROPERTY_RUNS ?? 100);\nexport default { runs };\n", 'export default {};\n'],
+  ])('blocks %s deleted outright', (_, before, after) => {
+    setup();
+    repo.write({ 'packages/sim/src/p.test.ts': before });
+    repo.commit();
+    repo.git('switch', '-q', '-C', 'main');
+    repo.git('switch', '-q', '-c', 'cut');
+    repo.write({ 'packages/sim/src/p.test.ts': after });
+    expect(guard().out).toContain('[property-runs-cut]');
+  });
+
+  it('accepts a run count that moved within its file', () => {
+    setup();
+    repo.write({ 'packages/sim/src/p.test.ts': 'fc.assert(a, { numRuns: 1000 });\nfc.assert(b);\n' });
+    repo.commit();
+    repo.git('switch', '-q', '-C', 'main');
+    repo.git('switch', '-q', '-c', 'move');
+    repo.write({ 'packages/sim/src/p.test.ts': 'fc.assert(b);\nfc.assert(a, { numRuns: 1000 });\n' });
+    expect(guard().code).toBe(0);
+  });
+
+  it.each([
+    ['every fallow-ignore form', '// fallow-ignore-next-line unused-export\n'],
+    ['a fallow-ignore for a block', '// fallow-ignore-start\n'],
+  ])('blocks %s', (_, code) => {
+    setup();
+    repo.write({ 'packages/sim/src/c.ts': code });
+    expect(guard().out).toContain('[silenced-checker]');
+  });
+
+  it.each([
+    ['without extends or strict', '{\n  "compilerOptions": {\n    "target": "ES2022"\n  }\n}\n', 1],
+    ['with extends', '{\n  "extends": "../../tsconfig.base.json"\n}\n', 0],
+    ['with strict on', '{\n  "compilerOptions": {\n    "strict": true\n  }\n}\n', 0],
+  ])('judges a new package tsconfig %s', (_, content, code) => {
+    setup();
+    repo.write({ 'packages/new/tsconfig.json': content });
+    const r = guard();
+    expect(r.code).toBe(code);
+    if (code) expect(r.out).toContain('[config-loosened] packages/new/tsconfig.json');
+  });
+
   it.each([
     ['a TODO', '// TODO\n'],
     ['a not-implemented stub', "throw new Error('Not implemented');\n"],
     ['an empty catch', 'try { f(); } catch {}\n'],
     ['an empty multi-line catch', 'try {\n  f();\n} catch (e) {\n}\n'],
+    // #99: patterns the #40 review found passing.
+    ['an empty .catch callback', 'p.catch(() => {});\n'],
+    ['an empty .catch callback with a parameter', 'p.catch((e) => { });\n'],
+    ['an empty .catch function', 'p.catch(function () {});\n'],
+    ['a catch holding only a comment', 'try { f(); } catch { /* fine */ }\n'],
+    ['a multi-line catch holding only comments', 'try {\n  f();\n} catch (e) {\n  // ignore\n  /* really */\n}\n'],
+    ['a "not yet implemented" stub', "throw new Error('Not yet implemented');\n"],
+    ['an "unimplemented" stub', 'throw new TypeError(`unimplemented: ${x}`);\n'],
   ])('always blocks %s', (_, code) => {
     setup();
     repo.write({ 'packages/sim/src/s.ts': code, 'CONSTRAINTS.md': withException(row('E1', 'packages/sim/**', '2026-11-20')) });

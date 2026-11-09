@@ -39,9 +39,31 @@ const MAX_EXCEPTION_DAYS = 30;
 
 // CONSTRAINTS.md, Floor: the suppression comments.
 const SUPPRESSIONS =
-  /@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|istanbul ignore|c8 ignore|v8 ignore|Stryker disable|nosemgrep|gitleaks:allow|fallow-ignore-next-line|fallow-ignore-file|#\s*noqa|#\s*type:\s*ignore/;
+  /@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|istanbul ignore|c8 ignore|v8 ignore|Stryker disable|nosemgrep|gitleaks:allow|fallow-ignore[\w-]*|#\s*noqa|#\s*type:\s*ignore/;
 const SKIPS = /\.(skip|only|todo|skipIf|runIf)\b|\b(xit|xtest|xdescribe|fit|fdescribe)\s*\(/;
-const STUBS = /throw new \w*Error\(\s*['"`][^'"`]*[Nn]ot [Ii]mplemented|catch\s*(\([^)]*\))?\s*\{\s*\}|\bTODO\b/;
+// Unfinished work (#99 added the last four): a not-implemented stub, "not yet implemented" and
+// "unimplemented" included; an empty `catch`, or one holding only a comment; an empty `.catch`
+// callback; a TODO.
+const STUBS = new RegExp(
+  [
+    /throw new \w*Error\(\s*['"`][^'"`]*\b(?:[Nn]ot\s+(?:[Yy]et\s+)?[Ii]mplemented|[Uu]nimplemented)/,
+    /catch\s*(\([^)]*\))?\s*\{\s*\}/,
+    /catch\s*(\([^)]*\))?\s*\{\s*(\/\*.*?\*\/\s*)+\}/,
+    /\.catch\(\s*(?:\([^)]*\)|\w+)\s*=>\s*\{\s*\}\s*\)/,
+    /\bTODO\b/,
+  ].map((r) => r.source).join('|'),
+);
+// A line holding only a comment, for a multi-line `catch` with nothing else in it.
+const COMMENT_ONLY = /^\s*(\/\/.*|\/\*.*\*\/|\*.*|\/\*.*)\s*$/;
+// Whether the block opened on line `n` (1-based) closes with nothing but blank or comment lines.
+const emptyBlockAfter = (lines, n) => {
+  for (let i = n; i < lines.length; i++) {
+    const l = lines[i] ?? '';
+    if (/^\s*\}/.test(l)) return true;
+    if (l.trim() && !COMMENT_ONLY.test(l)) return false;
+  }
+  return false;
+};
 // An ESLint rule turned off or down to a warning: `'rule': 'off'`, `'rule': 0`, `'rule': ['warn', …]`.
 const RULE_OFF = /(["'][\w@/-]+["']|\w+)\s*:\s*\[?\s*["'](off|warn)["']|["'][\w@/-]+["']\s*:\s*\[?\s*[01]\b/;
 const OPEN_CATCH = /catch\s*(\([^)]*\))?\s*\{\s*$/;
@@ -112,6 +134,12 @@ const configLoosening = (f, mergeBase) => {
       for (const r of f.removed) if (/configs\.|["']error["']/.test(r.text)) hits.push(`${r.line} (old)`);
     }
   } else if (/^tsconfig.*\.json$/.test(name)) {
+    // A new tsconfig that neither extends a shared one nor turns `strict` on compiles a package
+    // with TypeScript's loose defaults (#99).
+    if (f.status === 'added') {
+      const text = readFileSync(f.path, 'utf8');
+      if (!/"extends"\s*:/.test(text) && !/"strict"\s*:\s*true/.test(text)) hits.push(1);
+    }
     const addedTrue = new Set(f.added.map((a) => STRICT_KEYS.exec(a.text)).filter((m) => m?.[2] === 'true').map((m) => m[1]));
     for (const a of f.added) {
       const m = STRICT_KEYS.exec(a.text);
@@ -720,13 +748,15 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       ruleChanges.push(...result.changes);
     }
     if (isProse(f.path)) continue;
-    const byLine = new Map(f.added.map((a) => [a.line, a.text]));
+    // The whole new file, read once and only if a check needs lines that weren't added.
+    let content;
+    const fileLines = () => (content ??= readFileSync(f.path, 'utf8').split('\n'));
     for (const { line, text } of f.added) {
       // Only the suppression and stub scans skip the guard's own files (see SELF).
       if (!SELF.has(f.path)) {
         if (SUPPRESSIONS.test(text)) weak('silenced-checker', f.path, line);
         if (STUBS.test(text)) always('unfinished-work', f.path, line);
-        else if (OPEN_CATCH.test(text) && /^\s*\}/.test(byLine.get(line + 1) ?? '')) always('unfinished-work', f.path, line);
+        else if (OPEN_CATCH.test(text) && emptyBlockAfter(fileLines(), line)) always('unfinished-work', f.path, line);
       }
       if (isTest(f.path) && SKIPS.test(text)) weak('test-made-easier', f.path, line);
     }
@@ -757,6 +787,13 @@ export const guard = (changes, { mergeBase, today, constraintsNow }) => {
       if (!was) continue;
       const now = f.added.map((a) => RUN_COUNT.exec(a.text)).find((m) => m?.[1] === was[1]);
       if (now && Number(now[2]) < Number(was[2])) weak('property-runs-cut', f.path, `${r.line} (old)`);
+      // Deleted outright (#99): the run count falls back to the library's default. It counts as
+      // kept if the file still sets it to at least the old value somewhere (a moved line).
+      const kept = fileLines().some((l) => {
+        const m = RUN_COUNT.exec(l);
+        return m?.[1] === was[1] && Number(m[2]) >= Number(was[2]);
+      });
+      if (!now && !kept) weak('property-runs-cut', f.path, `${r.line} (old)`);
     }
     for (const line of configLoosening(f, mergeBase)) weak('config-loosened', f.path, line);
   }
