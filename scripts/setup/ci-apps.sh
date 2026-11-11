@@ -217,7 +217,9 @@ usage: scripts/setup/ci-apps.sh
 
 Walks you through #101's setup, one stage per screen:
   1. checks gh is signed in;
-  2. creates the Actions environments `factory` and `review`;
+  2. creates the Actions environments `factory` and `review` if missing, each with a custom
+     deployment-branch policy allowing only `main` and `throwaway/*` (an existing environment
+     is never re-created, so its other protection rules stay);
   3-5. sunny-factory: register it (contents, issues and pull requests: read and write), store its
        client ID as FACTORY_APP_CLIENT_ID and its key as FACTORY_APP_PRIVATE_KEY in `factory`,
        install it on sssoto17/sunny-pastures only;
@@ -225,7 +227,7 @@ Walks you through #101's setup, one stage per screen:
        REVIEWER_APP_CLIENT_ID and REVIEWER_APP_PRIVATE_KEY in `review`;
   9. lists what is set, by name only.
 Neither App gets Administration or Workflows, and neither joins a ruleset's bypass list.
-Keys: save the downloaded .pem outside the repo; the wizard deletes it once it is stored.
+Keys: save the downloaded .pem outside the repo; once it is stored, the wizard offers to delete it.
 Re-running is safe: every write replaces the value it set before.
 
 Exit codes: 0 done; 1 a gh command failed; 2 refused (gh missing or signed out, input ended).
@@ -242,6 +244,43 @@ case ${1-} in
   "") ;;
   *) usage; exit 2 ;;
 esac
+
+# ensure_env ENV: create ENV only if it is missing, and give it a custom deployment-branch policy
+# allowing only the branches in BRANCH_POLICIES, adding just the patterns it lacks. Idempotent:
+# GitHub's REST reference doesn't say what a PUT without a body does to existing protection rules,
+# so an environment that exists with the custom policy is never PUT again.
+BRANCH_POLICIES=(main 'throwaway/*')
+ensure_env() {
+  local env=$1 policy have name
+  policy=$(gh api "repos/$REPO/environments/$env" --jq \
+    '.deployment_branch_policy // {} | "\(.protected_branches) \(.custom_branch_policies)"' 2>/dev/null) ||
+    policy=missing
+  if [[ $policy != "false true" ]]; then
+    gh api -X PUT "repos/$REPO/environments/$env" --silent \
+      -F 'deployment_branch_policy[protected_branches]=false' \
+      -F 'deployment_branch_policy[custom_branch_policies]=true' ||
+      die 1 "creating or restricting environment $env failed"
+  fi
+  have=$(gh api "repos/$REPO/environments/$env/deployment-branch-policies" \
+    --jq '.branch_policies[] | select((.type // "branch") == "branch") | .name') ||
+    die 1 "reading the branch policies of $env failed"
+  for name in "${BRANCH_POLICIES[@]}"; do
+    grep -qxF -- "$name" <<<"$have" && continue
+    gh api -X POST "repos/$REPO/environments/$env/deployment-branch-policies" --silent \
+      -f "name=$name" -f type=branch || die 1 "adding branch policy $name to $env failed"
+  done
+  printf '  %s✓ environment%s %s: only %s may use it\n' "$GREEN" "$RESET" "$env" "${BRANCH_POLICIES[*]}"
+}
+
+# intro TITLE: the opening frame. Used instead of the library's banner, whose text promises
+# remembered values this wizard doesn't keep.
+intro() {
+  _clear
+  printf '\n%s%s  %s%s\n' "$BOLD" "$BLUE" "$1" "$RESET"
+  printf '%s  %s stages. You drive the browser; this wizard says what to do and stores what\n' "$DIM" "$TOTAL_STAGES"
+  printf '  you copy back. Stop with Ctrl-C any time; re-running is safe.%s\n\n' "$RESET"
+  pause "Ready to start?"
+}
 
 # store_key ENV NAME: asks for the .pem path and sends the file to `gh secret set` on stdin. The
 # key never passes through a shell variable, an argument or the terminal.
@@ -308,7 +347,7 @@ run_wizard() {
 
 TOTAL_STAGES=9
 
-banner "#101: the factory and reviewer Apps"
+intro "#101: the factory and reviewer Apps"
 
 stage "Check gh"
 command -v gh >/dev/null 2>&1 || die 2 "gh is not installed: https://cli.github.com"
@@ -318,11 +357,8 @@ pause
 
 stage "Environments"
 say "Each App's key lives in its own environment, so only a job that names it gets the key."
-for env in factory review; do
-  gh api -X PUT "repos/$REPO/environments/$env" --silent || die 1 "creating environment $env failed"
-  printf '  %s✓ environment%s %s\n' "$GREEN" "$RESET" "$env"
-done
-note "No branch restriction yet, so the throwaway check branches can use them (ci-check.sh)."
+for env in factory review; do ensure_env "$env"; done
+note "No other branch's workflow can read their secrets. throwaway/* is for the checks."
 pause
 
 app_stages sunny-factory FACTORY factory "contents=write&issues=write&pull_requests=write" \
@@ -339,7 +375,7 @@ for env in factory review; do
     die 1 "gh secret list --env $env failed"
   say "Environment $env, secrets:"; note "  ${names//$'\n'/, }"
 done
-say "Next: scripts/setup/ci-claude.sh (#103), then scripts/setup/ci-check.sh start 101."
+say "Next: the Claude token (#103), then the checks: see How to run in PR #179."
 pause
 
 finish
