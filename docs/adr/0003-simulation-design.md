@@ -448,21 +448,24 @@ Collector is SHOULD-08.
   content's `addOns[addOn].price`. It is refused for a facility the farm hasn't bought, an add-on
   not in content, or one the facility has, so an action sent twice buys it once.
 - **The Collector** is one `moveGoods` step per facility and time, keyed by the facility and slot
-  0. It falls when one of the facility's jobs finishes, in place of `finishJob`, and at the farm's
-  time whenever the facility's oldest job is done and its goods fit. It finishes the jobs due, then
+  0. It falls when one of the facility's jobs finishes, in place of `finishJob`, and a ms after the
+  farm's time whenever the facility's oldest job is done and its goods fit. It finishes the jobs due, then
   moves the done jobs into the barn through `storage/`'s `put`, oldest first, while they fit, each
   with its XP through `gainXp`, as collecting by hand does (the two share one rule). Goods that
-  don't fit wait in their slot (MUST-06.6) and move as soon as the barn has room; goods already
-  waiting when the Collector is bought move at once if they fit.
-- **`apply` advances once more after the action**, to `at`, so a step the action made due at its
-  own time (a Collector moving goods that waited, once it is bought or feeding frees room) runs in the same call. Every farm the rules return has then run its steps
-  up to its time. This amends section 2, where `apply` only advanced before the action.
+  don't fit wait in their slot (MUST-06.6) and move a ms after the barn has room; goods already
+  waiting when the Collector is bought move a ms after it, if they fit. Room that a step or an
+  action frees at a time is so used at the next, never behind a step already run at it (MUST-10.6).
+- **`apply` advances once more after the action**, to `at`, so an automated step the action made
+  due at its own time runs in the same call (from #88's Loop on: a restart into a slot a collect
+  freed). Every farm the rules return has then run its steps up to its time. This amends section
+  2, where `apply` only advanced before the action.
 - **Step kind.** `moveGoods` ranks after the producing kinds, so goods made at a time are moved at
-  it. No step ranked after it frees barn room, so no move falls due behind a step already run at
+  it. Waiting goods move a ms after the room appears, so room a later-ranked step frees (a Loop
+  restart that takes barn goods, such as cookies' eggs, #85) never makes a move due behind it at
   the same time (MUST-10.6).
 
-**Patterns:** a level-triggered automated step (the Collector acts whenever its oldest job's goods
-fit, at the farm's time, besides its step at a job's stored finish); the strategy behind
+**Patterns:** a level-triggered automated step (the Collector acts a ms after its oldest job's
+goods fit, besides its step at a job's stored finish); the strategy behind
 `StepSource` (section 12), chosen per facility by its stored add-ons; the policy function of
 section 11 for buying; one rule reused by the player's action and the automated step (collecting,
 for the Collector).
@@ -474,11 +477,15 @@ for the Collector).
   them would never resume on its own; the admin's queue rule needs them to move once there is room.
 - **`finishJob` then a separate `moveGoods` of the done job.** A done job stores no time, so the
   move would need a status that lives only inside one millisecond, or a level-triggered step.
+- **Moving waiting goods at the same ms the room appears** (this stack's second version). A Loop
+  restart that takes barn goods (cookies take eggs, #85) frees room at a time after the moves at
+  that time have run, so a move would fall due behind a step already run, which `advance` throws
+  on; a ms later is the earliest a move can follow it in MUST-10.6's order.
 - **Moving waiting goods inside `buyAddOn` and `feed`.** Each action that frees room or adds a
   Collector would have to know about it; one advance after any action covers them all.
-- **Leaving the move to the caller's next advance.** A farm `apply` returned would still have a
-  step due at its own time: `advance(farm, farm.time)` would change it, breaking idempotent
-  `advance` and MUST-14.2's replay from a snapshot.
+- **Leaving a step the action made due to the caller's next advance.** A farm `apply` returned
+  would still have a step due at its own time: `advance(farm, farm.time)` would change it,
+  breaking idempotent `advance` and MUST-14.2's replay from a snapshot.
 - **Add-ons as a list of ids.** A list has an order to keep canonical; a flag per add-on is one
   fact each.
 - **A price per facility.** One price per add-on is enough for the slice; a field in `Facility`
@@ -512,7 +519,7 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
 | Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding and collecting from pens (sections 12, 13). |
 | Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
-| Level-triggered automated step | the Collector | It acts whenever its oldest job's goods fit, at the farm's time, in MUST-10.6's order, so room freed by any step or action is used at once (section 15). |
+| Level-triggered automated step | the Collector | It acts a ms after its oldest job's goods fit, so room freed by any step or action is used at the next ms, never behind a step already run (section 15). |
 | Table-driven rules | a facility's tier rows | Each tier's price, slots and job time is a row of content, so tuning or adding a tier changes no code (section 14). |
 
 ## Consequences

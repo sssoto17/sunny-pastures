@@ -83,10 +83,9 @@ export function createSim(content: Content): Sim {
 				);
 			}
 
-			// An action can make a step due at its own time, such as a Collector moving goods that
-			// waited, once it is bought or feeding frees room; advancing again runs it, so every farm
-			// the rules return has run its steps up to its time (D6), and advancing it to that time
-			// changes nothing.
+			// An action can make an automated step due at its own time; advancing again runs it, so
+			// every farm the rules return has run its steps up to its time (D6), and advancing it to
+			// that time changes nothing.
 			const result = act(advance(state, at), action);
 			return result.ok ? { ok: true, state: advance(result.state, at) } : result;
 		},
