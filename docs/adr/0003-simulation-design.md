@@ -348,6 +348,52 @@ adds its automated steps without changing `advance`); a shared module for a repe
 - **A room check in each feature.** It would be written three times, and `fallow dupes` fails on
   the copies.
 
+## 13. Pens and troughs (#86)
+
+Chosen by #86's lane on 11 Nov, unattended; the admin reviews it in #86's PRs ("Decided by the
+lane").
+
+`pens/` owns the animal pens (ADR-0005, section 3). Content lists pens in an array; the state has
+one entry per content pen, `null` until bought (MUST-05.6). A bought pen stores its trough's
+portions, one status per animal in slot order (`idle`, or `producing` with the `readyAt` it
+produces at) and the products waiting. A pen is unlocked by the first Level-table row that lists
+it and bought through `purchase` (section 11). Its actions name the pen, so `buyPen` sent twice
+buys one.
+
+- **Feeding** takes as much feed from the barn as fits in the trough and the barn holds, through
+  `storage/` (section 12). Idle animals then eat from the trough at once, in slot order, so no
+  animal is idle while the trough holds feed.
+- **Producing** is an automated step of kind `produce`, keyed by the pen's index and the animal's
+  slot (section 2). The animal adds one product to the pen, then eats the next portion at the
+  time it produced, if the trough holds one (MUST-02.3). When animals produce at the same time
+  and one portion is left, the lowest slot eats it (MUST-10.6).
+- **Collecting** puts every waiting product in the barn through `put`, and gives the pen's XP per
+  product through `gainXp` (MUST-02.4, 05.2).
+- **Each `readyAt` is stored when the animal eats**, read from content once, so a later rules
+  version doesn't move it (ADR-0006, section 7). The next portion's time is read from the rules
+  running when the animal produces. Across a release, a gap is advanced under the new version
+  (ADR-0006, section 4), so a portion eaten in that gap uses the new duration. A portion eaten
+  before the release keeps its stored time.
+- **Step kinds.** `produce` ranks after `finishJob`, for section 12's reason: it touches neither
+  storage nor coins and changes only its own pen, so today its rank changes no outcome, and it
+  produces goods, so it ranks before the kinds that will move them (the Collector and Farmhands,
+  #88).
+
+**Patterns:** a discriminated union per animal with a stored end time (section 5); the
+`StepSource` strategy of section 12, here closed over the pen rules because an animal's next
+portion reads its duration; the shared `storage/` module (section 12).
+
+**Rejected:**
+
+- **One status per pen** (the pen is producing until a time). Animals in one pen eat at different
+  times, and MUST-02.3 is per animal.
+- **A count of producing animals with one shared end time.** It can't hold animals that ate at
+  different times, and it would lose the stored end time ADR-0006 section 7 asks for.
+- **Eating at the next step instead of at once.** An animal would wait idle beside a full
+  trough, and when it eats would depend on unrelated steps.
+- **Products straight to the barn as they are produced.** MUST-02.4 keeps products in the pen
+  until collected, and a full barn would then need a rule for where a product goes.
+
 ## Vocabulary (D11)
 
 **Automated step** (`GLOSSARY.md`): a change the farm makes by itself at a server time, with no
@@ -372,7 +418,8 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Policy function | `progress/`'s `purchase` | One rule for every upgrade: unlocked at a Level, then bought with coins (section 11). |
 | Queue with stored end times | a facility's jobs | Jobs run in start order, and work in flight keeps its end time (section 12). |
 | Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
-| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests and jobs (section 12). |
+| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding and collecting from pens (sections 12, 13). |
+| Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
 
 ## Consequences
 

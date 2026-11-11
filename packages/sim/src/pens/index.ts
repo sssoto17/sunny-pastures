@@ -1,12 +1,13 @@
-// Pens: buying them and feeding their troughs (MUST-02, MUST-05.6; ADR-0005, section 3). The
-// animals producing and collecting the products come next (#86).
+// Pens: buying them, feeding their troughs, the animals producing, and collecting the products
+// (MUST-02, MUST-05.6; ADR-0005, section 3; ADR-0003, section 13).
 import { assertTime } from "../advance/index.js";
+import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
-import { purchase } from "../progress/index.js";
+import { gainXp, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
-import { countStored, take } from "../storage/index.js";
+import { countStored, put, take } from "../storage/index.js";
 import type { StorageRules } from "../storage/index.js";
 
 /** A bought pen (ADR-0003, section 5: pens and troughs are stored facts). */
@@ -34,7 +35,9 @@ export type PenAction =
 	/** Buys the pen; refused once bought, so an action sent twice buys one pen. */
 	| { readonly type: "buyPen"; readonly pen: number }
 	/** Moves feed from the barn into the trough, up to its capacity (MUST-02.2). */
-	| { readonly type: "feed"; readonly pen: number };
+	| { readonly type: "feed"; readonly pen: number }
+	/** Moves every waiting product to the barn (MUST-02.4). */
+	| { readonly type: "collectProducts"; readonly pen: number };
 
 /** The pen rules for one content, prepared once in createSim. */
 export interface PenRules {
@@ -107,6 +110,53 @@ export function feed(farm: FarmState, index: number, rules: PenRules): ApplyResu
 
 	const filled = { ...pen, trough: pen.trough + amount };
 	return { ok: true, state: replacePen(taken.state, index, eat(filled, rule, farm.time)) };
+}
+
+/**
+ * Moves every waiting product to the barn and gives XP for each, with the level-up coins of any
+ * Level it reaches (MUST-02.4, 05.2, 05.4). Refused if there are none or the barn can't hold them.
+ */
+export function collectProducts(farm: FarmState, index: number, rules: PenRules): ApplyResult {
+	const found = findOwned(farm, index, rules);
+	if (typeof found === "string") return refuse(found);
+
+	const { rule, pen } = found;
+	if (pen.products === 0) return refuse(`The ${rule.id} has nothing to collect.`);
+
+	const goods = { good: rule.product, amount: pen.products };
+	const stored = put(farm, goods, `collecting from the ${rule.id}`, rules.storage);
+	if (!stored.ok) return stored;
+
+	const collected = replacePen(stored.state, index, { ...pen, products: 0 });
+	return { ok: true, state: gainXp(collected, pen.products * rule.xp, rules.progress) };
+}
+
+/**
+ * Creates the producing source: an animal produces at its `readyAt`, then eats the next portion if
+ * the trough holds one (MUST-02.3). A step's index is its pen's and its slot the animal's, so keys
+ * stay unique. The next portion's time is read from the rules running at the time the animal
+ * produces (ADR-0006, section 4); a portion already eaten keeps its stored time (section 7).
+ */
+export function createProducing(rules: PenRules): StepSource<FarmState> {
+	return {
+		steps: (farm) =>
+			farm.pens.flatMap((pen, index) =>
+				(pen?.animals ?? []).flatMap((animal, slot): AutomatedStep[] =>
+					animal.status === "producing"
+						? [{ at: animal.readyAt, kind: "produce", index, slot }]
+						: [],
+				),
+			),
+		run: (farm, step) => {
+			const pen = farm.pens[step.index] ?? null;
+			const rule = rules.pens[step.index];
+			if (pen?.animals[step.slot]?.status !== "producing" || rule === undefined) return farm;
+
+			const animals = pen.animals.map((animal, slot) => (slot === step.slot ? idle : animal));
+			const produced = { ...pen, animals, products: pen.products + 1 };
+			return replacePen(farm, step.index, eat(produced, rule, step.at));
+		},
+	};
 }
 
 interface PenRule {

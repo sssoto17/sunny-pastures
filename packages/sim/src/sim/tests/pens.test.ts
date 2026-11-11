@@ -11,6 +11,7 @@ const level2 = 10;
 
 const buy = { type: "buyPen", pen: 0 } as const;
 const feed = { type: "feed", pen: 0 } as const;
+const collect = { type: "collectProducts", pen: 0 } as const;
 
 /** Applies each action at `at`; fails the test on a refusal. */
 const applyAll = (farm: FarmState, actions: readonly Action[], at: number): FarmState =>
@@ -123,5 +124,79 @@ describe("feeding", () => {
 		["a pen content doesn't have", sim.newFarm("farm-1"), 3, "There is no pen 4."],
 	])("is refused for %s", (_name, farm, pen, reason) => {
 		expect(sim.apply(farm, { type: "feed", pen }, 0)).toEqual({ ok: false, reason });
+	});
+});
+
+describe("a chicken producing", () => {
+	it("lays its egg in the pen exactly its production time after eating (MUST-02.3)", () => {
+		const fed = applyAll(withPen(), [feed], 1_000);
+
+		expect(sim.advance(fed, 1_000 + layMs - 1).pens[0]?.products).toBe(0);
+		expect(sim.advance(fed, 1_000 + layMs).pens[0]).toEqual({
+			trough: 0,
+			animals: [idle, idle, idle],
+			products: 1,
+		});
+	});
+
+	it("eats the next portion at the time it lays, while the player is away (MUST-02.3, 07.1)", () => {
+		const fed = applyAll(withPen(), [feed, feed, feed], 0);
+		const topped = applyAll(fed, [feed], 5_000);
+
+		expect(sim.advance(topped, layMs).pens[0]).toEqual({
+			trough: 0,
+			animals: [producing(2 * layMs), idle, idle],
+			products: 3,
+		});
+		expect(sim.advance(topped, 30 * layMs).pens[0]).toEqual({
+			trough: 0,
+			animals: [idle, idle, idle],
+			products: 4,
+		});
+	});
+
+	it("gives the last portion to the lowest slot when chickens lay at once (MUST-10.6)", () => {
+		const fed = applyAll(withPen(), [feed, feed, feed, feed], 0);
+
+		expect(sim.advance(fed, layMs).pens[0]?.animals).toEqual([producing(2 * layMs), idle, idle]);
+	});
+
+	it("keeps the laid time stored when it ate, under a later rules version (ADR-0006, section 7)", () => {
+		const fed = applyAll(withPen(), [feed], 0);
+		const [pen] = sliceContent.pens;
+		const slower: Content = { ...sliceContent, pens: [{ ...pen, seconds: 600 }] };
+
+		expect(createSim(slower).advance(fed, layMs).pens[0]?.products).toBe(1);
+	});
+});
+
+describe("collecting from a pen", () => {
+	const laid = (): FarmState => sim.advance(applyAll(withPen(), [feed, feed], 0), layMs);
+
+	it("moves the eggs to the barn and gives XP for each (MUST-02.4, 05.2)", () => {
+		const before = laid();
+		const farm = expectAccepted(sim.apply(before, collect, layMs));
+
+		expect(farm.barn).toEqual({ chickenFeed: 4, egg: 2 });
+		expect(farm.pens[0]?.products).toBe(0);
+		expect(farm.xp).toBe(before.xp + 2);
+	});
+
+	it("is refused if the barn can't hold them all", () => {
+		const farm = { ...laid(), barn: { chickenFeed: 49 } };
+
+		expect(sim.apply(farm, collect, layMs)).toEqual({
+			ok: false,
+			reason:
+				"The barn has room for 1 more good, and collecting from the chickenPen needs room for 2 egg.",
+		});
+	});
+
+	it.each([
+		["with nothing laid", withPen(), 0, "The chickenPen has nothing to collect."],
+		["from a pen that isn't bought", sim.newFarm("farm-1"), 0, "The chickenPen isn't bought."],
+		["from a pen content doesn't have", withPen(), 1, "There is no pen 2."],
+	])("is refused %s", (_name, farm, pen, reason) => {
+		expect(sim.apply(farm, { type: "collectProducts", pen }, 0)).toEqual({ ok: false, reason });
 	});
 });
