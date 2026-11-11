@@ -12,6 +12,18 @@ const params = inject("fastCheck");
 const sim = createSim(sliceContent);
 const { wheat } = sliceContent.crops;
 
+// The slice's approved Level table (admin, 11 Nov, #83), written out rather than read from content,
+// so the expected values don't recompute what the rules do.
+const levelXp = [0, 10, 30, 60, 100];
+/** The level-up coins paid in all by the time a farm reaches each Level. */
+const paidBy = [0, 20, 50, 90, 140];
+
+/** The Level a farm with `xp` is at (MUST-05.3). */
+const levelAt = (xp: number): number => levelXp.filter((threshold) => threshold <= xp).length;
+
+/** The level-up coins paid in all by the time a farm has `xp` (MUST-05.4). */
+const paidAt = (xp: number): number => paidBy[levelAt(xp) - 1] ?? NaN;
+
 /** A time at or after the farm's, from the generated delays (never before: see 14.7). */
 const addDelay = (farm: FarmState, wait: number): number => farm.time + Math.abs(wait);
 
@@ -110,7 +122,9 @@ describe("the sim's properties", () => {
 						expect(after.coins).toBe(before.coins - wheat.seedPrice);
 						expect(gained).toBe(0);
 					} else {
-						expect(after.coins).toBe(before.coins);
+						// A harvest pays the level-up coins of the Levels its XP reaches (MUST-05.4).
+						expect(after.xp).toBe(before.xp + wheat.xp);
+						expect(after.coins).toBe(before.coins + paidAt(after.xp) - paidAt(before.xp));
 						expect([wheat.baseYield, wheat.baseYield + wheat.bonusYield]).toContain(gained);
 					}
 				}

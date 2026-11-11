@@ -2,6 +2,8 @@
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
+import { cropLocked, gainXp, prepareProgressRules } from "../progress/index.js";
+import type { ProgressRules } from "../progress/index.js";
 import { mulberry32 } from "../random/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
@@ -22,6 +24,7 @@ export type PlotAction =
 export interface PlotRules {
 	readonly crops: ReadonlyMap<string, CropRules>;
 	readonly siloCapacity: number;
+	readonly progress: ProgressRules;
 }
 
 /** Prepares the content once: grow times in ms (D7) and bonus odds as a draw threshold (D16). */
@@ -39,10 +42,17 @@ export function preparePlotRules(content: Content): PlotRules {
 			xp: crop.xp,
 		},
 	]);
-	return { crops: new Map(crops), siloCapacity: content.silo.capacity };
+	return {
+		crops: new Map(crops),
+		siloCapacity: content.silo.capacity,
+		progress: prepareProgressRules(content),
+	};
 }
 
-/** Plants a crop on an empty plot at the farm's time, for its seed price (MUST-01.1, 01.2). */
+/**
+ * Plants an unlocked crop on an empty plot at the farm's time, for its seed price (MUST-01.1,
+ * 01.2).
+ */
 export function plant(
 	farm: FarmState,
 	index: number,
@@ -54,6 +64,9 @@ export function plant(
 
 	const crop = rules.crops.get(cropId);
 	if (crop === undefined) return refuse(`There is no crop ${cropId}.`);
+	const locked = cropLocked(crop.id, farm.xp, rules.progress);
+	if (locked !== null) return refuse(locked);
+
 	if (plot.status !== "empty") return refuse(`Plot ${formatPlotNumber(index)} isn't empty.`);
 	if (farm.coins < crop.seedPrice) {
 		return refuse(
@@ -72,7 +85,8 @@ export function plant(
 
 /**
  * Harvests a ready plot: the base yield plus a bonus drawn from the yields stream goes into the
- * silo, and the harvest gives XP (MUST-01.3, 01.4). Refused if the silo can't hold it all.
+ * silo, and the harvest gives XP, with the level-up coins of any Level it reaches (MUST-01.3, 01.4,
+ * 05.4). Refused if the silo can't hold it all.
  */
 export function harvest(farm: FarmState, index: number, rules: PlotRules): ApplyResult {
 	const plot = findPlot(farm, index);
@@ -93,15 +107,12 @@ export function harvest(farm: FarmState, index: number, rules: PlotRules): Apply
 		);
 	}
 
-	return {
-		ok: true,
-		state: {
-			...replacePlot(farm, index, { status: "empty" }),
-			xp: farm.xp + crop.xp,
-			silo: { ...farm.silo, [crop.id]: (farm.silo[crop.id] ?? 0) + amount },
-			streams: { ...farm.streams, yields: draw.next },
-		},
+	const harvested = {
+		...replacePlot(farm, index, { status: "empty" }),
+		silo: { ...farm.silo, [crop.id]: (farm.silo[crop.id] ?? 0) + amount },
+		streams: { ...farm.streams, yields: draw.next },
 	};
+	return { ok: true, state: gainXp(harvested, crop.xp, rules.progress) };
 }
 
 /** Ripening: a growing plot becomes ready at its `readyAt` (MUST-01.2). */

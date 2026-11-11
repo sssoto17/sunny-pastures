@@ -21,6 +21,15 @@ describe("harvesting", () => {
 		expect(farm.streams).toEqual({ yields: 3150588026, orders: 0xe8550433 });
 	});
 
+	it("pays the level-up coins of the Level its XP reaches (MUST-05.4)", () => {
+		const [, level2] = sliceContent.levels;
+		const nearlyLevel2 = { ...plantWheat(sim, "farm-1"), xp: level2.xp - 1 };
+		const farm = expectAccepted(sim.apply(nearlyLevel2, { type: "harvest", plot: 0 }, growMs));
+
+		expect(farm.xp).toBe(level2.xp);
+		expect(farm.coins).toBe(nearlyLevel2.coins + level2.coins);
+	});
+
 	it("adds the bonus when the yields stream's draw falls under the odds (MUST-01.4)", () => {
 		const farm = expectAccepted(
 			sim.apply(plantWheat(sim, "farm-15"), { type: "harvest", plot: 0 }, growMs),
