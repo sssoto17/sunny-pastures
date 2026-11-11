@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Runs the throwaway checks for #101 (the two Apps) and #103 (Claude in Actions), collects their
+# Runs the throwaway checks for #101 (the two Apps), #102 (reading the Project) and #103 (Claude
+# in Actions), collects their
 # results and cleans up. `start` pushes a branch from origin/main plus one draft workflow from
 # scripts/setup/workflows/, built in a temporary worktree, so your checkout and main are never
 # touched; the push runs the workflow. `results` prints a Markdown summary of non-secret fields
 # for the issue comment. `cleanup` closes the throwaway PR unmerged and deletes the branches.
-# Run ci-apps.sh and ci-claude.sh first. Tests: scripts/setup/ci-check.test.sh.
+# Run ci-apps.sh, ci-project.sh and ci-claude.sh first. Tests: scripts/setup/ci-check.test.sh.
 # shellcheck disable=SC2016 # single-quoted jq programs and Markdown backticks, by design
 set -euo pipefail
 
@@ -20,9 +21,10 @@ TAG=v0.0.0-throwaway-101
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/setup/ci-check.sh start|results|cleanup 101|103
+usage: scripts/setup/ci-check.sh start|results|cleanup 101|102|103
 
   start 101    push throwaway/101-identities with check-101-identities.yml; the push runs it
+  start 102    push throwaway/102-project with check-102-project.yml (needs 101's App)
   start 103    push throwaway/103-claude with check-103-claude.yml (three short Claude runs)
   results N    print the latest run's results as Markdown, for a comment on issue N:
                  scripts/setup/ci-check.sh results 101 > .scratch/101-results.md
@@ -49,6 +51,7 @@ die() { # code message
 cmd=$1 issue=$2
 case $issue in
   101) branch=throwaway/101-identities workflow=check-101-identities.yml ;;
+  102) branch=throwaway/102-project workflow=check-102-project.yml ;;
   103) branch=throwaway/103-claude workflow=check-103-claude.yml ;;
   *) usage; exit 2 ;;
 esac
@@ -111,7 +114,16 @@ results() {
     sed -E $'s/^([^\t]*)\t[^\t]*\t[^ ]* /\\1: /' || true
   printf '```\n'
   [[ $issue == 101 ]] && results_101
+  [[ $issue == 102 ]] && results_102
   return 0
+}
+
+results_102() {
+  printf '\nNext, from the `pat` job'"'"'s `readable=` line:\n\n'
+  printf -- '- yes: that token kind and its scopes are the smallest that works (the last checkbox).\n'
+  printf -- '- no, with a classic token: cleanup 102, ci-project.sh --fine-grained, start 102 again.\n'
+  printf -- '- no, with a fine-grained token too: stop. Bring the alternatives back to the admin.\n'
+  printf -- '  Never widen a classic token to the repo scope.\n'
 }
 
 results_101() {
