@@ -8,8 +8,9 @@
 set -uo pipefail
 command -v jq >/dev/null || { echo "ci-check.test: needs jq" >&2; exit 2; }
 
-script="$(cd "$(dirname "$0")" && pwd)/ci-check.sh"
-draft="$(cd "$(dirname "$0")" && pwd)/workflows/check-101-identities.yml"
+src="$(cd "$(dirname "$0")" && pwd)"
+draft="$src/workflows/check-101-identities.yml"
+GH_URL=https://github.com/sssoto17/sunny-pastures.git
 pass=0
 fail=0
 work=$(mktemp -d "${TMPDIR:-/tmp}/ci-check-test.XXXXXX")
@@ -23,6 +24,9 @@ cat >"$work/gitconfig" <<'EOF'
 [init]
   defaultBranch = main
 EOF
+# The test clone's origin is the real URL, as on the admin's machine; git rewrites it to the bare
+# repo here, while `git config remote.origin.url` (what the script checks) still reads the URL.
+printf '[url "%s"]\n  insteadOf = %s\n' "$work/origin.git" "$GH_URL" >>"$work/gitconfig"
 export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
 
 cat >"$work/bin/gh" <<'FAKE'
@@ -51,7 +55,8 @@ FAKE
 chmod +x "$work/bin/gh"
 
 reset() {
-  rm -rf "$work/origin.git" "$work/seed" "$work/clone" "$work/calls" "$work/fx"
+  rm -rf "$work/origin.git" "$work/seed" "$work/clone" "$work/calls" "$work/fx" \
+    "$work/other.git" "$work/other"
   mkdir -p "$work/fx"
   printf 'X-Oauth-Scopes: gist, read:org, repo, workflow\r\n' >"$work/fx/scopes"
   git init -q --bare "$work/origin.git"
@@ -60,7 +65,14 @@ reset() {
   git -C "$work/seed" add README.md
   git -C "$work/seed" commit -qm init
   git -C "$work/seed" push -q origin main
-  git clone -q "$work/origin.git" "$work/clone"
+  git clone -q "$GH_URL" "$work/clone"
+  install "$work/clone"
+  script=$work/clone/scripts/setup/ci-check.sh
+}
+install() { # repo: copy the script and its drafts into scripts/setup/ there, untracked
+  mkdir -p "$1/scripts/setup"
+  cp "$src/ci-check.sh" "$1/scripts/setup/"
+  cp -r "$src/workflows" "$1/scripts/setup/"
 }
 run() { # args... -> runs the script in the clone; sets code, out, err, calls
   out=$(cd "$work/clone" && printf 'y\n' | PATH="$work/bin:$PATH" bash "$script" "$@" 2>"$work/err")
@@ -107,7 +119,34 @@ assert "expected no leftover worktree" test "$(git -C "$work/clone" worktree lis
 assert "expected no closing keyword in the commit" \
   lacks "$(git -C "$work/origin.git" log -1 --format=%B "$b")" "Closes"
 
+# Run from inside another clone, it still works on its own clone: the other repo gets nothing.
+reset
+git init -q --bare "$work/other.git"
+git clone -q "$work/other.git" "$work/other" 2>/dev/null
+out=$(cd "$work/other" && PATH="$work/bin:$PATH" bash "$script" start 101 2>"$work/err")
+code=$?
+expect_code 0
+assert "expected the push to the script's own origin" \
+  git -C "$work/origin.git" show-ref -q --verify refs/heads/throwaway/101-identities
+assert "expected nothing pushed to the other repo" test -z "$(git -C "$work/other.git" for-each-ref)"
+
+# A copy of the script inside a clone whose origin isn't sunny-pastures: refused, nothing pushed.
+reset
+git init -q --bare "$work/other.git"
+git clone -q "$work/other.git" "$work/other" 2>/dev/null
+install "$work/other"
+out=$(cd "$work/other" && PATH="$work/bin:$PATH" bash "$work/other/scripts/setup/ci-check.sh" start 101 2>"$work/err")
+code=$?
+err=$(cat "$work/err")
+expect_code 2
+assert "expected the wrong origin named" contains "$err" "not sssoto17/sunny-pastures: nothing pushed"
+assert "expected nothing pushed to the other repo" test -z "$(git -C "$work/other.git" for-each-ref)"
+assert "expected nothing pushed to sunny-pastures" \
+  test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+
 # The branch is there now: refused, nothing pushed.
+reset
+run start 101
 run start 101
 expect_code 2
 assert "expected the cleanup hint" contains "$err" "cleanup 101"
@@ -190,6 +229,22 @@ out=$(cd "$work/clone" && printf 'n\n' | PATH="$work/bin:$PATH" bash "$script" c
 code=$?
 expect_code 2
 assert "expected nothing deleted" test "$(grep -c DELETE "$work/calls")" -eq 2
+
+# --- cleanup of another issue never touches #101's PR or branches --------------------------------
+# Every throwaway branch exists, and #101's PR is open: cleanup 103 deletes only its own branch.
+all_branches() {
+  printf 'heads/%s\n' throwaway/101-identities throwaway/101-factory-pr throwaway/101-readonly-probe \
+    throwaway/102-project throwaway/103-claude >"$work/fx/refs"
+}
+reset
+echo '[{"number":42}]' >"$work/fx/prs.json"
+all_branches
+run cleanup 103
+expect_code 0
+assert "expected 103's branch deleted" contains "$calls" "git/refs/heads/throwaway/103-claude"
+assert "expected one deletion only" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 1
+assert "expected #101's PR left open" lacks "$calls" "pr close"
+assert "expected #101's PR not even looked up" lacks "$calls" "pr list"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))

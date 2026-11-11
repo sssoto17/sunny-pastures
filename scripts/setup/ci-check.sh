@@ -29,7 +29,8 @@ usage: scripts/setup/ci-check.sh start|results|cleanup 101|103
                then read it and post it: gh issue comment 101 --body-file .scratch/101-results.md
   cleanup N    close the throwaway PR unmerged and delete the throwaway branches (asks first)
 
-Run it from your clone of the repo. Nothing it prints is secret: logins, states, exit codes,
+It works on the clone it lives in, whatever directory you run it from, and refuses unless that
+clone's origin is sssoto17/sunny-pastures. Nothing it prints is secret: logins, states, exit codes,
 costs and minutes. Pushing a workflow file over HTTPS with gh's credentials needs the `workflow`
 scope: gh auth refresh -h github.com -s workflow (it prints a one-time code, not a token).
 
@@ -54,10 +55,20 @@ esac
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 gh auth status >/dev/null 2>&1 || die 2 "gh is signed out: run gh auth login"
 
+# start works on the clone this script lives in, never on the current directory's repo, and only
+# when that clone's origin is $REPO: run from another clone, it must not push anything there.
 start() {
-  git rev-parse --git-dir >/dev/null 2>&1 || die 2 "run it from your clone of $REPO"
-  git fetch -q origin main || die 1 "git fetch origin main failed"
-  if git ls-remote --exit-code -q origin "refs/heads/$branch" >/dev/null 2>&1; then
+  # repo and url are global: the EXIT trap below reads repo after start returns.
+  repo=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null) ||
+    die 2 "$here isn't inside a git clone of $REPO"
+  url=$(git -C "$repo" config --get remote.origin.url) || die 2 "$repo has no origin remote"
+  case $url in
+    "https://github.com/$REPO" | "https://github.com/$REPO.git" | "git@github.com:$REPO.git" | \
+      "git@github.com:$REPO" | "ssh://git@github.com/$REPO.git" | "ssh://git@github.com/$REPO") ;;
+    *) die 2 "origin of $repo is $url, not $REPO: nothing pushed" ;;
+  esac
+  git -C "$repo" fetch -q origin main || die 1 "git fetch origin main failed"
+  if git -C "$repo" ls-remote --exit-code -q origin "refs/heads/$branch" >/dev/null 2>&1; then
     die 2 "$branch already exists on origin: run cleanup $issue first"
   fi
   scopes=$(gh api -i user 2>/dev/null | tr -d '\r' | grep -i '^x-oauth-scopes:' || true)
@@ -66,8 +77,8 @@ start() {
     printf 'be refused. If you push over HTTPS: gh auth refresh -h github.com -s workflow\n' >&2
   fi
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-check.XXXXXX")
-  trap 'git worktree remove --force "$tmp/wt" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
-  git worktree add -q --detach "$tmp/wt" origin/main || die 1 "git worktree add failed"
+  trap 'git -C "$repo" worktree remove --force "$tmp/wt" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
+  git -C "$repo" worktree add -q --detach "$tmp/wt" origin/main || die 1 "git worktree add failed"
   mkdir -p "$tmp/wt/.github/workflows"
   cp "$here/workflows/$workflow" "$tmp/wt/.github/workflows/$workflow"
   git -C "$tmp/wt" add ".github/workflows/$workflow"
