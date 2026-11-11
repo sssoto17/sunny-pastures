@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createSim, sliceContent } from "../../index.js";
+import type { Content } from "../../index.js";
 import { expectAccepted } from "./expectAccepted.js";
 
 const sim = createSim(sliceContent);
@@ -74,4 +75,40 @@ describe("planting", () => {
 			).toThrow(RangeError);
 		},
 	);
+
+	describe("a crop that isn't unlocked (MUST-01.1)", () => {
+		// Test content: the slice has only wheat, at Level 1. Corn unlocks at Level 2; rye at none.
+		const [level1, level2, ...rest] = sliceContent.levels;
+		const content: Content = {
+			...sliceContent,
+			crops: { ...sliceContent.crops, corn: wheat, rye: wheat },
+			levels: [level1, { ...level2, crops: ["corn"] }, ...rest],
+		};
+		const cornSim = createSim(content);
+		const plantCorn = { type: "plant", plot: 0, crop: "corn" } as const;
+
+		it("is refused below the Level that unlocks it", () => {
+			const farm = { ...cornSim.newFarm("farm-1"), xp: level2.xp - 1 };
+
+			expect(cornSim.apply(farm, plantCorn, 0)).toEqual({
+				ok: false,
+				reason: "The crop corn isn't unlocked: it unlocks at Level 2, and the farm is at Level 1.",
+			});
+		});
+
+		it("is planted from the Level that unlocks it", () => {
+			const farm = { ...cornSim.newFarm("farm-1"), xp: level2.xp };
+
+			expect(expectAccepted(cornSim.apply(farm, plantCorn, 0)).plots[0]?.status).toBe("growing");
+		});
+
+		it("is refused if no Level unlocks it", () => {
+			const farm = { ...cornSim.newFarm("farm-1"), xp: 1_000_000 };
+
+			expect(cornSim.apply(farm, { ...plantCorn, crop: "rye" }, 0)).toEqual({
+				ok: false,
+				reason: "The crop rye isn't unlocked at any Level.",
+			});
+		});
+	});
 });
