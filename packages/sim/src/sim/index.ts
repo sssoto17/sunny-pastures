@@ -33,9 +33,9 @@ export interface Sim {
 	/** A new farm (spec decision 5) at time 0, its streams seeded from `farmId` (D9). */
 	newFarm(farmId: string): FarmState;
 	/**
-	 * Advances the farm to `at`, then applies `action`. A refusal is returned, never thrown, and
-	 * carries no state (D15); an `at` before the farm's time is refused (D7, MUST-14.7). Throws a
-	 * RangeError if `at` isn't a safe integer.
+	 * Advances the farm to `at`, applies `action`, then runs any automated step it made due at `at`.
+	 * A refusal is returned, never thrown, and carries no state (D15); an `at` before the farm's time
+	 * is refused (D7, MUST-14.7). Throws a RangeError if `at` isn't a safe integer.
 	 */
 	apply(state: FarmState, action: Action, at: number): ApplyResult;
 	/**
@@ -82,30 +82,38 @@ export function createSim(content: Content): Sim {
 				);
 			}
 
-			const farm = advance(state, at);
-			switch (action.type) {
-				case "plant":
-					return plant(farm, action.plot, action.crop, plotRules);
-				case "harvest":
-					return harvest(farm, action.plot, plotRules);
-				case "buyPlot":
-					return buyPlot(farm, action.plot, plotRules);
-				case "buyFacility":
-					return buyFacility(farm, action.facility, facilityRules);
-				case "startJob":
-					return startJob(farm, action.facility, action.recipe, facilityRules);
-				case "buyPen":
-					return buyPen(farm, action.pen, penRules);
-				case "feed":
-					return feed(farm, action.pen, penRules);
-				case "collectProducts":
-					return collectProducts(farm, action.pen, penRules);
-				case "collect":
-					return collect(farm, action.facility, facilityRules);
-				case "buyAddOn":
-					return buyAddOn(farm, action.facility, action.addOn, facilityRules);
-			}
+			// An action can make a step due at its own time, such as a Collector moving goods that
+			// waited, once it is bought or feeding frees room; advancing again runs it, so every farm
+			// the rules return has run its steps up to its time (D6), and advancing it to that time
+			// changes nothing.
+			const result = act(advance(state, at), action);
+			return result.ok ? { ok: true, state: advance(result.state, at) } : result;
 		},
 		advance,
 	};
+
+	function act(farm: FarmState, action: Action): ApplyResult {
+		switch (action.type) {
+			case "plant":
+				return plant(farm, action.plot, action.crop, plotRules);
+			case "harvest":
+				return harvest(farm, action.plot, plotRules);
+			case "buyPlot":
+				return buyPlot(farm, action.plot, plotRules);
+			case "buyFacility":
+				return buyFacility(farm, action.facility, facilityRules);
+			case "startJob":
+				return startJob(farm, action.facility, action.recipe, facilityRules);
+			case "buyPen":
+				return buyPen(farm, action.pen, penRules);
+			case "feed":
+				return feed(farm, action.pen, penRules);
+			case "collectProducts":
+				return collectProducts(farm, action.pen, penRules);
+			case "collect":
+				return collect(farm, action.facility, facilityRules);
+			case "buyAddOn":
+				return buyAddOn(farm, action.facility, action.addOn, facilityRules);
+		}
+	}
 }

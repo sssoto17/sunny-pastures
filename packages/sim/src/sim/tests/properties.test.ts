@@ -6,7 +6,7 @@ import fc from "fast-check";
 import { describe, expect, inject, it } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
-import type { Content, FarmState } from "../../index.js";
+import type { Action, Content, FarmState, Sim } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
 import type { Transition } from "../../state/tests/farms.js";
@@ -146,6 +146,51 @@ function expectAutomated(
 	expect(wheatIn(to)).toBe(wheatIn(from) - wheat);
 	expect(to.xp).toBe(from.xp + xp);
 	expect(to.coins).toBe(from.coins + paidAt(to.xp) - paidAt(from.xp));
+}
+
+/**
+ * `action` alone on `farm`, already at `at`, without the automated steps apply runs after it:
+ * applied with every add-on off, so nothing moves or restarts after it, then with the add-ons
+ * back. The action itself doesn't read them. buyAddOn would switch its add-on on and run it, so
+ * its farm is the purchase written out: the price paid and the flag set, which its branch and the
+ * real farm after it check.
+ */
+function actAlone(sim: Sim, farm: FarmState, action: Action, at: number): FarmState {
+	if (action.type === "buyAddOn") {
+		return {
+			...farm,
+			coins: farm.coins - addOnPrices[action.addOn],
+			facilities: farm.facilities.map((owned, i) =>
+				owned && i === action.facility
+					? { ...owned, addOns: { ...owned.addOns, [action.addOn]: true } }
+					: owned,
+			),
+		};
+	}
+
+	const off = { loop: false, collector: false };
+	const result = sim.apply(
+		{ ...farm, facilities: farm.facilities.map((owned) => owned && { ...owned, addOns: off }) },
+		action,
+		at,
+	);
+	if (!result.ok) throw new Error(`the action alone was refused: ${result.reason}`);
+
+	return {
+		...result.state,
+		facilities: result.state.facilities.map((owned, i) => {
+			const had = farm.facilities[i]?.addOns ?? off;
+			return (
+				owned && {
+					...owned,
+					addOns: {
+						loop: owned.addOns.loop || had.loop,
+						collector: owned.addOns.collector || had.collector,
+					},
+				}
+			);
+		}),
+	};
 }
 
 /** A time at or after the farm's, from the generated delays (never before: see 14.7). */
@@ -455,10 +500,13 @@ describe.each([
 		fc.assert(
 			fc.property(farmId, timedActions, (id, played) => {
 				for (const transition of play(levelSim, id, played).transitions) {
-					const { action, at, after } = transition;
-					// The automated steps up to the action's time, then the action.
+					const { action, at } = transition;
+					// The automated steps up to the action's time, then the action alone (checked
+					// below), then the steps it made due at its time, which apply runs after it.
 					const before = levelSim.advance(transition.before, at);
 					expectAutomated(transition.before, before, recipes);
+					const after = actAlone(levelSim, before, action, at);
+					expectAutomated(after, transition.after, recipes);
 					const gained = wheatIn(after) - wheatIn(before);
 					// Feeding and collecting eggs change the barn too; their branches below check it exactly.
 					const isBarnChanged = ["collect", "feed", "collectProducts"].includes(action.type);
@@ -535,10 +583,11 @@ describe.each([
 						expect(after.coins).toBe(before.coins - addOnPrices[action.addOn]);
 						expect(levelAt(after.xp)).toBeGreaterThanOrEqual(addOnLevels[action.addOn]);
 						expect(owned?.addOns[action.addOn]).toBe(false);
-						expect(after.facilities[action.facility]).toEqual({
-							...owned,
-							addOns: { ...owned?.addOns, [action.addOn]: true },
-						});
+						// The real farm after it has the add-on on and the facility otherwise as it was, but
+						// for the moves the add-on made due at once, checked above.
+						const bought = transition.after.facilities[action.facility];
+						expect(bought?.addOns).toEqual({ ...owned?.addOns, [action.addOn]: true });
+						expect([bought?.tier, bought?.lastRecipe]).toEqual([owned?.tier, owned?.lastRecipe]);
 						expectOnlyPaid(before, after, gained);
 					} else if (action.type === "buyPlot") {
 						expect(after.coins).toBe(
@@ -564,15 +613,22 @@ describe.each([
 		fc.assert(
 			fc.property(farmId, timedActions, delay, (id, played, wait) => {
 				const { transitions, final } = play(levelSim, id, played);
+				// Apart from the actions, only the Collector changes the barn's feed: it moves what the mill
+				// made, before an action or right after it (#88).
+				const feedIn = (farm: FarmState): number => farm.barn["chickenFeed"] ?? 0;
 				let made = 0;
 				for (const { action, at, before, after } of transitions) {
+					const advanced = levelSim.advance(before, at);
+					const acted = actAlone(levelSim, advanced, action, at);
+					made += feedIn(advanced) - feedIn(before) + feedIn(after) - feedIn(acted);
 					if (action.type === "collect") {
-						const [job] = levelSim.advance(before, at).facilities[action.facility]?.jobs ?? [];
+						const [job] = advanced.facilities[action.facility]?.jobs ?? [];
 						if (job?.recipe === "chickenFeed") made += feedJob;
 					}
 					expect(countFeedAndEggs(after)).toBe(made);
 				}
-				expect(countFeedAndEggs(levelSim.advance(final, addDelay(final, wait)))).toBe(made);
+				const last = levelSim.advance(final, addDelay(final, wait));
+				expect(countFeedAndEggs(last)).toBe(made + feedIn(last) - feedIn(final));
 			}),
 			params,
 		);
