@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Rules versions: replay never crosses a version, and a base snapshot holds the upgraded farm
+# Rules versions: replay never crosses a version, and a base snapshot holds the farm after its version upgrade
 
 ADR-0001 chose store B100: a farm is the result of replaying its append-only action log from the
 latest snapshot, and `replay` throws if the rules refuse a logged action. Content is tuned after
@@ -23,15 +23,15 @@ ADR-0001, then found eleven issues. Six are fixed in the sections below, four ar
 trade-offs ([Consequences](#consequences)), and one needed a new decision (Q10).
 
 "Rules version", "snapshot", "base snapshot" and "version upgrade" are used as `GLOSSARY.md`
-defines them. In this ADR, "upgrade" alone always means a version upgrade, and `upgrade` is its
-function in the registry; it is never a facility's upgrade.
+defines them. "Upgrade" alone already means a facility's tier or a bought plot (MUST-06), so this
+ADR always says "version upgrade" in full; `upgrade` is only the function's name in the registry.
 
 ## 1. A base snapshot per rules version (Q1)
 
 Every log row and every snapshot records the rules version it was written under. A replay never
 crosses a version inside the rules: when the log steps from version N to a later version, the farm
-is **upgraded** at that seq (section 6) and the rest of the log is replayed under the later
-version. The snapshot that holds the upgraded farm is the **base snapshot** of that version.
+gets a **version upgrade** at that seq (section 6) and the rest of the log is replayed under the later
+version. The snapshot that holds the farm after it is the **base snapshot** of that version.
 
 This is #31's option "logs are frozen at a cut-off, with a snapshot as the new base", adapted:
 the cut-off is per farm, at its last action before the release, and the base is written lazily
@@ -42,9 +42,9 @@ the cut-off is per farm, at its last action before the release, and the base is 
 
 **Rejected:**
 
-- **Each action replayed under its own version, without an upgrade step.** The state from v1
+- **Each action replayed under its own version, without a version upgrade step.** The state from v1
   becomes v2's input with no defined point where its shape changes, and the time between two
-  actions belongs to neither version. It is the chosen design with the upgrade left implicit.
+  actions belongs to neither version. It is the chosen design with the version upgrade left implicit.
 - **A migration that rewrites old logs.** It breaks the append-only log that ADR-0001 makes the
   source of truth, and it destroys the history an audit checks (T10).
 - **Allowing only rules changes that never refuse an earlier valid action.** It can't hold for
@@ -68,7 +68,7 @@ version; it never edits a released one. Content that hasn't been released yet ca
 The state still carries no version field (ADR-0003, section 1): the version belongs to the log
 row and the snapshot that store the state, not to the state.
 
-**Pattern:** Registry (version → content and upgrade); content as data (MUST-10.4).
+**Pattern:** Registry (version → content and `upgrade`); content as data (MUST-10.4).
 
 **Rejected:**
 
@@ -79,10 +79,10 @@ row and the snapshot that store the state, not to the state.
 
 ## 3. The base snapshot is written lazily, by the first commit after the release (Q2)
 
-Nothing happens at deploy. `load` replays a farm under the versions its log records, then upgrades
-it to the current version, unadvanced (section 5). When the handler commits the farm's first
+Nothing happens at deploy. `load` replays a farm under the versions its log records, then gives it
+a version upgrade to the current version, unadvanced (section 5). When the handler commits the farm's first
 action under the new version, the same transaction writes the action's row (tagged with the
-current version) and the base snapshot: the upgraded farm at the previous seq, tagged with the
+current version) and the base snapshot: the farm after its version upgrade, at the previous seq, tagged with the
 current version. A farm with no action before the release needs no base: it is `newFarm` under the
 current version, and no snapshot is ever written at seq 0.
 
@@ -90,11 +90,11 @@ Reads still never write (ADR-0001). An inactive farm costs nothing until its pla
 
 A base snapshot is a cache like every other snapshot. Each log row's version is the source of
 truth (section 5), so if a base snapshot is missing, `load` replays the same farm from the older
-snapshot and upgrades it.
+snapshot and the version upgrade.
 
 **Pattern:** lazy migration on the next write (the lazy-offline-progress choice of ADR-0001
 applied to versions). As in ADR-0003, an avoided word ("migration", "event") appears only in a
-pattern's name; the docs and code say *upgrade* and *action*.
+pattern's name; the docs say *version upgrade* and *action*.
 
 **Rejected:**
 
@@ -106,8 +106,8 @@ pattern's name; the docs and code say *upgrade* and *action*.
 ## 4. The release gap is advanced under the new version (Q5)
 
 The offline time between a farm's last action under version N and its first action under a later
-version is advanced entirely under the later version. `load` returns the farm upgraded and
-unadvanced at its last action, and the handler advances it to `at` as for any farm. No release
+version is advanced entirely under the later version. `load` returns the farm after its version upgrade,
+unadvanced, at its last action, and the handler advances it to `at` as for any farm. No release
 time is recorded anywhere, and the server's result matches what a client on the new version
 predicts.
 
@@ -124,15 +124,15 @@ could advance a farm past the "release time" after a new one had served it.
 1. Start from the newest snapshot at or before the target seq. At the same seq, the snapshot with
    the higher version wins. With no snapshot, start from `newFarm` under the version of the first
    log row.
-2. For each later row, in seq order: if its version is higher than the farm's, upgrade the farm to
-   it (section 6). Then advance to the row's `at` and apply the action, both under the row's
+2. For each later row, in seq order: if its version is higher than the farm's, give the farm a version upgrade
+   to it (section 6). Then advance to the row's `at` and apply the action, both under the row's
    version.
 3. A row whose version is lower than the farm's is a corrupt log: `replay` throws a store error.
    A refused logged action throws, as in ADR-0001.
-4. `load` ends by upgrading to the current version, unadvanced.
+4. `load` ends with a version upgrade to the current version, unadvanced.
 
 A version the running code doesn't know (higher than its current version) makes `load` throw a
-store error. That is section 8's case.
+store error, and the handler maps that store error to a 503. That is section 8's case.
 
 **Pattern:** Event Sourcing replay with a version step (section 1); each row's version is the
 single source of truth for the rules it was accepted under.
@@ -141,11 +141,11 @@ single source of truth for the rules it was accepted under.
 snapshot would then replay later rows under the wrong rules, and the snapshot would stop being a
 cache.
 
-## 6. An upgrade brings a farm to the next version's shape (Q7)
+## 6. A version upgrade brings a farm to the next version's shape (Q7)
 
 Each version after the first provides `upgrade(farm)`, which takes a farm in the previous version's
 shape and returns one in its own. By default it fills new plots, facilities, pens and goods from
-content and changes nothing else. A farm that skipped versions is upgraded one step at a time
+content and changes nothing else. A farm that skipped versions gets one version upgrade at a time
 (v1 → v2 → v3). The rules only ever see a farm in their own version's shape.
 
 `upgrade` is part of the sim, under all of its rules (pure, integer-only, plain JSON), and it is
@@ -161,7 +161,7 @@ is the only change at the boundary, and it is reviewed with the content change t
 
 **Pattern:** Upcaster (event sourcing), chained one version at a time.
 
-**Rejected:** tolerant reading with additive-only content (no upgrade; every rule treats a missing
+**Rejected:** tolerant reading with additive-only content (no version upgrade; every rule treats a missing
 entry as its default). The default handling would spread through every rule, and a removal or
 rename could never ship.
 
@@ -190,7 +190,8 @@ rules-version check (section 10) enforces this on recorded logs, and the product
 
 **Versions only go forward.** Along one farm's log, versions never decrease. The commit refuses a
 row whose version is lower than the farm's latest row, and the audit flags one. An instance whose
-code doesn't know a farm's version answers 503 and writes nothing. This covers the overlap at a
+code doesn't know a farm's version answers 503 and writes nothing: its `load` throws a store
+error (section 5), and the handler maps that to a 503. This covers the overlap at a
 deploy, when an old instance can meet a farm a new one has already moved on. **A released version
 is never withdrawn:** a rollback ships the old content again as a new version, so it is a fix
 forward.
@@ -219,8 +220,8 @@ base snapshot yet, the answer for a `t` in its release gap follows the current v
 shift if another release lands before the farm acts again (Consequences).
 
 **Log against snapshots** (MUST-16.3) replays from the first action (`newFarm` under the first
-row's version), upgrading wherever the rows step up a version. It compares each snapshot under the
-version it was written with, at its seq (a base snapshot after the upgrade), and **each row's
+row's version), with a version upgrade wherever the rows step up a version. It compares each snapshot under the
+version it was written with, at its seq (a base snapshot after the version upgrade), and **each row's
 stored answer hash** after that row. A farm where any of them differ, or whose versions decrease,
 is flagged. Comparing the answer hashes covers the tail after the newest snapshot and farms under
 100 actions, so editing a row or its version tag is flagged too (MUST-16.4, T10).
@@ -240,11 +241,11 @@ released version it asserts:
 1. **Frozen content:** `stateHash(content)` equals the hash recorded when the version was released.
 2. **Old logs replay:** every recorded log of that version replays on today's code to its recorded
    hashes: each row's answer hash and the final farm's (MUST-13.6, section 8).
-3. **Upgrades are total and keep the farm:** a property over generated farms of that version
-   (fast-check, fixed seed, as ADR-0003 section 9): upgrading to the next version and on to the
+3. **Version upgrades are total and keep the farm:** a property over generated farms of that version
+   (fast-check, fixed seed, as ADR-0003 section 9): a version upgrade to the next version and on to the
    current one never throws, the result satisfies MUST-14's invariants and the JSON round trip,
    and it keeps the facts both versions share unless that version's `upgrade` declares otherwise.
-4. **Across the boundary:** each recorded log, upgraded and continued with generated actions under
+4. **Across the boundary:** each recorded log, given its version upgrade and continued with generated actions under
    the current version, gives the same hash whether replayed from its first action or from a base
    snapshot written at the boundary (MUST-16.3 across a release).
 
@@ -254,7 +255,7 @@ pseudonymised first; the farm id seeds the PRNG streams (ADR-0003, section 7), s
 recorded by replaying the pseudonymised log under its own version.
 
 **Pattern:** golden-file tests (recorded logs and hashes) plus property-based testing (generated
-farms for the upgrade).
+farms for the version upgrade).
 
 **Rejected:**
 
@@ -267,7 +268,7 @@ farms for the upgrade).
 The registry is server-only. The client imports only the current version's content, so the bundle
 doesn't grow with each tuning. Every game API answer carries the rules version, and a client
 running a different version reloads instead of predicting under the wrong rules (MUST-12). The
-upgrade runs only on the server: the client receives farms already upgraded.
+version upgrade runs only on the server: the client receives farms after it.
 
 **Pattern:** version negotiation by tag: the answer names its rules version, and a mismatch
 means reload.
@@ -285,7 +286,7 @@ the client never replays an old log.
 | Lazy migration on the next write | base snapshot in the first commit | No deploy job, reads never write, inactive farms cost nothing. |
 | Feature switch in content | behaviour changes in the rules code | One sim reproduces every version; the switch is part of frozen content. |
 | Monotonic version with fix-forward | commit check, 503 on unknown versions | Overlapping deploys and rollbacks can't write a farm backwards. |
-| Golden-file (recorded log) tests plus property-based tests | the rules-version check | Recorded logs pin old outcomes; generated farms reach the upgrade cases recordings miss. |
+| Golden-file (recorded log) tests plus property-based tests | the rules-version check | Recorded logs pin old outcomes; generated farms reach the version-upgrade cases recordings miss. |
 
 ## Consequences
 
@@ -301,7 +302,9 @@ the client never replays an old log.
   rules-version check are built before the first release (M3); a build issue carries them.
 - **#89's content check runs on every version in the registry**, not only the current one.
 - **Content changes after the first release are new versions.** `CONSTRAINTS.md`'s "Content
-  change" row waited on this decision; whether it changes is the admin's call, outside #31.
+  change" row waited on this decision. Its reason now cites this ADR, and it still escalates every
+  content change (admin, 11 Nov). Narrowing it once the rules-version check exists is the admin's
+  call.
 - **Accepted trade-off: rules code is frozen only by sampled logs.** A refactor can change an edge
   case no recorded log reaches. The rules-version check narrows that, and the production audit
   (MUST-16.3) flags a farm it hits. Fixing an exploit retroactively is not possible without

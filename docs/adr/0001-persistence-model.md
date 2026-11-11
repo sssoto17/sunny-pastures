@@ -80,7 +80,10 @@ simulation. The farm's PRNG seed comes from its id, so a new farm is the same on
 Store B is also given `replay(state, actions, to)` when it is created, the same
 way it gets `newFarm`. It applies the actions in seq order, each at its own `at`, then advances to
 `to`. B's `load` and `stateAt` call it, but store code never imports the sim: the factory hands it
-in. If the rules refuse a logged action, `replay` throws instead of skipping it.
+in. If the rules refuse a logged action, `replay` throws instead of skipping it. (Amended 11 Nov
+after #31: from M3, every log row and snapshot carries a rules version, and `replay`, `load` and
+`stateAt` take those versions and give a farm a version upgrade where the log steps up;
+[ADR-0006](0006-rules-versions-and-replay.md), section 5.)
 
 A repeated idempotency key returns the first answer. The handler asks `processed` before it runs
 the simulation, because a resent action may no longer be valid (a resent "plant plot 0" finds the
@@ -349,7 +352,9 @@ Because B100 won:
 
 - **M3's schema is the action log plus a snapshot after every 100th action.** `actions` is keyed
   by (farm, seq), with a unique (farm, idempotency key) and the stored first answer. `snapshots`
-  is keyed by (farm, seq). The log is the source of truth; snapshots are a cache.
+  is keyed by (farm, seq, rules version), and both tables carry a `rules_version` column
+  (amended 11 Nov, [ADR-0006](0006-rules-versions-and-replay.md)). The log is the source of
+  truth; snapshots are a cache.
 - **`stateAt` is available for audits** (`AuditableStore`). It replays at most 99 actions from
   the nearest snapshot at or before `t`. The audit route refuses a `t` after server time.
 - **The idempotency path carries over as the spike built it:** `processed` before the sim, the
@@ -358,7 +363,7 @@ Because B100 won:
 - **M2/M3 decision: replaying old logs after a rules change.** If new rules refuse an
   action the old rules accepted, `replay` throws and that farm can't load. **Decided 11 Nov
   (#31):** every log row and snapshot records its rules version, a replay never crosses a version,
-  and a base snapshot holds the farm upgraded to the new version. That adds a `rules_version`
+  and a base snapshot holds the farm after its version upgrade. That adds a `rules_version`
   column to `actions` and to `snapshots`, whose key above becomes (farm, seq, rules version): a
   base snapshot can sit at any seq, beside a 100th-action snapshot at the same seq
   ([ADR-0006](0006-rules-versions-and-replay.md)).
