@@ -282,6 +282,8 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
   client each call `createSim(content)` once and use what it returns. Store code still never
   imports the sim: the factory hands `replay` and `newFarm` in.
 - **#31 can be decided later** without changing the state: a rules version is a content object.
+  (Decided 11 Nov in [ADR-0006](0006-rules-versions-and-replay.md); the state still has no
+  version field.)
 - **A refusal returns no state.** The handler answers 422 on `{ ok: false }` (ADR-0001's second
   `processed` check comes first) and keeps the farm it loaded.
 - **The state hash is one pure, synchronous function** for client and server. It encodes strings
@@ -292,4 +294,5 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
   or an export, meets `CONSTRAINTS.md`'s "Interface change" row and carries `review:admin`.
 - **MUST-07.4 is 30 days**, as in `CONSTRAINTS.md`. The bench in the `advance` ticket's PR is the
   first measurement; #41 makes it a check in M3.
-- **Open:** how logs stay replayable after a rules change (#31), due before M3's schema.
+- **Decided 11 Nov (#31):** how logs stay replayable after a rules change: a registry of rules
+  versions, each a frozen content object ([ADR-0006](0006-rules-versions-and-replay.md)).

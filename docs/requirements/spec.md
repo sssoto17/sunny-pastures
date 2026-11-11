@@ -40,9 +40,10 @@ Words in **bold** in the criteria, and the terms they use, are defined in [`GLOS
   reads the value from content data instead of hard-coding it. This spec fixes only what exists,
   how it connects and the bounds that tests rely on.
 - **Tuning content is a rules change.** A farm is rebuilt by replaying its log (ADR-0001), so a
-  new grow time or price can make an old action replay differently, or be refused. #31 decides
-  how logs survive that. It has to be settled **before M3 builds the log schema, and in any case
-  before the first tuning after playtest 1** (MUST-13.6).
+  new grow time or price can make an old action replay differently, or be refused. Logs survive
+  it through rules versions: once released, a version's content is frozen, a tuning adds a new
+  version, and a replay never crosses one (decided in #31,
+  [ADR-0006](../adr/0006-rules-versions-and-replay.md); MUST-13.6).
 - **Farm history** (actions from before the farm's last action) exists because
   [ADR-0001](../adr/0001-persistence-model.md) chose store B100: an append-only action log per
   farm, with a snapshot after every 100th action. The criteria that rely on it are listed under
@@ -266,7 +267,7 @@ requests/s on the load VM), B100 is measured against A again, as the ADR's revis
 | MUST-13.3 | Concurrent actions on one farm never lose an update. A conflict is retried (at most 3 times). After that the request fails with a 503 and nothing is committed. | `accept`, `attack` (T4) |
 | MUST-13.4 | Sending a gift, and claiming one, is written in the same transaction as the farm. No gift is lost or claimed twice, even across a crash. | `accept`, `attack` (T4, T6) |
 | MUST-13.5 | The spike's concurrency check runs against the real store: 1,000 gift-and-harvest pairs fired at one farm at the same moment, with no lost update. | `accept` |
-| MUST-13.6 | Logs written under an earlier rules or content version still load after a release, including a release that only tunes content numbers. Each farm rebuilds to the same farm it had before the release. CI replays a set of recorded logs under the new version. How this is achieved is decided in #31, before M3 builds the log schema and in any case before the first tuning after playtest 1. | `ci` |
+| MUST-13.6 | Logs written under an earlier rules or content version still load after a release, including a release that only tunes content numbers. Each farm rebuilds to the same farm it had before the release. CI replays a set of recorded logs under the new version. How: every log row and snapshot records its rules version, and the rules-version check replays them (decided in #31, [ADR-0006](../adr/0006-rules-versions-and-replay.md)). | `ci` |
 | MUST-13.7 | Every query in a commit runs inside its transaction. A saturating stress run shows 0 `UNSAFE_TRANSACTION` errors and 0 lost updates (#28). | `accept`, `metric` |
 
 ### MUST-14 Property tests for the simulation
@@ -436,8 +437,9 @@ The grill checked three more and kept them independent of the log:
    BASE IDs and are never cut. `CONSTRAINTS.md` holds their thresholds and checks.
 5. **The admin role** (MUST-16.5): how an account gets it. Anonymous sign-in gives every player a
    user, so the admin needs a role that only the admin can set.
-6. **Replaying old logs after a rules change** (MUST-13.6, MUST-16.3): decided in #31. That
-   includes content tuning. #31 must be settled before M3 builds the log schema, and in any
-   case before the first tuning after playtest 1.
+6. ~~**Replaying old logs after a rules change**~~ Settled 11 Nov (#31): every log row and
+   snapshot records its rules version, a replay never crosses a version, and a base snapshot
+   holds the farm after its version upgrade ([ADR-0006](../adr/0006-rules-versions-and-replay.md),
+   MUST-13.6, MUST-16.3).
 7. ~~**Where the state hash lives**~~ Settled 8 Nov (#72): inside the simulation, as a
    pure-TypeScript SHA-256 ([ADR-0003](../adr/0003-simulation-design.md), MUST-10.5).
