@@ -31,3 +31,6 @@ supabase/.temp/
 .DS_Store
 .vscode/
 *.log
+
+# GitHub App private keys: save them outside the repo; this stops one being committed by accident
+*.pem
