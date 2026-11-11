@@ -63,20 +63,20 @@ describe("the Collector", () => {
 		]);
 	});
 
-	it("moves both the waiting goods and the new job's, when the barn has room for them", () => {
-		const waiting = {
-			...collecting(2),
-			facilities: [
-				ownedFacility([{ status: "done", recipe: "chickenFeed" }], collector),
-				ownedFacility([], collector),
-			],
+	it("moves every waiting job that fits in one step once the barn has room, with their XP", () => {
+		const done = { status: "done", recipe: "chickenFeed" } as const;
+		const full = {
+			...collecting(0, { bread: 50 }),
+			facilities: [ownedFacility([done, done], collector), ownedFacility([], collector)],
 		};
-		const advanced = sim.advance(applyAll(waiting, [[startFeed, 0]]), feedMs);
+		const held = sim.advance(full, feedMs);
+		expect(held.facilities[feedMill]?.jobs).toEqual([done, done]);
 
-		// Room for 4 in an empty barn of 50: both jobs' 2 feed move in one step, with their XP.
-		expect(advanced.barn).toEqual({ chickenFeed: 4 });
-		expect(advanced.xp).toBe(xpOfLevel(4) + 2);
-		expect(advanced.facilities[feedMill]?.jobs).toEqual([]);
+		// Room for 4 (an order delivered, say): both jobs' 2 feed move at that time, in one step.
+		const moved = sim.advance({ ...held, barn: { bread: 46 } }, feedMs);
+		expect(moved.barn).toEqual({ bread: 46, chickenFeed: 4 });
+		expect(moved.xp).toBe(xpOfLevel(4) + 2);
+		expect(moved.facilities[feedMill]?.jobs).toEqual([]);
 	});
 
 	it("throws on a Collector in a facility that isn't in content, a programmer error (D15)", () => {
