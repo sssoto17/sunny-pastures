@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { createSim, sliceContent } from "../../index.js";
 import type { FarmState } from "../../index.js";
+import { applyAll } from "./applyAll.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
 import { ownedFacility } from "./ownedFacility.js";
-import { applyAll, bakery, breadMs, feedMill, feedMs, startBread, startFeed } from "./sliceJobs.js";
+import { bakery, breadMs, feedMill, feedMs, startBread, startFeed } from "./sliceJobs.js";
 
 const sim = createSim(sliceContent);
 const collector = { addOns: { loop: false, collector: true } } as const;
@@ -75,8 +76,10 @@ describe("the Collector", () => {
 		const held = sim.advance(fullBarn, feedMs);
 		expect(held.facilities[feedMill]?.jobs).toEqual([done, done]);
 
-		// Room for 4 (an order delivered, say): both jobs' 2 feed move at that time, in one step.
-		const moved = sim.advance({ ...held, barn: { bread: 46 } }, feedMs);
+		// Room for 4 (an order delivered, say): both jobs' 2 feed move a ms later, in one step.
+		const room = { ...held, barn: { bread: 46 } };
+		expect(sim.advance(room, feedMs)).toBe(room);
+		const moved = sim.advance(room, feedMs + 1);
 		expect(moved.barn).toEqual({ bread: 46, chickenFeed: 4 });
 		expect(moved.xp).toBe(xpOfLevel(4) + 2);
 		expect(moved.facilities[feedMill]?.jobs).toEqual([]);
@@ -107,7 +110,7 @@ describe("the Collector", () => {
 		expect(advanced.facilities[bakery]?.jobs).toEqual([{ status: "done", recipe: "bread" }]);
 	});
 
-	it("moves goods already waiting when it's bought, at that time, if the barn has room (MUST-06.6)", () => {
+	it("moves goods already waiting when it's bought a ms later, if the barn has room (MUST-06.6)", () => {
 		const done = {
 			...collecting(0),
 			facilities: [
@@ -119,10 +122,12 @@ describe("the Collector", () => {
 			[{ type: "buyAddOn", facility: feedMill, addOn: "collector" }, 5_000],
 		]);
 
-		// apply ran the move due at its time, so advancing to that time changes nothing (MUST-14.2).
-		expect(farm.facilities[feedMill]?.jobs).toEqual([]);
-		expect(farm.barn).toEqual({ chickenFeed: 2 });
+		// The move falls a ms after the purchase, so the farm apply returns has nothing due at its own
+		// time, and advancing to that time changes nothing (MUST-14.2).
 		expect(sim.advance(farm, 5_000)).toBe(farm);
+		const moved = sim.advance(farm, 5_001);
+		expect(moved.facilities[feedMill]?.jobs).toEqual([]);
+		expect(moved.barn).toEqual({ chickenFeed: 2 });
 	});
 
 	it("moves goods that waited for room once the barn has room again, in their order (MUST-06.6, 07.2)", () => {
@@ -130,7 +135,7 @@ describe("the Collector", () => {
 		expect(held.facilities[feedMill]?.jobs).toEqual([done, done]);
 
 		// Room for 3 (an order delivered, say): the oldest job's 2 feed move, the next waits.
-		const room = sim.advance({ ...held, barn: { bread: 47 } }, 1_000_000);
+		const room = sim.advance({ ...held, barn: { bread: 47 } }, 1_000_001);
 		expect(room.barn).toEqual({ bread: 47, chickenFeed: 2 });
 		expect(room.facilities[feedMill]?.jobs).toEqual([done]);
 	});

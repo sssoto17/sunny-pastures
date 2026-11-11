@@ -71,7 +71,7 @@ it, until none is left. Steps at exactly `to` are processed. When several steps 
 time, MUST-10.6's key breaks the tie: time, then kind of automated step, then facility, pen or plot
 index, then queue slot. The key is defined once in the sim. `apply` advances to `at` first, then
 applies the action, then advances to `at` again, so a step the action made due at its own time
-runs in the same call (section 14).
+runs in the same call (section 15).
 
 Because steps at exactly `to` are processed, `advance(advance(s, t1), t2)` and `advance(s, t2)`
 process the same steps in the same order, so time-splitting (MUST-14.1) holds by construction.
@@ -395,7 +395,43 @@ portion reads its duration; the shared `storage/` module (section 12).
 - **Products straight to the barn as they are produced.** MUST-02.4 keeps products in the pen
   until collected, and a full barn would then need a rule for where a product goes.
 
-## 14. The Loop and the Collector (#88)
+## 14. Facility tiers (#85)
+
+Chosen by #85's lane on 11 Nov, unattended; the admin reviews it in #85's PRs ("Decided by the
+lane").
+
+- **Content.** A facility keeps its tier-1 `slots` and lists the tiers it can be upgraded to,
+  tier 2 first, as rows of price, slots and `timePerMille`. The highest tier is the last row, so
+  the slice stops at 3 (MUST-06.2) and SHOULD-08 adds rows. The Level table lists each tier it
+  unlocks as `{ facility, tier }` (MUST-05.5), read by `progress/`'s `findTierLevel`.
+- **Buying.** `buyTier` names the facility and the tier, which must be the facility's next, so an
+  action sent twice buys one tier. It goes through `purchase` (section 11) and only raises the
+  stored `tier` (section 12): no new field in the state.
+- **Job times.** A tier's time is the recipe's `seconds` times its per mille, rounded down to whole
+  seconds, then in ms, worked out for every tier once in `createSim` (sections 3, 10). Whole
+  seconds let #89's content check hold every tier's time to MUST-10.4's 10 s–24 h, which it has
+  to check per tier: a recipe's tier-1 `seconds` alone doesn't bound it.
+- **Reads.** `startJob` reads the slots and the time of the facility's tier when it runs, and the
+  job stores its `readyAt` (section 12), so a tier bought later never moves a job already queued or
+  running (MUST-03.3, 06.7; ADR-0006, section 7). The Loop (#88) restarts through `startJob` and
+  reads them the same way.
+
+**Patterns:** the policy function of section 11 for buying; a table of tier rows looked up by
+index (table-driven rules); integer fixed-point arithmetic (section 10) for job times.
+
+**Rejected:**
+
+- **Slots as a formula in the rules** (one more every 2nd tier, up to a maximum). MUST-06.2's
+  shape would be fixed in code, while the spec puts numbers in content; a row per tier states it
+  and #89's content check holds it to MUST-06.2.
+- **A seconds list per recipe and tier.** More numbers to tune for one rule; a per mille per tier
+  shortens every recipe alike.
+- **A growing price curve per facility,** as plots have (section 11). Each tier already has a row
+  for its slots and time, so its price sits there.
+- **The unlock Level in the tier row.** MUST-05.5 puts every unlock in the Level table.
+- **`buyTier` with no tier.** A resent action would buy two tiers.
+
+## 15. The Loop and the Collector (#88)
 
 Decided by #88's lane on 11 Nov, under the admin's brief (content values and these shapes are the
 lane's call, reviewed in its PRs' "Decided by the lane"); the Loop's limit is the admin's decision
@@ -413,58 +449,64 @@ Collector is SHOULD-08.
   content's `addOns[addOn].price`. It is refused for a facility the farm hasn't bought, an add-on
   not in content, or one the facility has, so an action sent twice buys it once.
 - **The Collector** is one `moveGoods` step per facility and time, keyed by the facility and slot
-  0. It falls when one of the facility's jobs finishes, in place of `finishJob`, and at the farm's
-  time whenever the facility's oldest job is done and its goods fit. It finishes the jobs due, then
-  moves the done jobs into the barn through `storage/`'s `put`, oldest first, while they fit, each
-  with its XP through `gainXp`, as collecting by hand does (the two share one rule). Goods that
-  don't fit wait in their slot (MUST-06.6) and move as soon as the barn has room; goods already
-  waiting when the Collector is bought move at once if they fit.
+  0. It falls when one of the facility's jobs finishes, in place of `finishJob`, and a ms after the
+  farm's time whenever the facility's oldest job is done and its goods fit. It finishes the jobs
+  due, then moves the done jobs into the barn through `storage/`'s `put`, oldest first, while they
+  fit, each with its XP through `gainXp`, as collecting by hand does (the two share one rule).
+  Goods that don't fit wait in their slot (MUST-06.6) and move a ms after the barn has room; goods
+  already waiting when the Collector is bought move a ms after it, if they fit. Room that a step or
+  an action frees at a time is so used at the next, never behind a step already run at it
+  (MUST-10.6).
 - **The Loop** restarts whenever its facility has a free slot and the inputs are in storage: a
   `restartRecipe` step at the farm's time, keyed by the slot it fills, that starts the last recipe
-  through `startJob`, so the job stores its finish when it starts (ADR-0006, section 7).
+  through `startJob`, so the job stores its finish, at the facility's tier, when it starts
+  (ADR-0006, section 7; section 14).
 - **The Loop's limit is the queue** (MUST-06.5, 07.2; the admin, 11 Nov). A done job keeps its slot
   until its goods are collected: by hand, or by the Collector once bought. When every slot is
   taken, running or done, the facility stops producing, whether or not the barn has room, and it
-  resumes as soon as a slot frees. Without a Collector, a Looping facility fills its queue and waits
-  for the player; with one, it stops when the barn is full (the waiting goods keep the slots) and
-  resumes once the barn has room. It also stops when the inputs run out. There is no time cap.
-- **`apply` advances once more after the action**, to `at`, so a step the action made due at its
-  own time (a Collector moving goods that waited, once it is bought or feeding frees room; a Loop
-  restarting into a slot that a collect freed, or a Loop just bought) runs in the same call. Every farm the rules return has then run its steps
-  up to its time. This amends section 2, where `apply` only advanced before the action.
+  resumes as soon as a slot frees: after a collect, a Collector's move, or a tier that adds a slot
+  (section 14). Without a Collector, a Looping facility fills its queue and waits for the player;
+  with one, it stops when the barn is full (the waiting goods keep the slots) and resumes once the
+  barn has room. It also stops when the inputs run out. There is no time cap.
+- **`apply` advances once more after the action**, to `at`, so an automated step the action made
+  due at its own time runs in the same call: a Loop restarting into a slot a collect freed, a Loop
+  just bought, or a tier just bought. Every farm the rules return has then run its steps up to its
+  time. This amends section 2, where `apply` only advanced before the action.
 - **Step kinds.** `moveGoods` ranks after the producing kinds, so goods made at a time are moved at
-  it; `restartRecipe` ranks last, so a slot the Collector frees is refilled at the same time, and a
-  slot its waiting goods hold is not. A restart only adds a running job that ends later, and no
-  step ranked after `moveGoods` frees barn room today (recipes take only crops), so no step falls
-  due behind one already run at the same time (MUST-10.6). **For #85:** a recipe that takes barn
-  goods (cookies take eggs) frees barn room as its Loop restarts, which can make a Collector's move
-  due at the same millisecond, ranked before the restart just run; `advance` would throw. #85 has to
-  settle that order, for example by running a facility's moves and restarts in one step.
+  it; `restartRecipe` ranks last of all kinds (the admin, 11 Nov: after #87's order refills too),
+  so a slot the Collector frees is refilled at the same time, and a slot its waiting goods hold is
+  not. A restart only adds a running job that ends later; one that takes barn goods (cookies take
+  eggs, section 14) frees room, which the Collector uses a ms later, so no step falls due behind
+  one already run at the same time (MUST-10.6).
 
-**Patterns:** level-triggered automated steps (the Collector and the Loop each act whenever their
-condition holds, at the farm's time, besides the Collector's step at a job's stored finish); the
-strategy behind `StepSource` (section 12), chosen per facility by its stored add-ons; the policy
-function of section 11 for buying; one rule reused by the player's action and the automated step
-(`startJob` for the Loop, collecting for the Collector).
+**Patterns:** level-triggered automated steps (the Collector acts a ms after its oldest job's goods
+fit, besides its step at a job's stored finish; the Loop whenever a slot and the inputs are there);
+the strategy behind `StepSource` (section 12), chosen per facility by its stored add-ons; the
+policy function of section 11 for buying; one rule reused by the player's action and the automated
+step (`startJob` for the Loop, collecting for the Collector).
 
 **Rejected:**
 
 - **A Collector that acts only as a job finishes** (this stack's first version). Goods that
   waited for room would stay until collected by hand, so a Looping facility with a full queue of
   them would never resume on its own; the admin's queue rule needs them to move once there is room.
+- **Moving waiting goods at the same ms the room appears** (this stack's second version). A Loop
+  restart that takes barn goods (cookies take eggs) frees room at a time after the moves at that
+  time have run, so a move would fall due behind a step already run, which `advance` throws on; a
+  ms later is the earliest a move can follow it in MUST-10.6's order.
 - **`finishJob` then a separate `moveGoods` of the done job.** A done job stores no time, so the
   move would need a status that lives only inside one millisecond, or a level-triggered step.
 - **The Loop holding while the barn has no room for its goods** (a version from the review round,
   replaced the same day). The admin chose the queue as the limit: a job started in a free slot may
   take its inputs and wait for room, and the player sees a full queue, not a Loop that refuses to
   start beside an empty slot.
-- **Starting the Loop inside `collect` and `buyAddOn`, or moving waiting goods inside `buyAddOn`
-  and `feed`.** Each action that frees a slot or room, or adds an add-on, would have to know about
-  the add-ons, and a later action (harvesting the wheat a Loop waits for) would be one more place
-  to forget; one advance after any action covers them all.
-- **Leaving these steps to the caller's next advance.** A farm `apply` returned would still have a
-  step due at its own time: `advance(farm, farm.time)` would change it, breaking idempotent
-  `advance` and MUST-14.2's replay from a snapshot.
+- **Starting the Loop inside `collect`, `buyAddOn` and `buyTier`, or moving waiting goods inside
+  `buyAddOn` and `feed`.** Each action that frees a slot or room, or adds an add-on or a slot,
+  would have to know about the add-ons, and a later action (harvesting the wheat a Loop waits for)
+  would be one more place to forget; one advance after any action covers them all.
+- **Leaving a step the action made due to the caller's next advance.** A farm `apply` returned
+  would still have a step due at its own time: `advance(farm, farm.time)` would change it,
+  breaking idempotent `advance` and MUST-14.2's replay from a snapshot.
 - **One Loop step that fills every free slot.** One job a step, keyed by the slot it fills, keeps
   the keys unique, and each restart is its own entry in the away summary (MUST-07.3).
 - **Add-ons as a list of ids.** A list has an order to keep canonical; a flag per add-on is one
@@ -500,7 +542,8 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
 | Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding and collecting from pens (sections 12, 13). |
 | Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
-| Level-triggered automated steps | the Collector, the Loop | Each acts whenever its condition holds at the farm's time, in MUST-10.6's order, so a slot or room freed by any step or action is used at once, and the queue alone limits a Loop (section 14). |
+| Level-triggered automated steps | the Collector, the Loop | The Collector acts a ms after waiting goods fit and the Loop whenever a slot and the inputs are there, so a slot or room freed by any step or action is used at once or at the next ms, never behind a step already run; the queue alone limits a Loop (section 15). |
+| Table-driven rules | a facility's tier rows | Each tier's price, slots and job time is a row of content, so tuning or adding a tier changes no code (section 14). |
 
 ## Consequences
 

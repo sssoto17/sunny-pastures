@@ -100,15 +100,36 @@ describe("the Loop", () => {
 		expect(full.silo).toEqual({ wheat: 26 });
 		expect(full.facilities[feedMill]?.jobs).toEqual([done, done]);
 
-		// Room for 10 again (an order delivered, say): the Collector moves both, and the Loop
-		// restarts into both slots at once.
-		const resumed = sim.advance({ ...full, barn: { bread: 20, chickenFeed: 20 } }, day);
+		// Room for 10 again (an order delivered, say): a ms later the Collector moves both, and the
+		// Loop restarts into both slots at once.
+		const resumed = sim.advance({ ...full, barn: { bread: 20, chickenFeed: 20 } }, day + 1);
 		expect(resumed.barn).toEqual({ bread: 20, chickenFeed: 24 });
 		expect(resumed.facilities[feedMill]?.jobs).toEqual([
-			running("chickenFeed", day + feedMs),
-			running("chickenFeed", day + 2 * feedMs),
+			running("chickenFeed", day + 1 + feedMs),
+			running("chickenFeed", day + 1 + 2 * feedMs),
 		]);
 		expect(resumed.silo).toEqual({ wheat: 22 });
+	});
+
+	it("baking cookies frees barn room, which the Collector uses a ms later, in MUST-10.6's order (#85)", () => {
+		// A full barn: the feed mill's goods wait. The bakery's Loop restarts cookies at 0, taking 2
+		// eggs from the barn; the feed moves into that room at 1 ms, not behind the restart at 0.
+		const farm: FarmState = {
+			...looping(2),
+			barn: { egg: 4, bread: 46 },
+			facilities: [
+				ownedFacility([{ status: "done", recipe: "chickenFeed" }], both),
+				ownedFacility([], { ...both, tier: 2, lastRecipe: "cookies" }),
+			],
+		};
+
+		const restarted = sim.advance(farm, 0);
+		expect(restarted.barn).toEqual({ egg: 2, bread: 46 });
+		expect(restarted.facilities[feedMill]?.jobs).toEqual([
+			{ status: "done", recipe: "chickenFeed" },
+		]);
+		expect(restarted.facilities[bakery]?.jobs).toEqual([running("cookies", 400_000)]);
+		expect(sim.advance(farm, 1).barn).toEqual({ egg: 2, bread: 46, chickenFeed: 2 });
 	});
 
 	it("keeps a restarted job's stored finish under a rules version with another duration (ADR-0006 §7, MUST-06.7)", () => {

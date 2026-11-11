@@ -4,20 +4,41 @@
 import fc from "fast-check";
 import { describe, expect, inject, it } from "vitest";
 
-import { createSim, stateHash } from "../../index.js";
+import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Content, FarmState, Sim } from "../../index.js";
 import { delay, farmId, play, timedActions } from "../../state/tests/farms.js";
 import { richContent } from "./richContent.js";
 
 const params = inject("fastCheck");
 
+const slice: Content = sliceContent;
+
 /**
- * The test content, whose 4-good barn makes the Collectors compete for the last space, and one
- * with room for 20, where the barn holds the Loops back less and they compete for the last wheat.
+ * The test content with the slice's job times (60 s feed, 300 s bread), so the generator's
+ * automation chunk lines finishes up on the same ms, and 31 XP a harvest, so its one tending
+ * reaches the add-ons' Levels; #85's 61 s feed and 9 XP are for its rounding and Level cases.
+ */
+const tieContent: Content = {
+	...richContent,
+	crops: { wheat: { ...sliceContent.crops.wheat, xp: 31 } },
+	facilities: richContent.facilities.map((facility, i) => ({
+		...facility,
+		recipes: Object.fromEntries(
+			Object.entries(facility.recipes).map(([id, recipe]) => [
+				id,
+				{ ...recipe, seconds: slice.facilities[i]?.recipes[id]?.seconds ?? NaN },
+			]),
+		),
+	})),
+};
+
+/**
+ * Its 4-good barn makes the Collectors compete for the last space; with room for 20, the barn
+ * holds the Loops back less and they compete for the last wheat.
  */
 const contents = [
-	["a barn of 4", richContent],
-	["a barn of 20", { ...richContent, barn: { capacity: 20 } }],
+	["a barn of 4", tieContent],
+	["a barn of 20", { ...tieContent, barn: { capacity: 20 } }],
 ] as const;
 
 /** Each facility's one recipe in content, by facility: the wheat it takes and the goods it makes. */
