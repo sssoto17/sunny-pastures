@@ -5,7 +5,7 @@ import fc from "fast-check";
 import { describe, expect, inject, it } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
-import type { Content, FarmState } from "../../index.js";
+import type { Action, Content, FarmState } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
 
@@ -120,6 +120,42 @@ function expectAutomated(
 	expect(wheatIn(to)).toBe(wheatIn(from) - wheat);
 	expect(to.xp).toBe(from.xp + xp);
 	expect(to.coins).toBe(from.coins + paidAt(to.xp) - paidAt(from.xp));
+}
+
+/**
+ * The Loop's restarts that an action made due at its time, which apply ran after it: each in a
+ * facility with a Loop, a running job of its last recipe appended to the queue, ending the
+ * recipe's time after the later of now and the job before it (MUST-06.5, ADR-0006 §7). Returns
+ * the wheat they took.
+ */
+function expectRestarts(
+	before: FarmState,
+	after: FarmState,
+	action: Action,
+	recipes: ReadonlyMap<string, TestRecipe>,
+): number {
+	return after.facilities.reduce((wheat, owned, i) => {
+		const own =
+			"facility" in action && action.facility === i
+				? Number(action.type === "startJob") - Number(action.type === "collect")
+				: 0;
+		const queue = owned?.jobs ?? [];
+		const first = (before.facilities[i]?.jobs.length ?? 0) + own;
+		const restarted = queue.slice(first);
+		if (restarted.length > 0) expect(owned?.addOns.loop).toBe(true);
+		const made = recipes.get(owned?.lastRecipe ?? "");
+		restarted.forEach((job, k) => {
+			const previous = queue[first + k - 1];
+			const from =
+				previous?.status === "running" ? Math.max(after.time, previous.readyAt) : after.time;
+			expect(job).toEqual({
+				status: "running",
+				recipe: owned?.lastRecipe,
+				readyAt: from + (made?.ms ?? NaN),
+			});
+		});
+		return wheat + restarted.length * (made?.wheat ?? 0);
+	}, 0);
 }
 
 /** A time at or after the farm's, from the generated delays (never before: see 14.7). */
@@ -347,10 +383,12 @@ describe.each(contents)("the Level and plot properties, over %s", (_name, conten
 			fc.property(farmId, timedActions, (id, played) => {
 				for (const transition of play(levelSim, id, played).transitions) {
 					const { action, at, after } = transition;
-					// The automated steps up to the action's time, then the action.
+					// The automated steps up to the action's time, then the action, then the Loop's
+					// restarts the action made due at its time (sim/'s apply).
 					const before = levelSim.advance(transition.before, at);
 					expectAutomated(transition.before, before, recipes);
-					const gained = wheatIn(after) - wheatIn(before);
+					const restartWheat = expectRestarts(before, after, action, recipes);
+					const gained = wheatIn(after) - wheatIn(before) + restartWheat;
 					if (action.type !== "collect") expect(after.barn).toEqual(before.barn);
 					if (action.type === "startJob") {
 						// The inputs leave the silo, and the job ends the recipe's time after the later
@@ -361,8 +399,8 @@ describe.each(contents)("the Level and plot properties, over %s", (_name, conten
 						const from = last?.status === "running" ? Math.max(at, last.readyAt) : at;
 						const queue = after.facilities[action.facility]?.jobs ?? [];
 						expect(gained).toBe(-(made?.wheat ?? NaN));
-						expect(queue).toHaveLength(jobs.length + 1);
-						expect(queue[queue.length - 1]).toEqual({
+						expect(queue.length).toBeGreaterThan(jobs.length);
+						expect(queue[jobs.length]).toEqual({
 							status: "running",
 							recipe: action.recipe,
 							readyAt: from + (made?.ms ?? NaN),
@@ -377,7 +415,9 @@ describe.each(contents)("the Level and plot properties, over %s", (_name, conten
 						expect(jobs[0]?.status).toBe("done");
 						const made = recipes.get(jobs[0]?.recipe ?? "");
 						const good = made?.good ?? "";
-						expect(after.facilities[action.facility]?.jobs).toHaveLength(jobs.length - 1);
+						expect(after.facilities[action.facility]?.jobs.slice(0, jobs.length - 1)).toEqual(
+							jobs.slice(1),
+						);
 						expect((after.barn[good] ?? 0) - (before.barn[good] ?? 0)).toBe(made?.amount);
 						expect(after.xp).toBe(before.xp + (made?.xp ?? NaN));
 						expect(after.coins).toBe(before.coins + paidAt(after.xp) - paidAt(before.xp));
@@ -403,10 +443,15 @@ describe.each(contents)("the Level and plot properties, over %s", (_name, conten
 						expect(after.coins).toBe(before.coins - addOnPrices[action.addOn]);
 						expect(levelAt(after.xp)).toBeGreaterThanOrEqual(addOnLevels[action.addOn]);
 						expect(owned?.addOns[action.addOn]).toBe(false);
+						// A Loop bought with a free slot and the inputs restarts at once, after the queue.
 						expect(after.facilities[action.facility]).toEqual({
 							...owned,
+							jobs: after.facilities[action.facility]?.jobs,
 							addOns: { ...owned?.addOns, [action.addOn]: true },
 						});
+						expect(after.facilities[action.facility]?.jobs.slice(0, owned?.jobs.length)).toEqual(
+							owned?.jobs,
+						);
 						expectOnlyPaid(before, after, gained);
 					} else if (action.type === "buyPlot") {
 						expect(after.coins).toBe(

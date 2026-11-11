@@ -10,8 +10,11 @@
  *   what was produced at the same time (ADR-0003, section 12).
  * - `moveGoods` (#88), the Collector, after the producers: a job finishing in a facility with a
  *   Collector is this step, which moves its goods into the barn if they fit (ADR-0003, section 13).
+ * - `restartRecipe` (#88), the Loop, last: the Collector's move frees the queue slot a Loop
+ *   restarts into at the same time, and goods that don't fit keep it (MUST-06.5, 06.6). A restart
+ *   adds only a running job that ends later, so it never makes an earlier-ranked step due now.
  */
-const stepKinds = ["ripen", "finishJob", "moveGoods"] as const;
+const stepKinds = ["ripen", "finishJob", "moveGoods", "restartRecipe"] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 
