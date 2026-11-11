@@ -89,7 +89,9 @@ escalation criteria in `CONSTRAINTS.md`, "Admin review". Production changes only
 `v*` tag (ADR-0002, area 4).
 
 **Until #68, the reviewer bot isn't live** (it needs #37 and #68), so you review and merge every PR,
-factory PRs included.
+factory PRs included. Until then the coordinating session stands in for the bot: it dispatches a
+fresh-context reviewer agent per PR and relays the verdict before you merge
+(`.claude/skills/today/SKILL.md`, "After the agenda: coordinator mode").
 
 ## When to use what
 
@@ -103,7 +105,7 @@ factory PRs included.
 | | Addy `spec-driven-development` | `docs/requirements/spec.md` (living, doubles as the requirements chapter) | edit and approve |
 | | Addy `planning-and-task-breakdown` | `docs/plans/NN-<slug>.md`, frozen once published | approve the plan |
 | | `to-tickets` | GitHub issues with native blocking edges, on the Project | nothing: it publishes |
-| Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`) | PR, reviewed by the reviewer bot | review and merge admin-review PRs (every PR until #68) |
+| Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`) | PR, reviewed by the reviewer bot (until #68, a reviewer agent the coordinator dispatches) | review and merge admin-review PRs (every PR until #68) |
 | ↳ high stakes: sim determinism, authority, RLS | Addy `doubt-driven-development` | adversarial review | |
 | ↳ framework APIs: Next, Drizzle, Supabase | Addy `source-driven-development` | docs-verified code | |
 | ↳ module or API shape | Addy `api-and-interface-design` + `codebase-design` | interface sketch | the interface |
