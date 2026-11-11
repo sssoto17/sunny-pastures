@@ -21,7 +21,7 @@ export interface OwnedFacility {
 	 * (MUST-06.5); null until a job starts. Stored, since the queue forgets it once collected.
 	 */
 	readonly lastRecipe: string | null;
-	/** Whether the farm has bought each add-on for this facility; none when bought (MUST-06.8). */
+	/** Whether the farm has bought each add-on for this facility; none when bought, since an add-on exists on the farm only once bought (MUST-05.6). */
 	readonly addOns: Readonly<Record<AddOn, boolean>>;
 }
 
@@ -221,17 +221,25 @@ export const jobFinishing: StepSource<FarmState> = {
  * The Collector (MUST-06.6): a job finishing in its facility is a `moveGoods` step, which finishes
  * the job and then moves the facility's done jobs into the barn, oldest first, while they fit. It
  * decides once, as the job finishes: goods that don't fit wait in the facility as a done job until
- * collected by hand or moved at the facility's next finish (ADR-0003, section 13).
+ * collected by hand or moved at the facility's next finish (ADR-0003, section 14).
  */
 export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
 	return {
 		steps: (farm) => findFinishes(farm, "moveGoods", (owned) => owned.addOns.collector),
 		run: (farm, step) => {
+			// A step comes from the farm's entry, one per content facility (ADR-0003, section 12), so a
+			// facility that isn't in content is a broken farm: a programmer error (D15).
+			const facility = rules.facilities[step.index];
+			if (facility === undefined) {
+				throw new RangeError(
+					`The farm has a Collector on facility ${String(step.index + 1)}, which isn't in content.`,
+				);
+			}
+
 			let current = finishJob(farm, step);
 			for (;;) {
 				const owned = current.facilities[step.index] ?? null;
-				const facility = rules.facilities[step.index];
-				if (owned?.jobs[0]?.status !== "done" || facility === undefined) return current;
+				if (owned?.jobs[0]?.status !== "done") return current;
 
 				const moved = collectOldest(current, step.index, owned, facility, rules);
 				if (!moved.ok) return current;
@@ -246,8 +254,9 @@ export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
  * The Loop (MUST-06.5): while its facility has a free slot and the inputs are in storage, it
  * starts the facility's last recipe again, through `startJob`, so the job stores its finish when it
  * starts (ADR-0006, section 7). A `restartRecipe` step falls at the farm's time, keyed by the slot
- * it fills, one job a step. It stops when the inputs or the slots run out; goods the Collector
- * can't fit keep their slots, so it stops when the output wouldn't fit (MUST-07.2).
+ * it fills, one job a step. It stops when the inputs or the slots run out, and holds while storage
+ * has no room for the new job's goods and its queue's, so it takes no inputs for goods that would
+ * wait; it resumes once there is room (MUST-07.2; ADR-0003, section 14).
  */
 export function createLooping(rules: FacilityRules): StepSource<FarmState> {
 	return {
@@ -265,6 +274,21 @@ export function createLooping(rules: FacilityRules): StepSource<FarmState> {
 function restart(farm: FarmState, index: number, rules: FacilityRules): FarmState | null {
 	const owned = farm.facilities[index] ?? null;
 	if (owned?.addOns.loop !== true || owned.lastRecipe === null) return null;
+
+	// MUST-07.2 (the admin, 11 Nov): no inputs for goods that would wait. The store must hold the
+	// new job's goods and those of every job in the queue, waiting or running; until it does, the
+	// Loop holds, and it resumes once there is room. A facility's goods all go to one store (the
+	// barn, in content), so the queue's goods are counted against the new job's store.
+	const facility = rules.facilities[index];
+	const recipe = facility?.recipes.get(owned.lastRecipe);
+	if (recipe === undefined) return null;
+
+	const queued = owned.jobs.reduce(
+		(total, job) => total + (facility?.recipes.get(job.recipe)?.output.amount ?? 0),
+		recipe.output.amount,
+	);
+	const room = put(farm, { good: recipe.output.good, amount: queued }, "the Loop", rules.storage);
+	if (!room.ok) return null;
 
 	const started = startJob(farm, index, owned.lastRecipe, rules);
 	return started.ok ? started.state : null;

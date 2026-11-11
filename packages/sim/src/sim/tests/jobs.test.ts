@@ -22,12 +22,11 @@ describe("starting a job", () => {
 		const farm = applyAll(workshop(5), [[startFeed, 1_000]]);
 
 		expect(farm.silo).toEqual({ wheat: 3 });
-		expect(farm.facilities[feedMill]).toEqual({
-			tier: 1,
-			jobs: [{ status: "running", recipe: "chickenFeed", readyAt: 1_000 + feedMs }],
-			lastRecipe: "chickenFeed",
-			addOns: { loop: false, collector: false },
-		});
+		expect(farm.facilities[feedMill]).toEqual(
+			ownedFacility([{ status: "running", recipe: "chickenFeed", readyAt: 1_000 + feedMs }], {
+				lastRecipe: "chickenFeed",
+			}),
+		);
 		expect(farm.coins).toBe(0);
 		expect(farm.xp).toBe(xpOfLevel(3));
 	});
