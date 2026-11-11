@@ -1,14 +1,17 @@
 // Content is data handed to createSim, never imported by the rules (ADR-0003, section 1, D5). The
 // values are the admin's (spec, "How to read this spec"; CONSTRAINTS.md, "Content change" row):
-// approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83),
-// to be tuned after playtest 1.
+// approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83);
+// the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
+// lane"). All to be tuned after playtest 1.
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
 	/** A new farm (spec decision 5). */
 	readonly start: { readonly coins: number; readonly plots: number };
-	/** The silo holds at most `capacity` crops in all. */
+	/** The silo holds at most `capacity` crops in all (MUST-06.4). */
 	readonly silo: { readonly capacity: number };
+	/** The barn holds at most `capacity` goods in all: every good that isn't a crop (MUST-06.4). */
+	readonly barn: { readonly capacity: number };
 	/** Crops by good id. */
 	readonly crops: Readonly<Record<string, Crop>>;
 	/**
@@ -48,10 +51,17 @@ export interface Crop {
 	readonly xp: number;
 }
 
+/** An amount of one good. */
+export interface GoodCount {
+	readonly good: string;
+	readonly amount: number;
+}
+
 /** The M4 slice's content, wheat only for now (#72, D1). */
 export const sliceContent = {
 	start: { coins: 50, plots: 6 },
 	silo: { capacity: 50 },
+	barn: { capacity: 50 },
 	crops: {
 		wheat: {
 			seedPrice: 2,

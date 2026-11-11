@@ -69,7 +69,7 @@ describe("harvesting", () => {
 
 		expect(sim.apply(nearlyFull, { type: "harvest", plot: 0 }, growMs)).toEqual({
 			ok: false,
-			reason: "The silo has room for 1 more crop, and the harvest is 2 wheat.",
+			reason: "The silo has room for 1 more crop, and the harvest needs room for 2 wheat.",
 		});
 	});
 });

@@ -191,11 +191,14 @@ describe.each([
 					assertSafeIntegers(farm);
 					expect(farm.coins).toBeGreaterThanOrEqual(0);
 					expect(farm.plots.length).toBeLessThanOrEqual(mostPlots[levelAt(farm.xp) - 1] ?? 0);
-					const counts = Object.values(farm.silo);
-					expect(counts.every((count) => count > 0)).toBe(true);
-					expect(counts.reduce((total, count) => total + count, 0)).toBeLessThanOrEqual(
-						content.silo.capacity,
-					);
+					for (const [goods, capacity] of [
+						[farm.silo, content.silo.capacity],
+						[farm.barn, content.barn.capacity],
+					] as const) {
+						const counts = Object.values(goods);
+						expect(counts.every((count) => count > 0)).toBe(true);
+						expect(counts.reduce((total, count) => total + count, 0)).toBeLessThanOrEqual(capacity);
+					}
 				}
 			}),
 			params,
