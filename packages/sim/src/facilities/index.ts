@@ -213,50 +213,89 @@ export function buyAddOn(
  * In a facility with a Collector, the Collector's step finishes it instead (`createCollecting`).
  */
 export const jobFinishing: StepSource<FarmState> = {
-	steps: (farm) => findFinishes(farm, "finishJob", (owned) => !owned.addOns.collector),
+	steps: (farm) =>
+		farm.facilities.flatMap((owned, index): AutomatedStep[] =>
+			owned === null || owned.addOns.collector
+				? []
+				: owned.jobs.flatMap((job, slot): AutomatedStep[] =>
+						job.status === "running" ? [{ at: job.readyAt, kind: "finishJob", index, slot }] : [],
+					),
+		),
 	run: finishJob,
 };
 
 /**
- * The Collector (MUST-06.6): a job finishing in its facility is a `moveGoods` step, which finishes
- * the job and then moves the facility's done jobs into the barn, oldest first, while they fit. It
- * decides once, as the job finishes: goods that don't fit wait in the facility as a done job until
- * collected by hand or moved at the facility's next finish (ADR-0003, section 14).
+ * The Collector (MUST-06.6): a `moveGoods` step, one per facility and time, keyed by the facility
+ * and slot 0. It falls when one of the facility's jobs finishes, which it finishes in place of
+ * `finishJob`, and at the farm's time whenever the facility's oldest job is done and its goods fit,
+ * so goods that waited move as soon as the barn has room. It moves the done jobs into the barn,
+ * oldest first, while they fit; the rest wait in their slots (ADR-0003, section 14).
  */
 export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
 	return {
-		steps: (farm) => findFinishes(farm, "moveGoods", (owned) => owned.addOns.collector),
+		steps: (farm) =>
+			farm.facilities.flatMap((owned, index): AutomatedStep[] => {
+				if (owned?.addOns.collector !== true) return [];
+
+				const ends = owned.jobs.flatMap((job) => (job.status === "running" ? [job.readyAt] : []));
+				const isWaiting =
+					!ends.includes(farm.time) && collectFirst(farm, index, rules)?.ok === true;
+				return [...ends, ...(isWaiting ? [farm.time] : [])].map((at) => ({
+					at,
+					kind: "moveGoods",
+					index,
+					slot: 0,
+				}));
+			}),
 		run: (farm, step) => {
 			// A step comes from the farm's entry, one per content facility (ADR-0003, section 12), so a
 			// facility that isn't in content is a broken farm: a programmer error (D15).
-			const facility = rules.facilities[step.index];
-			if (facility === undefined) {
+			if (rules.facilities[step.index] === undefined) {
 				throw new RangeError(
 					`The farm has a Collector on facility ${String(step.index + 1)}, which isn't in content.`,
 				);
 			}
 
-			let current = finishJob(farm, step);
-			for (;;) {
-				const owned = current.facilities[step.index] ?? null;
-				if (owned?.jobs[0]?.status !== "done") return current;
-
-				const moved = collectOldest(current, step.index, owned, facility, rules);
-				if (!moved.ok) return current;
-
+			let current = finishDue(farm, step.index);
+			for (let moved = collectFirst(current, step.index, rules); moved?.ok === true;) {
 				current = moved.state;
+				moved = collectFirst(current, step.index, rules);
 			}
+			return current;
 		},
 	};
+}
+
+/** Collecting the facility's oldest job, or null if it isn't done (or there's none). */
+function collectFirst(farm: FarmState, index: number, rules: FacilityRules): ApplyResult | null {
+	const owned = farm.facilities[index] ?? null;
+	const facility = rules.facilities[index];
+	if (owned?.jobs[0]?.status !== "done" || facility === undefined) return null;
+
+	return collectOldest(farm, index, owned, facility, rules);
+}
+
+/** Marks the facility's running jobs that end by the farm's time done (#88's Collector). */
+function finishDue(farm: FarmState, index: number): FarmState {
+	const owned = farm.facilities[index] ?? null;
+	if (owned === null) return farm;
+
+	const jobs = owned.jobs.map((job): Job =>
+		job.status === "running" && job.readyAt <= farm.time
+			? { status: "done", recipe: job.recipe }
+			: job,
+	);
+	return replaceFacility(farm, index, { ...owned, jobs });
 }
 
 /**
  * The Loop (MUST-06.5): while its facility has a free slot and the inputs are in storage, it
  * starts the facility's last recipe again, through `startJob`, so the job stores its finish when it
  * starts (ADR-0006, section 7). A `restartRecipe` step falls at the farm's time, keyed by the slot
- * it fills, one job a step. It stops when the inputs or the slots run out, and holds while storage
- * has no room for the new job's goods and its queue's, so it takes no inputs for goods that would
- * wait; it resumes once there is room (MUST-07.2; ADR-0003, section 14).
+ * it fills, one job a step. Its limit is the queue (the admin, 11 Nov): a done job keeps its slot
+ * until collected, by hand or by the Collector, so it stops when every slot is taken, barn room or
+ * not, and resumes as soon as one frees; it also stops when the inputs run out (MUST-06.5, 07.2;
+ * ADR-0003, section 14).
  */
 export function createLooping(rules: FacilityRules): StepSource<FarmState> {
 	return {
@@ -274,21 +313,6 @@ export function createLooping(rules: FacilityRules): StepSource<FarmState> {
 function restart(farm: FarmState, index: number, rules: FacilityRules): FarmState | null {
 	const owned = farm.facilities[index] ?? null;
 	if (owned?.addOns.loop !== true || owned.lastRecipe === null) return null;
-
-	// MUST-07.2 (the admin, 11 Nov): no inputs for goods that would wait. The store must hold the
-	// new job's goods and those of every job in the queue, waiting or running; until it does, the
-	// Loop holds, and it resumes once there is room. A facility's goods all go to one store (the
-	// barn, in content), so the queue's goods are counted against the new job's store.
-	const facility = rules.facilities[index];
-	const recipe = facility?.recipes.get(owned.lastRecipe);
-	if (recipe === undefined) return null;
-
-	const queued = owned.jobs.reduce(
-		(total, job) => total + (facility?.recipes.get(job.recipe)?.output.amount ?? 0),
-		recipe.output.amount,
-	);
-	const room = put(farm, { good: recipe.output.good, amount: queued }, "the Loop", rules.storage);
-	if (!room.ok) return null;
 
 	const started = startJob(farm, index, owned.lastRecipe, rules);
 	return started.ok ? started.state : null;
@@ -321,21 +345,6 @@ function collectOldest(
 
 	const collected = replaceFacility(stored.state, index, { ...owned, jobs: rest });
 	return { ok: true, state: gainXp(collected, recipe.xp, rules.progress) };
-}
-
-/** A step of `kind` at each running job's `readyAt`, in the facilities `chosen` picks. */
-function findFinishes(
-	farm: FarmState,
-	kind: "finishJob" | "moveGoods",
-	chosen: (owned: OwnedFacility) => boolean,
-): AutomatedStep[] {
-	return farm.facilities.flatMap((owned, index): AutomatedStep[] =>
-		owned !== null && chosen(owned)
-			? owned.jobs.flatMap((job, slot): AutomatedStep[] =>
-					job.status === "running" ? [{ at: job.readyAt, kind, index, slot }] : [],
-				)
-			: [],
-	);
 }
 
 /** Marks the running job in the step's slot done. */
