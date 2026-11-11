@@ -87,6 +87,32 @@ describe("drawing an order", () => {
 		expect(new Set(orders.map((order) => order.goods.length))).toEqual(new Set([1, 2, 3]));
 	});
 
+	it("draws goods in content order, pinned for a Level with several goods (MUST-04.2, 10.6)", () => {
+		// farm-1's board under test content that unlocks all four goods, recorded once. Picking by
+		// sorted id or object key order instead of `orderGoods`' array order changes it.
+		const { board } = createSim(allAtOnce).newFarm("farm-1");
+		const order = (goods: [string, number][], coins: number, xp: number): OrderSlot =>
+			open({ goods: goods.map(([good, amount]) => ({ good, amount })), coins, xp });
+
+		expect(board).toEqual([
+			order(
+				[
+					["wheat", 6],
+					["bread", 1],
+					["egg", 1],
+				],
+				41,
+				12,
+			),
+			open(wheatOrder(3)),
+			open(wheatOrder(3)),
+			open(wheatOrder(2)),
+			open(wheatOrder(2)),
+		]);
+		const reversed = { ...allAtOnce, orderGoods: [...allAtOnce.orderGoods].reverse() };
+		expect(createSim(reversed).newFarm("farm-1").board).not.toEqual(board);
+	});
+
 	it("lets at most one open order ask for a good the farm can't produce (MUST-04.3)", () => {
 		// A new farm has no facility or pen, so only wheat is producible.
 		expect(Math.max(...newFarms(allAtOnce).map(countStretched))).toBe(1);
