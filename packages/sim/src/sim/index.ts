@@ -11,6 +11,7 @@ import {
 	prepareFacilityRules,
 	startJob,
 } from "../facilities/index.js";
+import { buyPen, feed, newPens, preparePenRules } from "../pens/index.js";
 import { buyPlot, harvest, plant, preparePlotRules, ripening } from "../plots/index.js";
 import { prepareProgressRules } from "../progress/index.js";
 import { streamSeed } from "../random/index.js";
@@ -40,6 +41,7 @@ export function createSim(content: Content): Sim {
 	const storage = prepareStorageRules(content);
 	const plotRules = preparePlotRules(content, progress, storage);
 	const facilityRules = prepareFacilityRules(content, progress, storage);
+	const penRules = preparePenRules(content, progress, storage);
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
 	return {
@@ -51,6 +53,7 @@ export function createSim(content: Content): Sim {
 			barn: {},
 			plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
 			facilities: newFacilities(facilityRules),
+			pens: newPens(penRules),
 			streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
 		}),
 		apply: (state, action, at) => {
@@ -73,6 +76,10 @@ export function createSim(content: Content): Sim {
 					return buyFacility(farm, action.facility, facilityRules);
 				case "startJob":
 					return startJob(farm, action.facility, action.recipe, facilityRules);
+				case "buyPen":
+					return buyPen(farm, action.pen, penRules);
+				case "feed":
+					return feed(farm, action.pen, penRules);
 				case "collect":
 					return collect(farm, action.facility, facilityRules);
 			}
