@@ -436,8 +436,9 @@ The grill checked three more and kept them independent of the log:
    BASE IDs and are never cut. `CONSTRAINTS.md` holds their thresholds and checks.
 5. **The admin role** (MUST-16.5): how an account gets it. Anonymous sign-in gives every player a
    user, so the admin needs a role that only the admin can set.
-6. **Replaying old logs after a rules change** (MUST-13.6, MUST-16.3): decided in #31. That
-   includes content tuning. #31 must be settled before M3 builds the log schema, and in any
-   case before the first tuning after playtest 1.
+6. ~~**Replaying old logs after a rules change**~~ Settled 11 Nov (#31): every log row and
+   snapshot records its rules version, a replay never crosses a version, and a base snapshot
+   holds the farm after its version upgrade ([ADR-0006](../adr/0006-rules-versions-and-replay.md),
+   MUST-13.6, MUST-16.3).
 7. ~~**Where the state hash lives**~~ Settled 8 Nov (#72): inside the simulation, as a
    pure-TypeScript SHA-256 ([ADR-0003](../adr/0003-simulation-design.md), MUST-10.5).
