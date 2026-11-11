@@ -30,6 +30,23 @@ describe("compareSteps", () => {
 		expect([makeStep(11, 0), finish].sort(compareSteps)).toEqual([finish, makeStep(11, 0)]);
 	});
 
+	it("ranks every kind: producing goods, then the Collector moving them (MUST-10.6, #88)", () => {
+		// Each kind at a higher index and slot than the next, so only the kind can order them.
+		const at = (kind: AutomatedStep["kind"], index: number): AutomatedStep => ({
+			at: 10,
+			kind,
+			index,
+			slot: index,
+		});
+		const ranked = [at("ripen", 3), at("finishJob", 2), at("moveGoods", 1)];
+
+		expect([...ranked].reverse().sort(compareSteps)).toEqual(ranked);
+		expect([at("moveGoods", 0), at("finishJob", 9)].sort(compareSteps)).toEqual([
+			at("finishJob", 9),
+			at("moveGoods", 0),
+		]);
+	});
+
 	it("is 0 only for the same step", () => {
 		expect(compareSteps(makeStep(10, 1), makeStep(10, 1))).toBe(0);
 		expect(compareSteps(makeStep(10, 1), makeStep(10, 2))).toBeLessThan(0);

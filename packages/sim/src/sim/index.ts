@@ -7,6 +7,7 @@ import {
 	buyAddOn,
 	buyFacility,
 	collect,
+	createCollecting,
 	jobFinishing,
 	newFacilities,
 	prepareFacilityRules,
@@ -41,6 +42,14 @@ export function createSim(content: Content): Sim {
 	const storage = prepareStorageRules(content);
 	const plotRules = preparePlotRules(content, progress, storage);
 	const facilityRules = prepareFacilityRules(content, progress, storage);
+	// Every feature's automated steps. advance/'s tie key orders them, and this list's order never
+	// matters: two steps with the same key are a programmer error, which advanceFarm throws on as a
+	// RangeError. Each new kind must keep its keys unique (MUST-10.6).
+	const sources: readonly StepSource<FarmState>[] = [
+		ripening,
+		jobFinishing,
+		createCollecting(facilityRules),
+	];
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
 	return {
@@ -83,10 +92,3 @@ export function createSim(content: Content): Sim {
 		advance,
 	};
 }
-
-/**
- * Every feature's automated steps. advance/'s tie key orders them, and this list's order never
- * matters: two steps with the same key are a programmer error, which advanceFarm throws on as a
- * RangeError. Each new kind must keep its keys unique (MUST-10.6).
- */
-const sources: readonly StepSource<FarmState>[] = [ripening, jobFinishing];

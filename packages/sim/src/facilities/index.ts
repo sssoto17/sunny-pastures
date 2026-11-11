@@ -173,23 +173,11 @@ export function collect(farm: FarmState, index: number, rules: FacilityRules): A
 	if (typeof found === "string") return refuse(found);
 
 	const { facility, owned } = found;
-	const [job, ...rest] = owned.jobs;
-	if (job?.status !== "done") return refuse(`The ${facility.id} has no finished job to collect.`);
-
-	// A done job's recipe is in content: a version that drops a recipe settles its jobs in its
-	// `upgrade` (ADR-0006, section 6), so a missing one is a programmer error.
-	const recipe = facility.recipes.get(job.recipe);
-	if (recipe === undefined) {
-		throw new RangeError(
-			`The ${facility.id} has a done job of ${job.recipe}, which isn't in content.`,
-		);
+	if (owned.jobs[0]?.status !== "done") {
+		return refuse(`The ${facility.id} has no finished job to collect.`);
 	}
 
-	const stored = put(farm, recipe.output, "collecting the job", rules.storage);
-	if (!stored.ok) return stored;
-
-	const collected = replaceFacility(stored.state, index, { ...owned, jobs: rest });
-	return { ok: true, state: gainXp(collected, recipe.xp, rules.progress) };
+	return collectOldest(farm, index, owned, facility, rules);
 }
 
 /**
@@ -220,24 +208,94 @@ export function buyAddOn(
 	return { ok: true, state: replaceFacility(bought.state, index, equipped) };
 }
 
-/** A running job becomes done at its `readyAt`, keyed by facility index and queue slot (MUST-03.3). */
+/**
+ * A running job becomes done at its `readyAt`, keyed by facility index and queue slot (MUST-03.3).
+ * In a facility with a Collector, the Collector's step finishes it instead (`createCollecting`).
+ */
 export const jobFinishing: StepSource<FarmState> = {
-	steps: (farm) =>
-		farm.facilities.flatMap((owned, index): AutomatedStep[] =>
-			(owned?.jobs ?? []).flatMap((job, slot): AutomatedStep[] =>
-				job.status === "running" ? [{ at: job.readyAt, kind: "finishJob", index, slot }] : [],
-			),
-		),
-	run: (farm, step) => {
-		const owned = farm.facilities[step.index] ?? null;
-		const job = owned?.jobs[step.slot];
-		if (owned === null || job?.status !== "running") return farm;
-
-		const done: Job = { status: "done", recipe: job.recipe };
-		const jobs = owned.jobs.map((current, slot) => (slot === step.slot ? done : current));
-		return replaceFacility(farm, step.index, { ...owned, jobs });
-	},
+	steps: (farm) => findFinishes(farm, "finishJob", (owned) => !owned.addOns.collector),
+	run: finishJob,
 };
+
+/**
+ * The Collector (MUST-06.6): a job finishing in its facility is a `moveGoods` step, which finishes
+ * the job and then moves the facility's done jobs into the barn, oldest first, while they fit. It
+ * decides once, as the job finishes: goods that don't fit wait in the facility as a done job until
+ * collected by hand or moved at the facility's next finish (ADR-0003, section 13).
+ */
+export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
+	return {
+		steps: (farm) => findFinishes(farm, "moveGoods", (owned) => owned.addOns.collector),
+		run: (farm, step) => {
+			let current = finishJob(farm, step);
+			for (;;) {
+				const owned = current.facilities[step.index] ?? null;
+				const facility = rules.facilities[step.index];
+				if (owned?.jobs[0]?.status !== "done" || facility === undefined) return current;
+
+				const moved = collectOldest(current, step.index, owned, facility, rules);
+				if (!moved.ok) return current;
+
+				current = moved.state;
+			}
+		},
+	};
+}
+
+/**
+ * Collects the job in slot 0, which must be done: its goods go to the barn, refused if they don't
+ * fit, and it gives XP through gainXp (MUST-03.4, 05.2). The jobs behind it move up a slot.
+ * Collecting by hand and the Collector share it.
+ */
+function collectOldest(
+	farm: FarmState,
+	index: number,
+	owned: OwnedFacility,
+	facility: FacilityRule,
+	rules: FacilityRules,
+): ApplyResult {
+	const [job, ...rest] = owned.jobs;
+	// A done job's recipe is in content: a version that drops a recipe settles its jobs in its
+	// `upgrade` (ADR-0006, section 6), so a missing one is a programmer error.
+	const recipe = facility.recipes.get(job?.recipe ?? "");
+	if (recipe === undefined) {
+		throw new RangeError(
+			`The ${facility.id} has a done job of ${job?.recipe ?? "nothing"}, which isn't in content.`,
+		);
+	}
+
+	const stored = put(farm, recipe.output, "collecting the job", rules.storage);
+	if (!stored.ok) return stored;
+
+	const collected = replaceFacility(stored.state, index, { ...owned, jobs: rest });
+	return { ok: true, state: gainXp(collected, recipe.xp, rules.progress) };
+}
+
+/** A step of `kind` at each running job's `readyAt`, in the facilities `chosen` picks. */
+function findFinishes(
+	farm: FarmState,
+	kind: "finishJob" | "moveGoods",
+	chosen: (owned: OwnedFacility) => boolean,
+): AutomatedStep[] {
+	return farm.facilities.flatMap((owned, index): AutomatedStep[] =>
+		owned !== null && chosen(owned)
+			? owned.jobs.flatMap((job, slot): AutomatedStep[] =>
+					job.status === "running" ? [{ at: job.readyAt, kind, index, slot }] : [],
+				)
+			: [],
+	);
+}
+
+/** Marks the running job in the step's slot done. */
+function finishJob(farm: FarmState, step: AutomatedStep): FarmState {
+	const owned = farm.facilities[step.index] ?? null;
+	const job = owned?.jobs[step.slot];
+	if (owned === null || job?.status !== "running") return farm;
+
+	const done: Job = { status: "done", recipe: job.recipe };
+	const jobs = owned.jobs.map((current, slot) => (slot === step.slot ? done : current));
+	return replaceFacility(farm, step.index, { ...owned, jobs });
+}
 
 interface FacilityRule {
 	readonly id: string;

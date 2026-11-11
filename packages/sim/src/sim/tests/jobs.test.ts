@@ -1,20 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { createSim, sliceContent } from "../../index.js";
-import type { Action, Content, FarmState } from "../../index.js";
-import { expectAccepted } from "./expectAccepted.js";
+import type { Content, FarmState } from "../../index.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
 import { ownedFacility } from "./ownedFacility.js";
+import { applyAll, bakery, breadMs, feedMill, feedMs, startBread, startFeed } from "./sliceJobs.js";
 
 const sim = createSim(sliceContent);
-// The slice's recipes (#84): chicken feed takes 2 wheat and 60 s, bread 3 wheat and 300 s.
-const feedMs = 60_000;
-const breadMs = 300_000;
-
-const feedMill = 0;
-const bakery = 1;
-const startFeed = { type: "startJob", facility: feedMill, recipe: "chickenFeed" } as const;
-const startBread = { type: "startJob", facility: bakery, recipe: "bread" } as const;
 const doneFeed = { status: "done", recipe: "chickenFeed" } as const;
 const collectFeed = { type: "collect", facility: feedMill } as const;
 
@@ -24,10 +16,6 @@ const workshop = (wheat: number): FarmState => ({
 	silo: { wheat },
 	facilities: [ownedFacility(), ownedFacility()],
 });
-
-/** Applies `actions` in turn, each at its time; fails the test on a refusal. */
-const applyAll = (farm: FarmState, actions: readonly [Action, number][]): FarmState =>
-	actions.reduce((current, [action, at]) => expectAccepted(sim.apply(current, action, at)), farm);
 
 describe("starting a job", () => {
 	it("takes the inputs from storage and stores when the job finishes and its recipe, for the Loop (MUST-03.2, 06.5, ADR-0006 §7)", () => {
