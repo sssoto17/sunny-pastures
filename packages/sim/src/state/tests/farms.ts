@@ -64,15 +64,21 @@ const slotIndex = fc.oneof(
 
 /** Mostly the slice's recipes, sometimes one the facility lacks or not in content. */
 const recipe = fc.oneof(
-	{ weight: 9, arbitrary: fc.constantFrom("chickenFeed", "bread") },
+	{ weight: 9, arbitrary: fc.constantFrom("chickenFeed", "bread", "cookies") },
 	{ weight: 1, arbitrary: fc.constant("cake") },
 );
 
+/** Mostly the slice's tiers above 1 (#85), sometimes one the facility has or content lacks. */
+const tier = fc.oneof(
+	{ weight: 4, arbitrary: fc.constantFrom(2, 3) },
+	{ weight: 1, arbitrary: fc.constantFrom(1, 4) },
+);
+
 /**
- * Plant, harvest, buy, start jobs and collect, on plots and facilities in and out of range, mostly
- * wheat, sometimes a crop not in content; buy, feed and collect from pens in and out of range;
- * deliver and discard orders in slots in and out of range. A generated buy rarely names the next
- * plot, so it mostly reaches the refusals.
+ * Plant, harvest, buy, start jobs, buy tiers and collect, on plots and facilities in and out of
+ * range, mostly wheat, sometimes a crop not in content; buy, feed and collect from pens in and out
+ * of range; deliver and discard orders in slots in and out of range. A generated buy rarely names
+ * the next plot, so it mostly reaches the refusals.
  */
 const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({
@@ -88,6 +94,7 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({ type: fc.constant("buyFacility" as const), facility: facilityIndex }),
 	fc.record({ type: fc.constant("startJob" as const), facility: facilityIndex, recipe }),
 	fc.record({ type: fc.constant("collect" as const), facility: facilityIndex }),
+	fc.record({ type: fc.constant("buyTier" as const), facility: facilityIndex, tier }),
 	fc.record({ type: fc.constant("buyPen" as const), pen: penIndex }),
 	fc.record({ type: fc.constant("feed" as const), pen: penIndex }),
 	fc.record({ type: fc.constant("collectProducts" as const), pen: penIndex }),
@@ -192,6 +199,62 @@ const keepChickens = fc
 		{ action: { type: "collectProducts", pen: 0 }, delay: Math.abs(third) },
 	]);
 
+/**
+ * Upgrading the facilities (#85): buy both, start a job in each, buy tier 2 while it runs, start
+ * another, buy tier 3, then start jobs past tier 1's slots until the queue is full and refused;
+ * collect each job after a wait. So tiers are bought with jobs queued and running (MUST-03.3, 06.7)
+ * and queues fill to a higher tier's slots (MUST-03.5, 06.2). Refused and skipped while a tier is
+ * locked or unaffordable, or the silo lacks wheat.
+ */
+const buyTiers = delay.map((wait): TimedAction[] =>
+	(["chickenFeed", "bread"] as const).flatMap((made, facility): TimedAction[] => {
+		const start: TimedAction = { action: { type: "startJob", facility, recipe: made }, delay: 0 };
+		return [
+			{ action: { type: "buyFacility", facility }, delay: 0 },
+			start,
+			{ action: { type: "buyTier", facility, tier: 2 }, delay: 0 },
+			start,
+			{ action: { type: "buyTier", facility, tier: 3 }, delay: 0 },
+			...repeat({ type: "startJob", facility, recipe: made }, 3),
+			{ action: { type: "collect", facility }, delay: Math.abs(wait) },
+			...repeat({ type: "collect", facility }, 2),
+		];
+	}),
+);
+
+/**
+ * Baking cookies (#85, #72 D4), from the field up: tend the start's plots until they ripen, make
+ * chicken feed, feed the chickens and collect their eggs once laid, then buy the bakery, try
+ * cookies at its tier 1 (refused), buy its tier 2, start two cookies jobs and collect them after a
+ * wait (MUST-03.1, 03.2). The waits that
+ * ripen and lay are fixed, or random runs would rarely hold wheat and eggs at once. Refused and
+ * skipped while the barn holds too few eggs or the bakery or its tier 2 is locked.
+ */
+const bake = delay.map((wait): TimedAction[] => {
+	const plots = allPlots.slice(0, startPlots);
+	return [
+		...plots.map((plot): TimedAction => ({
+			action: { type: "plant", plot, crop: "wheat" },
+			delay: 0,
+		})),
+		...plots.map((plot, i): TimedAction => ({
+			action: { type: "harvest", plot },
+			delay: i === 0 ? 120_000 : 0,
+		})),
+		{ action: { type: "buyFacility", facility: 0 }, delay: 0 },
+		{ action: { type: "buyPen", pen: 0 }, delay: 0 },
+		...makeFeed(60_000),
+		...repeat({ type: "feed", pen: 0 }, 4),
+		{ action: { type: "collectProducts", pen: 0 }, delay: 180_000 },
+		{ action: { type: "buyFacility", facility: 1 }, delay: 0 },
+		{ action: { type: "startJob", facility: 1, recipe: "cookies" }, delay: 0 },
+		{ action: { type: "buyTier", facility: 1, tier: 2 }, delay: 0 },
+		...repeat({ type: "startJob", facility: 1, recipe: "cookies" }, 2),
+		{ action: { type: "collect", facility: 1 }, delay: Math.abs(wait) },
+		{ action: { type: "collect", facility: 1 }, delay: 0 },
+	];
+});
+
 /** Delivering the order in every slot the board can have, at the farm's time. */
 const deliverAll = Array.from({ length: 7 }, (_slot, slot): TimedAction => ({
 	action: { type: "deliver", slot },
@@ -223,6 +286,8 @@ const chunk = fc.oneof(
 	{ weight: 1, arbitrary: fc.constant(expand) },
 	{ weight: 2, arbitrary: produce },
 	{ weight: 2, arbitrary: keepChickens },
+	{ weight: 2, arbitrary: buyTiers },
+	{ weight: 2, arbitrary: bake },
 	{ weight: 2, arbitrary: trade },
 );
 

@@ -1,0 +1,103 @@
+# THROWAWAY: #103's checks of Claude in Actions. Never merge into main. scripts/setup/ci-check.sh
+# copies this file to .github/workflows/ on the branch throwaway/103-claude and pushes it; the push
+# runs it. Issue events and workflow_dispatch only run workflows from the default branch, so the
+# trigger is a push to that branch, and no throwaway issue is needed. Each job prints `RESULT ...`
+# lines with non-secret fields only; `ci-check.sh results 103` collects them with the minutes.
+# Low caps: at most 3 turns a run, 10 minutes a job. Actions pinned to full SHAs (ADR-0002, area 8).
+name: check-103-claude
+
+on:
+  push:
+    branches: [throwaway/103-claude]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-103
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    name: claude (${{ matrix.check }})
+    runs-on: ubuntu-24.04
+    environment: factory
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Auth and hooks: one short answer.
+          - check: auth-hooks
+            turns: 2
+            timeout: 10
+            tools: ''
+            prompt: Reply with the single word OK. Do not use any tools.
+          # --max-turns 1 stops a run that needs three tool calls (subtype error_max_turns).
+          - check: max-turns
+            turns: 1
+            timeout: 10
+            tools: Read
+            prompt: >-
+              Read AGENTS.md, then CLAUDE.md, then CONSTRAINTS.md, each with its own Read call,
+              one after the other. Then reply with each file's first heading.
+          # timeout-minutes: 4 stops a run that waits on a 9-minute command.
+          - check: timeout
+            turns: 3
+            timeout: 4
+            tools: Bash(sleep 540)
+            prompt: >-
+              Run exactly this command with the Bash tool, in the foreground, and wait for it to
+              finish: sleep 540. Then reply DONE.
+    env:
+      ANTHROPIC_API_KEY: '' # never an API key here: the setup-token is the only credential
+      BASH_DEFAULT_TIMEOUT_MS: '600000' # so the timeout case waits on sleep, not on the Bash tool
+      BASH_MAX_TIMEOUT_MS: '600000'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Two harmless hooks in the checkout's .claude/settings.json, beside the repo's own; each
+      # appends its event name to a file outside the repo.
+      - name: Add marker hooks
+        run: |
+          jq --arg m "$RUNNER_TEMP/hook-marker" '
+            def mark(e): {hooks: [{type: "command", command: ("echo " + e + " >> " + $m)}]};
+            .hooks.SessionStart += [mark("SessionStart")]
+            | .hooks.UserPromptSubmit += [mark("UserPromptSubmit")]' .claude/settings.json >"$RUNNER_TEMP/s.json"
+          mv "$RUNNER_TEMP/s.json" .claude/settings.json
+      # Whether an API key secret exists anywhere this job could read one (repo or environment):
+      # it should say no, so the setup-token is the only credential the run can have used.
+      # The expressions yield true or false only, so no secret value enters the step.
+      - name: Which credentials exist (yes or no only)
+        env:
+          HAS_OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          HAS_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: echo "RESULT oauth_token_secret=$HAS_OAUTH api_key_secret=$HAS_API_KEY"
+      - id: claude
+        continue-on-error: true
+        uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: ${{ matrix.prompt }}
+          claude_args: >-
+            --max-turns ${{ matrix.turns }}
+            ${{ matrix.tools != '' && format('--allowedTools "{0}"', matrix.tools) || '' }}
+      # After a timeout this step may not run; the job's conclusion and seconds in the results
+      # table are then the record.
+      - name: Report
+        if: always()
+        env:
+          CHECK: ${{ matrix.check }}
+          OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          echo "RESULT check=$CHECK action=$OUTCOME" \
+            "hooks_fired=$(sort -u "$RUNNER_TEMP/hook-marker" 2>/dev/null | paste -sd, - || true)"
+          exec_file="$RUNNER_TEMP/claude-execution-output.json"
+          [ -f "$exec_file" ] || { echo "RESULT execution_file=missing"; exit 0; }
+          jq -r '(.[] | select(.type == "system" and .subtype == "init")
+              | "RESULT api_key_source=\(.apiKeySource // "unset") model=\(.model)"),
+            (.[] | select(.type == "result") | "RESULT subtype=\(.subtype) is_error=\(.is_error)"
+              + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)")' \
+            "$exec_file"
