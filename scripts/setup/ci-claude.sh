@@ -225,7 +225,8 @@ Walks you through #103's setup, one stage per screen:
   1. checks gh is signed in and the environments `factory` and `review` exist (ci-apps.sh);
   2. you run `claude setup-token` in another terminal, signed in to your employer seat;
   3. you paste the token at a hidden prompt; it is stored as CLAUDE_CODE_OAUTH_TOKEN in both
-     environments, and an API key (sk-ant-api…) is refused;
+     environments. An API key (sk-ant-api…) is refused; anything else not starting sk-ant-oat
+     is stored only if you answer y;
   4. adds the pinned claude-code-action (and the setup-bun it uses) to "Allowed actions",
      keeping every pattern already there;
   5. lists what is set, by name only.
@@ -247,11 +248,21 @@ case ${1-} in
   *) usage; exit 2 ;;
 esac
 
+# intro TITLE: the opening frame. Used instead of the library's banner, whose text promises
+# remembered values this wizard doesn't keep.
+intro() {
+  _clear
+  printf '\n%s%s  %s%s\n' "$BOLD" "$BLUE" "$1" "$RESET"
+  printf '%s  %s stages. You drive the browser; this wizard says what to do and stores what\n' "$DIM" "$TOTAL_STAGES"
+  printf '  you copy back. Stop with Ctrl-C any time; re-running is safe.%s\n\n' "$RESET"
+  pause "Ready to start?"
+}
+
 run_wizard() {
 
 TOTAL_STAGES=5
 
-banner "#103: Claude from the employer seat"
+intro "#103: Claude from the employer seat"
 
 stage "Check gh and the environments"
 command -v gh >/dev/null 2>&1 || die 2 "gh is not installed: https://cli.github.com"
@@ -281,7 +292,9 @@ case $_CI_CLAUDE_TOKEN in
   "") die 2 "nothing pasted" ;;
   sk-ant-api*) _CI_CLAUDE_TOKEN=""; die 2 "that is an API key, not a setup-token; nothing was stored" ;;
   sk-ant-oat*) ;;
-  *) warn "it doesn't start like a setup-token (sk-ant-oat…); storing it anyway" ;;
+  *)
+    warn "it doesn't start like a setup-token (sk-ant-oat…)"
+    confirm "Store it anyway?" || { _CI_CLAUDE_TOKEN=""; die 2 "nothing stored"; } ;;
 esac
 for env in factory review; do
   printf '%s' "$_CI_CLAUDE_TOKEN" |
@@ -334,7 +347,7 @@ for env in factory review; do
 done
 listed=$(gh api "$sel" --jq '.patterns_allowed // [] | .[]') || die 1 "reading the selected actions failed"
 say "Allowed action patterns:"; note "  ${listed//$'\n'/, }"
-say "Next: scripts/setup/ci-check.sh start 103."
+say "Next: the checks: see How to run in PR #179."
 pause
 
 finish
