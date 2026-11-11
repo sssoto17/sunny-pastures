@@ -223,7 +223,8 @@ Walks you through #102's setup, one stage per screen:
   3. you paste it at a hidden prompt; it is stored as PROJECT_READ_TOKEN in `sweep`. A classic
      token whose scopes are anything but read:project is refused, and nothing is stored;
   4. lists what is set, by name only.
-Then: scripts/setup/ci-check.sh start 102. Run --fine-grained only if the classic token can't
+A fine-grained token's limits (this one repository, read-only) can't be checked by a script: you
+create it that way. Then: scripts/setup/ci-check.sh start 102. Run --fine-grained only if the classic token can't
 read the board. If neither can, stop and bring the alternatives back to the admin.
 
 Exit codes: 0 done; 1 a gh command failed; 2 refused (gh missing or signed out, a token that is
@@ -244,11 +245,21 @@ case ${1-} in
   *) usage; exit 2 ;;
 esac
 
+# intro TITLE: the opening frame. Used instead of the library's banner, whose text promises
+# remembered values this wizard doesn't keep.
+intro() {
+  _clear
+  printf '\n%s%s  %s%s\n' "$BOLD" "$BLUE" "$1" "$RESET"
+  printf '%s  %s stages. You drive the browser; this wizard says what to do and stores what\n' "$DIM" "$TOTAL_STAGES"
+  printf '  you copy back. Stop with Ctrl-C any time; re-running is safe.%s\n\n' "$RESET"
+  pause "Ready to start?"
+}
+
 run_wizard() {
 
 TOTAL_STAGES=4
 
-banner "#102: read the Project from Actions ($kind token)"
+intro "#102: read the Project from Actions ($kind token)"
 
 stage "Check gh and the environment"
 command -v gh >/dev/null 2>&1 || die 2 "gh is not installed: https://cli.github.com"
@@ -269,6 +280,7 @@ else
   step "Repository permissions: leave Metadata (read-only); add nothing that writes."
   step "Account permissions: Projects → Read-only, if the page offers it."
   note "GitHub's docs list user-owned Projects as a gap of fine-grained tokens, so this may fail."
+  warn "No script can check this token's repository and permission limits: set them as above."
 fi
 step "Click Generate token and copy it. GitHub shows it once."
 warn "Never paste the token, or that page, into a Claude session or a chat."
