@@ -273,7 +273,7 @@ store_key() {
 
 # app_stages SLUG PREFIX ENV PERMS DESCRIPTION: register, key, install. Three stages.
 app_stages() {
-  local slug=$1 prefix=$2 env=$3 perms=$4 what=$5 id
+  local slug=$1 prefix=$2 env=$3 perms=$4 what=$5
   stage "$slug: register the App"
   say "$what"
   open_url "https://github.com/settings/apps/new?name=$slug&url=https://github.com/$REPO&public=false&$perms"
@@ -285,8 +285,7 @@ app_stages() {
   step "On the App's page (General), copy the Client ID. It is not the App ID."
   ask CLIENT_ID "Client ID:" || die 2 "input ended"
   [[ $CLIENT_ID =~ ^Iv[0-9A-Za-z._-]+$ ]] || warn "client IDs usually start with Iv; check it"
-  id=$CLIENT_ID
-  gh variable set "${prefix}_APP_CLIENT_ID" --env "$env" --repo "$REPO" --body "$id" >/dev/null ||
+  gh variable set "${prefix}_APP_CLIENT_ID" --env "$env" --repo "$REPO" --body "$CLIENT_ID" >/dev/null ||
     die 1 "gh variable set ${prefix}_APP_CLIENT_ID --env $env failed"
   printf '  %s✓ set%s variable %s in environment %s\n' "$GREEN" "$RESET" "${prefix}_APP_CLIENT_ID" "$env"
   pause
@@ -333,10 +332,12 @@ app_stages sunny-reviewer REVIEWER review "contents=write&pull_requests=write" \
 
 stage "Check what is set (names only)"
 for env in factory review; do
-  say "Environment $env, variables:"
-  gh variable list --env "$env" --repo "$REPO" --json name --jq '.[].name' | sed 's/^/    /'
-  say "Environment $env, secrets:"
-  gh secret list --env "$env" --repo "$REPO" --json name --jq '.[].name' | sed 's/^/    /'
+  names=$(gh variable list --env "$env" --repo "$REPO" --json name --jq '.[].name') ||
+    die 1 "gh variable list --env $env failed"
+  say "Environment $env, variables:"; note "  ${names//$'\n'/, }"
+  names=$(gh secret list --env "$env" --repo "$REPO" --json name --jq '.[].name') ||
+    die 1 "gh secret list --env $env failed"
+  say "Environment $env, secrets:"; note "  ${names//$'\n'/, }"
 done
 say "Next: scripts/setup/ci-claude.sh (#103), then scripts/setup/ci-check.sh start 101."
 pause
