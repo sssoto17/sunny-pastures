@@ -182,6 +182,15 @@ describe("collecting from a pen", () => {
 		expect(farm.xp).toBe(before.xp + 2);
 	});
 
+	it("pays the level-up coins of the Level its eggs' XP reaches (MUST-05.4)", () => {
+		// The slice's Level 3 is at 30 XP and pays 30 coins (#83); two eggs take 29 XP to 31.
+		const before = { ...laid(), xp: 29, coins: 0 };
+		const farm = expectAccepted(sim.apply(before, collect, layMs));
+
+		expect(farm.xp).toBe(31);
+		expect(farm.coins).toBe(30);
+	});
+
 	it("is refused if the barn can't hold them all", () => {
 		const farm = { ...laid(), barn: { chickenFeed: 49 } };
 

@@ -50,6 +50,12 @@ const facilityIndex = fc.oneof(
 	{ weight: 1, arbitrary: fc.constantFrom(-1, 2) },
 );
 
+/** Mostly the slice's one pen (#86), sometimes one content doesn't have. */
+const penIndex = fc.oneof(
+	{ weight: 9, arbitrary: fc.constant(0) },
+	{ weight: 1, arbitrary: fc.constantFrom(-1, 1) },
+);
+
 /** Mostly the slice's recipes, sometimes one the facility lacks or not in content. */
 const recipe = fc.oneof(
 	{ weight: 9, arbitrary: fc.constantFrom("chickenFeed", "bread") },
@@ -58,8 +64,8 @@ const recipe = fc.oneof(
 
 /**
  * Plant, harvest, buy, start jobs and collect, on plots and facilities in and out of range, mostly
- * wheat, sometimes a crop not in content. A generated buy rarely names the next plot, so it mostly
- * reaches the refusals.
+ * wheat, sometimes a crop not in content; buy, feed and collect from pens in and out of range. A
+ * generated buy rarely names the next plot, so it mostly reaches the refusals.
  */
 const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({
@@ -75,6 +81,9 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({ type: fc.constant("buyFacility" as const), facility: facilityIndex }),
 	fc.record({ type: fc.constant("startJob" as const), facility: facilityIndex, recipe }),
 	fc.record({ type: fc.constant("collect" as const), facility: facilityIndex }),
+	fc.record({ type: fc.constant("buyPen" as const), pen: penIndex }),
+	fc.record({ type: fc.constant("feed" as const), pen: penIndex }),
+	fc.record({ type: fc.constant("collectProducts" as const), pen: penIndex }),
 );
 
 /**
@@ -142,11 +151,44 @@ const produce = delay.map((wait): TimedAction[] => {
 	return [...buyFacilities, ...starts, ...collects];
 });
 
+/** An action `times` times, all at the farm's time. */
+const repeat = (action: Action, times: number): TimedAction[] =>
+	Array.from({ length: times }, () => ({ action, delay: 0 }));
+
+/** Two chicken feed jobs at the feed mill, collected after `wait` (#84). */
+const makeFeed = (wait: number): TimedAction[] => [
+	...repeat({ type: "startJob", facility: 0, recipe: "chickenFeed" }, 2),
+	{ action: { type: "collect", facility: 0 }, delay: Math.abs(wait) },
+	{ action: { type: "collect", facility: 0 }, delay: 0 },
+];
+
+/**
+ * Keeping chickens: buy the feed mill and the pen, make feed, feed once per chicken and once more
+ * for the trough, then make feed again before collecting the eggs, so the barn is often too full
+ * for them, and collect again after feeding. Chickens lay, eat the next portion at the time they
+ * lay, fill the barn and, with test content's egg XP, cross Levels (MUST-02, 05.4, 14.4). Refused
+ * and skipped while the mill or pen is locked or unaffordable, the silo lacks wheat, the trough is
+ * full or the barn has no feed or no room.
+ */
+const keepChickens = fc
+	.tuple(delay, delay, delay)
+	.map(([first, second, third]): TimedAction[] => [
+		{ action: { type: "buyFacility", facility: 0 }, delay: 0 },
+		{ action: { type: "buyPen", pen: 0 }, delay: 0 },
+		...makeFeed(first),
+		...repeat({ type: "feed", pen: 0 }, 4),
+		...makeFeed(second),
+		{ action: { type: "collectProducts", pen: 0 }, delay: 0 },
+		...repeat({ type: "feed", pen: 0 }, 4),
+		{ action: { type: "collectProducts", pen: 0 }, delay: Math.abs(third) },
+	]);
+
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
 	{ weight: 2, arbitrary: tend },
 	{ weight: 1, arbitrary: fc.constant(expand) },
 	{ weight: 2, arbitrary: produce },
+	{ weight: 2, arbitrary: keepChickens },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());
