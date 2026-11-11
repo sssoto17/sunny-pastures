@@ -5,9 +5,10 @@ import fc from "fast-check";
 import { describe, expect, inject, it } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
-import type { Action, Content, FarmState } from "../../index.js";
+import type { Action, FarmState } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
+import { richContent, richJobXp } from "./richContent.js";
 
 const params = inject("fastCheck");
 const { wheat } = sliceContent.crops;
@@ -48,31 +49,9 @@ const levelAt = (xp: number): number => levelXp.filter((threshold) => threshold 
 /** The level-up coins paid in all by the time a farm has `xp` (MUST-05.4). */
 const paidAt = (xp: number): number => paidBy[levelAt(xp) - 1] ?? NaN;
 
-/** The test content's job XP: enough that a collect crosses a Level (MUST-05.4). */
-const richJobXp = 31;
 const richRecipes = new Map(
 	[...sliceRecipes].map(([id, recipe]) => [id, { ...recipe, xp: richJobXp }] as const),
 );
-
-/**
- * Test content with the slice's Level table and plot prices, but room and coins to reach every
- * Level and plot: wheat isn't sold yet (#87), so the slice's silo keeps a farm near Level 2.
- * 31 XP a harvest crosses Levels 2 and 3 in one gain. A small barn fills after a few collects, so
- * collects reach its bound and its refusal, and 31 XP a collect lets a collect cross a Level.
- */
-const richContent: Content = {
-	...sliceContent,
-	start: { ...sliceContent.start, coins: 2_000 },
-	silo: { capacity: 100_000 },
-	barn: { capacity: 4 },
-	crops: { wheat: { ...wheat, xp: 31 } },
-	facilities: sliceContent.facilities.map((facility) => ({
-		...facility,
-		recipes: Object.fromEntries(
-			Object.entries(facility.recipes).map(([id, recipe]) => [id, { ...recipe, xp: richJobXp }]),
-		),
-	})),
-};
 
 /**
  * A purchase changes neither XP nor goods: the coins it costs are checked beside it, and `gained`
