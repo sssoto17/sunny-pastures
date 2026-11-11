@@ -73,9 +73,22 @@ describe("the Collector", () => {
 		};
 		const advanced = sim.advance(applyAll(waiting, [[startFeed, 0]]), feedMs);
 
+		// Room for 4 in an empty barn of 50: both jobs' 2 feed move in one step, with their XP.
 		expect(advanced.barn).toEqual({ chickenFeed: 4 });
 		expect(advanced.xp).toBe(xpOfLevel(4) + 2);
 		expect(advanced.facilities[feedMill]?.jobs).toEqual([]);
+	});
+
+	it("throws on a Collector in a facility that isn't in content, a programmer error (D15)", () => {
+		const running = { status: "running", recipe: "chickenFeed", readyAt: feedMs } as const;
+		const broken = {
+			...collecting(0),
+			facilities: [ownedFacility(), ownedFacility(), ownedFacility([running], collector)],
+		};
+
+		expect(() => sim.advance(broken, feedMs)).toThrow(
+			new RangeError("The farm has a Collector on facility 3, which isn't in content."),
+		);
 	});
 
 	it("gives the last barn space to the lower facility index when two finish at the same ms (MUST-10.6)", () => {

@@ -70,7 +70,8 @@ it); content as data (MUST-10.4).
 it, until none is left. Steps at exactly `to` are processed. When several steps fall at the same
 time, MUST-10.6's key breaks the tie: time, then kind of automated step, then facility, pen or plot
 index, then queue slot. The key is defined once in the sim. `apply` advances to `at` first, then
-applies the action.
+applies the action, then advances to `at` again, so a step the action made due at its own time
+runs in the same call (section 14).
 
 Because steps at exactly `to` are processed, `advance(advance(s, t1), t2)` and `advance(s, t2)`
 process the same steps in the same order, so time-splitting (MUST-14.1) holds by construction.
@@ -348,16 +349,63 @@ adds its automated steps without changing `advance`); a shared module for a repe
 - **A room check in each feature.** It would be written three times, and `fallow dupes` fails on
   the copies.
 
-## 13. The Loop and the Collector (#88)
+## 13. Pens and troughs (#86)
+
+Chosen by #86's lane on 11 Nov, unattended; the admin reviews it in #86's PRs ("Decided by the
+lane").
+
+`pens/` owns the animal pens (ADR-0005, section 3). Content lists pens in an array; the state has
+one entry per content pen, `null` until bought (MUST-05.6). A bought pen stores its trough's
+portions, one status per animal in slot order (`idle`, or `producing` with the `readyAt` it
+produces at) and the products waiting. A pen is unlocked by the first Level-table row that lists
+it and bought through `purchase` (section 11). Its actions name the pen, so `buyPen` sent twice
+buys one.
+
+- **Feeding** takes as much feed from the barn as fits in the trough and the barn holds, through
+  `storage/` (section 12). Idle animals then eat from the trough at once, in slot order, so no
+  animal is idle while the trough holds feed.
+- **Producing** is an automated step of kind `produce`, keyed by the pen's index and the animal's
+  slot (section 2). The animal adds one product to the pen, then eats the next portion at the
+  time it produced, if the trough holds one (MUST-02.3). When animals produce at the same time
+  and one portion is left, the lowest slot eats it (MUST-10.6).
+- **Collecting** puts every waiting product in the barn through `put`, and gives the pen's XP per
+  product through `gainXp` (MUST-02.4, 05.2).
+- **Each `readyAt` is stored when the animal eats**, read from content once, so a later rules
+  version doesn't move it (ADR-0006, section 7). The next portion's time is read from the rules
+  running when the animal produces. Across a release, a gap is advanced under the new version
+  (ADR-0006, section 4), so a portion eaten in that gap uses the new duration. A portion eaten
+  before the release keeps its stored time.
+- **Step kinds.** `produce` ranks after `finishJob`, for section 12's reason: it touches neither
+  storage nor coins and changes only its own pen, so today its rank changes no outcome, and it
+  produces goods, so it ranks before the kinds that will move them (the Collector and Farmhands,
+  #88).
+
+**Patterns:** a discriminated union per animal with a stored end time (section 5); the
+`StepSource` strategy of section 12, here closed over the pen rules because an animal's next
+portion reads its duration; the shared `storage/` module (section 12).
+
+**Rejected:**
+
+- **One status per pen** (the pen is producing until a time). Animals in one pen eat at different
+  times, and MUST-02.3 is per animal.
+- **A count of producing animals with one shared end time.** It can't hold animals that ate at
+  different times, and it would lose the stored end time ADR-0006 section 7 asks for.
+- **Eating at the next step instead of at once.** An animal would wait idle beside a full
+  trough, and when it eats would depend on unrelated steps.
+- **Products straight to the barn as they are produced.** MUST-02.4 keeps products in the pen
+  until collected, and a full barn would then need a rule for where a product goes.
+
+## 14. The Loop and the Collector (#88)
 
 Decided by #88's lane on 11 Nov, under the admin's brief (content values and these shapes are the
-lane's call, reviewed in its PRs' "Decided by the lane").
+lane's call, reviewed in its PRs' "Decided by the lane"); the Loop's hold is the admin's decision
+in the stack's review, 11 Nov.
 
 The add-ons live in `facilities/` (ADR-0005, section 1): nothing else uses them yet, since the pen
 Collector is SHOULD-08.
 
 - **State.** An owned facility stores `addOns: { loop, collector }`, both `false` when bought
-  (MUST-06.8), and `lastRecipe`: the recipe of the job started last, by hand or by the Loop, `null`
+  (an add-on exists only once bought, MUST-05.6), and `lastRecipe`: the recipe of the job started last, by hand or by the Loop, `null`
   until one starts. The queue forgets a recipe once its job is collected, so the Loop's "last
   recipe" (MUST-06.5) is a stored fact (section 5).
 - **Buying.** `buyAddOn(facility, addOn)` goes through `purchase` (section 11): each add-on is
@@ -373,15 +421,25 @@ Collector is SHOULD-08.
 - **The Loop** is level-triggered: while its facility has a free slot and the inputs are in
   storage, a `restartRecipe` step falls at the farm's time, keyed by the slot it fills, and starts
   the last recipe through `startJob`, so the job stores its finish when it starts (ADR-0006,
-  section 7). It stops when the inputs or the slots run out. Goods the Collector can't fit keep
-  their slots, so production stops when its output wouldn't fit (MUST-07.2), with no time cap.
+  section 7). It stops when the inputs or the slots run out.
+- **The Loop holds when the barn is full** (MUST-07.2; the admin, 11 Nov). It takes no inputs for
+  goods that would wait: it starts a job only while the store has room for that job's goods and
+  for those of every job in its queue, waiting or running. Until then it holds, with any goods that
+  didn't fit waiting in the facility, and it resumes once there is room. Production therefore stops
+  when its output wouldn't fit, with no time cap. A facility's goods all go to the barn, so the
+  queue's goods count against the new job's store.
 - **`apply` advances once more after the action**, to `at`, so a step the action made due at its
   own time (a Loop restarting into a slot that a collect freed, or a Loop just bought) runs in the
-  same call. Every farm the rules return has then run its steps up to its time.
+  same call. Every farm the rules return has then run its steps up to its time. This amends
+  section 2, where `apply` only advanced before the action.
 - **Step kinds.** `moveGoods` ranks after the producing kinds, so goods made at a time are moved at
   it; `restartRecipe` ranks last, so a slot the Collector frees is refilled at the same time, and a
-  slot its waiting goods hold is not. A restart only adds a running job that ends later, so no step
-  runs before one already run at the same time (MUST-10.6).
+  slot its waiting goods hold is not. A restart only adds a running job that ends later, and today's
+  recipes take only crops, so no step runs before one already run at the same time (MUST-10.6).
+  **For #85:** a recipe that takes barn goods (cookies take eggs) frees barn room as its Loop
+  restarts, which can release a held Loop of a lower-indexed facility at the same millisecond, ranked
+  before the restart just run; `advance` would throw. #85 has to settle that order, for example by
+  restarting every Loop that can at a time in one step, in facility order.
 
 **Patterns:** edge-triggered and level-triggered automated steps (the Collector acts at the moment
 a job finishes; the Loop whenever its condition holds); the strategy behind `StepSource` (section
@@ -398,9 +456,16 @@ the Collector).
   step.
 - **`finishJob` then a separate `moveGoods` of the done job.** A done job stores no time, so the
   move would need a status that lives only inside one millisecond, or a level-triggered step.
-- **The Loop checking barn room for its output before it starts.** Room at the start reserves
-  nothing at the finish, when other facilities may have filled it; the slots the waiting goods
-  hold already stop it.
+- **No hold: the slots the waiting goods keep stop the Loop** (this stack's first version). The
+  job started while the last goods were being moved still takes its inputs, and its goods wait.
+- **Holding only once a finished job's goods fail to move.** By then the job behind it has already
+  started and taken its inputs; counting the queue's goods stops before that.
+- **Starting the Loop inside `collect` and `buyAddOn`.** Each action that frees a slot or adds a Loop
+  would have to know about the Loop, and a later action (harvesting the wheat a Loop waits for)
+  would be one more place to forget; one advance after any action covers them all.
+- **Leaving the restart to the caller's next advance.** A farm `apply` returned would still have a
+  step due at its own time: `advance(farm, farm.time)` would change it, breaking idempotent
+  `advance` and MUST-14.2's replay from a snapshot.
 - **One Loop step that fills every free slot.** One job a step, keyed by the slot it fills, keeps
   the keys unique, and each restart is its own entry in the away summary (MUST-07.3).
 - **Add-ons as a list of ids.** A list has an order to keep canonical; a flag per add-on is one
@@ -434,8 +499,9 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Policy function | `progress/`'s `purchase` | One rule for every upgrade: unlocked at a Level, then bought with coins (section 11). |
 | Queue with stored end times | a facility's jobs | Jobs run in start order, and work in flight keeps its end time (section 12). |
 | Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
-| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests and jobs (section 12). |
-| Edge- and level-triggered automated steps | the Collector, the Loop | The Collector decides once, as a job finishes, and the Loop restarts whenever it can, so steps at one time never run out of MUST-10.6's order (section 13). |
+| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding and collecting from pens (sections 12, 13). |
+| Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
+| Edge- and level-triggered automated steps | the Collector, the Loop | The Collector decides once, as a job finishes, and the Loop restarts whenever it can, so steps at one time never run out of MUST-10.6's order (section 14). |
 
 ## Consequences
 

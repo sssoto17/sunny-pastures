@@ -8,13 +8,15 @@
  * - `finishJob` (#84) after `ripen`: neither touches storage, so their rank changes no outcome
  *   today. Kinds that produce goods rank before the kinds that move or use them, so a step sees
  *   what was produced at the same time (ADR-0003, section 12).
- * - `moveGoods` (#88), the Collector, after the producers: a job finishing in a facility with a
- *   Collector is this step, which moves its goods into the barn if they fit (ADR-0003, section 13).
+ * - `produce` (#86) after `finishJob`, for the same reason: it touches neither storage nor coins
+ *   and changes only its own pen (ADR-0003, section 13).
+ * - `moveGoods` (#88), the Collector, after every producer: a job finishing in a facility with a
+ *   Collector is this step, which moves its goods into the barn if they fit (ADR-0003, section 14).
  * - `restartRecipe` (#88), the Loop, last: the Collector's move frees the queue slot a Loop
  *   restarts into at the same time, and goods that don't fit keep it (MUST-06.5, 06.6). A restart
  *   adds only a running job that ends later, so it never makes an earlier-ranked step due now.
  */
-const stepKinds = ["ripen", "finishJob", "moveGoods", "restartRecipe"] as const;
+const stepKinds = ["ripen", "finishJob", "produce", "moveGoods", "restartRecipe"] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 
