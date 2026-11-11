@@ -12,6 +12,7 @@ import {
 	prepareFacilityRules,
 	startJob,
 } from "../facilities/index.js";
+import { fillNewBoard, prepareOrderRules } from "../orders/index.js";
 import {
 	buyPen,
 	collectProducts,
@@ -50,6 +51,7 @@ export function createSim(content: Content): Sim {
 	const plotRules = preparePlotRules(content, progress, storage);
 	const facilityRules = prepareFacilityRules(content, progress, storage);
 	const penRules = preparePenRules(content, progress, storage);
+	const orderRules = prepareOrderRules(content, progress, storage);
 	// Every feature's automated steps. advance/'s tie key orders them, and this list's order never
 	// matters: two steps with the same key are a programmer error, which advanceFarm throws on as a
 	// RangeError. Each new kind must keep its keys unique (MUST-10.6).
@@ -61,17 +63,22 @@ export function createSim(content: Content): Sim {
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
 	return {
-		newFarm: (farmId) => ({
-			time: 0,
-			coins: content.start.coins,
-			xp: 0,
-			silo: {},
-			barn: {},
-			plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
-			facilities: newFacilities(facilityRules),
-			pens: newPens(penRules),
-			streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
-		}),
+		newFarm: (farmId) =>
+			fillNewBoard(
+				{
+					time: 0,
+					coins: content.start.coins,
+					xp: 0,
+					silo: {},
+					barn: {},
+					plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
+					facilities: newFacilities(facilityRules),
+					pens: newPens(penRules),
+					board: [],
+					streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
+				},
+				orderRules,
+			),
 		apply: (state, action, at) => {
 			assertTime(at);
 			if (at < state.time) {

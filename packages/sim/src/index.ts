@@ -15,6 +15,7 @@ export type {
 } from "./content/index.js";
 export type { FacilityAction, Job, OwnedFacility } from "./facilities/index.js";
 export { stateHash } from "./hash/index.js";
+export type { Order, OrderSlot } from "./orders/index.js";
 export { createSim } from "./sim/index.js";
 export type { Sim } from "./sim/index.js";
 export type { Animal, OwnedPen, PenAction } from "./pens/index.js";
