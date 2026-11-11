@@ -355,9 +355,12 @@ Because B100 won:
 - **The idempotency path carries over as the spike built it:** `processed` before the sim, the
   key and the first answer written in the log row in the commit's transaction, and a second
   `processed` check before any 422.
-- **Open M2/M3 decision: replaying old logs after a rules change.** If new rules refuse an
-  action the old rules accepted, `replay` throws and that farm can't load. No way to keep old
-  logs replayable is chosen yet.
+- **M2/M3 decision: replaying old logs after a rules change.** If new rules refuse an
+  action the old rules accepted, `replay` throws and that farm can't load. **Decided 11 Nov
+  (#31):** every log row and snapshot records its rules version, a replay never crosses a version,
+  and a base snapshot holds the farm upgraded to the new version. That adds a rules version to
+  the `actions` and `snapshots` keys above
+  ([ADR-0006](0006-rules-versions-and-replay.md)).
 - **M3 checks its transaction use before building on it (#28).** Every query inside a
   transaction uses the transaction handle, and a saturating stress run shows 0
   `UNSAFE_TRANSACTION` errors and 0 lost updates.

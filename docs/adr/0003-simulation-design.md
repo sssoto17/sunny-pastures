@@ -292,4 +292,5 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
   or an export, meets `CONSTRAINTS.md`'s "Interface change" row and carries `review:admin`.
 - **MUST-07.4 is 30 days**, as in `CONSTRAINTS.md`. The bench in the `advance` ticket's PR is the
   first measurement; #41 makes it a check in M3.
-- **Open:** how logs stay replayable after a rules change (#31), due before M3's schema.
+- **Decided 11 Nov (#31):** how logs stay replayable after a rules change: a registry of rules
+  versions, each a frozen content object ([ADR-0006](0006-rules-versions-and-replay.md)).
