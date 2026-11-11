@@ -85,8 +85,9 @@ export function buyFacility(farm: FarmState, index: number, rules: FacilityRules
 	const facility = findRule(index, rules);
 	if (facility === null) return refuse(`There is no facility ${formatFacilityNumber(index)}.`);
 
-	const owned = farm.facilities[index] ?? null;
-	if (owned !== null) return refuse(`The ${facility.id} is already bought.`);
+	if (readEntry(farm, index, facility) !== null) {
+		return refuse(`The ${facility.id} is already bought.`);
+	}
 
 	const offer = { what: `The ${facility.id}`, level: facility.level, price: facility.price };
 	const bought = purchase(farm, offer, rules.progress);
@@ -127,8 +128,10 @@ export function startJob(
 	const taken = take(farm, recipe.inputs, `Making ${recipe.id}`, rules.storage);
 	if (!taken.ok) return taken;
 
+	// MUST-03.3's "later of its start and the previous job's finish": apply advances the farm first,
+	// so a job still running ends after the farm's time and a done one ended at or before it.
 	const last = owned.jobs[owned.jobs.length - 1];
-	const from = last?.status === "running" ? Math.max(farm.time, last.readyAt) : farm.time;
+	const from = last?.status === "running" ? last.readyAt : farm.time;
 	const readyAt = from + recipe.ms;
 	assertTime(readyAt);
 	const job: Job = { status: "running", recipe: recipe.id, readyAt };
@@ -215,10 +218,26 @@ function findOwned(
 	const facility = findRule(index, rules);
 	if (facility === null) return `There is no facility ${formatFacilityNumber(index)}.`;
 
-	const owned = farm.facilities[index] ?? null;
+	const owned = readEntry(farm, index, facility);
 	if (owned === null) return `The ${facility.id} isn't bought.`;
 
 	return { facility, owned };
+}
+
+/**
+ * The farm's entry for a content facility: null until bought. Every farm has one entry per content
+ * facility (ADR-0003, section 12), so a missing entry is a broken farm, a programmer error, and
+ * throws a RangeError rather than refuse (D15).
+ */
+function readEntry(farm: FarmState, index: number, facility: FacilityRule): OwnedFacility | null {
+	const entry = farm.facilities[index];
+	if (entry === undefined) {
+		throw new RangeError(
+			`The farm has no entry for the ${facility.id}: its facilities don't match the content.`,
+		);
+	}
+
+	return entry;
 }
 
 /** Players count facilities from 1. */

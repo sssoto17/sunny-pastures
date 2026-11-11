@@ -22,11 +22,15 @@ export interface Transition extends LoggedAction {
 	readonly after: FarmState;
 }
 
-/** A played run: every farm it went through, the log of accepted actions and its transitions. */
+/**
+ * A played run: every farm it went through, the log of accepted actions, its transitions and the
+ * reasons of the actions refused.
+ */
 export interface Run {
 	readonly farms: readonly FarmState[];
 	readonly log: readonly LoggedAction[];
 	readonly transitions: readonly Transition[];
+	readonly refusals: readonly string[];
 	readonly final: FarmState;
 }
 
@@ -113,12 +117,18 @@ const expand: TimedAction[] = [
 ];
 
 /**
- * Running the facilities: fill both queues and one more (refused: full), wait, then collect each
- * job. Jobs queue behind each other, finish while the farm waits and fill the barn, so the queue,
- * input, barn and XP cases are reached (MUST-03.2-03.5, 14.4). Facilities the farm hasn't bought
- * are refused and skipped.
+ * Running the facilities: buy both (refused while locked or once bought), fill both queues and one
+ * more (refused: full), wait, then collect each job. Jobs queue behind each other and finish while the farm waits, so the queue and input cases
+ * are reached (MUST-03.2, 03.3, 03.5). With a small barn and XP enough to cross a Level, as the
+ * harness's test content has, collects fill the barn, are refused once it is full and reach
+ * Levels (MUST-03.4, 05.4, 14.4); the harness checks that they do. Facilities the farm hasn't
+ * bought are refused and skipped.
  */
 const produce = delay.map((wait): TimedAction[] => {
+	const buyFacilities = [0, 1].map((facility): TimedAction => ({
+		action: { type: "buyFacility", facility },
+		delay: 0,
+	}));
 	const starts = (["chickenFeed", "bread"] as const).flatMap((made, facility) =>
 		[0, 1, 2].map((): TimedAction => ({
 			action: { type: "startJob", facility, recipe: made },
@@ -129,7 +139,7 @@ const produce = delay.map((wait): TimedAction[] => {
 		action: { type: "collect", facility },
 		delay: i === 0 ? Math.abs(wait) : 0,
 	}));
-	return [...starts, ...collects];
+	return [...buyFacilities, ...starts, ...collects];
 });
 
 const chunk = fc.oneof(
@@ -148,17 +158,21 @@ export function play(sim: Sim, id: string, played: readonly TimedAction[]): Run 
 	let farm = sim.newFarm(id);
 	const farms = [farm];
 	const transitions: Transition[] = [];
+	const refusals: string[] = [];
 	for (const { action: next, delay: wait } of played) {
 		const at = farm.time + wait;
 		const result = sim.apply(farm, next, at);
-		if (!result.ok) continue;
+		if (!result.ok) {
+			refusals.push(result.reason);
+			continue;
+		}
 
 		transitions.push({ action: next, at, before: farm, after: result.state });
 		farm = result.state;
 		farms.push(farm);
 	}
 	const log = transitions.map(({ action: next, at }) => ({ action: next, at }));
-	return { farms, log, transitions, final: farm };
+	return { farms, log, transitions, refusals, final: farm };
 }
 
 /** Replays a log from `farm`; throws on a refusal, as ADR-0001's replay does. */

@@ -55,7 +55,7 @@ export interface Facility {
 
 /** One run of a recipe is a job (`GLOSSARY.md`). */
 export interface Recipe {
-	/** The facility tier that makes it available (MUST-03.1). */
+	/** The lowest facility tier that can make it (MUST-03.1). */
 	readonly tier: number;
 	/** Taken from storage when a job starts (MUST-03.2), in this order. */
 	readonly inputs: readonly GoodCount[];

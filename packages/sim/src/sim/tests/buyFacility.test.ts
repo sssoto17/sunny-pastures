@@ -58,6 +58,14 @@ describe("buying a facility", () => {
 		});
 	});
 
+	it("throws on a farm whose facilities don't match the content, a programmer error (D15)", () => {
+		const broken = { ...farmAt(2, 100), facilities: [] };
+
+		expect(() => sim.apply(broken, { type: "buyFacility", facility: feedMill }, 0)).toThrow(
+			RangeError,
+		);
+	});
+
 	it("is refused for a facility no Level unlocks", () => {
 		const content: Content = {
 			...sliceContent,
