@@ -1,0 +1,187 @@
+// The property harness (ADR-0003, section 9, D10): MUST-01.2, MUST-14.1-14.7, idempotent advance and the
+// JSON round trip, over the real slice content, with fast-check's fixed seed from the root config.
+import fc from "fast-check";
+import { describe, expect, inject, it } from "vitest";
+
+import { createSim, sliceContent, stateHash } from "../../index.js";
+import type { FarmState } from "../../index.js";
+import { assertSafeIntegers } from "../../state/index.js";
+import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
+
+const params = inject("fastCheck");
+const sim = createSim(sliceContent);
+const { wheat } = sliceContent.crops;
+
+/** A time at or after the farm's, from the generated delays (never before: see 14.7). */
+const addDelay = (farm: FarmState, wait: number): number => farm.time + Math.abs(wait);
+
+describe("the sim's properties", () => {
+	it("MUST-01.2: a crop is ready exactly its grow time after planting, not a ms before", () => {
+		const growMs = wheat.growSeconds * 1000;
+		fc.assert(
+			fc.property(farmId, timedActions, delay, fc.nat(5), (id, played, wait, plot) => {
+				const { final } = play(sim, id, played);
+				const at = addDelay(final, wait);
+				const result = sim.apply(final, { type: "plant", plot, crop: "wheat" }, at);
+				fc.pre(result.ok);
+
+				const harvest = { type: "harvest", plot } as const;
+				expect(sim.apply(result.state, harvest, at + growMs - 1)).toEqual({
+					ok: false,
+					reason: `Plot ${String(plot + 1)} isn't ready to harvest.`,
+				});
+				const ripe = sim.apply(result.state, harvest, at + growMs);
+				expect(ripe.ok || ripe.reason.startsWith("The silo has room")).toBe(true);
+			}),
+			params,
+		);
+	});
+
+	it("MUST-14.1: advancing in two steps equals advancing in one", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, delay, delay, (id, played, first, second) => {
+				const { final } = play(sim, id, played);
+				const t1 = addDelay(final, first);
+				const t2 = t1 + Math.abs(second);
+
+				expect(stateHash(sim.advance(sim.advance(final, t1), t2))).toBe(
+					stateHash(sim.advance(final, t2)),
+				);
+			}),
+			params,
+		);
+	});
+
+	it("MUST-14.2: replaying from a serialized mid-run snapshot equals the uninterrupted run", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, fc.nat(), fc.nat(), (id, played, cut, wait) => {
+				const { farms, log, final } = play(sim, id, played);
+				const at = cut % (log.length + 1);
+				// farms has one more entry than log, so farms[at] always exists.
+				const taken = farms[at] ?? final;
+				// Advanced up to the next logged action, as a server snapshot after offline progress is.
+				const until = log[at]?.at ?? taken.time + wait;
+				const advanced = sim.advance(taken, taken.time + (wait % (until - taken.time + 1)));
+				const snapshot = JSON.parse(JSON.stringify(advanced)) as FarmState;
+				const replayed = replay(createSim(sliceContent), snapshot, log.slice(at));
+
+				// A cut after the last action leaves the snapshot ahead of `final`: compare at one time.
+				expect(stateHash(replayed)).toBe(stateHash(sim.advance(final, replayed.time)));
+			}),
+			params,
+		);
+	});
+
+	it("MUST-14.3: two fresh sims give the same farm for the same id, actions and times", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				const { log, final } = play(sim, id, played);
+				const other = createSim(sliceContent);
+
+				expect(stateHash(replay(other, other.newFarm(id), log))).toBe(stateHash(final));
+			}),
+			params,
+		);
+	});
+
+	it("MUST-14.4: coins and goods stay within their bounds, as safe integers", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				for (const farm of play(sim, id, played).farms) {
+					assertSafeIntegers(farm);
+					expect(farm.coins).toBeGreaterThanOrEqual(0);
+					const counts = Object.values(farm.silo);
+					expect(counts.every((count) => count > 0)).toBe(true);
+					expect(counts.reduce((total, count) => total + count, 0)).toBeLessThanOrEqual(
+						sliceContent.silo.capacity,
+					);
+				}
+			}),
+			params,
+		);
+	});
+
+	it("MUST-14.5: goods and coins change only by planting and harvesting", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				for (const { action, before, after } of play(sim, id, played).transitions) {
+					const gained = (after.silo["wheat"] ?? 0) - (before.silo["wheat"] ?? 0);
+					if (action.type === "plant") {
+						expect(after.coins).toBe(before.coins - wheat.seedPrice);
+						expect(gained).toBe(0);
+					} else {
+						expect(after.coins).toBe(before.coins);
+						expect([wheat.baseYield, wheat.baseYield + wheat.bonusYield]).toContain(gained);
+					}
+				}
+			}),
+			params,
+		);
+	});
+
+	it("MUST-14.6: a refused action leaves the farm unchanged", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				let farm = sim.newFarm(id);
+				for (const { action, delay: wait } of played) {
+					const before = JSON.stringify(farm);
+					const result = sim.apply(farm, action, farm.time + wait);
+					if (result.ok) {
+						farm = result.state;
+					} else {
+						expect(result.reason).toMatch(/\.$/);
+						expect(JSON.stringify(farm)).toBe(before);
+					}
+				}
+			}),
+			params,
+		);
+	});
+
+	it("MUST-14.7: time never runs backwards, and an action before the farm's time is refused", () => {
+		fc.assert(
+			fc.property(
+				farmId,
+				timedActions,
+				fc.integer({ min: 1, max: 2 ** 34 }),
+				(id, played, back) => {
+					const { log, transitions, final } = play(sim, id, played);
+					for (const { at, before, after } of transitions) {
+						expect(at).toBeGreaterThanOrEqual(before.time);
+						expect(after.time).toBe(at);
+					}
+					for (const { action } of log) {
+						expect(sim.apply(final, action, final.time - back).ok).toBe(false);
+					}
+				},
+			),
+			params,
+		);
+	});
+
+	it("advance is idempotent, and a time before the farm's leaves it as it is (D7)", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, delay, (id, played, wait) => {
+				const { final } = play(sim, id, played);
+				const to = addDelay(final, wait);
+				const advanced = sim.advance(final, to);
+
+				expect(sim.advance(advanced, to)).toBe(advanced);
+				expect(sim.advance(advanced, to - 1)).toBe(advanced);
+			}),
+			params,
+		);
+	});
+
+	it("every farm survives a JSON round trip (D10)", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, delay, (id, played, wait) => {
+				const { farms, final } = play(sim, id, played);
+				for (const farm of [...farms, sim.advance(final, addDelay(final, wait))]) {
+					expect(JSON.parse(JSON.stringify(farm))).toEqual(farm);
+				}
+			}),
+			params,
+		);
+	});
+});
