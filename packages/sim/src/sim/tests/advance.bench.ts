@@ -1,8 +1,9 @@
 // The sim speed row (CONSTRAINTS.md; ADR-0003, section 8): advance across 30 days on the largest
 // content farm, and one apply. Reported in the PR, not gating yet (#41). The largest farm is every
 // plot the Level table allows bought (#83) and planted, each ripening at a different time, every
-// facility bought with its queue full of jobs (#84), and every pen bought with each animal
-// producing and its trough full (#86).
+// facility bought with its queue full of jobs (#84), every pen bought with each animal
+// producing and its trough full (#86), and every order slot of the top Level discarded, so the
+// whole board refills (#87).
 import { expect, it } from "vitest";
 
 import { createSim, sliceContent } from "../../index.js";
@@ -44,13 +45,17 @@ const feedEveryAnimal = sliceContent.pens.flatMap((pen, index) =>
 		() => ({ type: "feed", pen: index }) as const,
 	),
 );
-const fullFarm: FarmState = [
+const fed: FarmState = [
 	...sliceContent.pens.map((_pen, pen) => ({ type: "buyPen", pen }) as const),
 	...feedEveryAnimal,
 ].reduce(
 	(farm, action) =>
 		expectAccepted(sim.apply({ ...farm, barn: { chickenFeed: 10 } }, action, farm.time)),
 	working,
+);
+const fullFarm: FarmState = fed.board.reduce(
+	(farm, _slot, slot) => expectAccepted(sim.apply(farm, { type: "discard", slot }, farm.time)),
+	fed,
 );
 
 // The budgets, in ms (CONSTRAINTS.md, "Sim speed"). Checked only when `vitest bench` runs.
@@ -61,17 +66,21 @@ it("advances 30 days and applies an action within the sim speed budget", async (
 	bench: measure,
 }) => {
 	const results = await measure.compare(
-		measure("advance 30 days, every plot planted, every queue full, every pen fed", () => {
-			sim.advance(fullFarm, fullFarm.time + thirtyDays);
-		}),
+		measure(
+			"advance 30 days, every plot planted, every queue full, every pen fed, the board refilling",
+			() => {
+				sim.advance(fullFarm, fullFarm.time + thirtyDays);
+			},
+		),
 		measure("apply one harvest after 30 days", () => {
 			sim.apply(fullFarm, { type: "harvest", plot: 0 }, fullFarm.time + thirtyDays);
 		}),
 	);
 
 	expect(
-		results.get("advance 30 days, every plot planted, every queue full, every pen fed").latency
-			.mean,
+		results.get(
+			"advance 30 days, every plot planted, every queue full, every pen fed, the board refilling",
+		).latency.mean,
 	).toBeLessThan(advanceBudget);
 	expect(results.get("apply one harvest after 30 days").latency.mean).toBeLessThan(applyBudget);
 });

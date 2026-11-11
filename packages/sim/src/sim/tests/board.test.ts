@@ -3,19 +3,13 @@ import { describe, expect, it } from "vitest";
 import { createSim, sliceContent } from "../../index.js";
 import type { Content, FarmState, Order, OrderSlot } from "../../index.js";
 import { expectAccepted } from "./expectAccepted.js";
+import { expectDrawn } from "./expectDrawn.js";
 import { plantWheat } from "./plantWheat.js";
 
 const sim = createSim(sliceContent);
 // The slice's order board (#87's "Decided by the lane"), written out rather than read from content.
 const level2 = 10;
 const growMs = 120_000;
-/** What each good may be asked for, at the Level that unlocks it for orders. */
-const terms = new Map([
-	["wheat", { level: 1, min: 2, max: 6, coins: 3, xp: 1 }],
-	["chickenFeed", { level: 2, min: 2, max: 4, coins: 4, xp: 1 }],
-	["egg", { level: 2, min: 1, max: 3, coins: 8, xp: 2 }],
-	["bread", { level: 3, min: 1, max: 2, coins: 15, xp: 4 }],
-]);
 
 const wheatOrder = (amount: number): Order => ({
 	goods: [{ good: "wheat", amount }],
@@ -77,22 +71,7 @@ describe("drawing an order", () => {
 		const orders = newFarms(allAtOnce).flatMap(listOrders);
 
 		expect(orders).toHaveLength(5 * 40);
-		for (const order of orders) {
-			const goods = order.goods.map(({ good }) => good);
-			expect(goods.length).toBeGreaterThanOrEqual(1);
-			expect(goods.length).toBeLessThanOrEqual(3);
-			expect(new Set(goods).size).toBe(goods.length);
-			let [coins, xp] = [0, 0];
-			for (const { good, amount } of order.goods) {
-				const term = terms.get(good);
-				expect(term?.level).toBeLessThanOrEqual(3);
-				expect(amount).toBeGreaterThanOrEqual(term?.min ?? NaN);
-				expect(amount).toBeLessThanOrEqual(term?.max ?? NaN);
-				coins += amount * (term?.coins ?? NaN);
-				xp += amount * (term?.xp ?? NaN);
-			}
-			expect([order.coins, order.xp]).toEqual([coins, xp]);
-		}
+		for (const order of orders) expectDrawn(order, 3);
 		// Every unlocked good appears, and so do orders of one, two and three kinds.
 		const drawn = new Set(orders.flatMap((order) => order.goods.map(({ good }) => good)));
 		expect([...drawn].sort()).toEqual(["bread", "chickenFeed", "egg", "wheat"]);
