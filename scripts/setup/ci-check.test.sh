@@ -111,7 +111,7 @@ expect_code 0
 assert "expected exit codes in --help" contains "$err" "Exit codes:"
 run start
 expect_code 2
-run start 102
+run start 104
 expect_code 2
 
 # --- start 101: a branch of origin/main plus the draft workflow, the clone untouched -----------
@@ -228,6 +228,13 @@ assert "expected the scope warning" contains "$err" "gh auth refresh -h github.c
 assert "expected the 103 workflow pushed" \
   git -C "$work/origin.git" cat-file -e throwaway/103-claude:.github/workflows/check-103-claude.yml
 
+# --- start 102: its own branch and workflow ----------------------------------------------------
+reset
+run start 102
+expect_code 0
+assert "expected the 102 workflow pushed" \
+  git -C "$work/origin.git" cat-file -e throwaway/102-project:.github/workflows/check-102-project.yml
+
 # --- results: no run, a running one, a finished one -------------------------------------------
 reset
 echo '[]' >"$work/fx/runs.json"
@@ -280,6 +287,15 @@ echo tags/v0.0.0-throwaway-101 >"$work/fx/refs"
 run results 101
 assert "expected an existing tag flagged" contains "$out" "EXISTS"
 
+# --- results 102 adds what to do next, and never suggests the repo scope as a way out ----------
+echo '[{"databaseId":9,"status":"completed","conclusion":"success","url":"https://example.test/run/9"}]' \
+  >"$work/fx/runs.json"
+run results 102
+expect_code 0
+assert "expected the fallback named" contains "$out" "ci-project.sh --fine-grained"
+assert "expected the stop rule" contains "$out" "Bring the alternatives back to the admin"
+assert "expected repo only as a never" contains "$out" "Never widen a classic token to the repo scope"
+
 # --- cleanup 101: closes the PR unmerged, deletes the three branches ---------------------------
 reset
 echo '[{"number":42}]' >"$work/fx/prs.json"
@@ -313,6 +329,16 @@ assert "expected 103's branch deleted" contains "$calls" "git/refs/heads/throwaw
 assert "expected one deletion only" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 1
 assert "expected #101's PR left open" lacks "$calls" "pr close"
 assert "expected #101's PR not even looked up" lacks "$calls" "pr list"
+
+# cleanup 102 likewise deletes only throwaway/102-project.
+reset
+echo '[{"number":42}]' >"$work/fx/prs.json"
+all_branches
+run cleanup 102
+expect_code 0
+assert "expected 102's branch deleted" contains "$calls" "git/refs/heads/throwaway/102-project"
+assert "expected one deletion only" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 1
+assert "expected #101's PR left open" lacks "$calls" "pr close"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))
