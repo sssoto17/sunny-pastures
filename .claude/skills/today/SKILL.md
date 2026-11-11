@@ -5,8 +5,8 @@ disable-model-invocation: true
 ---
 
 `/today` stage 1 (#78; `docs/diagrams/workflow.md`, "Automation stages"). You draft the morning
-for the admin: an agenda, a brief per Manual item, a prompt line per Factory item. The admin and
-the coordinator decide and launch; you only prepare.
+for the admin: an agenda, a brief per Manual item, a prompt line per Factory item. While drafting
+(steps 1–6) you only prepare; the admin decides what launches.
 
 **Read-only while drafting.** In steps 1–6 you read GitHub (`gh issue view`, `gh pr list`,
 `gh api -X GET`), git and files. Your only writes are new files in `out`, the folder the gather
@@ -173,7 +173,9 @@ the board; the work itself goes to lanes and subagents.
 - **Keep the board.** Before proposing the next lane, check its blockers:
   `gh api repos/sssoto17/sunny-pastures/issues/<N>/dependencies/blocked_by` lists none open
   (`docs/agents/issue-tracker.md`, definition of ready, rule 4). Move issues with
-  `scripts/issue-fields.sh`: In progress at launch, In review when the PR opens. Remove a
+  `scripts/issue-fields.sh`, as `docs/agents/issue-tracker.md` "Status rules" sets them: In
+  progress when someone starts it, In review when its PR is open with `Closes #N` and its checks
+  are green. Remove a
   `blocked:*` label once its cause is gone. File follow-ups with `scripts/new-issue.sh` (Backlog,
   under their parent); log incidents on the Retro inbox. When the admin has archived a merged
   lane, run `scripts/after-merge.sh <name>` (a worktree still locked by the archived session gets

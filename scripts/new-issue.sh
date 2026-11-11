@@ -169,7 +169,8 @@ number=${url##*/}
 [[ $number =~ ^[1-9][0-9]*$ ]] || die 1 "gh issue create printed no issue URL (got \"$url\"); check the repo before re-running"
 
 if ! fields_out=$("$here/issue-fields.sh" "$number" "${fields[@]}"); then
-  die 1 "#$number was created ($url), but its Project fields weren't set. Fix the error above, then run: scripts/issue-fields.sh $number ${fields[*]}"
+  rerun=$(printf ' %q' "${fields[@]}")
+  die 1 "#$number was created ($url), but its Project fields weren't set. Fix the error above, then run: scripts/issue-fields.sh $number${rerun}"
 fi
 
 # --- read-back ----------------------------------------------------------------------------------

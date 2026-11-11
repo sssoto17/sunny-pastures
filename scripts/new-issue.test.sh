@@ -283,6 +283,13 @@ expect_err 'unknown Size "XL"'
 expect_err "#200 was created"
 expect_err "scripts/issue-fields.sh 200 --size XL"
 
+# The re-run hint quotes each value, so it pastes back as one command.
+reset
+echo 2 >"$work/fail-fields"
+case_ "${base[@]}" --week "Wk 2"
+expect_code 1
+expect_err 'scripts/issue-fields.sh 200 --week Wk\ 2'
+
 reset
 printf 'chore,area:tools%sM2 Sim properties + factory%s-\n' "$T" "$T" >"$work/issue.200"
 case_ "${base[@]}"
@@ -294,6 +301,12 @@ printf 'chore%sM2 Sim properties + factory%s73\n' "$T" "$T" >"$work/issue.200"
 case_ "${base[@]}"
 expect_code 1
 expect_err "missing label area:tools"
+
+reset
+printf 'chore,area:tools%sM3 Actions persist end to end%s73\n' "$T" "$T" >"$work/issue.200"
+case_ "${base[@]}"
+expect_code 1
+expect_err "milestone is M3 Actions persist end to end, expected M2 Sim properties + factory"
 
 reset
 rm -f "$work/issue.200"
