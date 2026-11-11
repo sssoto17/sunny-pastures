@@ -7,8 +7,10 @@
 export interface Content {
 	/** A new farm (spec decision 5). */
 	readonly start: { readonly coins: number; readonly plots: number };
-	/** The silo holds at most `capacity` crops in all. */
+	/** The silo holds at most `capacity` crops in all (MUST-06.4). */
 	readonly silo: { readonly capacity: number };
+	/** The barn holds at most `capacity` goods in all: every good that isn't a crop (MUST-06.4). */
+	readonly barn: { readonly capacity: number };
 	/** Crops by good id. */
 	readonly crops: Readonly<Record<string, Crop>>;
 	/**
@@ -48,10 +50,17 @@ export interface Crop {
 	readonly xp: number;
 }
 
+/** An amount of one good. */
+export interface GoodCount {
+	readonly good: string;
+	readonly amount: number;
+}
+
 /** The M4 slice's content, wheat only for now (#72, D1). */
 export const sliceContent = {
 	start: { coins: 50, plots: 6 },
 	silo: { capacity: 50 },
+	barn: { capacity: 50 },
 	crops: {
 		wheat: {
 			seedPrice: 2,

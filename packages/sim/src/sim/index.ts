@@ -4,9 +4,11 @@ import { advanceFarm, assertTime } from "../advance/index.js";
 import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
 import { buyPlot, harvest, plant, preparePlotRules, ripening } from "../plots/index.js";
+import { prepareProgressRules } from "../progress/index.js";
 import { streamSeed } from "../random/index.js";
 import { refuse } from "../state/index.js";
 import type { Action, ApplyResult, FarmState } from "../state/index.js";
+import { prepareStorageRules } from "../storage/index.js";
 
 /** The simulation for one content. Pure: time arrives as an argument (ADR-0003, "The interface"). */
 export interface Sim {
@@ -26,7 +28,9 @@ export interface Sim {
 }
 
 export function createSim(content: Content): Sim {
-	const plotRules = preparePlotRules(content);
+	const progress = prepareProgressRules(content);
+	const storage = prepareStorageRules(content);
+	const plotRules = preparePlotRules(content, progress, storage);
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
 	return {
@@ -35,6 +39,7 @@ export function createSim(content: Content): Sim {
 			coins: content.start.coins,
 			xp: 0,
 			silo: {},
+			barn: {},
 			plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
 			streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
 		}),

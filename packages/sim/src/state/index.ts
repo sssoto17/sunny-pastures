@@ -12,6 +12,8 @@ export interface FarmState {
 	readonly xp: number;
 	/** Crops by good id. A good has a key only while its count is above 0, so equal farms hash equally. */
 	readonly silo: Readonly<Record<string, number>>;
+	/** Every other good by good id, keyed as the silo is (MUST-06.4). */
+	readonly barn: Readonly<Record<string, number>>;
 	/** In content order. */
 	readonly plots: readonly Plot[];
 	/** The mulberry32 state of each stream, an unsigned 32-bit integer (ADR-0003, section 7). */
