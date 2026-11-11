@@ -2,11 +2,13 @@
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
-import { cropLocked, gainXp, prepareProgressRules, purchase } from "../progress/index.js";
+import { cropLocked, gainXp, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { mulberry32 } from "../random/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
+import { put } from "../storage/index.js";
+import type { StorageRules } from "../storage/index.js";
 
 /** One plot of the farm's state (ADR-0005, section 3: the plots module owns it). */
 export type Plot =
@@ -28,16 +30,20 @@ export type PlotAction =
 /** The plot rules for one content, prepared once in createSim. */
 export interface PlotRules {
 	readonly crops: ReadonlyMap<string, CropRules>;
-	readonly siloCapacity: number;
 	/** The plots a new farm starts with. */
 	readonly startPlots: number;
 	/** The plots beyond the start, in the order they are bought: the Level and price of each. */
 	readonly extraPlots: readonly ExtraPlot[];
 	readonly progress: ProgressRules;
+	readonly storage: StorageRules;
 }
 
 /** Prepares the content once: grow times in ms (D7) and bonus odds as a draw threshold (D16). */
-export function preparePlotRules(content: Content): PlotRules {
+export function preparePlotRules(
+	content: Content,
+	progress: ProgressRules,
+	storage: StorageRules,
+): PlotRules {
 	const crops = Object.entries(content.crops).map(([id, crop]): [string, CropRules] => [
 		id,
 		{
@@ -53,10 +59,10 @@ export function preparePlotRules(content: Content): PlotRules {
 	]);
 	return {
 		crops: new Map(crops),
-		siloCapacity: content.silo.capacity,
 		startPlots: content.start.plots,
 		extraPlots: prepareExtraPlots(content),
-		progress: prepareProgressRules(content),
+		progress,
+		storage,
 	};
 }
 
@@ -135,16 +141,11 @@ export function harvest(farm: FarmState, index: number, rules: PlotRules): Apply
 
 	const draw = mulberry32(farm.streams.yields);
 	const amount = crop.baseYield + (draw.value < crop.bonusBelow ? crop.bonusYield : 0);
-	const room = rules.siloCapacity - sumSilo(farm.silo);
-	if (amount > room) {
-		return refuse(
-			`The silo has room for ${String(room)} more crop${room === 1 ? "" : "s"}, and the harvest is ${String(amount)} ${crop.id}.`,
-		);
-	}
+	const stored = put(farm, { good: crop.id, amount }, "the harvest", rules.storage);
+	if (!stored.ok) return stored;
 
 	const harvested = {
-		...replacePlot(farm, index, { status: "empty" }),
-		silo: { ...farm.silo, [crop.id]: (farm.silo[crop.id] ?? 0) + amount },
+		...replacePlot(stored.state, index, { status: "empty" }),
 		streams: { ...farm.streams, yields: draw.next },
 	};
 	return { ok: true, state: gainXp(harvested, crop.xp, rules.progress) };
@@ -204,11 +205,6 @@ function findPlot(farm: FarmState, index: number): Plot | null {
 /** Players count plots from 1. */
 function formatPlotNumber(index: number): string {
 	return String(index + 1);
-}
-
-/** The silo's fill. A sum, so the order of the goods' keys can't matter (MUST-10.6). */
-function sumSilo(silo: FarmState["silo"]): number {
-	return Object.values(silo).reduce((total, count) => total + count, 0);
 }
 
 function replacePlot(farm: FarmState, index: number, plot: Plot): FarmState {
