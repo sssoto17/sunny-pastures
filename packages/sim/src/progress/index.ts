@@ -14,6 +14,8 @@ export interface ProgressRules {
 	readonly facilityLevels: ReadonlyMap<string, number>;
 	/** The Level that unlocks each pen (#86). */
 	readonly penLevels: ReadonlyMap<string, number>;
+	/** The Level that unlocks each good for orders (#87). */
+	readonly orderGoodLevels: ReadonlyMap<string, number>;
 }
 
 /** Copies what the rules read, so a later change to the content object can't reach them. */
@@ -24,6 +26,7 @@ export function prepareProgressRules(content: Content): ProgressRules {
 		cropLevels: mapUnlockLevels(content, (level) => level.crops),
 		facilityLevels: mapUnlockLevels(content, (level) => level.facilities),
 		penLevels: mapUnlockLevels(content, (level) => level.pens),
+		orderGoodLevels: mapUnlockLevels(content, (level) => level.orderGoods),
 	};
 }
 
