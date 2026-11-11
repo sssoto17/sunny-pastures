@@ -49,8 +49,9 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   tool before the first edit). Never `git checkout` or `git switch` in the main folder. A
   `PreToolUse` hook (`.claude/hooks/block-branch-switch.sh`) enforces this: in the main folder it
   denies branch switches and a top-level `cd` into a worktree.
-- The coordinating session (the main folder) briefs, dispatches, reviews, relays and keeps the
-  board. Work that crops up becomes a brief in `.scratch/` for a lane, not an edit. After each
+- The coordinating session (the main folder) briefs, dispatches reviewers, relays and keeps the
+  board (`.claude/skills/today/SKILL.md`, "After the agenda: coordinator mode"). Work that crops
+  up becomes a brief in `.scratch/` for a lane, not an edit. After each
   completed task it gives a short status: today's agenda, what's done, what's left in order. A
   session that finishes an issue asks "close #N?" in the same report. A `PreToolUse` hook
   (`.claude/hooks/block-coordinator-work.sh`) backs this up: in the main folder it denies the
