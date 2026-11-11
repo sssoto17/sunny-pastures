@@ -1,6 +1,6 @@
 ---
 name: today
-description: "Start the day from the handoff and the board: an agenda and paste-ready lane briefs in .scratch/, read-only."
+description: "Start the day from the handoff and the board: an agenda and paste-ready lane briefs in .scratch/, drafted read-only, then coordinator mode for the rest of the day."
 disable-model-invocation: true
 ---
 
@@ -8,10 +8,11 @@ disable-model-invocation: true
 for the admin: an agenda, a brief per Manual item, a prompt line per Factory item. The admin and
 the coordinator decide and launch; you only prepare.
 
-**Read-only.** You read GitHub (`gh issue view`, `gh pr list`, `gh api -X GET`), git and files.
-Your only writes are new files in `out`, the folder the gather script names. Every issue, field,
-label, comment, branch and worktree stays exactly as you found it; anything that should change
-goes in the agenda as a suggestion.
+**Read-only while drafting.** In steps 1–6 you read GitHub (`gh issue view`, `gh pr list`,
+`gh api -X GET`), git and files. Your only writes are new files in `out`, the folder the gather
+script names. Every issue, field, label, comment, branch and worktree stays exactly as you found
+it; anything that should change goes in the agenda as a suggestion. Once you've replied (step
+6), read-only ends and **coordinator mode** (last section) holds for the rest of the day.
 
 `/today 75 77` also drafts briefs for the issues named, Ready or not (to redraft one, or to
 compare with a hand-written brief).
@@ -37,7 +38,8 @@ compare with a hand-written brief).
    worktree. Create `out` if it's missing.
 5. **Write the agenda** (section below) to `out/today-<date>.md`. If that file exists, use
    `today-<date>-2.md`, then `-3`, and so on.
-6. **Reply** with the agenda's path and its "Launch" and "For the coordinator" sections.
+6. **Reply** with the agenda's path and its "Launch" and "For the coordinator" sections. Then
+   switch to coordinator mode.
 
 Done when every Ready item appears in the agenda's Launch section as a new brief, an existing
 brief, a prompt line or "no lane", and every line of `orphans`, `worktrees` and `strays` is
@@ -142,3 +144,43 @@ PR, and no launch line.>
 Put each launch line in its own fenced block so it pastes in one piece. In the agenda, file
 paths and commands are absolute (never `$TMPDIR`); inside a brief, repo files stay
 repo-relative, as the template writes them. Nothing you print shows a secret (`AGENTS.md`).
+
+## After the agenda: coordinator mode
+
+For the rest of the day you're the coordinating session: the project manager (`AGENTS.md`, the
+coordinating-session bullet). Your context goes on briefing, dispatching, relaying and keeping
+the board; the work itself goes to lanes and subagents.
+
+- **Delegate.** Work that crops up becomes a brief in `.scratch/brief-<N>-<slug>.md` for a lane,
+  with its launch line, or a background subagent. Lanes edit, build and open PRs; you read a PR's
+  description and checks, and leave its diff to the reviewer.
+- **Dispatch a reviewer for every PR** the moment a lane reports it: a background
+  `agent-skills:code-reviewer` agent, fresh context. Its prompt carries the PR number, the
+  issue's acceptance criteria, the brief's path and the rules to check (the relevant
+  `CONSTRAINTS.md` rows, ADRs, `docs/agents/code-style.md`, `AGENTS.md`), and asks for:
+  read-only (no comments, pushes or approvals); the PR description's claims are claims to check,
+  not facts; a verdict (merge / merge after fixes / don't merge), then findings ranked most
+  severe first, each with evidence and a fix, confirmed apart from unverified, under 400 words.
+  Your own view of the PR stays out of the prompt. Tell the admin "hold the merge until I relay
+  the verdict".
+- **Delta review.** After a fix round, dispatch a reviewer the same way over only the fix
+  commits (`<old head>..<new head>`), checked against the findings they answer.
+- **Relay.** Give the admin the verdict, the ranked findings, one recommendation and one
+  question ("Send the lane fixes 1 and 2?"). On yes, `SendMessage` the lane a self-contained
+  message: what to change, "admin-approved, <date>", and what to report back (head SHA, check
+  results). Reach a local lane by `SendMessage`; a message for the admin to paste is only for a
+  lane `ListAgents` can't reach.
+- **Keep the board.** Before proposing the next lane, check its blockers:
+  `gh api repos/sssoto17/sunny-pastures/issues/<N>/dependencies/blocked_by` lists none open
+  (`docs/agents/issue-tracker.md`, definition of ready, rule 4). Move issues with
+  `scripts/issue-fields.sh`: In progress at launch, In review when the PR opens. Remove a
+  `blocked:*` label once its cause is gone. File follow-ups with `scripts/new-issue.sh` (Backlog,
+  under their parent); log incidents on the Retro inbox. When the admin has archived a merged
+  lane, run `scripts/after-merge.sh <name>` (a worktree still locked by the archived session gets
+  `git worktree unlock` first). Ask "close #N?" once the closing PR has merged, and check a split
+  PR's `closingIssuesReferences` so only the last part closes the issue.
+- **Permissions stay with their owner.** When a lane's permission check refuses an action, the
+  lane asks the admin itself; you never perform it for the lane or ask another session to.
+- **Ask the admin** only for their decisions: dependencies, rule deviations, sequencing, Ready
+  and merges. Routing, briefs and review dispatch are yours.
+- **Status after each task**, 3–5 lines: **Today, in order** · **Done** · **Left**.
