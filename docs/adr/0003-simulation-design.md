@@ -404,10 +404,10 @@ in the stack's review, 11 Nov.
 The add-ons live in `facilities/` (ADR-0005, section 1): nothing else uses them yet, since the pen
 Collector is SHOULD-08.
 
-- **State.** An owned facility stores `addOns: { loop, collector }`, both `false` when bought
-  (an add-on exists only once bought, MUST-05.6), and `lastRecipe`: the recipe of the job started last, by hand or by the Loop, `null`
-  until one starts. The queue forgets a recipe once its job is collected, so the Loop's "last
-  recipe" (MUST-06.5) is a stored fact (section 5).
+- **State.** An owned facility stores `addOns: { loop, collector }`, both `false` when bought (an
+  add-on exists only once bought, MUST-05.6), and `lastRecipe`: the recipe of the job started
+  last, by hand or by the Loop, `null` until one starts. The queue forgets a recipe once its job
+  is collected, so the Loop's "last recipe" (MUST-06.5) is a stored fact (section 5).
 - **Buying.** `buyAddOn(facility, addOn)` goes through `purchase` (section 11): each add-on is
   unlocked for every facility by the first Level-table row that lists it in `addOns`, and costs
   content's `addOns[addOn].price`. It is refused for a facility the farm hasn't bought, an add-on
@@ -429,9 +429,9 @@ Collector is SHOULD-08.
   for the player; with one, it stops when the barn is full (the waiting goods keep the slots) and
   resumes once the barn has room. It also stops when the inputs run out. There is no time cap.
 - **`apply` advances once more after the action**, to `at`, so a step the action made due at its
-  own time (a Loop restarting into a slot that a collect freed, or a Loop just bought) runs in the
-  same call. Every farm the rules return has then run its steps up to its time. This amends
-  section 2, where `apply` only advanced before the action.
+  own time (a Collector moving goods that waited, once it is bought or feeding frees room; a Loop
+  restarting into a slot that a collect freed, or a Loop just bought) runs in the same call. Every farm the rules return has then run its steps
+  up to its time. This amends section 2, where `apply` only advanced before the action.
 - **Step kinds.** `moveGoods` ranks after the producing kinds, so goods made at a time are moved at
   it; `restartRecipe` ranks last, so a slot the Collector frees is refilled at the same time, and a
   slot its waiting goods hold is not. A restart only adds a running job that ends later, and no
@@ -442,10 +442,10 @@ Collector is SHOULD-08.
   settle that order, for example by running a facility's moves and restarts in one step.
 
 **Patterns:** level-triggered automated steps (the Collector and the Loop each act whenever their
-condition holds, at the farm's time, besides the Collector's step at a job's stored finish); the strategy behind `StepSource` (section
-12), chosen per facility by its stored add-ons; the policy function of section 11 for buying; one
-rule reused by the player's action and the automated step (`startJob` for the Loop, collecting for
-the Collector).
+condition holds, at the farm's time, besides the Collector's step at a job's stored finish); the
+strategy behind `StepSource` (section 12), chosen per facility by its stored add-ons; the policy
+function of section 11 for buying; one rule reused by the player's action and the automated step
+(`startJob` for the Loop, collecting for the Collector).
 
 **Rejected:**
 
@@ -458,10 +458,11 @@ the Collector).
   replaced the same day). The admin chose the queue as the limit: a job started in a free slot may
   take its inputs and wait for room, and the player sees a full queue, not a Loop that refuses to
   start beside an empty slot.
-- **Starting the Loop inside `collect` and `buyAddOn`.** Each action that frees a slot or adds a Loop
-  would have to know about the Loop, and a later action (harvesting the wheat a Loop waits for)
-  would be one more place to forget; one advance after any action covers them all.
-- **Leaving the restart to the caller's next advance.** A farm `apply` returned would still have a
+- **Starting the Loop inside `collect` and `buyAddOn`, or moving waiting goods inside `buyAddOn`
+  and `feed`.** Each action that frees a slot or room, or adds an add-on, would have to know about
+  the add-ons, and a later action (harvesting the wheat a Loop waits for) would be one more place
+  to forget; one advance after any action covers them all.
+- **Leaving these steps to the caller's next advance.** A farm `apply` returned would still have a
   step due at its own time: `advance(farm, farm.time)` would change it, breaking idempotent
   `advance` and MUST-14.2's replay from a snapshot.
 - **One Loop step that fills every free slot.** One job a step, keyed by the slot it fills, keeps
