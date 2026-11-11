@@ -68,13 +68,12 @@ jobs:
           mv "$RUNNER_TEMP/s.json" .claude/settings.json
       # Whether an API key secret exists anywhere this job could read one (repo or environment):
       # it should say no, so the setup-token is the only credential the run can have used.
+      # The expressions yield true or false only, so no secret value enters the step.
       - name: Which credentials exist (yes or no only)
         env:
-          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          API_KEY_SECRET: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          echo "RESULT oauth_token_secret=$([ -n "$OAUTH" ] && echo yes || echo no)" \
-            "api_key_secret=$([ -n "$API_KEY_SECRET" ] && echo yes || echo no)"
+          HAS_OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          HAS_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: echo "RESULT oauth_token_secret=$HAS_OAUTH api_key_secret=$HAS_API_KEY"
       - id: claude
         continue-on-error: true
         uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268

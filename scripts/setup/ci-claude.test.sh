@@ -24,6 +24,7 @@ printf '%s\n' "$*" >>"$dir/calls"
 case "$*" in
   "auth status") exit 0 ;;
   "secret set "*)
+    if [[ -f $dir/fail-secret ]]; then cat >/dev/null; echo "fake: HTTP 500" >&2; exit 1; fi
     cat >"$dir/stdin.$3.$5"; echo "✓ Set Actions secret $3"; exit 0 ;;
   "secret list "*) echo CLAUDE_CODE_OAUTH_TOKEN ;;
   "api repos/sssoto17/sunny-pastures/environments/"*)
@@ -40,7 +41,7 @@ FAKE
 chmod +x "$work/bin/gh"
 
 reset() {
-  rm -f "$work"/calls "$work"/stdin.* "$work"/no-env "$work"/fail-patterns
+  rm -f "$work"/calls "$work"/stdin.* "$work"/no-env "$work"/fail-patterns "$work"/fail-secret
   echo selected >"$work/mode"
   echo 'supabase/setup-cli@*' >"$work/patterns"
   token="sk-ant-oat01-FAKE$RANDOM$RANDOM"
@@ -120,6 +121,29 @@ run "$(answers "$token")"
 expect_code 1
 assert "expected no write" lacks "$calls" "api -X PUT"
 expect_hidden "$token"
+
+# --- gh secret set fails: exit 1, no "✓ set", and the token is never shown ---------------------
+reset
+touch "$work/fail-secret"
+run "$(answers "$token")"
+expect_code 1
+assert "expected the failing command named" contains "$err" "gh secret set CLAUDE_CODE_OAUTH_TOKEN --env factory failed"
+assert "expected no success line" lacks "$out" "✓ set"
+assert "expected no allowed-actions write after a failed upload" lacks "$calls" "api -X PUT"
+expect_hidden "$token"
+
+# --- a paste that isn't sk-ant-oat…: stored only on y ---------------------------------------------
+reset
+odd="odd-token-FAKE$RANDOM$RANDOM"
+run "$(printf '\n\n\n%s\nn\n' "$odd")"
+expect_code 2
+assert "expected nothing stored on n" lacks "$calls" "secret set"
+expect_hidden "$odd"
+reset
+run "$(printf '\n\n\n%s\ny\n\ny\n\n\n' "$odd")"
+expect_code 0
+assert "expected it stored on y" test "$(cat "$work/stdin.CLAUDE_CODE_OAUTH_TOKEN.review" 2>/dev/null)" == "$odd"
+expect_hidden "$odd"
 
 # --- an API key pasted by mistake: refused, nothing stored, never shown -----------------------
 reset
