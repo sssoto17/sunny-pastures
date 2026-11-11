@@ -20,11 +20,14 @@ const contents = [
 	["a barn of 20", { ...richContent, barn: { capacity: 20 } }],
 ] as const;
 
-/** The slice's recipes (#84), by facility: the wheat each takes and the goods it makes. */
-const made = [
-	{ wheat: 2, goods: 2 },
-	{ wheat: 3, goods: 1 },
-] as const;
+/** Each facility's one recipe in content, by facility: the wheat it takes and the goods it makes. */
+const [feedMade = { wheat: NaN, goods: NaN }, breadMade = { wheat: NaN, goods: NaN }] = (
+	["chickenFeed", "bread"] as const
+).map((id, i) => {
+	const recipe = richContent.facilities[i]?.recipes[id];
+	const wheat = recipe?.inputs.find(({ good }) => good === "wheat")?.amount ?? NaN;
+	return { wheat, goods: recipe?.output.amount ?? NaN };
+});
 
 /** A ms at which jobs in both facilities finish, from the farm it was found on. */
 interface Tie {
@@ -83,8 +86,9 @@ const barnRoom = ({ barnCapacity }: World, farm: FarmState): number =>
  * What a tie competes for, from the farm a ms before it and at it. The Collectors compete for the
  * last barn space when both have one and the room holds one facility's goods but not both. The
  * Loops compete for the last wheat only where the order decides: both have one, the silo holds
- * the bakery's 3 but not both recipes' 5, the feed mill (ranked first by index) restarts, and the
- * bakery is left with a free slot and room for its bread, stopped by the wheat alone. A Collector
+ * the bakery's wheat but not both recipes', the feed mill (ranked first by index) restarts, and the
+ * bakery is left with a free slot, stopped by the wheat alone: a Loop's limits are its queue and
+ * its inputs, never the barn (the admin, 11 Nov). A Collector
  * stops a Loop when the facility whose goods didn't fit has a Loop: its goods keep the slot
  * (ADR-0003, sections 2 and 14).
  */
@@ -97,15 +101,14 @@ function classify(world: World, { at, from }: Tie): string[] {
 		owned.every((facility) => facility?.addOns[addOn] === true);
 	const room = barnRoom(world, before);
 	const isForBarn =
-		both("collector") && room >= made[1].goods && room < made[0].goods + made[1].goods;
+		both("collector") && room >= breadMade.goods && room < feedMade.goods + breadMade.goods;
 	const bakeryJobs = after.facilities[1]?.jobs.length ?? 2;
 	const isForWheat =
 		both("loop") &&
-		wheatIn(before) >= made[1].wheat &&
-		wheatIn(before) < made[0].wheat + made[1].wheat &&
-		wheatIn(after) === wheatIn(before) - made[0].wheat &&
-		bakeryJobs < 2 &&
-		barnRoom(world, after) >= (bakeryJobs + 1) * made[1].goods;
+		wheatIn(before) >= breadMade.wheat &&
+		wheatIn(before) < feedMade.wheat + breadMade.wheat &&
+		wheatIn(after) === wheatIn(before) - feedMade.wheat &&
+		bakeryJobs < 2;
 	const isLoopStopped =
 		isForBarn &&
 		after.facilities.some(
@@ -159,13 +162,13 @@ describe.each(contents)(
 			forEachTie(({ at, from }) => {
 				const before = sim.advance(from, at - 1);
 				const isEachCollecting = before.facilities.every((owned) => owned?.addOns.collector);
-				if (!isEachCollecting || barnRoom(world, before) < made[0].goods) return;
+				if (!isEachCollecting || barnRoom(world, before) < feedMade.goods) return;
 
 				// The feed mill's oldest job, waiting or finishing now, has room, so it moves at the tie
 				// whatever the bakery's goods would take.
 				const after = sim.advance(from, at);
 				const feed = (farm: FarmState): number => farm.barn["chickenFeed"] ?? 0;
-				expect(feed(after)).toBeGreaterThanOrEqual(feed(before) + made[0].goods);
+				expect(feed(after)).toBeGreaterThanOrEqual(feed(before) + feedMade.goods);
 			});
 		});
 	},
