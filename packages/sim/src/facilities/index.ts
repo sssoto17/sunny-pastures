@@ -289,8 +289,8 @@ export const jobFinishing: StepSource<FarmState> = {
 /**
  * The Collector (MUST-06.6): a `moveGoods` step, one per facility and time, keyed by the facility
  * and slot 0. It falls when one of the facility's jobs finishes, which it finishes in place of
- * `finishJob`, and at the farm's time whenever the facility's oldest job is done and its goods fit,
- * so goods that waited move as soon as the barn has room. It moves the done jobs into the barn,
+ * `finishJob`, and a ms after the farm's time whenever the facility's oldest job is done and its
+ * goods fit, so goods that waited move as soon as the barn has room. It moves the done jobs into the barn,
  * oldest first, while they fit; the rest wait in their slots (ADR-0003, section 15).
  */
 export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
@@ -299,10 +299,12 @@ export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
 			farm.facilities.flatMap((owned, index): AutomatedStep[] => {
 				if (owned?.addOns.collector !== true) return [];
 
+				// Waiting goods that fit move a ms after the farm's time: room a step or an action frees
+				// at a time is then used at the next, never behind a step already run at it (MUST-10.6).
 				const ends = owned.jobs.flatMap((job) => (job.status === "running" ? [job.readyAt] : []));
-				const isWaiting =
-					!ends.includes(farm.time) && collectFirst(farm, index, rules)?.ok === true;
-				return [...ends, ...(isWaiting ? [farm.time] : [])].map((at) => ({
+				const next = farm.time + 1;
+				const isWaiting = !ends.includes(next) && collectFirst(farm, index, rules)?.ok === true;
+				return [...ends, ...(isWaiting ? [next] : [])].map((at) => ({
 					at,
 					kind: "moveGoods",
 					index,

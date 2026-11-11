@@ -11,11 +11,12 @@
  * - `produce` (#86) after `finishJob`, for the same reason: it touches neither storage nor coins
  *   and changes only its own pen (ADR-0003, section 13).
  * - `moveGoods` (#88), the Collector, after every producer, so goods made at a time move at it: one
- *   step per facility and time, as a job finishes or once waiting goods fit (ADR-0003, section 15).
- *   No later-ranked step frees barn room today, so a move never falls due behind one already run.
- * - `restartRecipe` (#88), the Loop, last: the Collector's move frees the queue slot a Loop
- *   restarts into at the same time, and goods that don't fit keep it (MUST-06.5, 06.6). A restart
- *   adds only a running job that ends later, so it never makes an earlier-ranked step due now.
+ *   step per facility and time, as a job finishes or a ms after waiting goods fit (ADR-0003,
+ *   section 15), so room a later-ranked step frees never makes a move due behind it.
+ * - `restartRecipe` (#88), the Loop, last of all kinds (the admin, 11 Nov): the Collector's move
+ *   frees the queue slot a Loop restarts into at the same time, and goods that don't fit keep it
+ *   (MUST-06.5, 06.6). A restart adds only a running job that ends later, and room it frees by
+ *   taking barn goods (cookies' eggs) the Collector uses a ms later.
  */
 const stepKinds = ["ripen", "finishJob", "produce", "moveGoods", "restartRecipe"] as const;
 
