@@ -78,7 +78,7 @@ export function newPens(rules: PenRules): readonly (OwnedPen | null)[] {
  */
 export function buyPen(farm: FarmState, index: number, rules: PenRules): ApplyResult {
 	const rule = findRule(index, rules);
-	if (rule === null) return refuse(`There is no pen ${formatPenNumber(index)}.`);
+	if (rule === null) return refuse(describeNoPen(index));
 	if ((farm.pens[index] ?? null) !== null) return refuse(`The ${rule.id} is already bought.`);
 
 	const offer = { what: `The ${rule.id}`, level: rule.level, price: rule.price };
@@ -95,7 +95,7 @@ export function buyPen(farm: FarmState, index: number, rules: PenRules): ApplyRe
  */
 export function feed(farm: FarmState, index: number, rules: PenRules): ApplyResult {
 	const found = findOwned(farm, index, rules);
-	if (!found.ok) return found;
+	if (typeof found === "string") return refuse(found);
 
 	const { rule, pen } = found;
 	const room = rule.troughCapacity - pen.trough;
@@ -118,7 +118,7 @@ export function feed(farm: FarmState, index: number, rules: PenRules): ApplyResu
  */
 export function collectProducts(farm: FarmState, index: number, rules: PenRules): ApplyResult {
 	const found = findOwned(farm, index, rules);
-	if (!found.ok) return found;
+	if (typeof found === "string") return refuse(found);
 
 	const { rule, pen } = found;
 	if (pen.products === 0) return refuse(`The ${rule.id} has nothing to collect.`);
@@ -195,24 +195,29 @@ function findRule(index: number, rules: PenRules): PenRule | null {
 	return Number.isSafeInteger(index) && index >= 0 ? (rules.pens[index] ?? null) : null;
 }
 
-/** The pen at `index` and its rule, or a refusal if content has no such pen or it isn't bought. */
+/** The pen at `index` and its rule, or why there is none, as a sentence (as facilities/ does). */
 function findOwned(
 	farm: FarmState,
 	index: number,
 	rules: PenRules,
-): { ok: true; rule: PenRule; pen: OwnedPen } | { ok: false; reason: string } {
+): { rule: PenRule; pen: OwnedPen } | string {
 	const rule = findRule(index, rules);
-	if (rule === null) return { ok: false, reason: `There is no pen ${formatPenNumber(index)}.` };
+	if (rule === null) return describeNoPen(index);
 
 	const pen = farm.pens[index] ?? null;
-	if (pen === null) return { ok: false, reason: `The ${rule.id} isn't bought.` };
+	if (pen === null) return `The ${rule.id} isn't bought.`;
 
-	return { ok: true, rule, pen };
+	return { rule, pen };
 }
 
-/** Players count pens from 1. */
-function formatPenNumber(index: number): string {
-	return String(index + 1);
+/**
+ * Why there is no pen at `index`. Players count pens from 1, so an index that can't name a pen
+ * (negative or not an integer) gets no number.
+ */
+function describeNoPen(index: number): string {
+	return Number.isSafeInteger(index) && index >= 0
+		? `There is no pen ${String(index + 1)}.`
+		: "There is no such pen.";
 }
 
 /**

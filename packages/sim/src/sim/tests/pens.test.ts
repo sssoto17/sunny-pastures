@@ -17,19 +17,16 @@ const collect = { type: "collectProducts", pen: 0 } as const;
 const applyAll = (farm: FarmState, actions: readonly Action[], at: number): FarmState =>
 	actions.reduce((current, action) => expectAccepted(sim.apply(current, action, at)), farm);
 
-/** A new farm at Level 2 with the chicken pen bought. */
+/** A new farm at Level 2 with the chicken pen bought and 6 chicken feed in the barn. */
 const withPen = (): FarmState =>
-	applyAll({ ...sim.newFarm("farm-1"), xp: level2, coins: 30 }, [buy], 0);
+	applyAll({ ...sim.newFarm("farm-1"), xp: level2, coins: 30, barn: { chickenFeed: 6 } }, [buy], 0);
 
 const idle = { status: "idle" } as const;
 const producing = (readyAt: number) => ({ status: "producing", readyAt }) as const;
 
 describe("a new farm's pens", () => {
-	it("has every content pen unbought, and the start's chicken feed in the barn", () => {
-		const farm = sim.newFarm("farm-1");
-
-		expect(farm.pens).toEqual([null]);
-		expect(farm.barn).toEqual({ chickenFeed: 6 });
+	it("has every content pen unbought", () => {
+		expect(sim.newFarm("farm-1").pens).toEqual([null]);
 	});
 });
 
@@ -55,7 +52,8 @@ describe("buying a pen", () => {
 			"The chickenPen costs 30 coins, and the farm has 29.",
 		],
 		["for a pen content doesn't have", { xp: level2, coins: 30 }, 1, "There is no pen 2."],
-		["for a pen index that isn't one", { xp: level2, coins: 30 }, -1, "There is no pen 0."],
+		["for a pen index that isn't one", { xp: level2, coins: 30 }, -1, "There is no such pen."],
+		["for an index that isn't an integer", { xp: level2, coins: 30 }, 0.5, "There is no such pen."],
 	])("is refused %s", (_name, progress, pen, reason) => {
 		const farm = { ...sim.newFarm("farm-1"), ...progress };
 
@@ -93,6 +91,23 @@ describe("feeding", () => {
 			ok: false,
 			reason: "The chickenPen's trough is full.",
 		});
+	});
+
+	it("moves only what the barn holds when that is less than the trough's room (MUST-02.2)", () => {
+		const [pen] = sliceContent.pens;
+		const deep: Content = { ...sliceContent, pens: [{ ...pen, animals: 1, troughCapacity: 4 }] };
+		const deepSim = createSim(deep);
+		const bought = expectAccepted(
+			deepSim.apply(
+				{ ...deepSim.newFarm("farm-1"), xp: level2, coins: 30, barn: { chickenFeed: 3 } },
+				buy,
+				0,
+			),
+		);
+		const farm = expectAccepted(deepSim.apply(bought, feed, 0));
+
+		expect(farm.barn).toEqual({});
+		expect(farm.pens[0]).toEqual({ trough: 2, animals: [producing(layMs)], products: 0 });
 	});
 
 	it("is refused when the barn has no chicken feed", () => {
@@ -165,6 +180,15 @@ describe("collecting from a pen", () => {
 		expect(farm.barn).toEqual({ chickenFeed: 4, egg: 2 });
 		expect(farm.pens[0]?.products).toBe(0);
 		expect(farm.xp).toBe(before.xp + 2);
+	});
+
+	it("pays the level-up coins of the Level its eggs' XP reaches (MUST-05.4)", () => {
+		// The slice's Level 3 is at 30 XP and pays 30 coins (#83); two eggs take 29 XP to 31.
+		const before = { ...laid(), xp: 29, coins: 0 };
+		const farm = expectAccepted(sim.apply(before, collect, layMs));
+
+		expect(farm.xp).toBe(31);
+		expect(farm.coins).toBe(30);
 	});
 
 	it("is refused if the barn can't hold them all", () => {

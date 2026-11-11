@@ -3,11 +3,11 @@
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content, GoodCount } from "../content/index.js";
-import { purchase } from "../progress/index.js";
+import { gainXp, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
-import { take } from "../storage/index.js";
+import { put, take } from "../storage/index.js";
 import type { StorageRules } from "../storage/index.js";
 
 /** A bought facility (ADR-0003, section 5: owned facilities with their tier and queue). */
@@ -31,7 +31,9 @@ export type Job =
 /** The actions on facilities (MUST-03). `facility` is an index in content order. */
 export type FacilityAction =
 	| { readonly type: "buyFacility"; readonly facility: number }
-	| { readonly type: "startJob"; readonly facility: number; readonly recipe: string };
+	| { readonly type: "startJob"; readonly facility: number; readonly recipe: string }
+	/** Collects the oldest job, in the first slot, once it is done. */
+	| { readonly type: "collect"; readonly facility: number };
 
 /** The facility rules for one content, prepared once in createSim. */
 export interface FacilityRules {
@@ -83,8 +85,9 @@ export function buyFacility(farm: FarmState, index: number, rules: FacilityRules
 	const facility = findRule(index, rules);
 	if (facility === null) return refuse(`There is no facility ${formatFacilityNumber(index)}.`);
 
-	const owned = farm.facilities[index] ?? null;
-	if (owned !== null) return refuse(`The ${facility.id} is already bought.`);
+	if (readEntry(farm, index, facility) !== null) {
+		return refuse(`The ${facility.id} is already bought.`);
+	}
 
 	const offer = { what: `The ${facility.id}`, level: facility.level, price: facility.price };
 	const bought = purchase(farm, offer, rules.progress);
@@ -125,13 +128,44 @@ export function startJob(
 	const taken = take(farm, recipe.inputs, `Making ${recipe.id}`, rules.storage);
 	if (!taken.ok) return taken;
 
+	// MUST-03.3's "later of its start and the previous job's finish": apply advances the farm first,
+	// so a job still running ends after the farm's time and a done one ended at or before it.
 	const last = owned.jobs[owned.jobs.length - 1];
-	const from = last?.status === "running" ? Math.max(farm.time, last.readyAt) : farm.time;
+	const from = last?.status === "running" ? last.readyAt : farm.time;
 	const readyAt = from + recipe.ms;
 	assertTime(readyAt);
 	const job: Job = { status: "running", recipe: recipe.id, readyAt };
 	const queued = { ...owned, jobs: [...owned.jobs, job] };
 	return { ok: true, state: replaceFacility(taken.state, index, queued) };
+}
+
+/**
+ * Collects the oldest job once it is done: its goods go to the barn, refused if they don't fit,
+ * and it gives XP, with the level-up coins of any Level it reaches (MUST-03.4, 05.2, 05.4). The
+ * jobs behind it move up a slot.
+ */
+export function collect(farm: FarmState, index: number, rules: FacilityRules): ApplyResult {
+	const found = findOwned(farm, index, rules);
+	if (typeof found === "string") return refuse(found);
+
+	const { facility, owned } = found;
+	const [job, ...rest] = owned.jobs;
+	if (job?.status !== "done") return refuse(`The ${facility.id} has no finished job to collect.`);
+
+	// A done job's recipe is in content: a version that drops a recipe settles its jobs in its
+	// `upgrade` (ADR-0006, section 6), so a missing one is a programmer error.
+	const recipe = facility.recipes.get(job.recipe);
+	if (recipe === undefined) {
+		throw new RangeError(
+			`The ${facility.id} has a done job of ${job.recipe}, which isn't in content.`,
+		);
+	}
+
+	const stored = put(farm, recipe.output, "collecting the job", rules.storage);
+	if (!stored.ok) return stored;
+
+	const collected = replaceFacility(stored.state, index, { ...owned, jobs: rest });
+	return { ok: true, state: gainXp(collected, recipe.xp, rules.progress) };
 }
 
 /** A running job becomes done at its `readyAt`, keyed by facility index and queue slot (MUST-03.3). */
@@ -184,10 +218,26 @@ function findOwned(
 	const facility = findRule(index, rules);
 	if (facility === null) return `There is no facility ${formatFacilityNumber(index)}.`;
 
-	const owned = farm.facilities[index] ?? null;
+	const owned = readEntry(farm, index, facility);
 	if (owned === null) return `The ${facility.id} isn't bought.`;
 
 	return { facility, owned };
+}
+
+/**
+ * The farm's entry for a content facility: null until bought. Every farm has one entry per content
+ * facility (ADR-0003, section 12), so a missing entry is a broken farm, a programmer error, and
+ * throws a RangeError rather than refuse (D15).
+ */
+function readEntry(farm: FarmState, index: number, facility: FacilityRule): OwnedFacility | null {
+	const entry = farm.facilities[index];
+	if (entry === undefined) {
+		throw new RangeError(
+			`The farm has no entry for the ${facility.id}: its facilities don't match the content.`,
+		);
+	}
+
+	return entry;
 }
 
 /** Players count facilities from 1. */
