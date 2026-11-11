@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { createSim, sliceContent } from "../../index.js";
 import type { Content, FarmState } from "../../index.js";
+import { applyAll } from "./applyAll.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
 import { ownedFacility } from "./ownedFacility.js";
-import { applyAll, bakery, breadMs, feedMill, feedMs, startBread, startFeed } from "./sliceJobs.js";
+import { bakery, breadMs, feedMill, feedMs, startBread, startFeed } from "./sliceJobs.js";
 
 const sim = createSim(sliceContent);
 const doneFeed = { status: "done", recipe: "chickenFeed" } as const;
