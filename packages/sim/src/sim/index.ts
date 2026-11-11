@@ -3,6 +3,7 @@
 import { advanceFarm, assertTime } from "../advance/index.js";
 import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
+import { buyFacility, newFacilities, prepareFacilityRules } from "../facilities/index.js";
 import { buyPlot, harvest, plant, preparePlotRules, ripening } from "../plots/index.js";
 import { prepareProgressRules } from "../progress/index.js";
 import { streamSeed } from "../random/index.js";
@@ -29,7 +30,9 @@ export interface Sim {
 
 export function createSim(content: Content): Sim {
 	const progress = prepareProgressRules(content);
-	const plotRules = preparePlotRules(content, progress, prepareStorageRules(content));
+	const storage = prepareStorageRules(content);
+	const plotRules = preparePlotRules(content, progress, storage);
+	const facilityRules = prepareFacilityRules(content, progress);
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
 	return {
@@ -40,6 +43,7 @@ export function createSim(content: Content): Sim {
 			silo: {},
 			barn: {},
 			plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
+			facilities: newFacilities(facilityRules),
 			streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
 		}),
 		apply: (state, action, at) => {
@@ -58,6 +62,8 @@ export function createSim(content: Content): Sim {
 					return harvest(farm, action.plot, plotRules);
 				case "buyPlot":
 					return buyPlot(farm, action.plot, plotRules);
+				case "buyFacility":
+					return buyFacility(farm, action.facility, facilityRules);
 			}
 		},
 		advance,

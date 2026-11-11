@@ -299,6 +299,55 @@ rule shared by every upgrade); integer fixed-point arithmetic (the price curve).
 - **`Math.pow(growth, n)` for the curve.** Its float result can differ between engines (section 10).
 - **`buyPlot` with no plot.** A resent action would buy a second plot.
 
+## 12. Facilities, jobs and storage (#84)
+
+Decided by #84's lane on 11 Nov, under the admin's brief (content values and these shapes are the
+lane's call, reviewed in its PRs' "Decided by the lane").
+
+`facilities/` owns buying facilities and running jobs; `storage/` owns the silo and the barn
+(ADR-0005, section 3).
+
+- **Storage.** A crop goes to the silo, every other good to the barn (MUST-06.4); each has a
+  capacity from content. `put(goods)` is refused if the good's store can't hold it all, and
+  `take(inputs)` takes every input in list order, or is refused naming the first that is short.
+  Harvesting, starting a job and collecting one all go through it: the silo's room check left
+  `plots/` at this second occurrence (ADR-0005, "Shared logic").
+- **Buying.** `state.facilities` has one entry per content facility, in content order: `null`
+  until bought, then `{ tier, jobs }`. A facility is unlocked by the first Level-table row that
+  lists it and bought through `purchase` (section 11). Owned facilities store `tier: 1` from the
+  start, so #85 adds tiers without changing the persisted shape. `buyFacility` is refused for a
+  facility the farm has, so an action sent twice buys it once.
+- **Jobs.** A facility's `jobs` is its queue, in the order the jobs started; a job's queue slot is
+  its position (MUST-03.5). Starting a job needs the recipe at the facility's tier, a free slot
+  and every input in storage; the inputs leave storage at the start (MUST-03.2). The job stores
+  `readyAt`, the later of its start and the previous job's `readyAt`, plus the recipe's duration,
+  read from content once (MUST-03.3; ADR-0006, section 7). A running job becomes done as an
+  automated step at `readyAt`, of kind `finishJob`, keyed by the facility's index and the job's
+  slot (section 2). Collecting takes the job in slot 0 once it is done: its goods go to the barn
+  and its XP through `gainXp` (MUST-03.4, 05.2), and the jobs behind it move up a slot.
+- **Step kinds.** `finishJob` ranks after `ripen`. Neither touches storage, so today the rank
+  changes no outcome; producing kinds rank before the kinds that will move or use goods (the
+  Collector and the Loop, #88), so a step at the same time sees what was produced at it.
+
+**Patterns:** queue (FIFO) with stored end times; the strategy behind `StepSource` (a feature
+adds its automated steps without changing `advance`); a shared module for a repeated rule
+(`storage/`); the policy function of section 11 for buying.
+
+**Rejected:**
+
+- **A fixed array of slots with holes for collected jobs.** "The previous job" would then need a
+  start order stored beside the slots; the queue's order already is it.
+- **Deriving "done" from `readyAt` and the farm's time, with no step.** A finished job is an
+  automated step (`GLOSSARY.md`), and the Collector (#88) needs it as one to move goods at the
+  right moment in MUST-10.6's order.
+- **Storing a job's start time and deriving its end.** A tuning would move work in flight
+  (ADR-0006, section 7).
+- **Collecting every done job at once.** One job a call lets a player collect what fits when the
+  barn can't hold them all.
+- **One goods store.** The spec gives the silo and the barn separate capacities (MUST-06.4).
+- **A room check in each feature.** It would be written three times, and `fallow dupes` fails on
+  the copies.
+
 ## Vocabulary (D11)
 
 **Automated step** (`GLOSSARY.md`): a change the farm makes by itself at a server time, with no
@@ -321,6 +370,9 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Property-based testing | MUST-14 | Generated farms reach the tie and storage cases; a fixed seed makes failures reproducible. |
 | Integer fixed-point arithmetic | multipliers, growing costs | The same result in every JavaScript engine, so client and server hashes agree. |
 | Policy function | `progress/`'s `purchase` | One rule for every upgrade: unlocked at a Level, then bought with coins (section 11). |
+| Queue with stored end times | a facility's jobs | Jobs run in start order, and work in flight keeps its end time (section 12). |
+| Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
+| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests and jobs (section 12). |
 
 ## Consequences
 
