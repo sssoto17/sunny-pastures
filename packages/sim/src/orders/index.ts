@@ -1,5 +1,5 @@
 // The order board: orders drawn from the orders stream, delivering and discarding them, and slots
-// refilling (MUST-04; ADR-0005, section 3; ADR-0003, section 14).
+// refilling (MUST-04; ADR-0005, section 3; ADR-0003, section 15).
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content, GoodCount, OrderGood } from "../content/index.js";

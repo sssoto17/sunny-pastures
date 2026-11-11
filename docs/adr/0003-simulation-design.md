@@ -71,7 +71,7 @@ it, until none is left. Steps at exactly `to` are processed. When several steps 
 time, MUST-10.6's key breaks the tie: time, then kind of automated step, then facility, pen, plot
 or order slot index, then queue slot. The key is defined once in the sim. `apply` advances to `at` first, then
 applies the action, then advances to `at` once more, so the steps the action made due at `at` run
-before the farm is returned (the order slots a crossed Level adds, section 14).
+before the farm is returned (the order slots a crossed Level adds, section 15).
 
 Because steps at exactly `to` are processed, `advance(advance(s, t1), t2)` and `advance(s, t2)`
 process the same steps in the same order, so time-splitting (MUST-14.1) holds by construction.
@@ -395,7 +395,43 @@ portion reads its duration; the shared `storage/` module (section 12).
 - **Products straight to the barn as they are produced.** MUST-02.4 keeps products in the pen
   until collected, and a full barn would then need a rule for where a product goes.
 
-## 14. The order board (#87)
+## 14. Facility tiers (#85)
+
+Chosen by #85's lane on 11 Nov, unattended; the admin reviews it in #85's PRs ("Decided by the
+lane").
+
+- **Content.** A facility keeps its tier-1 `slots` and lists the tiers it can be upgraded to,
+  tier 2 first, as rows of price, slots and `timePerMille`. The highest tier is the last row, so
+  the slice stops at 3 (MUST-06.2) and SHOULD-08 adds rows. The Level table lists each tier it
+  unlocks as `{ facility, tier }` (MUST-05.5), read by `progress/`'s `findTierLevel`.
+- **Buying.** `buyTier` names the facility and the tier, which must be the facility's next, so an
+  action sent twice buys one tier. It goes through `purchase` (section 11) and only raises the
+  stored `tier` (section 12): no new field in the state.
+- **Job times.** A tier's time is the recipe's `seconds` times its per mille, rounded down to whole
+  seconds, then in ms, worked out for every tier once in `createSim` (sections 3, 10). Whole
+  seconds let #89's content check hold every tier's time to MUST-10.4's 10 s–24 h, which it has
+  to check per tier: a recipe's tier-1 `seconds` alone doesn't bound it.
+- **Reads.** `startJob` reads the slots and the time of the facility's tier when it runs, and the
+  job stores its `readyAt` (section 12), so a tier bought later never moves a job already queued or
+  running (MUST-03.3, 06.7; ADR-0006, section 7). The Loop (#88) restarts through `startJob` and
+  reads them the same way.
+
+**Patterns:** the policy function of section 11 for buying; a table of tier rows looked up by
+index (table-driven rules); integer fixed-point arithmetic (section 10) for job times.
+
+**Rejected:**
+
+- **Slots as a formula in the rules** (one more every 2nd tier, up to a maximum). MUST-06.2's
+  shape would be fixed in code, while the spec puts numbers in content; a row per tier states it
+  and #89's content check holds it to MUST-06.2.
+- **A seconds list per recipe and tier.** More numbers to tune for one rule; a per mille per tier
+  shortens every recipe alike.
+- **A growing price curve per facility,** as plots have (section 11). Each tier already has a row
+  for its slots and time, so its price sits there.
+- **The unlock Level in the tier row.** MUST-05.5 puts every unlock in the Level table.
+- **`buyTier` with no tier.** A resent action would buy two tiers.
+
+## 15. The order board (#87)
 
 Chosen by #87's lane on 11 Nov, unattended; the admin reviews it in #87's PRs ("Decided by the
 lane").
@@ -428,12 +464,17 @@ each good's fewest and most per order and its coins and XP per good, in content 
   drawn at once, as a `refillSlot` step at the farm's time with the next index, one slot at a time.
   `apply` advances to `at` again after the action (section 2), so a Level an action crosses opens
   its slots before the farm is returned. A new farm draws its Level 1 slots in `newFarm`.
-- **Step kinds.** `refillSlot` ranks last. It reads the Level and what is producible, which a step
-  at the same time can change (#88's Collector gains XP), and a slot that a Level adds is due at
-  the time the Level is crossed, which ranks after the step that crossed it only if refills rank
-  after every kind that gains XP; otherwise `advanceFarm` would throw. A refill changes only its
-  slot and the orders stream, which no other kind reads, so it never makes an earlier-ranked step
-  due at its own time.
+- **Step kinds.** `refillSlot` ranks after every kind on main (`ripen`, `finishJob`, `produce`).
+  It reads the Level and what is producible, which a step at the same time can change (#88's
+  Collector gains XP), and a slot that a Level adds is due at the time the Level is crossed, which
+  ranks after the step that crossed it only if refills rank after every kind that gains XP;
+  otherwise `advanceFarm` would throw. A refill changes only its slot and the orders stream, which
+  no other kind reads, so it never makes an earlier-ranked step due at its own time. **The admin's
+  decision (b), 11 Nov:** #88's `moveGoods` (the Collector, which gains XP) ranks before
+  `refillSlot`, and its `restartRecipe` (the Loop, which gains none) ranks last, after it. #88
+  isn't merged yet: whichever of #87 and #88 merges second sets that final order,
+  `["ripen", "finishJob", "produce", "moveGoods", "refillSlot", "restartRecipe"]`, with one
+  kind-order test covering all six.
 
 **Patterns:** a discriminated union per slot with a stored end time (section 5, as for animals in
 section 13); a seeded draw from a pool filtered before the draw (section 7); a derived predicate
@@ -479,10 +520,11 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Policy function | `progress/`'s `purchase` | One rule for every upgrade: unlocked at a Level, then bought with coins (section 11). |
 | Queue with stored end times | a facility's jobs | Jobs run in start order, and work in flight keeps its end time (section 12). |
 | Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
-| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding, collecting from pens and delivering orders (sections 12–14). |
+| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding, collecting from pens and delivering orders (sections 12, 13, 15). |
 | Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
-| Discriminated union per slot, stored end time | the order board | Each slot is open or refilling at a time fixed when it emptied (section 14). |
-| Seeded draw from a pool filtered first | drawing an order | MUST-04.3 holds at every draw in a fixed number of draws (section 14). |
+| Table-driven rules | a facility's tier rows | Each tier's price, slots and job time is a row of content, so tuning or adding a tier changes no code (section 14). |
+| Discriminated union per slot, stored end time | the order board | Each slot is open or refilling at a time fixed when it emptied (section 15). |
+| Seeded draw from a pool filtered first | drawing an order | MUST-04.3 holds at every draw in a fixed number of draws (section 15). |
 
 ## Consequences
 

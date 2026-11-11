@@ -102,6 +102,21 @@ describe("delivering an order", () => {
 	});
 });
 
+/**
+ * The waits, in ms, of a slot delivered and of one discarded at `level`, measured through the sim
+ * with an order that pays no XP, so the delivery stays at `level`.
+ */
+const measureWaits = (level: number): [number, number] => {
+	const xp = levelXp[level - 1] ?? NaN;
+	const free: Order = { goods: [{ good: "bread", amount: 1 }], coins: 0, xp: 0 };
+	const farm = sim.advance({ ...withOrder(free, { bread: 1 }), xp }, 1_000);
+	const [delivered, discarded] = [deliver, discard].map((action) => {
+		const slot = expectAccepted(sim.apply(farm, action, 1_000)).board[1];
+		return slot?.status === "empty" ? slot.refillAt - 1_000 : NaN;
+	});
+	return [delivered ?? NaN, discarded ?? NaN];
+};
+
 describe("discarding an order", () => {
 	it("empties its slot until the discarded delay, taking and paying nothing (MUST-04.4, 04.5)", () => {
 		const farm = withOrder(breadAndEggs, { bread: 2, egg: 1 });
@@ -133,6 +148,13 @@ describe("discarding an order", () => {
 				refillAt: 1_000 + (discardedMs[level - 1] ?? NaN),
 			});
 			expect(discardedMs[level - 1]).toBeGreaterThan(deliveredMs[level - 1] ?? NaN);
+			const [delivers, discards] = measureWaits(level);
+			expect(discards).toBeGreaterThan(delivers);
+			if (level > 1) {
+				const [deliveredBelow, discardedBelow] = measureWaits(level - 1);
+				expect(delivers).toBeLessThanOrEqual(deliveredBelow);
+				expect(discards).toBeLessThanOrEqual(discardedBelow);
+			}
 		},
 	);
 });
