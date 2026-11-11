@@ -359,7 +359,7 @@ function finishDue(farm: FarmState, index: number): FarmState {
  * it fills, one job a step. Its limit is the queue (the admin, 11 Nov): a done job keeps its slot
  * until collected, by hand or by the Collector, so it stops when every slot is taken, barn room or
  * not, and resumes as soon as one frees; it also stops when the inputs run out (MUST-06.5, 07.2;
- * ADR-0003, section 14).
+ * ADR-0003, section 15).
  */
 export function createLooping(rules: FacilityRules): StepSource<FarmState> {
 	return {
