@@ -63,6 +63,21 @@ describe("the Collector", () => {
 		]);
 	});
 
+	it("moves both the waiting goods and the new job's, when the barn has room for them", () => {
+		const waiting = {
+			...collecting(2),
+			facilities: [
+				ownedFacility([{ status: "done", recipe: "chickenFeed" }], collector),
+				ownedFacility([], collector),
+			],
+		};
+		const advanced = sim.advance(applyAll(waiting, [[startFeed, 0]]), feedMs);
+
+		expect(advanced.barn).toEqual({ chickenFeed: 4 });
+		expect(advanced.xp).toBe(xpOfLevel(4) + 2);
+		expect(advanced.facilities[feedMill]?.jobs).toEqual([]);
+	});
+
 	it("gives the last barn space to the lower facility index when two finish at the same ms (MUST-10.6)", () => {
 		// The feed mill's job starts 240 s after the bread, so both finish at 300 s.
 		const farm = applyAll(collecting(5, { bread: 48 }), [
