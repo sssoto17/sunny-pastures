@@ -66,12 +66,15 @@ jobs:
             .hooks.SessionStart += [mark("SessionStart")]
             | .hooks.UserPromptSubmit += [mark("UserPromptSubmit")]' .claude/settings.json >"$RUNNER_TEMP/s.json"
           mv "$RUNNER_TEMP/s.json" .claude/settings.json
-      - name: Which credentials are set (yes or no only)
+      # Whether an API key secret exists anywhere this job could read one (repo or environment):
+      # it should say no, so the setup-token is the only credential the run can have used.
+      - name: Which credentials exist (yes or no only)
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          API_KEY_SECRET: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          echo "RESULT oauth_token_set=$([ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && echo yes || echo no)" \
-            "api_key_set=$([ -n "$ANTHROPIC_API_KEY" ] && echo yes || echo no)"
+          echo "RESULT oauth_token_secret=$([ -n "$OAUTH" ] && echo yes || echo no)" \
+            "api_key_secret=$([ -n "$API_KEY_SECRET" ] && echo yes || echo no)"
       - id: claude
         continue-on-error: true
         uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
@@ -82,10 +85,15 @@ jobs:
           claude_args: >-
             --max-turns ${{ matrix.turns }}
             ${{ matrix.tools != '' && format('--allowedTools "{0}"', matrix.tools) || '' }}
+      # After a timeout this step may not run; the job's conclusion and seconds in the results
+      # table are then the record.
       - name: Report
         if: always()
+        env:
+          CHECK: ${{ matrix.check }}
+          OUTCOME: ${{ steps.claude.outcome }}
         run: |
-          echo "RESULT check=${{ matrix.check }} action=${{ steps.claude.outcome }}" \
+          echo "RESULT check=$CHECK action=$OUTCOME" \
             "hooks_fired=$(sort -u "$RUNNER_TEMP/hook-marker" 2>/dev/null | paste -sd, - || true)"
           exec_file="$RUNNER_TEMP/claude-execution-output.json"
           [ -f "$exec_file" ] || { echo "RESULT execution_file=missing"; exit 0; }

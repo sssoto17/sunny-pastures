@@ -31,7 +31,8 @@ case "$*" in
   *"actions/permissions --jq .allowed_actions") cat "$dir/mode" ;;
   *"selected-actions --jq .github_owned_allowed") echo true ;;
   *"selected-actions --jq .verified_allowed") echo false ;;
-  *"selected-actions --jq .patterns_allowed[]") cat "$dir/patterns" ;;
+  *"selected-actions --jq .patterns_allowed // [] | .[]")
+    [[ -f $dir/fail-patterns ]] && exit 1; cat "$dir/patterns" ;;
   "api -X PUT "*) exit 0 ;;
   *) echo "fake: unexpected gh call: $*" >&2; exit 99 ;;
 esac
@@ -39,7 +40,7 @@ FAKE
 chmod +x "$work/bin/gh"
 
 reset() {
-  rm -f "$work"/calls "$work"/stdin.* "$work"/no-env
+  rm -f "$work"/calls "$work"/stdin.* "$work"/no-env "$work"/fail-patterns
   echo selected >"$work/mode"
   echo 'supabase/setup-cli@*' >"$work/patterns"
   token="sk-ant-oat01-FAKE$RANDOM$RANDOM"
@@ -111,6 +112,14 @@ run "$(answers "$token" n)"
 expect_code 0
 assert "expected no write" lacks "$calls" "api -X PUT"
 assert "expected it listed as still to do" contains "$out" "Allowed actions: add"
+
+# --- the pattern read fails: stop, never write a list without the existing patterns -------------
+reset
+touch "$work/fail-patterns"
+run "$(answers "$token")"
+expect_code 1
+assert "expected no write" lacks "$calls" "api -X PUT"
+expect_hidden "$token"
 
 # --- an API key pasted by mistake: refused, nothing stored, never shown -----------------------
 reset
