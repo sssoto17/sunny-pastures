@@ -5,6 +5,7 @@ import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
 import {
 	buyFacility,
+	collect,
 	jobFinishing,
 	newFacilities,
 	prepareFacilityRules,
@@ -72,6 +73,8 @@ export function createSim(content: Content): Sim {
 					return buyFacility(farm, action.facility, facilityRules);
 				case "startJob":
 					return startJob(farm, action.facility, action.recipe, facilityRules);
+				case "collect":
+					return collect(farm, action.facility, facilityRules);
 			}
 		},
 		advance,

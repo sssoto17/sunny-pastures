@@ -30,6 +30,26 @@ describe("put", () => {
 		expect(put(farm, { good: "chickenFeed", amount: 5 }, "the job", rules).ok).toBe(true);
 	});
 
+	it("holds each store to its own capacity (MUST-06.4)", () => {
+		const own = prepareStorageRules({
+			...sliceContent,
+			silo: { capacity: 10 },
+			barn: { capacity: 3 },
+		});
+		const farm = farmWith({}, {});
+
+		expect(put(farm, { good: "wheat", amount: 10 }, "the harvest", own).ok).toBe(true);
+		expect(put(farm, { good: "bread", amount: 3 }, "the job", own).ok).toBe(true);
+		expect(put(farm, { good: "bread", amount: 4 }, "the job", own)).toEqual({
+			ok: false,
+			reason: "The barn has room for 3 more goods, and the job needs room for 4 bread.",
+		});
+		expect(put(farm, { good: "wheat", amount: 11 }, "the harvest", own)).toEqual({
+			ok: false,
+			reason: "The silo has room for 10 more crops, and the harvest needs room for 11 wheat.",
+		});
+	});
+
 	it.each([
 		[
 			"the silo",
