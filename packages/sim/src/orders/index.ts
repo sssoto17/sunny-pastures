@@ -1,5 +1,6 @@
-// The order board: orders drawn from the orders stream (MUST-04; ADR-0005, section 3). #87's later
-// parts add refilling, delivering and discarding.
+// The order board: orders drawn from the orders stream, and slots refilling (MUST-04; ADR-0005,
+// section 3; ADR-0003, section 14). #87's next part adds delivering and discarding.
+import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content, GoodCount, OrderGood } from "../content/index.js";
 import { levelOf } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
@@ -11,8 +12,8 @@ import type { StorageRules } from "../storage/index.js";
 export type OrderSlot =
 	| { readonly status: "open"; readonly order: Order }
 	/**
-	 * Refills at `refillAt`, in ms, stored when the slot emptied so a later rules version doesn't
-	 * move it (ADR-0006, section 7).
+	 * Refills as an automated step at `refillAt`, in ms, stored when the slot emptied so a later
+	 * rules version doesn't move it (ADR-0006, section 7).
 	 */
 	| { readonly status: "empty"; readonly refillAt: number };
 
@@ -73,6 +74,28 @@ export function fillNewBoard(farm: FarmState, rules: OrderRules): FarmState {
 		current = drawInto(current, current.board.length, rules);
 	}
 	return current;
+}
+
+/**
+ * Creates the refilling source (MUST-04.6): an empty slot draws a new order at its `refillAt`, and
+ * a slot that a new Level adds draws one at once, at the farm's time (MUST-04.1). A step's index is
+ * its slot, so keys stay unique; the added slots come one at a time, in slot order.
+ */
+export function createRefilling(rules: OrderRules): StepSource<FarmState> {
+	return {
+		steps: (farm) => {
+			const due = farm.board.flatMap((slot, index): AutomatedStep[] =>
+				slot.status === "empty" ? [makeStep(slot.refillAt, index)] : [],
+			);
+			const isShort = farm.board.length < countSlots(farm, rules);
+			return isShort ? [...due, makeStep(farm.time, farm.board.length)] : due;
+		},
+		run: (farm, step) => {
+			const slot = farm.board[step.index];
+			const isDue = slot === undefined ? step.index === farm.board.length : slot.status === "empty";
+			return isDue ? drawInto(farm, step.index, rules) : farm;
+		},
+	};
 }
 
 /** An order good with the Level that unlocks it for orders, or null if none does: then no order asks for it. */
@@ -196,6 +219,10 @@ function drawInto(farm: FarmState, index: number, rules: OrderRules): FarmState 
 	};
 	const filled = replaceSlot(farm, index, { status: "open", order });
 	return { ...filled, streams: { ...farm.streams, orders: stream } };
+}
+
+function makeStep(at: number, index: number): AutomatedStep {
+	return { at, kind: "refillSlot", index, slot: 0 };
 }
 
 /** Sets the slot at `index`, or adds it at the end when `index` is the board's length. */

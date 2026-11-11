@@ -11,7 +11,7 @@ import {
 	prepareFacilityRules,
 	startJob,
 } from "../facilities/index.js";
-import { fillNewBoard, prepareOrderRules } from "../orders/index.js";
+import { createRefilling, fillNewBoard, prepareOrderRules } from "../orders/index.js";
 import {
 	buyPen,
 	collectProducts,
@@ -32,7 +32,8 @@ export interface Sim {
 	/** A new farm (spec decision 5) at time 0, its streams seeded from `farmId` (D9). */
 	newFarm(farmId: string): FarmState;
 	/**
-	 * Advances the farm to `at`, then applies `action`. A refusal is returned, never thrown, and
+	 * Advances the farm to `at`, applies `action`, then runs the steps it made due at `at` (the
+	 * order slots a Level it crosses adds, MUST-04.1). A refusal is returned, never thrown, and
 	 * carries no state (D15); an `at` before the farm's time is refused (D7, MUST-14.7). Throws a
 	 * RangeError if `at` isn't a safe integer.
 	 */
@@ -58,6 +59,7 @@ export function createSim(content: Content): Sim {
 		ripening,
 		jobFinishing,
 		createProducing(penRules),
+		createRefilling(orderRules),
 	];
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
@@ -86,28 +88,34 @@ export function createSim(content: Content): Sim {
 				);
 			}
 
-			const farm = advance(state, at);
-			switch (action.type) {
-				case "plant":
-					return plant(farm, action.plot, action.crop, plotRules);
-				case "harvest":
-					return harvest(farm, action.plot, plotRules);
-				case "buyPlot":
-					return buyPlot(farm, action.plot, plotRules);
-				case "buyFacility":
-					return buyFacility(farm, action.facility, facilityRules);
-				case "startJob":
-					return startJob(farm, action.facility, action.recipe, facilityRules);
-				case "buyPen":
-					return buyPen(farm, action.pen, penRules);
-				case "feed":
-					return feed(farm, action.pen, penRules);
-				case "collectProducts":
-					return collectProducts(farm, action.pen, penRules);
-				case "collect":
-					return collect(farm, action.facility, facilityRules);
-			}
+			// An action that crosses a Level adds order slots, drawn as automated steps at `at`, so the
+			// farm is advanced to `at` again after it (MUST-04.1; ADR-0003, section 14).
+			const result = applyAction(advance(state, at), action);
+			return result.ok ? { ok: true, state: advance(result.state, at) } : result;
 		},
 		advance,
 	};
+
+	function applyAction(farm: FarmState, action: Action): ApplyResult {
+		switch (action.type) {
+			case "plant":
+				return plant(farm, action.plot, action.crop, plotRules);
+			case "harvest":
+				return harvest(farm, action.plot, plotRules);
+			case "buyPlot":
+				return buyPlot(farm, action.plot, plotRules);
+			case "buyFacility":
+				return buyFacility(farm, action.facility, facilityRules);
+			case "startJob":
+				return startJob(farm, action.facility, action.recipe, facilityRules);
+			case "buyPen":
+				return buyPen(farm, action.pen, penRules);
+			case "feed":
+				return feed(farm, action.pen, penRules);
+			case "collectProducts":
+				return collectProducts(farm, action.pen, penRules);
+			case "collect":
+				return collect(farm, action.facility, facilityRules);
+		}
+	}
 }
