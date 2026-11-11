@@ -15,6 +15,7 @@ const bakery = 1;
 const startFeed = { type: "startJob", facility: feedMill, recipe: "chickenFeed" } as const;
 const startBread = { type: "startJob", facility: bakery, recipe: "bread" } as const;
 const doneFeed = { status: "done", recipe: "chickenFeed" } as const;
+const collectFeed = { type: "collect", facility: feedMill } as const;
 
 /** A Level 3 farm with both facilities bought and `wheat` in the silo. */
 const workshop = (wheat: number): FarmState => ({
@@ -65,6 +66,20 @@ describe("starting a job", () => {
 			{ status: "done", recipe: "chickenFeed" },
 			{ status: "running", recipe: "chickenFeed", readyAt: 100_000 + feedMs },
 		]);
+	});
+
+	it("is refused once the queue is full, and a job keeps its slot until collected (MUST-03.5)", () => {
+		const full = applyAll(workshop(6), [
+			[startFeed, 0],
+			[startFeed, 0],
+		]);
+
+		expect(sim.apply(full, startFeed, 1_000_000)).toEqual({
+			ok: false,
+			reason: "The feedMill's queue is full: 2 of 2 slots.",
+		});
+		const collected = applyAll(full, [[collectFeed, 1_000_000]]);
+		expect(sim.apply(collected, startFeed, 1_000_000).ok).toBe(true);
 	});
 
 	it.each([
@@ -163,5 +178,71 @@ describe("a job finishing", () => {
 		expect(advanced.facilities[feedMill]?.jobs).toEqual([
 			{ status: "done", recipe: "chickenFeed" },
 		]);
+	});
+});
+
+describe("collecting", () => {
+	it("moves the oldest job's goods to the barn and gives XP; the next job moves up (MUST-03.4)", () => {
+		const farm = applyAll(workshop(4), [
+			[startFeed, 0],
+			[startFeed, 0],
+			[collectFeed, feedMs],
+		]);
+
+		expect(farm.barn).toEqual({ chickenFeed: 2 });
+		expect(farm.xp).toBe(xpOfLevel(3) + 1);
+		expect(farm.facilities[feedMill]?.jobs).toEqual([
+			{ status: "running", recipe: "chickenFeed", readyAt: 2 * feedMs },
+		]);
+	});
+
+	it("pays the level-up coins of the Level its XP reaches (MUST-05.2, 05.4)", () => {
+		const [, , , level4] = sliceContent.levels;
+		const farm = applyAll({ ...workshop(3), xp: level4.xp - 2 }, [
+			[startBread, 0],
+			[{ type: "collect", facility: bakery }, breadMs],
+		]);
+
+		expect(farm.xp).toBe(level4.xp);
+		expect(farm.coins).toBe(level4.coins);
+		expect(farm.barn).toEqual({ bread: 1 });
+	});
+
+	it("throws on a done job whose recipe isn't in content, a programmer error (ADR-0006 §6)", () => {
+		const stale = {
+			...workshop(0),
+			facilities: [{ tier: 1, jobs: [{ status: "done", recipe: "cake" } as const] }, null],
+		};
+
+		expect(() => sim.apply(stale, collectFeed, 0)).toThrow(RangeError);
+	});
+
+	it.each([
+		[
+			"while the job is running",
+			workshop(2),
+			feedMs - 1,
+			"The feedMill has no finished job to collect.",
+		],
+		["with no job", workshop(0), feedMs, "The feedMill has no finished job to collect."],
+		[
+			"if the barn can't hold the goods",
+			{ ...workshop(2), barn: { bread: 49 } },
+			feedMs,
+			"The barn has room for 1 more good, and collecting the job needs room for 2 chickenFeed.",
+		],
+		[
+			"for a facility not bought",
+			{ ...workshop(2), facilities: [null, null] },
+			feedMs,
+			"The feedMill isn't bought.",
+		],
+	])("is refused %s (MUST-03.4)", (_name, farm, at, reason) => {
+		const started =
+			farm.silo["wheat"] === 2 && farm.facilities[feedMill] !== null
+				? applyAll(farm, [[startFeed, 0]])
+				: farm;
+
+		expect(sim.apply(started, collectFeed, at)).toEqual({ ok: false, reason });
 	});
 });

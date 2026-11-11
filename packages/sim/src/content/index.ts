@@ -2,18 +2,12 @@
 // values are the admin's (spec, "How to read this spec"; CONSTRAINTS.md, "Content change" row):
 // approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83);
 // the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
-// lane"); the chicken pen and the start's chicken feed chosen by #86's lane (11 Nov, its PRs'
-// "Decided by the lane"). All to be tuned after playtest 1.
+// lane"); the chicken pen chosen by #86's lane (11 Nov, its PRs' "Decided by the lane"). All to be tuned after playtest 1.
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
 	/** A new farm (spec decision 5). */
-	readonly start: {
-		readonly coins: number;
-		readonly plots: number;
-		/** Goods in the barn, by good id, each count above 0 (state/'s invariant). */
-		readonly barn: Readonly<Record<string, number>>;
-	};
+	readonly start: { readonly coins: number; readonly plots: number };
 	/** The silo holds at most `capacity` crops in all (MUST-06.4). */
 	readonly silo: { readonly capacity: number };
 	/** The barn holds at most `capacity` goods in all: every good that isn't a crop (MUST-06.4). */
@@ -65,7 +59,7 @@ export interface Facility {
 
 /** One run of a recipe is a job (`GLOSSARY.md`). */
 export interface Recipe {
-	/** The facility tier that makes it available (MUST-03.1). */
+	/** The lowest facility tier that can make it (MUST-03.1). */
 	readonly tier: number;
 	/** Taken from storage when a job starts (MUST-03.2), in this order. */
 	readonly inputs: readonly GoodCount[];
@@ -117,7 +111,7 @@ export interface Crop {
 
 /** The M4 slice's content, wheat only for now (#72, D1). */
 export const sliceContent = {
-	start: { coins: 50, plots: 6, barn: { chickenFeed: 6 } },
+	start: { coins: 50, plots: 6 },
 	silo: { capacity: 50 },
 	barn: { capacity: 50 },
 	crops: {

@@ -315,7 +315,7 @@ lane's call, reviewed in its PRs' "Decided by the lane").
 - **Buying.** `state.facilities` has one entry per content facility, in content order: `null`
   until bought, then `{ tier, jobs }`. A facility is unlocked by the first Level-table row that
   lists it and bought through `purchase` (section 11). Owned facilities store `tier: 1` from the
-  start, so #85 adds tiers without changing the persisted shape. `buyFacility` is refused for a
+  start (the admin's decision, 11 Nov), so #85 adds tiers without changing the persisted shape. `buyFacility` is refused for a
   facility the farm has, so an action sent twice buys it once.
 - **Jobs.** A facility's `jobs` is its queue, in the order the jobs started; a job's queue slot is
   its position (MUST-03.5). Starting a job needs the recipe at the facility's tier, a free slot

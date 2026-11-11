@@ -5,6 +5,7 @@ import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
 import {
 	buyFacility,
+	collect,
 	jobFinishing,
 	newFacilities,
 	prepareFacilityRules,
@@ -64,7 +65,7 @@ export function createSim(content: Content): Sim {
 			coins: content.start.coins,
 			xp: 0,
 			silo: {},
-			barn: { ...content.start.barn },
+			barn: {},
 			plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
 			facilities: newFacilities(facilityRules),
 			pens: newPens(penRules),
@@ -96,6 +97,8 @@ export function createSim(content: Content): Sim {
 					return feed(farm, action.pen, penRules);
 				case "collectProducts":
 					return collectProducts(farm, action.pen, penRules);
+				case "collect":
+					return collect(farm, action.facility, facilityRules);
 			}
 		},
 		advance,
