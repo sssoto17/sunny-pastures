@@ -72,36 +72,43 @@ describe("the Loop", () => {
 		expect(sim.advance(farm, 20 * feedMs - 1).barn).toEqual({ chickenFeed: 38 });
 	});
 
-	it("stops once its goods wouldn't fit, taking no inputs for goods that would wait (MUST-07.2)", () => {
-		const mill = ownedFacility([], both);
-		const farm = expectAccepted(sim.apply(looping(50, mill, { bread: 30 }), startFeed, 0));
-		const advanced = sim.advance(farm, day);
+	it("without a Collector, fills every slot, stops until a collect by hand frees one, then restarts (MUST-06.5)", () => {
+		const farm = expectAccepted(sim.apply(looping(40), startFeed, 0));
+		const done = { status: "done", recipe: "chickenFeed" } as const;
+		const full = sim.advance(farm, day);
 
-		// Room for 20 goods, 10 feed jobs: the Loop starts a job only while the barn has room for its
-		// feed and the queue's, so it stops at 10 jobs and keeps the rest of the wheat.
-		expect(advanced.barn).toEqual({ bread: 30, chickenFeed: 20 });
-		expect(advanced.silo).toEqual({ wheat: 30 });
-		expect(advanced.facilities[feedMill]?.jobs).toEqual([]);
-	});
+		expect(full.facilities[feedMill]?.jobs).toEqual([done, done]);
+		expect(full.silo).toEqual({ wheat: 36 });
 
-	it("holds while goods wait for room, then resumes once the barn has room again (MUST-07.2)", () => {
-		const waiting = ownedFacility([{ status: "done", recipe: "chickenFeed" }], {
-			...both,
-			lastRecipe: "chickenFeed",
-		});
-		const held = sim.advance(looping(10, waiting, { bread: 50 }), day);
-
-		expect(held.facilities[feedMill]?.jobs).toEqual([{ status: "done", recipe: "chickenFeed" }]);
-		expect(held.silo).toEqual({ wheat: 10 });
-
-		// Room for 10 again (an order delivered, say): room for the waiting feed and a new job's.
-		const resumed = sim.advance({ ...held, barn: { bread: 40 } }, day);
-		expect(resumed.facilities[feedMill]?.jobs).toEqual([
-			{ status: "done", recipe: "chickenFeed" },
+		const collected = expectAccepted(sim.apply(full, { type: "collect", facility: feedMill }, day));
+		expect(collected.facilities[feedMill]?.jobs).toEqual([
+			done,
 			running("chickenFeed", day + feedMs),
 		]);
-		expect(resumed.silo).toEqual({ wheat: 8 });
-		expect(sim.advance(resumed, day + feedMs).barn).toEqual({ bread: 40, chickenFeed: 4 });
+		expect(collected.silo).toEqual({ wheat: 34 });
+	});
+
+	it("with a Collector and a full barn, keeps done jobs in their slots and stops, then resumes once the barn has room (MUST-07.2)", () => {
+		const mill = ownedFacility([], both);
+		const farm = expectAccepted(sim.apply(looping(50, mill, { bread: 30 }), startFeed, 0));
+		const full = sim.advance(farm, day);
+
+		// Room for 10 jobs' feed. The 11th's goods wait; the 12th, started in the slot the 10th freed,
+		// finishes behind it, and with every slot taken the facility stops (the admin, 11 Nov).
+		const done = { status: "done", recipe: "chickenFeed" } as const;
+		expect(full.barn).toEqual({ bread: 30, chickenFeed: 20 });
+		expect(full.silo).toEqual({ wheat: 26 });
+		expect(full.facilities[feedMill]?.jobs).toEqual([done, done]);
+
+		// Room for 10 again (an order delivered, say): the Collector moves both, and the Loop
+		// restarts into both slots at once.
+		const resumed = sim.advance({ ...full, barn: { bread: 20, chickenFeed: 20 } }, day);
+		expect(resumed.barn).toEqual({ bread: 20, chickenFeed: 24 });
+		expect(resumed.facilities[feedMill]?.jobs).toEqual([
+			running("chickenFeed", day + feedMs),
+			running("chickenFeed", day + 2 * feedMs),
+		]);
+		expect(resumed.silo).toEqual({ wheat: 22 });
 	});
 
 	it("keeps a restarted job's stored finish under a rules version with another duration (ADR-0006 §7, MUST-06.7)", () => {
