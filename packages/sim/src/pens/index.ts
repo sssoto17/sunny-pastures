@@ -1,5 +1,5 @@
 // Pens: buying them, feeding their troughs, the animals producing, and collecting the products
-// (MUST-02, MUST-05.6; ADR-0005, section 3; ADR-0003, section 12).
+// (MUST-02, MUST-05.6; ADR-0005, section 3; ADR-0003, section 13).
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
@@ -7,7 +7,7 @@ import { gainXp, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
-import { countHeld, put, take } from "../storage/index.js";
+import { countStored, put, take } from "../storage/index.js";
 import type { StorageRules } from "../storage/index.js";
 
 /** A bought pen (ADR-0003, section 5: pens and troughs are stored facts). */
@@ -56,7 +56,7 @@ export function preparePenRules(
 	const pens = content.pens.map((pen): PenRule => ({
 		id: pen.id,
 		price: pen.price,
-		level: unlockLevel(pen.id, content),
+		level: progress.penLevels.get(pen.id) ?? null,
 		animals: pen.animals,
 		feed: pen.feed,
 		troughCapacity: pen.troughCapacity,
@@ -103,7 +103,7 @@ export function feed(farm: FarmState, index: number, rules: PenRules): ApplyResu
 
 	// As much as fits and the barn holds. With none held, ask for a full trough, so take's
 	// refusal names the shortage.
-	const inBarn = countHeld(farm, rule.feed, rules.storage);
+	const inBarn = countStored(farm, rule.feed, rules.storage);
 	const amount = inBarn === 0 ? room : Math.min(room, inBarn);
 	const taken = take(farm, [{ good: rule.feed, amount }], `Feeding the ${rule.id}`, rules.storage);
 	if (!taken.ok) return taken;
@@ -189,12 +189,6 @@ function eat(pen: OwnedPen, rule: PenRule, time: number): OwnedPen {
 		return { status: "producing", readyAt };
 	});
 	return { ...pen, trough, animals };
-}
-
-/** The first Level that lists the pen, in the table's array order (MUST-10.6). */
-function unlockLevel(id: string, content: Content): number | null {
-	const i = content.levels.findIndex((level) => level.pens.includes(id));
-	return i === -1 ? null : i + 1;
 }
 
 function findRule(index: number, rules: PenRules): PenRule | null {

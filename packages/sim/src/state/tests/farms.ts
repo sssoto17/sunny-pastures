@@ -40,8 +40,14 @@ const plotIndex = fc.oneof(
 	{ weight: 1, arbitrary: fc.constantFrom(-1, 14, 15) },
 );
 
+/** The slice's facilities, the feed mill and the bakery (#84), and indexes out of range. */
+const facilityIndex = fc.oneof(
+	{ weight: 4, arbitrary: fc.constantFrom(0, 1) },
+	{ weight: 1, arbitrary: fc.constantFrom(-1, 2) },
+);
+
 /**
- * Plant, harvest and buy on plots in and out of range, mostly wheat, sometimes a crop not in
+ * Plant, harvest and buy on plots and facilities in and out of range, mostly wheat, sometimes a crop not in
  * content. A generated buy rarely names the next plot, so it mostly reaches the refusals.
  */
 const action: fc.Arbitrary<Action> = fc.oneof(
@@ -55,6 +61,7 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	}),
 	fc.record({ type: fc.constant("harvest" as const), plot: plotIndex }),
 	fc.record({ type: fc.constant("buyPlot" as const), plot: plotIndex }),
+	fc.record({ type: fc.constant("buyFacility" as const), facility: facilityIndex }),
 );
 
 /**
@@ -83,12 +90,18 @@ const tend = delay.map((wait): TimedAction[] => [
 ]);
 
 /**
- * Buying plots: each next plot in turn, so the farm buys as many as its Level and coins allow,
- * and the rest reach the Level, coin and maximum refusals (MUST-06.1).
+ * Buying plots, each next one in turn, then the facilities, so the farm buys as many as its Level
+ * and coins allow, and the rest reach the Level, coin and maximum refusals (MUST-05.6, 06.1).
  */
-const expand: TimedAction[] = allPlots
-	.slice(startPlots)
-	.map((plot) => ({ action: { type: "buyPlot", plot }, delay: 0 }));
+const expand: TimedAction[] = [
+	...allPlots
+		.slice(startPlots)
+		.map((plot): TimedAction => ({ action: { type: "buyPlot", plot }, delay: 0 })),
+	...[0, 1].map((facility): TimedAction => ({
+		action: { type: "buyFacility", facility },
+		delay: 0,
+	})),
+];
 
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },

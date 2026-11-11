@@ -22,18 +22,35 @@ describe("compareSteps", () => {
 		]);
 	});
 
-	it("ranks the kinds ripen, then produce, before the index and slot (MUST-10.6)", () => {
-		const produce = (at: number, index: number, slot: number): AutomatedStep => ({
-			...makeStep(at, index, slot),
-			kind: "produce",
+	it("orders by kind before index: a crop ripening, then a job finishing (MUST-10.6)", () => {
+		const finish: AutomatedStep = { at: 10, kind: "finishJob", index: 0, slot: 0 };
+		const ripen = makeStep(10, 5);
+
+		expect([finish, ripen].sort(compareSteps)).toEqual([ripen, finish]);
+		expect([makeStep(11, 0), finish].sort(compareSteps)).toEqual([finish, makeStep(11, 0)]);
+	});
+
+	it("ranks the kinds ripen, then finishJob, then produce, before the index and slot (MUST-10.6)", () => {
+		const step = (at: number, kind: AutomatedStep["kind"], index: number): AutomatedStep => ({
+			at,
+			kind,
+			index,
+			slot: 0,
 		});
-		const steps = [produce(10, 0, 0), makeStep(10, 5, 2), produce(5, 9, 9), makeStep(20, 0)];
+		const steps = [
+			step(10, "produce", 0),
+			step(10, "finishJob", 3),
+			step(10, "ripen", 9),
+			step(5, "produce", 9),
+			step(20, "ripen", 0),
+		];
 
 		expect([...steps].sort(compareSteps)).toEqual([
-			produce(5, 9, 9),
-			makeStep(10, 5, 2),
-			produce(10, 0, 0),
-			makeStep(20, 0),
+			step(5, "produce", 9),
+			step(10, "ripen", 9),
+			step(10, "finishJob", 3),
+			step(10, "produce", 0),
+			step(20, "ripen", 0),
 		]);
 	});
 

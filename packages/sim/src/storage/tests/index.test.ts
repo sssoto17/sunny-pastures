@@ -1,69 +1,102 @@
 import { describe, expect, it } from "vitest";
 
-import { createSim, sliceContent } from "../../index.js";
-import type { Content, FarmState } from "../../index.js";
-import { countHeld, prepareStorageRules, put, take } from "../index.js";
+import { sliceContent } from "../../content/index.js";
+import { createSim } from "../../sim/index.js";
+import type { FarmState } from "../../state/index.js";
+import { countStored, prepareStorageRules, put, take } from "../index.js";
 
-const content: Content = { ...sliceContent, silo: { capacity: 10 }, barn: { capacity: 5 } };
-const rules = prepareStorageRules(content);
-const farm: FarmState = {
-	...createSim(content).newFarm("farm-1"),
-	silo: { wheat: 4 },
-	barn: { chickenFeed: 2 },
-};
+const rules = prepareStorageRules(sliceContent);
+const newFarm = createSim(sliceContent).newFarm("farm-1");
+const farmWith = (silo: FarmState["silo"], barn: FarmState["barn"]): FarmState => ({
+	...newFarm,
+	silo,
+	barn,
+});
 
 describe("put", () => {
-	it("adds crops to the silo and every other good to the barn (MUST-06.4)", () => {
-		const silo = put(farm, { good: "wheat", amount: 6 }, "the harvest", rules);
-		const barn = put(farm, { good: "egg", amount: 3 }, "collecting", rules);
+	it("adds a crop to the silo and any other good to the barn (MUST-06.4)", () => {
+		const farm = farmWith({ wheat: 1 }, {});
+		const withWheat = put(farm, { good: "wheat", amount: 2 }, "the harvest", rules);
+		const withBread = put(farm, { good: "bread", amount: 1 }, "the job", rules);
 
-		expect(silo).toEqual({ ok: true, state: { ...farm, silo: { wheat: 10 } } });
-		expect(barn).toEqual({ ok: true, state: { ...farm, barn: { chickenFeed: 2, egg: 3 } } });
+		expect(withWheat).toEqual({ ok: true, state: farmWith({ wheat: 3 }, {}) });
+		expect(withBread).toEqual({ ok: true, state: farmWith({ wheat: 1 }, { bread: 1 }) });
 	});
 
-	it("is refused if the store can't hold them all, naming the room left", () => {
-		expect(put(farm, { good: "egg", amount: 4 }, "collecting the eggs", rules)).toEqual({
-			ok: false,
-			reason: "The barn has room for 3 more goods, and collecting the eggs needs room for 4 egg.",
-		});
-		const full = { ...farm, silo: { wheat: 9 } };
-		expect(put(full, { good: "wheat", amount: 2 }, "the harvest", rules)).toEqual({
-			ok: false,
-			reason: "The silo has room for 1 more crop, and the harvest needs room for 2 wheat.",
-		});
+	it("fills a store to exactly its capacity", () => {
+		const farm = farmWith({ wheat: 40 }, { bread: 45 });
+
+		expect(put(farm, { good: "wheat", amount: 10 }, "the harvest", rules).ok).toBe(true);
+		expect(put(farm, { good: "chickenFeed", amount: 5 }, "the job", rules).ok).toBe(true);
+	});
+
+	it.each([
+		[
+			"the silo",
+			farmWith({ wheat: 49 }, {}),
+			{ good: "wheat", amount: 2 },
+			"the harvest",
+			"The silo has room for 1 more crop, and the harvest needs room for 2 wheat.",
+		],
+		[
+			"the barn",
+			farmWith({ wheat: 49 }, { chickenFeed: 47 }),
+			{ good: "bread", amount: 4 },
+			"collecting the job",
+			"The barn has room for 3 more goods, and collecting the job needs room for 4 bread.",
+		],
+	])("is refused if %s can't hold it all (MUST-03.4)", (_name, farm, goods, what, reason) => {
+		expect(put(farm, goods, what, rules)).toEqual({ ok: false, reason });
 	});
 });
 
 describe("take", () => {
-	it("takes every input from its store, and drops a good's key at 0", () => {
+	it("removes every input from its store, and drops a good's key at 0", () => {
+		const farm = farmWith({ wheat: 5 }, { chickenFeed: 2, bread: 1 });
 		const inputs = [
-			{ good: "wheat", amount: 1 },
+			{ good: "wheat", amount: 3 },
 			{ good: "chickenFeed", amount: 2 },
 		];
 
-		expect(take(farm, inputs, "Making bread", rules)).toEqual({
+		expect(take(farm, inputs, "Making cake", rules)).toEqual({
 			ok: true,
-			state: { ...farm, silo: { wheat: 3 }, barn: {} },
+			state: farmWith({ wheat: 2 }, { bread: 1 }),
 		});
 	});
 
-	it("is refused, naming the first input that is short", () => {
+	it("is refused, naming the first input in list order that is short", () => {
+		const farm = farmWith({ wheat: 1 }, {});
 		const inputs = [
-			{ good: "chickenFeed", amount: 3 },
-			{ good: "wheat", amount: 9 },
+			{ good: "chickenFeed", amount: 1 },
+			{ good: "wheat", amount: 2 },
 		];
 
-		expect(take(farm, inputs, "Feeding", rules)).toEqual({
+		expect(take(farm, inputs, "Making cake", rules)).toEqual({
 			ok: false,
-			reason: "Feeding needs 3 chickenFeed, and the barn has 2.",
+			reason: "Making cake needs 1 chickenFeed, and the barn has 0.",
+		});
+	});
+
+	it("counts an input listed twice against the store once in all", () => {
+		const farm = farmWith({ wheat: 3 }, {});
+		const inputs = [
+			{ good: "wheat", amount: 2 },
+			{ good: "wheat", amount: 2 },
+		];
+
+		expect(take(farm, inputs, "Making bread", rules)).toEqual({
+			ok: false,
+			reason: "Making bread needs 2 wheat, and the silo has 1.",
 		});
 	});
 });
 
-describe("countHeld", () => {
+describe("countStored", () => {
 	it("counts a good in its store, 0 when it has no key", () => {
-		expect(countHeld(farm, "chickenFeed", rules)).toBe(2);
-		expect(countHeld(farm, "wheat", rules)).toBe(4);
-		expect(countHeld(farm, "egg", rules)).toBe(0);
+		const farm = farmWith({ wheat: 4 }, { chickenFeed: 2 });
+
+		expect(countStored(farm, "chickenFeed", rules)).toBe(2);
+		expect(countStored(farm, "wheat", rules)).toBe(4);
+		expect(countStored(farm, "egg", rules)).toBe(0);
 	});
 });

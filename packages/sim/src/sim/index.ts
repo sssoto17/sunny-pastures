@@ -4,6 +4,13 @@ import { advanceFarm, assertTime } from "../advance/index.js";
 import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
 import {
+	buyFacility,
+	jobFinishing,
+	newFacilities,
+	prepareFacilityRules,
+	startJob,
+} from "../facilities/index.js";
+import {
 	buyPen,
 	collectProducts,
 	createProducing,
@@ -39,11 +46,16 @@ export function createSim(content: Content): Sim {
 	const progress = prepareProgressRules(content);
 	const storage = prepareStorageRules(content);
 	const plotRules = preparePlotRules(content, progress, storage);
+	const facilityRules = prepareFacilityRules(content, progress, storage);
 	const penRules = preparePenRules(content, progress, storage);
 	// Every feature's automated steps. advance/'s tie key orders them, and this list's order never
 	// matters: two steps with the same key are a programmer error, which advanceFarm throws on as a
 	// RangeError. Each new kind must keep its keys unique (MUST-10.6).
-	const sources: readonly StepSource<FarmState>[] = [ripening, createProducing(penRules)];
+	const sources: readonly StepSource<FarmState>[] = [
+		ripening,
+		jobFinishing,
+		createProducing(penRules),
+	];
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
 	return {
@@ -54,6 +66,7 @@ export function createSim(content: Content): Sim {
 			silo: {},
 			barn: { ...content.start.barn },
 			plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
+			facilities: newFacilities(facilityRules),
 			pens: newPens(penRules),
 			streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
 		}),
@@ -73,6 +86,10 @@ export function createSim(content: Content): Sim {
 					return harvest(farm, action.plot, plotRules);
 				case "buyPlot":
 					return buyPlot(farm, action.plot, plotRules);
+				case "buyFacility":
+					return buyFacility(farm, action.facility, facilityRules);
+				case "startJob":
+					return startJob(farm, action.facility, action.recipe, facilityRules);
 				case "buyPen":
 					return buyPen(farm, action.pen, penRules);
 				case "feed":
