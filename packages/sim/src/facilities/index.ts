@@ -3,7 +3,7 @@
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { AddOn, Content, GoodCount } from "../content/index.js";
-import { gainXp, purchase } from "../progress/index.js";
+import { findTierLevel, gainXp, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
@@ -12,7 +12,7 @@ import type { StorageRules } from "../storage/index.js";
 
 /** A bought facility (ADR-0003, section 5: owned facilities with their tier, add-ons and queue). */
 export interface OwnedFacility {
-	/** From 1 (`GLOSSARY.md`, "Tier"); #85 upgrades it. */
+	/** From 1 (`GLOSSARY.md`, "Tier"), raised one at a time by `buyTier` (MUST-06.2). */
 	readonly tier: number;
 	/** The queue, in the order the jobs started; a job's slot is its position (MUST-03.3, 03.5). */
 	readonly jobs: readonly Job[];
@@ -41,7 +41,9 @@ export type FacilityAction =
 	| { readonly type: "startJob"; readonly facility: number; readonly recipe: string }
 	/** Collects the oldest job, in the first slot, once it is done. */
 	| { readonly type: "collect"; readonly facility: number }
-	| { readonly type: "buyAddOn"; readonly facility: number; readonly addOn: AddOn };
+	| { readonly type: "buyAddOn"; readonly facility: number; readonly addOn: AddOn }
+	/** Buys `tier`, which must be the facility's next, so an action sent twice buys it once. */
+	| { readonly type: "buyTier"; readonly facility: number; readonly tier: number };
 
 /** The facility rules for one content, prepared once in createSim. */
 export interface FacilityRules {
@@ -53,7 +55,10 @@ export interface FacilityRules {
 	readonly addOns: ReadonlyMap<string, AddOnRule>;
 }
 
-/** Copies what the rules read: each facility's unlock Level, and its job times in ms (D7). */
+/**
+ * Copies what the rules read: each facility's and tier's unlock Level, and each recipe's job time
+ * at every tier in ms (D7), in whole seconds rounded down once here, the same on every engine (D16).
+ */
 export function prepareFacilityRules(
 	content: Content,
 	progress: ProgressRules,
@@ -63,7 +68,14 @@ export function prepareFacilityRules(
 		id: facility.id,
 		price: facility.price,
 		level: progress.facilityLevels.get(facility.id) ?? null,
-		slots: facility.slots,
+		tiers: [
+			{ price: 0, level: null, slots: facility.slots },
+			...facility.tiers.map(({ price, slots }, i) => ({
+				price,
+				level: findTierLevel(facility.id, i + 2, progress),
+				slots,
+			})),
+		],
 		recipes: new Map(
 			Object.entries(facility.recipes).map(([id, recipe]): [string, RecipeRule] => [
 				id,
@@ -72,7 +84,9 @@ export function prepareFacilityRules(
 					tier: recipe.tier,
 					inputs: recipe.inputs.map(({ good, amount }) => ({ good, amount })),
 					output: { good: recipe.output.good, amount: recipe.output.amount },
-					ms: recipe.seconds * 1000,
+					ms: [1000, ...facility.tiers.map((tier) => tier.timePerMille)].map(
+						(perMille) => Math.floor((recipe.seconds * perMille) / 1000) * 1000,
+					),
 					xp: recipe.xp,
 				},
 			]),
@@ -120,9 +134,56 @@ export function buyFacility(farm: FarmState, index: number, rules: FacilityRules
 }
 
 /**
- * Starts a job: needs the recipe at the facility's tier, a free queue slot and every input in
- * storage, which leaves storage now (MUST-03.2). It finishes at the later of now and the previous
- * job's finish, plus the recipe's time, stored now (MUST-03.3; ADR-0006, section 7). The recipe
+ * Raises a bought facility to `tier`, its next, once the farm's Level unlocks it, through the
+ * purchase rule (spec decision 1, MUST-06.2). Its jobs keep their stored finish times: only jobs
+ * started after it take the new tier's time and slots (MUST-03.3, 06.7; ADR-0006, section 7).
+ */
+export function buyTier(
+	farm: FarmState,
+	index: number,
+	tier: number,
+	rules: FacilityRules,
+): ApplyResult {
+	const found = findOwned(farm, index, rules);
+	if (typeof found === "string") return refuse(found);
+
+	const { facility, owned } = found;
+	// A stored tier not in content is a broken farm, and throws here as in startJob (D15).
+	findTier(facility, owned.tier);
+	if (!Number.isSafeInteger(tier)) return refuse("A tier is a whole number.");
+	if (tier <= owned.tier) {
+		return refuse(`The ${facility.id} is already at tier ${String(owned.tier)}.`);
+	}
+
+	const highest = facility.tiers.length;
+	if (tier > highest) {
+		return refuse(
+			`The ${facility.id} has no tier ${String(tier)}: its highest is ${String(highest)}.`,
+		);
+	}
+	if (tier > owned.tier + 1) {
+		return refuse(
+			`The ${facility.id} is at tier ${String(owned.tier)}, so the next tier it can buy is ${String(owned.tier + 1)}.`,
+		);
+	}
+
+	const row = findTier(facility, tier);
+	const offer = {
+		what: `The ${facility.id}'s tier ${String(tier)}`,
+		level: row.level,
+		price: row.price,
+	};
+	const bought = purchase(farm, offer, rules.progress);
+	if (!bought.ok) return bought;
+
+	return { ok: true, state: replaceFacility(bought.state, index, { ...owned, tier }) };
+}
+
+/**
+ * Starts a job: needs the recipe at the facility's tier, a free queue slot at that tier and every
+ * input in storage, which leaves storage now (MUST-03.2, 03.5). It finishes at the later of now
+ * and the previous job's finish, plus the recipe's time at the facility's tier now, stored now
+ * (MUST-03.3; ADR-0006, section 7), so a tier bought later never moves it (MUST-06.7). The recipe
  * becomes the facility's last, which its Loop starts again (MUST-06.5).
  */
 export function startJob(
@@ -143,9 +204,10 @@ export function startJob(
 			`The ${facility.id} makes ${recipe.id} from tier ${String(recipe.tier)}, and it is at tier ${String(owned.tier)}.`,
 		);
 	}
-	if (owned.jobs.length >= facility.slots) {
+	const { slots } = findTier(facility, owned.tier);
+	if (owned.jobs.length >= slots) {
 		return refuse(
-			`The ${facility.id}'s queue is full: ${String(owned.jobs.length)} of ${String(facility.slots)} slots.`,
+			`The ${facility.id}'s queue is full: ${String(owned.jobs.length)} of ${String(slots)} slots.`,
 		);
 	}
 
@@ -156,7 +218,7 @@ export function startJob(
 	// so a job still running ends after the farm's time and a done one ended at or before it.
 	const last = owned.jobs[owned.jobs.length - 1];
 	const from = last?.status === "running" ? last.readyAt : farm.time;
-	const readyAt = from + recipe.ms;
+	const readyAt = from + (recipe.ms[owned.tier - 1] ?? NaN);
 	assertTime(readyAt);
 	const job: Job = { status: "running", recipe: recipe.id, readyAt };
 	const queued = { ...owned, jobs: [...owned.jobs, job], lastRecipe: recipe.id };
@@ -244,7 +306,8 @@ interface FacilityRule {
 	readonly price: number;
 	/** The Level that unlocks it, or null if none does. */
 	readonly level: number | null;
-	readonly slots: number;
+	/** Its tiers, tier 1 first: row i is tier i + 1. Tier 1 comes with the facility. */
+	readonly tiers: readonly TierRule[];
 	readonly recipes: ReadonlyMap<string, RecipeRule>;
 }
 
@@ -262,17 +325,39 @@ const addOnNames = { loop: "Loop", collector: "Collector" } as const satisfies R
 	string
 >;
 
+interface TierRule {
+	readonly price: number;
+	/** The Level that unlocks it, or null if none does. */
+	readonly level: number | null;
+	readonly slots: number;
+}
+
 interface RecipeRule {
 	readonly id: string;
 	readonly tier: number;
 	readonly inputs: readonly GoodCount[];
 	readonly output: GoodCount;
-	readonly ms: number;
+	/** The job's time in ms at each tier, tier 1 first. */
+	readonly ms: readonly number[];
 	readonly xp: number;
 }
 
 function findRule(index: number, rules: FacilityRules): FacilityRule | null {
 	return Number.isSafeInteger(index) && index >= 0 ? (rules.facilities[index] ?? null) : null;
+}
+
+/**
+ * The facility's `tier`. A bought facility's tier is in content: a version that drops a tier
+ * settles its farms in its `upgrade` (ADR-0006, section 6), so a missing one is a broken farm, a
+ * programmer error, and throws a RangeError rather than refuse (D15).
+ */
+function findTier(facility: FacilityRule, tier: number): TierRule {
+	const row = facility.tiers[tier - 1];
+	if (row === undefined) {
+		throw new RangeError(`The ${facility.id} has no tier ${String(tier)} in content.`);
+	}
+
+	return row;
 }
 
 /** The facility at `index` and the farm's copy of it, or why there is none, as a sentence. */
