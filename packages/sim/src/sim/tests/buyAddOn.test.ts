@@ -48,6 +48,12 @@ describe("buying an add-on", () => {
 
 	it.each([
 		[
+			"for an add-on not in content",
+			workshop(5, 1_000),
+			buy(feedMill, "sprinkler" as AddOn),
+			"There is no add-on sprinkler.",
+		],
+		[
 			"before its Level",
 			workshop(4, 1_000),
 			buy(feedMill, "loop"),
@@ -71,14 +77,10 @@ describe("buying an add-on", () => {
 			buy(2, "collector"),
 			"There is no facility 3.",
 		],
-		[
-			"for an add-on not in content",
-			workshop(5, 1_000),
-			buy(feedMill, "sprinkler" as AddOn),
-			"There is no add-on sprinkler.",
-		],
 	])("is refused %s", (_name, farm, action, reason) => {
-		expect(sim.apply(farm, action, 0)).toEqual({ ok: false, reason });
+		const refused = sim.apply(farm, action, 0);
+
+		expect(refused).toEqual({ ok: false, reason });
 	});
 
 	it("is refused for an add-on the facility has, so an action sent twice buys it once", () => {
