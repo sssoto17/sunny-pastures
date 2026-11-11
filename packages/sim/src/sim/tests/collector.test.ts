@@ -119,9 +119,10 @@ describe("the Collector", () => {
 			[{ type: "buyAddOn", facility: feedMill, addOn: "collector" }, 5_000],
 		]);
 
-		const moved = sim.advance(farm, 5_000);
-		expect(moved.facilities[feedMill]?.jobs).toEqual([]);
-		expect(moved.barn).toEqual({ chickenFeed: 2 });
+		// apply ran the move due at its time, so advancing to that time changes nothing (MUST-14.2).
+		expect(farm.facilities[feedMill]?.jobs).toEqual([]);
+		expect(farm.barn).toEqual({ chickenFeed: 2 });
+		expect(sim.advance(farm, 5_000)).toBe(farm);
 	});
 
 	it("moves goods that waited for room once the barn has room again, in their order (MUST-06.6, 07.2)", () => {
