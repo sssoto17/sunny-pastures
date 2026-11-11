@@ -10,8 +10,9 @@
  *   what was produced at the same time (ADR-0003, section 12).
  * - `produce` (#86) after `finishJob`, for the same reason: it touches neither storage nor coins
  *   and changes only its own pen (ADR-0003, section 13).
- * - `moveGoods` (#88), the Collector, after every producer: a job finishing in a facility with a
- *   Collector is this step, which moves its goods into the barn if they fit (ADR-0003, section 14).
+ * - `moveGoods` (#88), the Collector, after every producer, so goods made at a time move at it: one
+ *   step per facility and time, as a job finishes or once waiting goods fit (ADR-0003, section 14).
+ *   No later-ranked step frees barn room today, so a move never falls due behind one already run.
  */
 const stepKinds = ["ripen", "finishJob", "produce", "moveGoods"] as const;
 

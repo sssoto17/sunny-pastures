@@ -104,7 +104,7 @@ describe("the Collector", () => {
 		expect(advanced.facilities[bakery]?.jobs).toEqual([{ status: "done", recipe: "bread" }]);
 	});
 
-	it("doesn't move goods that were done before it was bought: it works from the next finish (MUST-06.7)", () => {
+	it("moves goods already waiting when it's bought, at that time, if the barn has room (MUST-06.6)", () => {
 		const done = {
 			...collecting(0),
 			facilities: [
@@ -113,12 +113,27 @@ describe("the Collector", () => {
 			],
 		};
 		const farm = applyAll({ ...done, xp: xpOfLevel(5), coins: 60 }, [
-			[{ type: "buyAddOn", facility: feedMill, addOn: "collector" }, 0],
+			[{ type: "buyAddOn", facility: feedMill, addOn: "collector" }, 5_000],
 		]);
 
-		expect(sim.advance(farm, 1_000_000).facilities[feedMill]?.jobs).toEqual([
-			{ status: "done", recipe: "chickenFeed" },
-		]);
+		const moved = sim.advance(farm, 5_000);
+		expect(moved.facilities[feedMill]?.jobs).toEqual([]);
+		expect(moved.barn).toEqual({ chickenFeed: 2 });
+	});
+
+	it("moves goods that waited for room once the barn has room again, in their order (MUST-06.6, 07.2)", () => {
+		const done = { status: "done", recipe: "chickenFeed" } as const;
+		const full = {
+			...collecting(0, { bread: 50 }),
+			facilities: [ownedFacility([done, done], collector), ownedFacility([], collector)],
+		};
+		const held = sim.advance(full, 1_000_000);
+		expect(held.facilities[feedMill]?.jobs).toEqual([done, done]);
+
+		// Room for 3 (an order delivered, say): the oldest job's 2 feed move, the next waits.
+		const room = sim.advance({ ...held, barn: { bread: 47 } }, 1_000_000);
+		expect(room.barn).toEqual({ bread: 47, chickenFeed: 2 });
+		expect(room.facilities[feedMill]?.jobs).toEqual([done]);
 	});
 
 	it("leaves a facility without one to finish its jobs for collecting by hand (MUST-03.4)", () => {
