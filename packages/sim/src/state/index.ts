@@ -1,6 +1,8 @@
 // The farm state and the actions: the persisted format (ADR-0001, action log plus snapshots), so a
 // change here meets CONSTRAINTS.md's "Interface change" row. Plain JSON data with readonly types
-// (ADR-0003, section 5, D12); the invariants the property tests check are below.
+// (ADR-0003, section 5, D12); the invariants the property tests check are below. Each feature
+// module owns its part of the state and its actions (ADR-0005, section 3); this module composes them.
+import type { Plot, PlotAction } from "../plots/index.js";
 
 /** A farm at a server time. Facts only: Level and unlocks are derived from content (D12). */
 export interface FarmState {
@@ -16,16 +18,8 @@ export interface FarmState {
 	readonly streams: { readonly yields: number; readonly orders: number };
 }
 
-export type Plot =
-	| { readonly status: "empty" }
-	/** Ripens as an automated step at `readyAt`, in ms (MUST-01.2). */
-	| { readonly status: "growing"; readonly crop: string; readonly readyAt: number }
-	| { readonly status: "ready"; readonly crop: string };
-
 /** Something a player chooses to do, applied at a server time (`GLOSSARY.md`). */
-export type Action =
-	| { readonly type: "plant"; readonly plot: number; readonly crop: string }
-	| { readonly type: "harvest"; readonly plot: number };
+export type Action = PlotAction;
 
 /** A refusal is data, not a throw, and carries no state (ADR-0003, section 4, D15). */
 export type ApplyResult =
