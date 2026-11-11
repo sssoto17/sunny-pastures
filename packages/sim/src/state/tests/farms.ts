@@ -62,8 +62,14 @@ const recipe = fc.oneof(
 	{ weight: 1, arbitrary: fc.constant("cake") },
 );
 
+/** Mostly the slice's tiers above 1 (#85), sometimes one the facility has or content lacks. */
+const tier = fc.oneof(
+	{ weight: 4, arbitrary: fc.constantFrom(2, 3) },
+	{ weight: 1, arbitrary: fc.constantFrom(1, 4) },
+);
+
 /**
- * Plant, harvest, buy, start jobs and collect, on plots and facilities in and out of range, mostly
+ * Plant, harvest, buy, start jobs, buy tiers and collect, on plots and facilities in and out of range, mostly
  * wheat, sometimes a crop not in content; buy, feed and collect from pens in and out of range. A
  * generated buy rarely names the next plot, so it mostly reaches the refusals.
  */
@@ -81,6 +87,7 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({ type: fc.constant("buyFacility" as const), facility: facilityIndex }),
 	fc.record({ type: fc.constant("startJob" as const), facility: facilityIndex, recipe }),
 	fc.record({ type: fc.constant("collect" as const), facility: facilityIndex }),
+	fc.record({ type: fc.constant("buyTier" as const), facility: facilityIndex, tier }),
 	fc.record({ type: fc.constant("buyPen" as const), pen: penIndex }),
 	fc.record({ type: fc.constant("feed" as const), pen: penIndex }),
 	fc.record({ type: fc.constant("collectProducts" as const), pen: penIndex }),
@@ -183,12 +190,36 @@ const keepChickens = fc
 		{ action: { type: "collectProducts", pen: 0 }, delay: Math.abs(third) },
 	]);
 
+/**
+ * Upgrading the facilities (#85): buy both, start a job in each, buy tier 2 while it runs, start
+ * another, buy tier 3, then start jobs past tier 1's slots until the queue is full and refused;
+ * collect each job after a wait. So tiers are bought with jobs queued and running (MUST-03.3, 06.7)
+ * and queues fill to a higher tier's slots (MUST-03.5, 06.2). Refused and skipped while a tier is
+ * locked or unaffordable, or the silo lacks wheat.
+ */
+const buyTiers = delay.map((wait): TimedAction[] =>
+	(["chickenFeed", "bread"] as const).flatMap((made, facility): TimedAction[] => {
+		const start: TimedAction = { action: { type: "startJob", facility, recipe: made }, delay: 0 };
+		return [
+			{ action: { type: "buyFacility", facility }, delay: 0 },
+			start,
+			{ action: { type: "buyTier", facility, tier: 2 }, delay: 0 },
+			start,
+			{ action: { type: "buyTier", facility, tier: 3 }, delay: 0 },
+			...repeat({ type: "startJob", facility, recipe: made }, 3),
+			{ action: { type: "collect", facility }, delay: Math.abs(wait) },
+			...repeat({ type: "collect", facility }, 2),
+		];
+	}),
+);
+
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
 	{ weight: 2, arbitrary: tend },
 	{ weight: 1, arbitrary: fc.constant(expand) },
 	{ weight: 2, arbitrary: produce },
 	{ weight: 2, arbitrary: keepChickens },
+	{ weight: 2, arbitrary: buyTiers },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());

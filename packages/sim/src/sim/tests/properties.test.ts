@@ -6,7 +6,7 @@ import fc from "fast-check";
 import { describe, expect, inject, it } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
-import type { Content, FarmState } from "../../index.js";
+import type { Content, FarmState, Sim } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
 import type { Transition } from "../../state/tests/farms.js";
@@ -24,18 +24,31 @@ const plotPrices = [20, 30, 45, 67, 100, 150, 225, 337];
 /** The feed mill's and the bakery's prices, and the Levels that unlock them (#84). */
 const facilityPrices = [30, 50];
 const facilityLevels = [2, 3];
-const facilitySlots = 2;
+// The slice's tiers (#85's "Decided by the lane"): each facility's slots at tiers 1, 2 and 3, and
+// the prices and Levels of its tiers 2 and 3, feed mill first.
+const tierSlots = [2, 3, 3];
+const tierPrices = [
+	[60, 120],
+	[100, 200],
+];
+const tierLevels = [
+	[3, 5],
+	[4, 5],
+];
 // The slice's chicken pen (#86's "Decided by the lane"): unlocked at Level 2 for 30 coins, three
 // chickens, a one-portion trough, an egg 180 s after each portion, 1 XP per egg collected.
 const penLevel = 2;
 const penPrice = 30;
 const chickens = 3;
 const layMs = 180_000;
-/** The slice's recipes (#84): the wheat each takes, the goods it makes, its time and XP. */
+/**
+ * The slice's recipes (#84): the wheat each takes, the goods it makes, its time at tiers 1, 2 and
+ * 3 (#85: 800 and 600 per mille, rounded down to whole seconds) and its XP.
+ */
 const sliceRecipes = new Map(
 	Object.entries({
-		chickenFeed: { wheat: 2, good: "chickenFeed", amount: 2, ms: 60_000, xp: 1 },
-		bread: { wheat: 3, good: "bread", amount: 1, ms: 300_000, xp: 2 },
+		chickenFeed: { wheat: 2, good: "chickenFeed", amount: 2, ms: [60_000, 48_000, 36_000], xp: 1 },
+		bread: { wheat: 3, good: "bread", amount: 1, ms: [300_000, 240_000, 180_000], xp: 2 },
 	} as const satisfies Record<string, TestRecipe>),
 );
 
@@ -43,7 +56,7 @@ interface TestRecipe {
 	readonly wheat: number;
 	readonly good: string;
 	readonly amount: number;
-	readonly ms: number;
+	readonly ms: readonly number[];
 	readonly xp: number;
 }
 
@@ -53,28 +66,39 @@ const levelAt = (xp: number): number => levelXp.filter((threshold) => threshold 
 /** The level-up coins paid in all by the time a farm has `xp` (MUST-05.4). */
 const paidAt = (xp: number): number => paidBy[levelAt(xp) - 1] ?? NaN;
 
-/** The test content's job XP: enough that a collect crosses a Level (MUST-05.4). */
-const richJobXp = 31;
+/** The test content's job XP: enough that a collect crosses two Levels in one gain (MUST-05.4). */
+const richJobXp = 51;
+/** The test content's chicken feed time: 61 s, so tiers 2 and 3 round down to 48 s and 36 s (D16). */
+const richFeedSeconds = 61;
 const richRecipes = new Map(
-	[...sliceRecipes].map(([id, recipe]) => [id, { ...recipe, xp: richJobXp }] as const),
+	[...sliceRecipes].map(([id, recipe]) => {
+		const ms = id === "chickenFeed" ? [richFeedSeconds * 1000, 48_000, 36_000] : recipe.ms;
+		return [id, { ...recipe, ms, xp: richJobXp }] as const;
+	}),
 );
 
 /**
  * Test content with the slice's Level table and plot prices, but room and coins to reach every
  * Level and plot: wheat isn't sold yet (#87), so the slice's silo keeps a farm near Level 2.
- * 31 XP a harvest crosses Levels 2 and 3 in one gain. A small barn fills after a few collects, so
- * collects reach its bound and its refusal, and 31 XP a collect lets a collect cross a Level.
+ * 9 XP a harvest keeps a farm that has bought a facility below Level 5 for a while, so collects
+ * reach Levels (#85: at 31 a harvest, one tending reached Level 5 before any collect), and 51 XP
+ * a collect from 18 or 27 XP crosses Levels 3 and 4 in one gain. A small barn fills after a few
+ * collects, so collects reach its bound and its refusal. Chicken feed's 61 s doesn't divide by the
+ * tiers' per mille, so a job time that isn't rounded down to whole seconds fails 14.5 (#85).
  */
 const richContent: Content = {
 	...sliceContent,
 	start: { ...sliceContent.start, coins: 2_000 },
 	silo: { capacity: 100_000 },
 	barn: { capacity: 4 },
-	crops: { wheat: { ...wheat, xp: 31 } },
+	crops: { wheat: { ...wheat, xp: 9 } },
 	facilities: sliceContent.facilities.map((facility) => ({
 		...facility,
 		recipes: Object.fromEntries(
-			Object.entries(facility.recipes).map(([id, recipe]) => [id, { ...recipe, xp: richJobXp }]),
+			Object.entries(facility.recipes).map(([id, recipe]) => [
+				id,
+				{ ...recipe, xp: richJobXp, ...(id === "chickenFeed" ? { seconds: richFeedSeconds } : {}) },
+			]),
 		),
 	})),
 };
@@ -217,6 +241,24 @@ describe.each(contents)("the sim's properties, over %s", (_name, content) => {
 		);
 	});
 
+	it("MUST-03.5, 06.2: a job is refused for a full queue exactly when it holds its tier's slots", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				let farm = sim.newFarm(id);
+				for (const { action, delay: wait } of played) {
+					const result = sim.apply(farm, action, farm.time + wait);
+					if (result.ok) {
+						farm = result.state;
+					} else if (action.type === "startJob" && result.reason.includes("queue is full")) {
+						const owned = farm.facilities[action.facility];
+						expect(owned?.jobs.length).toBe(tierSlots[(owned?.tier ?? NaN) - 1]);
+					}
+				}
+			}),
+			params,
+		);
+	});
+
 	it("MUST-14.7: time never runs backwards, and an action before the farm's time is refused", () => {
 		fc.assert(
 			fc.property(
@@ -265,6 +307,16 @@ describe.each(contents)("the sim's properties, over %s", (_name, content) => {
 	});
 });
 
+/** Checks every accepted action of the generated runs over `sim`, as a property. */
+const checkTransitions = (sim: Sim, check: (transition: Transition) => void): void => {
+	fc.assert(
+		fc.property(farmId, timedActions, (id, played) => {
+			for (const transition of play(sim, id, played).transitions) check(transition);
+		}),
+		params,
+	);
+};
+
 /**
  * Plays the generated runs over `content` and counts the cases each run reaches: the keys `name`
  * gives a transition, and the keys `nameRefusal` gives a refusal's reason.
@@ -295,6 +347,7 @@ describe("the generated farms", () => {
 				...(action.type === "collect" && levelAt(after.xp) > levelAt(before.xp)
 					? ["collect reaches a Level"]
 					: []),
+				...(levelAt(after.xp) - levelAt(before.xp) >= 2 ? ["one gain crosses two Levels"] : []),
 			],
 			(reason) => (reason.startsWith("The barn has room") ? ["barn full"] : []),
 		);
@@ -305,7 +358,38 @@ describe("the generated farms", () => {
 			"collect 0",
 			"collect 1",
 			"collect reaches a Level",
+			"one gain crosses two Levels",
 			"barn full",
+		]) {
+			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+		}
+	});
+
+	it("buy tiers 2 and 3 with jobs in the queue and fill it past tier 1's slots, so the tier properties aren't vacuous (#85)", () => {
+		const counts = countReached(
+			richContent,
+			({ action, before, after }) => {
+				if (action.type === "buyTier") {
+					const jobs = before.facilities[action.facility]?.jobs ?? [];
+					return [
+						`buyTier ${String(action.tier)}`,
+						...(jobs.some((job) => job.status === "running") ? ["buyTier with a job running"] : []),
+					];
+				}
+				const queue = action.type === "startJob" ? after.facilities[action.facility] : null;
+				return (queue?.jobs.length ?? 0) > (tierSlots[0] ?? NaN)
+					? ["queue past tier 1's slots"]
+					: [];
+			},
+			(reason) => (reason.includes("queue is full: 3 of 3") ? ["full at tier 2 or 3"] : []),
+		);
+
+		for (const key of [
+			"buyTier 2",
+			"buyTier 3",
+			"buyTier with a job running",
+			"queue past tier 1's slots",
+			"full at tier 2 or 3",
 		]) {
 			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
 		}
@@ -360,7 +444,11 @@ describe.each([
 					}
 					for (const owned of farm.facilities) {
 						const jobs = owned?.jobs ?? [];
-						expect(jobs.length).toBeLessThanOrEqual(facilitySlots);
+						// The slots follow the tier, from 1 up to 3 (MUST-03.5, 06.2).
+						const tier = owned?.tier ?? 1;
+						expect(tier).toBeGreaterThanOrEqual(1);
+						expect(tier).toBeLessThanOrEqual(tierSlots.length);
+						expect(jobs.length).toBeLessThanOrEqual(tierSlots[tier - 1] ?? NaN);
 						// Done jobs come first, and each running job finishes after the farm's time and
 						// no sooner than the one before it (MUST-03.3).
 						const ends = jobs.flatMap((job) => (job.status === "running" ? [job.readyAt] : []));
@@ -429,9 +517,10 @@ describe.each([
 						expect(after.xp).toBe(before.xp);
 						expect(after.silo).toEqual(before.silo);
 					} else if (action.type === "startJob") {
-						// The inputs leave the silo, and the job ends the recipe's time after the later
-						// of now and the job before it (MUST-03.2, 03.3).
+						// The inputs leave the silo, and the job ends the recipe's time at the facility's
+						// tier now after the later of now and the job before it (MUST-03.2, 03.3, 06.2).
 						const made = recipes.get(action.recipe);
+						const tier = before.facilities[action.facility]?.tier ?? NaN;
 						const jobs = before.facilities[action.facility]?.jobs ?? [];
 						const last = jobs[jobs.length - 1];
 						const from = last?.status === "running" ? Math.max(at, last.readyAt) : at;
@@ -441,7 +530,7 @@ describe.each([
 						expect(queue[queue.length - 1]).toEqual({
 							status: "running",
 							recipe: action.recipe,
-							readyAt: from + (made?.ms ?? NaN),
+							readyAt: from + (made?.ms[tier - 1] ?? NaN),
 						});
 						expect(after.coins).toBe(before.coins);
 						expect(after.xp).toBe(before.xp);
@@ -470,6 +559,23 @@ describe.each([
 						expect(after.xp).toBe(before.xp);
 						expect(after.silo).toEqual(before.silo);
 						expect(after.barn).toEqual(before.barn);
+					} else if (action.type === "buyTier") {
+						// The next tier, for its price, once its Level is reached; nothing else changes,
+						// the jobs' stored finishes included (MUST-06.2, 06.7).
+						const advanced = levelSim.advance(before, at);
+						const owned = advanced.facilities[action.facility];
+						const prices = tierPrices[action.facility] ?? [];
+						const levels = tierLevels[action.facility] ?? [];
+						expect(action.tier).toBe((owned?.tier ?? NaN) + 1);
+						expect(after.coins).toBe(before.coins - (prices[action.tier - 2] ?? NaN));
+						expect(levelAt(after.xp)).toBeGreaterThanOrEqual(levels[action.tier - 2] ?? NaN);
+						expect(after.facilities).toEqual(
+							advanced.facilities.map((current, i) =>
+								i === action.facility ? { ...owned, tier: action.tier } : current,
+							),
+						);
+						expect(after.xp).toBe(before.xp);
+						expect(after.silo).toEqual(before.silo);
 					} else if (action.type === "buyPlot") {
 						expect(after.coins).toBe(
 							before.coins - (plotPrices[action.plot - content.start.plots] ?? NaN),
@@ -508,6 +614,18 @@ describe.each([
 		);
 	});
 
+	it("MUST-03.3, 06.7: no action moves a stored job finish, a tier bought included", () => {
+		checkTransitions(levelSim, ({ action, at, before, after }) => {
+			levelSim.advance(before, at).facilities.forEach((owned, facility) => {
+				// Collecting takes the oldest job; every other job keeps its slot's order.
+				const isCollected = action.type === "collect" && action.facility === facility;
+				const kept = (owned?.jobs ?? []).slice(isCollected ? 1 : 0);
+				const jobs = after.facilities[facility]?.jobs ?? [];
+				expect(jobs.slice(0, kept.length)).toEqual(kept);
+			});
+		});
+	});
+
 	it("MUST-05.2, 05.3: XP and the Level never go down", () => {
 		fc.assert(
 			fc.property(farmId, timedActions, (id, played) => {
@@ -530,9 +648,12 @@ describe.each([
 				const plots = final.plots.length - content.start.plots;
 				const facilities = facilityPrices.filter((_price, i) => final.facilities[i] !== null);
 				const pens = final.pens.filter((pen) => pen !== null).length;
+				const tiers = final.facilities.flatMap((owned, i) =>
+					(tierPrices[i] ?? []).slice(0, (owned?.tier ?? 1) - 1),
+				);
 				const spent =
 					seeds * crop.seedPrice +
-					[...plotPrices.slice(0, plots), ...facilities].reduce((sum, p) => sum + p, 0) +
+					[...plotPrices.slice(0, plots), ...facilities, ...tiers].reduce((sum, p) => sum + p, 0) +
 					pens * penPrice;
 
 				expect(final.coins).toBe(content.start.coins - spent + paidAt(final.xp));
