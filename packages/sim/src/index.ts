@@ -8,6 +8,7 @@ export type {
 	FacilityTier,
 	GoodCount,
 	LevelRow,
+	OrderGood,
 	Pen,
 	Recipe,
 	TierRow,
