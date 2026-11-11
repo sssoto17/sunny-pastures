@@ -138,15 +138,15 @@ labels=$(gh label list --repo "$OWNER/$REPO" --limit 500 --json name --jq '.[].n
 grep -qxF -- "$type" <<<"$labels" ||
   die 2 "the type label \"$type\" doesn't exist in $OWNER/$REPO. Nothing was created."
 if ! grep -qxF -- "$area" <<<"$labels"; then
-  areas=$(grep '^area:' <<<"$labels" | paste -sd, - | sed 's/,/, /g')
-  die 2 "unknown area \"$area\". Valid areas: $areas. Nothing was created."
+  mapfile -t areas < <(grep '^area:' <<<"$labels")
+  die 2 "unknown area \"$area\". Valid areas: $(join "${areas[@]}"). Nothing was created."
 fi
 
 milestones=$(gh api "repos/$OWNER/$REPO/milestones?state=open&per_page=100" --jq '.[].title') ||
   die 3 "could not read the open milestones; nothing was created"
 if ! grep -qxF -- "$milestone" <<<"$milestones"; then
-  list=$(paste -sd, - <<<"$milestones" | sed 's/,/, /g')
-  die 2 "unknown milestone \"$milestone\". Open milestones: $list. Nothing was created."
+  mapfile -t open_milestones <<<"$milestones"
+  die 2 "unknown milestone \"$milestone\". Open milestones: $(join "${open_milestones[@]}"). Nothing was created."
 fi
 
 if [[ -n $parent ]]; then

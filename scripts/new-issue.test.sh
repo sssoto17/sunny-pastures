@@ -295,7 +295,6 @@ case_ "${base[@]}"
 expect_code 1
 expect_err "missing label area:tools"
 
-rm -f "$work/issue.200"
 reset
 rm -f "$work/issue.200"
 case_ "${base[@]}"
