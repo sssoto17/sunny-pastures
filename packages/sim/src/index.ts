@@ -3,4 +3,7 @@
 export { sliceContent } from "./content/index.js";
 export type { Content, Crop } from "./content/index.js";
 export { stateHash } from "./hash/index.js";
-export type { Action, ApplyResult, FarmState, Plot } from "./state/index.js";
+export { createSim } from "./sim/index.js";
+export type { Sim } from "./sim/index.js";
+export type { Plot, PlotAction } from "./plots/index.js";
+export type { Action, ApplyResult, FarmState } from "./state/index.js";
