@@ -2,7 +2,8 @@
 # file to .github/workflows/ on the branch throwaway/101-identities and pushes it; the push runs
 # it. A branch can't use workflow_dispatch (it needs the file on the default branch first), so the
 # trigger is a push to that branch. Each job prints `RESULT ...` lines with non-secret fields only;
-# `ci-check.sh results 101` collects them. Actions pinned to full SHAs (ADR-0002, area 8).
+# `ci-check.sh results 101` collects them. "Check N" is the Nth checkbox of #101, so the jobs
+# appear in dependency order, not check order. Actions pinned to full SHAs (ADR-0002, area 8).
 name: check-101-identities
 
 on:
@@ -52,8 +53,9 @@ jobs:
           echo "pr=$pr" >>"$GITHUB_OUTPUT"
           gh api "$r/pulls/$pr" --jq '"RESULT pr=\(.number) author=\(.user.login)"'
 
-  # Check 2: sunny-reviewer approves; read reviewDecision. It also opens a file-level thread for
-  # check 4.
+  # Check 2: sunny-reviewer approves; read reviewDecision. While `main` requires 0 approvals,
+  # reviewDecision may stay empty: the review's own state (APPROVED) is the record. It also opens
+  # a file-level thread for check 4.
   reviewer:
     needs: factory-pr
     runs-on: ubuntu-24.04
