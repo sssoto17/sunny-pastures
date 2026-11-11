@@ -46,9 +46,16 @@ const facilityIndex = fc.oneof(
 	{ weight: 1, arbitrary: fc.constantFrom(-1, 2) },
 );
 
+/** Mostly the slice's recipes, sometimes one the facility lacks or not in content. */
+const recipe = fc.oneof(
+	{ weight: 9, arbitrary: fc.constantFrom("chickenFeed", "bread") },
+	{ weight: 1, arbitrary: fc.constant("cake") },
+);
+
 /**
- * Plant, harvest and buy on plots and facilities in and out of range, mostly wheat, sometimes a crop not in
- * content. A generated buy rarely names the next plot, so it mostly reaches the refusals.
+ * Plant, harvest, buy, start jobs and collect, on plots and facilities in and out of range, mostly
+ * wheat, sometimes a crop not in content. A generated buy rarely names the next plot, so it mostly
+ * reaches the refusals.
  */
 const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({
@@ -62,6 +69,8 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({ type: fc.constant("harvest" as const), plot: plotIndex }),
 	fc.record({ type: fc.constant("buyPlot" as const), plot: plotIndex }),
 	fc.record({ type: fc.constant("buyFacility" as const), facility: facilityIndex }),
+	fc.record({ type: fc.constant("startJob" as const), facility: facilityIndex, recipe }),
+	fc.record({ type: fc.constant("collect" as const), facility: facilityIndex }),
 );
 
 /**
@@ -103,10 +112,31 @@ const expand: TimedAction[] = [
 	})),
 ];
 
+/**
+ * Running the facilities: fill both queues and one more (refused: full), wait, then collect each
+ * job. Jobs queue behind each other, finish while the farm waits and fill the barn, so the queue,
+ * input, barn and XP cases are reached (MUST-03.2-03.5, 14.4). Facilities the farm hasn't bought
+ * are refused and skipped.
+ */
+const produce = delay.map((wait): TimedAction[] => {
+	const starts = (["chickenFeed", "bread"] as const).flatMap((made, facility) =>
+		[0, 1, 2].map((): TimedAction => ({
+			action: { type: "startJob", facility, recipe: made },
+			delay: 0,
+		})),
+	);
+	const collects = [0, 1, 0, 1].map((facility, i): TimedAction => ({
+		action: { type: "collect", facility },
+		delay: i === 0 ? Math.abs(wait) : 0,
+	}));
+	return [...starts, ...collects];
+});
+
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
 	{ weight: 2, arbitrary: tend },
 	{ weight: 1, arbitrary: fc.constant(expand) },
+	{ weight: 2, arbitrary: produce },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());
