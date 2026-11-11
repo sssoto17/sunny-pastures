@@ -163,6 +163,12 @@ assert "expected the PR's author and decision" \
 assert "expected the CI run on its head" contains "$out" "ci (pull_request): completed success"
 assert "expected the head commit asked for" contains "$calls" "--commit abc123"
 assert "expected the tag absent" contains "$out" 'Tag `v0.0.0-throwaway-101` does not exist.'
+echo '[{"number":42,"headRefOid":"abc123","author":{"login":"app/sunny-factory"},"reviewDecision":"","state":"OPEN"}]' \
+  >"$work/fx/prs.json"
+run results 101
+assert "expected an empty decision shown, state kept in place" \
+  contains "$out" 'reviewDecision `(empty)`, state `OPEN`'
+assert "expected the note on an empty decision" contains "$out" "0 approvals"
 echo tags/v0.0.0-throwaway-101 >"$work/fx/refs"
 run results 101
 assert "expected an existing tag flagged" contains "$out" "EXISTS"

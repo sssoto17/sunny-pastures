@@ -81,12 +81,12 @@ start() {
 }
 
 results() {
-  local run id
+  local run id status url
   run=$(gh run list --repo "$REPO" --branch "$branch" --limit 1 \
-    --json databaseId,status,conclusion,url --jq '.[0] // empty | "\(.databaseId) \(.status) \(.url)"') ||
+    --json databaseId,status,conclusion,url --jq '.[0] // empty | "\(.databaseId)\t\(.status)\t\(.url)"') ||
     die 1 "gh run list failed"
   [[ -n $run ]] || die 3 "no run on $branch yet: run start $issue first"
-  read -r id status url <<<"$run"
+  IFS=$'\t' read -r id status url <<<"$run"
   [[ $status == completed ]] || die 3 "run $id is $status: wait for it ($url)"
   printf '## Results of the throwaway check for #%s\n\nRun: %s\n\n' "$issue" "$url"
   printf '| Job | Conclusion | Seconds | Billed minutes |\n|---|---|---|---|\n'
@@ -104,15 +104,17 @@ results() {
 }
 
 results_101() {
-  local pr head
+  local pr head author decision state
   printf '\nRead back from GitHub:\n\n'
   pr=$(gh pr list --repo "$REPO" --head "$FACTORY_PR_BRANCH" --state all --limit 1 \
     --json number,author,reviewDecision,headRefOid,state \
-    --jq '.[0] // empty | "\(.number) \(.headRefOid) \(.author.login) \(.reviewDecision) \(.state)"')
+    --jq '.[0] // empty | [.number, .headRefOid, .author.login, .reviewDecision // "", .state] | join("|")')
   if [[ -z $pr ]]; then printf -- '- No PR from %s.\n' "$FACTORY_PR_BRANCH"; return; fi
-  read -r pr head author decision state <<<"$pr"
+  IFS='|' read -r pr head author decision state <<<"$pr"
   printf -- '- PR #%s: author `%s`, reviewDecision `%s`, state `%s`.\n' \
-    "$pr" "$author" "$decision" "$state"
+    "$pr" "$author" "${decision:-(empty)}" "$state"
+  printf -- '  (While `main` requires 0 approvals, an empty reviewDecision is expected; the\n'
+  printf -- '  reviewer job'"'"'s `review=<login>:APPROVED` line above is the record.)\n'
   printf -- '- Workflow runs on its head commit (CI started if any ran; `action_required` means it waited):\n'
   gh run list --repo "$REPO" --commit "$head" --json workflowName,event,status,conclusion \
     --jq '.[] | "  - \(.workflowName) (\(.event)): \(.status) \(.conclusion)"'
