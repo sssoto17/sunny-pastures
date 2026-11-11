@@ -8,14 +8,21 @@ import { farmAt, xpOfLevel } from "./farmAt.js";
 const sim = createSim(sliceContent);
 const feedMill = 0;
 const bakery = 1;
+/** A facility as bought: tier 1, an empty queue, no last recipe and no add-ons (MUST-06.8). */
+const bought = {
+	tier: 1,
+	jobs: [],
+	lastRecipe: null,
+	addOns: { loop: false, collector: false },
+} as const;
 
 describe("buying a facility", () => {
-	it("adds it at tier 1 with an empty queue for its price, once its Level unlocks it", () => {
+	it("adds it at tier 1 with an empty queue and no add-ons for its price, once its Level unlocks it (MUST-06.8)", () => {
 		const farm = expectAccepted(
 			sim.apply(farmAt(2, 50), { type: "buyFacility", facility: feedMill }, 0),
 		);
 
-		expect(farm.facilities).toEqual([{ tier: 1, jobs: [] }, null]);
+		expect(farm.facilities).toEqual([bought, null]);
 		expect(farm.coins).toBe(20);
 		expect(farm.xp).toBe(xpOfLevel(2));
 	});
@@ -25,7 +32,7 @@ describe("buying a facility", () => {
 			sim.apply(farmAt(3, 50), { type: "buyFacility", facility: bakery }, 0),
 		);
 
-		expect(farm.facilities).toEqual([null, { tier: 1, jobs: [] }]);
+		expect(farm.facilities).toEqual([null, bought]);
 		expect(farm.coins).toBe(0);
 	});
 

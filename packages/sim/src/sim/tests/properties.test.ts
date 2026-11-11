@@ -23,6 +23,9 @@ const plotPrices = [20, 30, 45, 67, 100, 150, 225, 337];
 const facilityPrices = [30, 50];
 const facilityLevels = [2, 3];
 const facilitySlots = 2;
+/** The add-ons' prices and the Levels that unlock them (#88). */
+const addOnPrices = { loop: 80, collector: 60 } as const;
+const addOnLevels = { loop: 5, collector: 4 } as const;
 /** The slice's recipes (#84): the wheat each takes, the goods it makes, its time and XP. */
 const sliceRecipes = new Map(
 	Object.entries({
@@ -70,6 +73,13 @@ const richContent: Content = {
 		),
 	})),
 };
+
+/** A purchase changes neither XP nor goods: the coins it costs are checked beside it (MUST-14.5). */
+function expectOnlyPaid(before: FarmState, after: FarmState): void {
+	expect(after.xp).toBe(before.xp);
+	expect(after.silo).toEqual(before.silo);
+	expect(after.barn).toEqual(before.barn);
+}
 
 /** A time at or after the farm's, from the generated delays (never before: see 14.7). */
 const addDelay = (farm: FarmState, wait: number): number => farm.time + Math.abs(wait);
@@ -218,7 +228,7 @@ describe.each(contents)("the sim's properties, over %s", (_name, content) => {
 });
 
 describe("the generated farms", () => {
-	it("start and collect jobs, fill the barn and cross Levels by collecting, so the job properties aren't vacuous (#84)", () => {
+	it("start and collect jobs, fill the barn, cross Levels by collecting and buy add-ons, so the job properties aren't vacuous (#84, #88)", () => {
 		const rich = createSim(richContent);
 		const counts = new Map<string, number>();
 		const count = (key: string): void => {
@@ -230,6 +240,7 @@ describe("the generated farms", () => {
 				if (action.type === "startJob" || action.type === "collect") {
 					count(`${action.type} ${String(action.facility)}`);
 				}
+				if (action.type === "buyAddOn") count(`buyAddOn ${action.addOn}`);
 				if (action.type === "collect" && levelAt(after.xp) > levelAt(before.xp)) {
 					count("collect reaches a Level");
 				}
@@ -244,6 +255,8 @@ describe("the generated farms", () => {
 			"collect 1",
 			"collect reaches a Level",
 			"barn full",
+			"buyAddOn loop",
+			"buyAddOn collector",
 		]) {
 			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
 		}
@@ -288,7 +301,7 @@ describe.each(contents)("the Level and plot properties, over %s", (_name, conten
 		);
 	});
 
-	it("MUST-14.5: goods and coins change only by planting, harvesting, buying and jobs", () => {
+	it("MUST-14.5: goods and coins change only by planting, harvesting, buying, jobs and add-ons", () => {
 		fc.assert(
 			fc.property(farmId, timedActions, (id, played) => {
 				for (const { action, at, before, after } of play(levelSim, id, played).transitions) {
@@ -309,6 +322,7 @@ describe.each(contents)("the Level and plot properties, over %s", (_name, conten
 							recipe: action.recipe,
 							readyAt: from + (made?.ms ?? NaN),
 						});
+						expect(after.facilities[action.facility]?.lastRecipe).toBe(action.recipe);
 						expect(after.coins).toBe(before.coins);
 						expect(after.xp).toBe(before.xp);
 					} else if (action.type === "collect") {
@@ -332,10 +346,24 @@ describe.each(contents)("the Level and plot properties, over %s", (_name, conten
 							facilityLevels[action.facility] ?? NaN,
 						);
 						expect(before.facilities[action.facility]).toBeNull();
-						expect(after.facilities[action.facility]).toEqual({ tier: 1, jobs: [] });
-						expect(after.xp).toBe(before.xp);
-						expect(after.silo).toEqual(before.silo);
-						expect(after.barn).toEqual(before.barn);
+						expect(after.facilities[action.facility]).toEqual({
+							tier: 1,
+							jobs: [],
+							lastRecipe: null,
+							addOns: { loop: false, collector: false },
+						});
+						expectOnlyPaid(before, after);
+					} else if (action.type === "buyAddOn") {
+						// Jobs may finish on the way to the action's time; the add-on changes nothing else.
+						const owned = levelSim.advance(before, at).facilities[action.facility];
+						expect(after.coins).toBe(before.coins - addOnPrices[action.addOn]);
+						expect(levelAt(after.xp)).toBeGreaterThanOrEqual(addOnLevels[action.addOn]);
+						expect(owned?.addOns[action.addOn]).toBe(false);
+						expect(after.facilities[action.facility]).toEqual({
+							...owned,
+							addOns: { ...owned?.addOns, [action.addOn]: true },
+						});
+						expectOnlyPaid(before, after);
 					} else if (action.type === "buyPlot") {
 						expect(after.coins).toBe(
 							before.coins - (plotPrices[action.plot - content.start.plots] ?? NaN),
@@ -376,9 +404,14 @@ describe.each(contents)("the Level and plot properties, over %s", (_name, conten
 				const seeds = log.filter(({ action }) => action.type === "plant").length;
 				const plots = final.plots.length - content.start.plots;
 				const facilities = facilityPrices.filter((_price, i) => final.facilities[i] !== null);
+				const addOns = final.facilities.flatMap((owned) =>
+					(["loop", "collector"] as const).flatMap((addOn) =>
+						owned?.addOns[addOn] === true ? [addOnPrices[addOn]] : [],
+					),
+				);
 				const spent =
 					seeds * crop.seedPrice +
-					[...plotPrices.slice(0, plots), ...facilities].reduce((sum, p) => sum + p, 0);
+					[...plotPrices.slice(0, plots), ...facilities, ...addOns].reduce((sum, p) => sum + p, 0);
 
 				expect(final.coins).toBe(content.start.coins - spent + paidAt(final.xp));
 			}),

@@ -57,8 +57,8 @@ const recipe = fc.oneof(
 );
 
 /**
- * Plant, harvest, buy, start jobs and collect, on plots and facilities in and out of range, mostly
- * wheat, sometimes a crop not in content. A generated buy rarely names the next plot, so it mostly
+ * Plant, harvest, buy, start jobs, collect and buy add-ons, on plots and facilities in and out of
+ * range, mostly wheat, sometimes a crop not in content. A generated buy rarely names the next plot, so it mostly
  * reaches the refusals.
  */
 const action: fc.Arbitrary<Action> = fc.oneof(
@@ -75,6 +75,11 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({ type: fc.constant("buyFacility" as const), facility: facilityIndex }),
 	fc.record({ type: fc.constant("startJob" as const), facility: facilityIndex, recipe }),
 	fc.record({ type: fc.constant("collect" as const), facility: facilityIndex }),
+	fc.record({
+		type: fc.constant("buyAddOn" as const),
+		facility: facilityIndex,
+		addOn: fc.constantFrom("loop", "collector"),
+	}),
 );
 
 /**
@@ -103,8 +108,9 @@ const tend = delay.map((wait): TimedAction[] => [
 ]);
 
 /**
- * Buying plots, each next one in turn, then the facilities, so the farm buys as many as its Level
- * and coins allow, and the rest reach the Level, coin and maximum refusals (MUST-05.6, 06.1).
+ * Buying plots, each next one in turn, then the facilities and their add-ons, so the farm buys as
+ * many as its Level and coins allow, and the rest reach the Level, coin and maximum refusals
+ * (MUST-05.6, 06.1).
  */
 const expand: TimedAction[] = [
 	...allPlots
@@ -114,6 +120,12 @@ const expand: TimedAction[] = [
 		action: { type: "buyFacility", facility },
 		delay: 0,
 	})),
+	...[0, 1].flatMap((facility) =>
+		(["collector", "loop"] as const).map((addOn): TimedAction => ({
+			action: { type: "buyAddOn", facility, addOn },
+			delay: 0,
+		})),
+	),
 ];
 
 /**

@@ -2,7 +2,7 @@
 // values are the admin's (spec, "How to read this spec"; CONSTRAINTS.md, "Content change" row):
 // approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83);
 // the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
-// lane"). All to be tuned after playtest 1.
+// lane"); the add-ons' prices and Levels by #88's lane (11 Nov). All to be tuned after playtest 1.
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
@@ -26,7 +26,15 @@ export interface Content {
 	readonly plotPrice: { readonly first: number; readonly growthPerMille: number };
 	/** The facilities, in content order: a facility's index here is its index in the state (D12). */
 	readonly facilities: readonly Facility[];
+	/** Each add-on's price in coins, the same for every facility (MUST-06.5, 06.6; #88). */
+	readonly addOns: Readonly<Record<AddOn, { readonly price: number }>>;
 }
+
+/**
+ * The add-ons a facility can have (`GLOSSARY.md`, "Add-on"): the Loop starts its last recipe again
+ * (MUST-06.5), and the Collector moves its finished goods into storage (MUST-06.6).
+ */
+export type AddOn = "loop" | "collector";
 
 /** One Level of the Level table: what reaching it takes, pays and unlocks. */
 export interface LevelRow {
@@ -40,6 +48,8 @@ export interface LevelRow {
 	readonly plots: number;
 	/** Facility ids it unlocks for buying (MUST-05.6). */
 	readonly facilities: readonly string[];
+	/** Add-ons it unlocks for buying, for every facility (MUST-05.5, 05.6; #88). */
+	readonly addOns: readonly AddOn[];
 }
 
 /** A facility the farm can buy once a Level unlocks it (MUST-03, MUST-05.6). */
@@ -102,11 +112,11 @@ export const sliceContent = {
 		},
 	},
 	levels: [
-		{ xp: 0, coins: 0, crops: ["wheat"], plots: 0, facilities: [] },
-		{ xp: 10, coins: 20, crops: [], plots: 2, facilities: ["feedMill"] },
-		{ xp: 30, coins: 30, crops: [], plots: 2, facilities: ["bakery"] },
-		{ xp: 60, coins: 40, crops: [], plots: 2, facilities: [] },
-		{ xp: 100, coins: 50, crops: [], plots: 2, facilities: [] },
+		{ xp: 0, coins: 0, crops: ["wheat"], plots: 0, facilities: [], addOns: [] },
+		{ xp: 10, coins: 20, crops: [], plots: 2, facilities: ["feedMill"], addOns: [] },
+		{ xp: 30, coins: 30, crops: [], plots: 2, facilities: ["bakery"], addOns: [] },
+		{ xp: 60, coins: 40, crops: [], plots: 2, facilities: [], addOns: ["collector"] },
+		{ xp: 100, coins: 50, crops: [], plots: 2, facilities: [], addOns: ["loop"] },
 	],
 	plotPrice: { first: 20, growthPerMille: 1500 },
 	facilities: [
@@ -139,4 +149,5 @@ export const sliceContent = {
 			},
 		},
 	],
+	addOns: { loop: { price: 80 }, collector: { price: 60 } },
 } as const satisfies Content;

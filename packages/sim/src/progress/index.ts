@@ -12,6 +12,8 @@ export interface ProgressRules {
 	readonly cropLevels: ReadonlyMap<string, number>;
 	/** The Level that unlocks each facility (#84). */
 	readonly facilityLevels: ReadonlyMap<string, number>;
+	/** The Level that unlocks each add-on, for every facility (#88). */
+	readonly addOnLevels: ReadonlyMap<string, number>;
 }
 
 /** Copies what the rules read, so a later change to the content object can't reach them. */
@@ -21,6 +23,7 @@ export function prepareProgressRules(content: Content): ProgressRules {
 		levels,
 		cropLevels: mapUnlockLevels(content, (level) => level.crops),
 		facilityLevels: mapUnlockLevels(content, (level) => level.facilities),
+		addOnLevels: mapUnlockLevels(content, (level) => level.addOns),
 	};
 }
 
