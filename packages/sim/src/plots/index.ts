@@ -4,7 +4,19 @@ import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
 import { mulberry32 } from "../random/index.js";
 import { refuse } from "../state/index.js";
-import type { ApplyResult, FarmState, Plot } from "../state/index.js";
+import type { ApplyResult, FarmState } from "../state/index.js";
+
+/** One plot of the farm's state (ADR-0005, section 3: the plots module owns it). */
+export type Plot =
+	| { readonly status: "empty" }
+	/** Ripens as an automated step at `readyAt`, in ms (MUST-01.2). */
+	| { readonly status: "growing"; readonly crop: string; readonly readyAt: number }
+	| { readonly status: "ready"; readonly crop: string };
+
+/** The actions on plots (MUST-01). `plot` is an index in content order. */
+export type PlotAction =
+	| { readonly type: "plant"; readonly plot: number; readonly crop: string }
+	| { readonly type: "harvest"; readonly plot: number };
 
 /** The plot rules for one content, prepared once in createSim. */
 export interface PlotRules {
