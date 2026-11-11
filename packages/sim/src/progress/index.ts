@@ -33,7 +33,8 @@ export function levelOf(xp: number, rules: ProgressRules): number {
 export interface Offer {
 	/** What is bought, as the subject of a refusal sentence, for example "Plot 7". */
 	readonly what: string;
-	readonly level: number;
+	/** The Level that unlocks it, or null if no Level does: then it is never bought. */
+	readonly level: number | null;
 	readonly price: number;
 }
 
