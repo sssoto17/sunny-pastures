@@ -282,6 +282,8 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
   client each call `createSim(content)` once and use what it returns. Store code still never
   imports the sim: the factory hands `replay` and `newFarm` in.
 - **#31 can be decided later** without changing the state: a rules version is a content object.
+  (Decided 11 Nov in [ADR-0006](0006-rules-versions-and-replay.md); the state still has no
+  version field.)
 - **A refusal returns no state.** The handler answers 422 on `{ ok: false }` (ADR-0001's second
   `processed` check comes first) and keeps the farm it loaded.
 - **The state hash is one pure, synchronous function** for client and server. It encodes strings
