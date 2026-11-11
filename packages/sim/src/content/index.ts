@@ -2,7 +2,8 @@
 // values are the admin's (spec, "How to read this spec"; CONSTRAINTS.md, "Content change" row):
 // approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83);
 // the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
-// lane"); the chicken pen chosen by #86's lane (11 Nov, its PRs' "Decided by the lane"). All to be tuned after playtest 1.
+// lane"); the chicken pen chosen by #86's lane (11 Nov, its PRs' "Decided by the lane"); the tiers
+// chosen by #85's lane (11 Nov, its PRs' "Decided by the lane"). All to be tuned after playtest 1.
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
@@ -44,6 +45,16 @@ export interface LevelRow {
 	readonly facilities: readonly string[];
 	/** Pen ids it unlocks for buying (spec decision 1, MUST-05.6). */
 	readonly pens: readonly string[];
+	/** Facility tiers it unlocks for buying (MUST-05.5, 06.2; #85). */
+	readonly tiers: readonly FacilityTier[];
+}
+
+/** One tier of one facility, as the Level table names it. */
+export interface FacilityTier {
+	/** A facility's id. */
+	readonly facility: string;
+	/** From 2: tier 1 comes with the facility. */
+	readonly tier: number;
 }
 
 /** A facility the farm can buy once a Level unlocks it (MUST-03, MUST-05.6). */
@@ -51,10 +62,25 @@ export interface Facility {
 	readonly id: string;
 	/** Coins that buying it costs. */
 	readonly price: number;
-	/** Queue slots at tier 1 (MUST-03.5); #85 adds the slots of higher tiers (MUST-06.2). */
+	/** Queue slots at tier 1 (MUST-03.5). */
 	readonly slots: number;
+	/** The tiers it can be upgraded to, tier 2 first, each the next (MUST-06.2; #85). */
+	readonly tiers: readonly TierRow[];
 	/** What it can make, by recipe id (MUST-03.1). */
 	readonly recipes: Readonly<Record<string, Recipe>>;
+}
+
+/** A tier a facility can be upgraded to: bought once a Level unlocks it (MUST-06.2). */
+export interface TierRow {
+	/** Coins that buying it costs. */
+	readonly price: number;
+	/** Queue slots at this tier, never fewer than the tier below's (MUST-03.5). */
+	readonly slots: number;
+	/**
+	 * A job's time at this tier, per mille of the recipe's `seconds`: whole seconds, rounded down
+	 * (D16: integers only). Below 1000, so each tier shortens jobs.
+	 */
+	readonly timePerMille: number;
 }
 
 /** One run of a recipe is a job (`GLOSSARY.md`). */
@@ -65,7 +91,7 @@ export interface Recipe {
 	readonly inputs: readonly GoodCount[];
 	/** Waits in the facility once the job finishes, until collected (MUST-03.4). */
 	readonly output: GoodCount;
-	/** Whole seconds a job takes (MUST-03.3, MUST-10.4); createSim converts it to ms once (D7). */
+	/** Whole seconds a job takes at tier 1 (MUST-03.3, MUST-10.4); in ms once, per tier (D7). */
 	readonly seconds: number;
 	/** XP that collecting a job gives (MUST-05.2). */
 	readonly xp: number;
@@ -125,11 +151,46 @@ export const sliceContent = {
 		},
 	},
 	levels: [
-		{ xp: 0, coins: 0, crops: ["wheat"], plots: 0, facilities: [], pens: [] },
-		{ xp: 10, coins: 20, crops: [], plots: 2, facilities: ["feedMill"], pens: ["chickenPen"] },
-		{ xp: 30, coins: 30, crops: [], plots: 2, facilities: ["bakery"], pens: [] },
-		{ xp: 60, coins: 40, crops: [], plots: 2, facilities: [], pens: [] },
-		{ xp: 100, coins: 50, crops: [], plots: 2, facilities: [], pens: [] },
+		{ xp: 0, coins: 0, crops: ["wheat"], plots: 0, facilities: [], pens: [], tiers: [] },
+		{
+			xp: 10,
+			coins: 20,
+			crops: [],
+			plots: 2,
+			facilities: ["feedMill"],
+			pens: ["chickenPen"],
+			tiers: [],
+		},
+		{
+			xp: 30,
+			coins: 30,
+			crops: [],
+			plots: 2,
+			facilities: ["bakery"],
+			pens: [],
+			tiers: [{ facility: "feedMill", tier: 2 }],
+		},
+		{
+			xp: 60,
+			coins: 40,
+			crops: [],
+			plots: 2,
+			facilities: [],
+			pens: [],
+			tiers: [{ facility: "bakery", tier: 2 }],
+		},
+		{
+			xp: 100,
+			coins: 50,
+			crops: [],
+			plots: 2,
+			facilities: [],
+			pens: [],
+			tiers: [
+				{ facility: "feedMill", tier: 3 },
+				{ facility: "bakery", tier: 3 },
+			],
+		},
 	],
 	plotPrice: { first: 20, growthPerMille: 1500 },
 	facilities: [
@@ -137,6 +198,10 @@ export const sliceContent = {
 			id: "feedMill",
 			price: 30,
 			slots: 2,
+			tiers: [
+				{ price: 60, slots: 3, timePerMille: 800 },
+				{ price: 120, slots: 3, timePerMille: 600 },
+			],
 			recipes: {
 				chickenFeed: {
 					tier: 1,
@@ -151,6 +216,10 @@ export const sliceContent = {
 			id: "bakery",
 			price: 50,
 			slots: 2,
+			tiers: [
+				{ price: 100, slots: 3, timePerMille: 800 },
+				{ price: 200, slots: 3, timePerMille: 600 },
+			],
 			recipes: {
 				bread: {
 					tier: 1,

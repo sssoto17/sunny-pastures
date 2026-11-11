@@ -14,6 +14,8 @@ export interface ProgressRules {
 	readonly facilityLevels: ReadonlyMap<string, number>;
 	/** The Level that unlocks each pen (#86). */
 	readonly penLevels: ReadonlyMap<string, number>;
+	/** The Level that unlocks each facility tier, by `formatTierKey` (#85); read it with `findTierLevel`. */
+	readonly tierLevels: ReadonlyMap<string, number>;
 }
 
 /** Copies what the rules read, so a later change to the content object can't reach them. */
@@ -24,6 +26,9 @@ export function prepareProgressRules(content: Content): ProgressRules {
 		cropLevels: mapUnlockLevels(content, (level) => level.crops),
 		facilityLevels: mapUnlockLevels(content, (level) => level.facilities),
 		penLevels: mapUnlockLevels(content, (level) => level.pens),
+		tierLevels: mapUnlockLevels(content, (level) =>
+			level.tiers.map(({ facility, tier }) => formatTierKey(facility, tier)),
+		),
 	};
 }
 
@@ -59,6 +64,11 @@ export function purchase(farm: FarmState, offer: Offer, rules: ProgressRules): A
 	return { ok: true, state: { ...farm, coins: farm.coins - offer.price } };
 }
 
+/** The Level that unlocks the facility's tier, or null if no Level does (MUST-05.5, 06.2). */
+export function findTierLevel(facility: string, tier: number, rules: ProgressRules): number | null {
+	return rules.tierLevels.get(formatTierKey(facility, tier)) ?? null;
+}
+
 /**
  * Why a farm with `xp` can't plant the crop yet, as a sentence for a refusal, or null if the
  * crop is unlocked (MUST-01.1, 01.5). A crop no Level lists is never unlocked; #89's content check
@@ -81,6 +91,11 @@ function mapUnlockLevels(
 		for (const id of listed(level)) if (!unlocks.has(id)) unlocks.set(id, i + 1);
 	});
 	return unlocks;
+}
+
+/** One string per facility tier: JSON quotes the id, so no two tiers share one, whatever the id. */
+function formatTierKey(facility: string, tier: number): string {
+	return JSON.stringify([facility, tier]);
 }
 
 /** Why `what`, unlocked at `level` (null: at none), isn't unlocked yet, or null if it is. */
