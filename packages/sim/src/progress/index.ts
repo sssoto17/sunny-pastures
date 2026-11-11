@@ -76,7 +76,7 @@ function lockedReason(
 	const current = levelOf(xp, rules);
 	if (current >= level) return null;
 
-	return `${what} isn't unlocked: it unlocks at Level ${String(level)}, and the farm is at Level ${String(current)}.`;
+	return `${what} isn't unlocked: it unlocks at Level ${String(level)}, and you're at Level ${String(current)}.`;
 }
 
 /**

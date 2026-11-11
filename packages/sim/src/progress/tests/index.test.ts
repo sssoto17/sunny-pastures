@@ -61,7 +61,7 @@ describe("purchase", () => {
 			"below the Level that unlocks it",
 			{ ...level2, xp: 9 },
 			offer,
-			"Plot 7 isn't unlocked: it unlocks at Level 2, and the farm is at Level 1.",
+			"Plot 7 isn't unlocked: it unlocks at Level 2, and you're at Level 1.",
 		],
 		[
 			"with too few coins (MUST-05.1)",
@@ -80,5 +80,25 @@ describe("cropLocked", () => {
 		["a crop no Level lists", "rye", 1_000, "The crop rye isn't unlocked at any Level."],
 	])("says whether a crop can be planted: %s (MUST-01.1, 01.5)", (_name, crop, xp, reason) => {
 		expect(cropLocked(crop, xp, rules)).toBe(reason);
+	});
+
+	it("unlocks a crop at the first Level that lists it", () => {
+		// Test content: corn listed at Level 2 and again at Level 4.
+		const [level1, level2, level3, level4, ...rest] = sliceContent.levels;
+		const twice = prepareProgressRules({
+			...sliceContent,
+			levels: [
+				level1,
+				{ ...level2, crops: ["corn"] },
+				level3,
+				{ ...level4, crops: ["corn"] },
+				...rest,
+			],
+		});
+
+		expect(cropLocked("corn", level2.xp, twice)).toBeNull();
+		expect(cropLocked("corn", level2.xp - 1, twice)).toBe(
+			"The crop corn isn't unlocked: it unlocks at Level 2, and you're at Level 1.",
+		);
 	});
 });
