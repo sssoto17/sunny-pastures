@@ -235,6 +235,14 @@ ask for a split, suggests where to cut, and doesn't review the lines.
 - **How a split links:** each part says `Part of #N`, and the part that completes the issue says
   `Closes #N`. Only that last part is checked against the issue's acceptance criteria, and only it
   meets the feature-slice row (see the rows above).
+- **How a split is built:** as a stack, all parts opened together. Part 1 is based on `main`, and
+  each later part on the previous part's branch. Each part stays within the split size and is
+  reviewed on its own diff (`gh pr diff`); the closing part's criteria check covers the whole
+  stack. A fix for a part that merged early can ride in a later part's fix commit. After a part
+  merges, the next branch merges `origin/main` in (no rebase or force-push) and its base moves to
+  `main`. GitHub records `Closes #N` only while the base is `main`, so the closing part's
+  `closingIssuesReferences` is checked once its base is `main`; if it's empty, the admin re-links
+  the issue in the UI.
 - **What counts:** added plus deleted lines across all files, tests and Markdown included. Tests
   count at full weight: the bot has to read them (the risk the mutation row exists for), and the
   coverage rows stop an agent from trimming tests below the floor to fit. If retros show tests
