@@ -299,57 +299,100 @@ rule shared by every upgrade); integer fixed-point arithmetic (the price curve).
 - **`Math.pow(growth, n)` for the curve.** Its float result can differ between engines (section 10).
 - **`buyPlot` with no plot.** A resent action would buy a second plot.
 
-## 12. Pens, troughs and storage (#86)
+## 12. Facilities, jobs and storage (#84)
 
-Chosen by #86's lane on 11 Nov, unattended; the admin reviews it in #86's PR ("Decided by the
+Decided by #84's lane on 11 Nov, under the admin's brief (content values and these shapes are the
+lane's call, reviewed in its PRs' "Decided by the lane").
+
+`facilities/` owns buying facilities and running jobs; `storage/` owns the silo and the barn
+(ADR-0005, section 3).
+
+- **Storage.** A crop goes to the silo, every other good to the barn (MUST-06.4); each has a
+  capacity from content. `put(goods)` is refused if the good's store can't hold it all, and
+  `take(inputs)` takes every input in list order, or is refused naming the first that is short.
+  Harvesting, starting a job and collecting one all go through it: the silo's room check left
+  `plots/` at this second occurrence (ADR-0005, "Shared logic").
+- **Buying.** `state.facilities` has one entry per content facility, in content order: `null`
+  until bought, then `{ tier, jobs }`. A facility is unlocked by the first Level-table row that
+  lists it and bought through `purchase` (section 11). Owned facilities store `tier: 1` from the
+  start, so #85 adds tiers without changing the persisted shape. `buyFacility` is refused for a
+  facility the farm has, so an action sent twice buys it once.
+- **Jobs.** A facility's `jobs` is its queue, in the order the jobs started; a job's queue slot is
+  its position (MUST-03.5). Starting a job needs the recipe at the facility's tier, a free slot
+  and every input in storage; the inputs leave storage at the start (MUST-03.2). The job stores
+  `readyAt`, the later of its start and the previous job's `readyAt`, plus the recipe's duration,
+  read from content once (MUST-03.3; ADR-0006, section 7). A running job becomes done as an
+  automated step at `readyAt`, of kind `finishJob`, keyed by the facility's index and the job's
+  slot (section 2). Collecting takes the job in slot 0 once it is done: its goods go to the barn
+  and its XP through `gainXp` (MUST-03.4, 05.2), and the jobs behind it move up a slot.
+- **Step kinds.** `finishJob` ranks after `ripen`. Neither touches storage, so today the rank
+  changes no outcome; producing kinds rank before the kinds that will move or use goods (the
+  Collector and the Loop, #88), so a step at the same time sees what was produced at it.
+
+**Patterns:** queue (FIFO) with stored end times; the strategy behind `StepSource` (a feature
+adds its automated steps without changing `advance`); a shared module for a repeated rule
+(`storage/`); the policy function of section 11 for buying.
+
+**Rejected:**
+
+- **A fixed array of slots with holes for collected jobs.** "The previous job" would then need a
+  start order stored beside the slots; the queue's order already is it.
+- **Deriving "done" from `readyAt` and the farm's time, with no step.** A finished job is an
+  automated step (`GLOSSARY.md`), and the Collector (#88) needs it as one to move goods at the
+  right moment in MUST-10.6's order.
+- **Storing a job's start time and deriving its end.** A tuning would move work in flight
+  (ADR-0006, section 7).
+- **Collecting every done job at once.** One job a call lets a player collect what fits when the
+  barn can't hold them all.
+- **One goods store.** The spec gives the silo and the barn separate capacities (MUST-06.4).
+- **A room check in each feature.** It would be written three times, and `fallow dupes` fails on
+  the copies.
+
+## 13. Pens and troughs (#86)
+
+Chosen by #86's lane on 11 Nov, unattended; the admin reviews it in #86's PRs ("Decided by the
 lane").
 
 `pens/` owns the animal pens (ADR-0005, section 3). Content lists pens in an array; the state has
 one entry per content pen, `null` until bought (MUST-05.6). A bought pen stores its trough's
-portions, one status per animal in slot order (`idle`, or `producing` with the `readyAt` it lays
-at) and the products waiting. A pen is unlocked by the Level table's `pens` field and bought
-through `purchase` (section 11). Its actions name the pen, so `buyPen` sent twice buys one.
+portions, one status per animal in slot order (`idle`, or `producing` with the `readyAt` it
+produces at) and the products waiting. A pen is unlocked by the first Level-table row that lists
+it and bought through `purchase` (section 11). Its actions name the pen, so `buyPen` sent twice
+buys one.
 
-- **Feeding** takes as much feed as fits and the barn holds, then idle animals eat from the
-  trough at once, in slot order. So no animal is idle while the trough holds feed.
+- **Feeding** takes as much feed from the barn as fits in the trough and the barn holds, through
+  `storage/` (section 12). Idle animals then eat from the trough at once, in slot order, so no
+  animal is idle while the trough holds feed.
 - **Producing** is an automated step of kind `produce`, keyed by the pen's index and the animal's
-  slot. The animal adds one product to the pen, then eats the next portion at the time it
-  produced, if the trough holds one (MUST-02.3). When animals produce at the same time and one
-  portion is left, the lowest slot eats it (MUST-10.6).
-- **Collecting** puts every waiting product in the barn and gives the pen's XP per product
-  through `gainXp`.
+  slot (section 2). The animal adds one product to the pen, then eats the next portion at the
+  time it produced, if the trough holds one (MUST-02.3). When animals produce at the same time
+  and one portion is left, the lowest slot eats it (MUST-10.6).
+- **Collecting** puts every waiting product in the barn through `put`, and gives the pen's XP per
+  product through `gainXp` (MUST-02.4, 05.2).
 - **Each `readyAt` is stored when the animal eats**, read from content once, so a later rules
   version doesn't move it (ADR-0006, section 7). The next portion's time is read from the rules
   running when the animal produces. Across a release, a gap is advanced under the new version
   (ADR-0006, section 4), so a portion eaten in that gap uses the new duration. A portion eaten
   before the release keeps its stored time.
+- **Step kinds.** `produce` ranks after `finishJob`, for section 12's reason: it touches neither
+  storage nor coins and changes only its own pen, so today its rank changes no outcome, and it
+  produces goods, so it ranks before the kinds that will move them (the Collector and Farmhands,
+  #88).
 
-`produce` ranks after `ripen` in `stepKinds`. Neither touches storage or coins, and each changes
-only its own plot or pen, so their rank changes no outcome today. Kinds that produce goods rank
-before the kinds that will move or use them (the Collector and Farmhands, #88), so a step sees
-what was produced at the same time.
-
-`storage/` owns the silo and the barn: `put` (refused if the store can't hold it all), `take`
-(refused naming the first short input) and `held`. A good is in the silo if content lists it as
-a crop, otherwise in the barn. Harvesting, feeding and collecting call it, and the store keeps
-state/'s "a key only above 0" invariant in one place.
-
-**Patterns:** discriminated unions for the animals' statuses (section 5); a step source per
-feature, closed over its prepared rules (section 2); a shared storage module at the second
-occurrence (ADR-0005, section 3).
+**Patterns:** a discriminated union per animal with a stored end time (section 5); the
+`StepSource` strategy of section 12, here closed over the pen rules because an animal's next
+portion reads its duration; the shared `storage/` module (section 12).
 
 **Rejected:**
 
 - **One status per pen** (the pen is producing until a time). Animals in one pen eat at different
   times, and MUST-02.3 is per animal.
 - **A count of producing animals with one shared end time.** It can't hold animals that ate at
-  different times, and it would lose the stored laid time ADR-0006 section 7 asks for.
+  different times, and it would lose the stored end time ADR-0006 section 7 asks for.
 - **Eating at the next step instead of at once.** An animal would wait idle beside a full
   trough, and when it eats would depend on unrelated steps.
-- **Eggs straight to the barn as they are laid.** MUST-02.4 keeps products in the pen until
-  collected, and a full barn would then need a rule for where an egg goes.
-- **Storage rules inside each feature.** Harvesting and collecting would each check the room and
-  the zero-count invariant, and could drift.
+- **Products straight to the barn as they are produced.** MUST-02.4 keeps products in the pen
+  until collected, and a full barn would then need a rule for where a product goes.
 
 ## Vocabulary (D11)
 
@@ -373,7 +416,10 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Property-based testing | MUST-14 | Generated farms reach the tie and storage cases; a fixed seed makes failures reproducible. |
 | Integer fixed-point arithmetic | multipliers, growing costs | The same result in every JavaScript engine, so client and server hashes agree. |
 | Policy function | `progress/`'s `purchase` | One rule for every upgrade: unlocked at a Level, then bought with coins (section 11). |
-| Shared module at the second occurrence; a step source per feature | `storage/`; `pens/`'s `producing` | One room check and zero-count rule for every store, and each feature schedules its own automated steps (section 12). |
+| Queue with stored end times | a facility's jobs | Jobs run in start order, and work in flight keeps its end time (section 12). |
+| Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
+| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding and collecting from pens (sections 12, 13). |
+| Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
 
 ## Consequences
 
