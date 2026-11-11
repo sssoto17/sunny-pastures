@@ -43,17 +43,46 @@ const chickens = 3;
 const layMs = 180_000;
 /**
  * The slice's recipes (#84): the wheat each takes, the goods it makes, its time at tiers 1, 2 and
- * 3 (#85: 800 and 600 per mille, rounded down to whole seconds) and its XP.
+ * 3 (#85: 800 and 600 per mille, rounded down to whole seconds) and its XP. Cookies (#85) also
+ * take eggs, and are made from tier 2 (MUST-03.1).
  */
 const sliceRecipes = new Map(
 	Object.entries({
-		chickenFeed: { wheat: 2, good: "chickenFeed", amount: 2, ms: [60_000, 48_000, 36_000], xp: 1 },
-		bread: { wheat: 3, good: "bread", amount: 1, ms: [300_000, 240_000, 180_000], xp: 2 },
+		chickenFeed: {
+			tier: 1,
+			wheat: 2,
+			eggs: 0,
+			good: "chickenFeed",
+			amount: 2,
+			ms: [60_000, 48_000, 36_000],
+			xp: 1,
+		},
+		bread: {
+			tier: 1,
+			wheat: 3,
+			eggs: 0,
+			good: "bread",
+			amount: 1,
+			ms: [300_000, 240_000, 180_000],
+			xp: 2,
+		},
+		cookies: {
+			tier: 2,
+			wheat: 2,
+			eggs: 2,
+			good: "cookies",
+			amount: 1,
+			ms: [500_000, 400_000, 300_000],
+			xp: 5,
+		},
 	} as const satisfies Record<string, TestRecipe>),
 );
 
 interface TestRecipe {
+	/** The lowest tier that makes it (MUST-03.1). */
+	readonly tier: number;
 	readonly wheat: number;
+	readonly eggs: number;
 	readonly good: string;
 	readonly amount: number;
 	readonly ms: readonly number[];
@@ -118,6 +147,18 @@ const eggContent: Content = {
 	barn: { capacity: 5 },
 	crops: { wheat: { ...wheat, xp: 9 } },
 	pens: sliceContent.pens.map((pen) => ({ ...pen, xp: richEggXp })),
+};
+
+/**
+ * Test content where farms bake cookies (#85): 31 XP a harvest reaches the bakery's tier 2 at
+ * Level 4 in one tending, and a 12-good barn holds chicken feed, eggs and cookies together.
+ */
+const cookieContent: Content = {
+	...sliceContent,
+	start: { ...sliceContent.start, coins: 2_000 },
+	silo: { capacity: 100_000 },
+	barn: { capacity: 12 },
+	crops: { wheat: { ...wheat, xp: 31 } },
 };
 
 /** A time at or after the farm's, from the generated delays (never before: see 14.7). */
@@ -395,6 +436,23 @@ describe("the generated farms", () => {
 		}
 	});
 
+	it("bake cookies with eggs at bakery tier 2 and collect them, so the cookie branches aren't vacuous (#85)", () => {
+		const counts = countReached(
+			cookieContent,
+			({ action, before, after }) => [
+				...(action.type === "startJob" && action.recipe === "cookies" ? ["cookies started"] : []),
+				...((after.barn["cookies"] ?? 0) > (before.barn["cookies"] ?? 0)
+					? ["cookies collected"]
+					: []),
+			],
+			() => [],
+		);
+
+		for (const key of ["cookies started", "cookies collected"]) {
+			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+		}
+	});
+
 	it("keep chickens, fill the barn and cross Levels by collecting eggs, so the pen properties aren't vacuous (#86)", () => {
 		const counts = countReached(
 			eggContent,
@@ -423,6 +481,7 @@ describe("the generated farms", () => {
 describe.each([
 	...contents,
 	["a farm whose eggs cross Levels and fill the barn", eggContent, sliceRecipes, richEggXp],
+	["a farm that bakes cookies", cookieContent, sliceRecipes, 1],
 ] as const)("the Level, plot and pen properties, over %s", (_name, content, recipes, eggXp) => {
 	const levelSim = createSim(content);
 	const crop = content.crops.wheat;
@@ -487,8 +546,11 @@ describe.each([
 			fc.property(farmId, timedActions, (id, played) => {
 				for (const { action, at, before, after } of play(levelSim, id, played).transitions) {
 					const gained = (after.silo["wheat"] ?? 0) - (before.silo["wheat"] ?? 0);
-					// Feeding and collecting eggs change the barn too; their branches below check it exactly.
-					const isBarnChanged = ["collect", "feed", "collectProducts"].includes(action.type);
+					// Feeding, collecting eggs and starting a job that takes eggs change the barn too;
+					// their branches below check it exactly.
+					const isBarnChanged = ["collect", "feed", "collectProducts", "startJob"].includes(
+						action.type,
+					);
 					if (!isBarnChanged) expect(after.barn).toEqual(before.barn);
 					if (action.type === "feed") {
 						// A one-portion trough takes one portion a feeding (MUST-02.2, 02.5).
@@ -525,7 +587,9 @@ describe.each([
 						const last = jobs[jobs.length - 1];
 						const from = last?.status === "running" ? Math.max(at, last.readyAt) : at;
 						const queue = after.facilities[action.facility]?.jobs ?? [];
+						expect(tier).toBeGreaterThanOrEqual(made?.tier ?? NaN);
 						expect(gained).toBe(-(made?.wheat ?? NaN));
+						expect(after.barn).toEqual(changeGood(before.barn, "egg", -(made?.eggs ?? NaN)));
 						expect(queue).toHaveLength(jobs.length + 1);
 						expect(queue[queue.length - 1]).toEqual({
 							status: "running",
@@ -595,7 +659,7 @@ describe.each([
 		);
 	});
 
-	it("MUST-14.5: an egg is the portion its chicken ate, so feed and eggs total what the feed mill made", () => {
+	it("MUST-14.5: an egg is the portion its chicken ate, so feed and eggs total what the feed mill made, less the eggs baked", () => {
 		const feedJob = recipes.get("chickenFeed")?.amount ?? NaN;
 		fc.assert(
 			fc.property(farmId, timedActions, delay, (id, played, wait) => {
@@ -606,6 +670,8 @@ describe.each([
 						const [job] = levelSim.advance(before, at).facilities[action.facility]?.jobs ?? [];
 						if (job?.recipe === "chickenFeed") made += feedJob;
 					}
+					// Cookies take their eggs from the barn as the job starts (#85).
+					if (action.type === "startJob") made -= recipes.get(action.recipe)?.eggs ?? NaN;
 					expect(countFeedAndEggs(after)).toBe(made);
 				}
 				expect(countFeedAndEggs(levelSim.advance(final, addDelay(final, wait)))).toBe(made);

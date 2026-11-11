@@ -58,7 +58,7 @@ const penIndex = fc.oneof(
 
 /** Mostly the slice's recipes, sometimes one the facility lacks or not in content. */
 const recipe = fc.oneof(
-	{ weight: 9, arbitrary: fc.constantFrom("chickenFeed", "bread") },
+	{ weight: 9, arbitrary: fc.constantFrom("chickenFeed", "bread", "cookies") },
 	{ weight: 1, arbitrary: fc.constant("cake") },
 );
 
@@ -213,6 +213,39 @@ const buyTiers = delay.map((wait): TimedAction[] =>
 	}),
 );
 
+/**
+ * Baking cookies (#85, #72 D4), from the field up: tend the start's plots until they ripen, make
+ * chicken feed, feed the chickens and collect their eggs once laid, then buy the bakery, try
+ * cookies at its tier 1 (refused), buy its tier 2, start two cookies jobs and collect them after a
+ * wait (MUST-03.1, 03.2). The waits that
+ * ripen and lay are fixed, or random runs would rarely hold wheat and eggs at once. Refused and
+ * skipped while the barn holds too few eggs or the bakery or its tier 2 is locked.
+ */
+const bake = delay.map((wait): TimedAction[] => {
+	const plots = allPlots.slice(0, startPlots);
+	return [
+		...plots.map((plot): TimedAction => ({
+			action: { type: "plant", plot, crop: "wheat" },
+			delay: 0,
+		})),
+		...plots.map((plot, i): TimedAction => ({
+			action: { type: "harvest", plot },
+			delay: i === 0 ? 120_000 : 0,
+		})),
+		{ action: { type: "buyFacility", facility: 0 }, delay: 0 },
+		{ action: { type: "buyPen", pen: 0 }, delay: 0 },
+		...makeFeed(60_000),
+		...repeat({ type: "feed", pen: 0 }, 4),
+		{ action: { type: "collectProducts", pen: 0 }, delay: 180_000 },
+		{ action: { type: "buyFacility", facility: 1 }, delay: 0 },
+		{ action: { type: "startJob", facility: 1, recipe: "cookies" }, delay: 0 },
+		{ action: { type: "buyTier", facility: 1, tier: 2 }, delay: 0 },
+		...repeat({ type: "startJob", facility: 1, recipe: "cookies" }, 2),
+		{ action: { type: "collect", facility: 1 }, delay: Math.abs(wait) },
+		{ action: { type: "collect", facility: 1 }, delay: 0 },
+	];
+});
+
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
 	{ weight: 2, arbitrary: tend },
@@ -220,6 +253,7 @@ const chunk = fc.oneof(
 	{ weight: 2, arbitrary: produce },
 	{ weight: 2, arbitrary: keepChickens },
 	{ weight: 2, arbitrary: buyTiers },
+	{ weight: 2, arbitrary: bake },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());
