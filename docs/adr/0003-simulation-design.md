@@ -394,6 +394,42 @@ portion reads its duration; the shared `storage/` module (section 12).
 - **Products straight to the barn as they are produced.** MUST-02.4 keeps products in the pen
   until collected, and a full barn would then need a rule for where a product goes.
 
+## 14. Facility tiers (#85)
+
+Chosen by #85's lane on 11 Nov, unattended; the admin reviews it in #85's PRs ("Decided by the
+lane").
+
+- **Content.** A facility keeps its tier-1 `slots` and lists the tiers it can be upgraded to,
+  tier 2 first, as rows of price, slots and `timePerMille`. The highest tier is the last row, so
+  the slice stops at 3 (MUST-06.2) and SHOULD-08 adds rows. The Level table lists each tier it
+  unlocks as `{ facility, tier }` (MUST-05.5), read by `progress/`'s `findTierLevel`.
+- **Buying.** `buyTier` names the facility and the tier, which must be the facility's next, so an
+  action sent twice buys one tier. It goes through `purchase` (section 11) and only raises the
+  stored `tier` (section 12): no new field in the state.
+- **Job times.** A tier's time is the recipe's `seconds` times its per mille, rounded down to whole
+  seconds, then in ms, worked out for every tier once in `createSim` (sections 3, 10). Whole
+  seconds let #89's content check hold every tier's time to MUST-10.4's 10 s–24 h, which it has
+  to check per tier: a recipe's tier-1 `seconds` alone doesn't bound it.
+- **Reads.** `startJob` reads the slots and the time of the facility's tier when it runs, and the
+  job stores its `readyAt` (section 12), so a tier bought later never moves a job already queued or
+  running (MUST-03.3, 06.7; ADR-0006, section 7). The Loop (#88) restarts through `startJob` and
+  reads them the same way.
+
+**Patterns:** the policy function of section 11 for buying; a table of tier rows looked up by
+index (table-driven rules); integer fixed-point arithmetic (section 10) for job times.
+
+**Rejected:**
+
+- **Slots as a formula in the rules** (one more every 2nd tier, up to a maximum). MUST-06.2's
+  shape would be fixed in code, while the spec puts numbers in content; a row per tier states it
+  and #89's content check holds it to MUST-06.2.
+- **A seconds list per recipe and tier.** More numbers to tune for one rule; a per mille per tier
+  shortens every recipe alike.
+- **A growing price curve per facility,** as plots have (section 11). Each tier already has a row
+  for its slots and time, so its price sits there.
+- **The unlock Level in the tier row.** MUST-05.5 puts every unlock in the Level table.
+- **`buyTier` with no tier.** A resent action would buy two tiers.
+
 ## Vocabulary (D11)
 
 **Automated step** (`GLOSSARY.md`): a change the farm makes by itself at a server time, with no
@@ -420,6 +456,7 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
 | Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding and collecting from pens (sections 12, 13). |
 | Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
+| Table-driven rules | a facility's tier rows | Each tier's price, slots and job time is a row of content, so tuning or adding a tier changes no code (section 14). |
 
 ## Consequences
 
