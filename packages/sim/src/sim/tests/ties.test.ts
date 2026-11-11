@@ -61,7 +61,7 @@ const barnRoom = (farm: FarmState): number =>
  * last barn space when both have one and the room holds one facility's goods but not both. The
  * Loops compete for the last wheat when both have one, the silo holds one recipe's wheat but not
  * both, and one Loop is left with a free slot it can't fill. A Collector stops a Loop when the
- * facility whose goods didn't fit has a Loop: its goods keep the slot (ADR-0003, section 2).
+ * facility whose goods didn't fit has a Loop: its goods keep the slot (ADR-0003, sections 2 and 13).
  */
 function classify({ at, from }: Tie): string[] {
 	const before = sim.advance(from, at - 1);
