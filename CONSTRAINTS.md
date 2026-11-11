@@ -373,11 +373,7 @@ the guard sees only the PR's own diff.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| E2 | config-loosened | `eslint.config.mjs` | #125 part 2: `tseslint.configs.strict` is replaced by `strictTypeChecked`, which includes it, plus `stylisticTypeChecked` (ADR-0005, section 6). `disableTypeChecked` covers only JS and config files, where no typed rule ran before; the default-export rule's `ignores` keeps it out of Next's `app/`. No rule that ran before is turned off | Soto | 2026-11-23 |
-| E3 | config-loosened | `vitest.config.mts` | #125 part 2: `coverage.exclude` adds `**/tests/**`, so test helpers aren't counted as source. Every source file stays under `coverage.include`, since source never sits in a `tests/` folder (ADR-0005, section 4) | Soto | 2026-11-23 |
-| E4 | config-loosened | `packages/sim/tsconfig.json` | #125 part 2: `exclude` adds `src/**/tests/**`, which `tsconfig.test.json` now compiles, with the same strict options (ADR-0005, section 4) | Soto | 2026-11-23 |
-| E5 | config-loosened | `.fallowrc.jsonc` | #125 part 2c: the new Fallow config sets `ignoreDefaults: false`, which tightens: Fallow's defaults leave `*.test.ts` files out of duplication, and the duplication row covers the sim's tests | Soto | 2026-11-23 |
-| E6 | config-loosened | `eslint.config.mjs` | #125 part 3: the new file-name rules' `ignores` keeps them out of Next's `app/`, whose file names the framework dictates (ADR-0005, section 5). No rule that ran before changes | Soto | 2026-11-23 |
+| _none_ | | | | | |
 
 ## Interview record
 
