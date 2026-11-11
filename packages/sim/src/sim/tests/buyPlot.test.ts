@@ -3,16 +3,9 @@ import { describe, expect, it } from "vitest";
 import { createSim, sliceContent } from "../../index.js";
 import type { FarmState } from "../../index.js";
 import { expectAccepted } from "./expectAccepted.js";
+import { farmAt } from "./farmAt.js";
 
 const sim = createSim(sliceContent);
-const xpOfLevel = (level: number): number => sliceContent.levels[level - 1]?.xp ?? 0;
-
-/** A new farm at `level` with `coins`. */
-const farmAt = (level: number, coins: number): FarmState => ({
-	...sim.newFarm("farm-1"),
-	xp: xpOfLevel(level),
-	coins,
-});
 
 /** Buys the next plot, `times` times; fails the test on a refusal. */
 const buyPlots = (farm: FarmState, times: number): FarmState =>

@@ -22,6 +22,14 @@ describe("compareSteps", () => {
 		]);
 	});
 
+	it("orders by kind before index: a crop ripening, then a job finishing (MUST-10.6)", () => {
+		const finish: AutomatedStep = { at: 10, kind: "finishJob", index: 0, slot: 0 };
+		const ripen = makeStep(10, 5);
+
+		expect([finish, ripen].sort(compareSteps)).toEqual([ripen, finish]);
+		expect([makeStep(11, 0), finish].sort(compareSteps)).toEqual([finish, makeStep(11, 0)]);
+	});
+
 	it("is 0 only for the same step", () => {
 		expect(compareSteps(makeStep(10, 1), makeStep(10, 1))).toBe(0);
 		expect(compareSteps(makeStep(10, 1), makeStep(10, 2))).toBeLessThan(0);

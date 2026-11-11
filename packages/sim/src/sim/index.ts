@@ -3,6 +3,13 @@
 import { advanceFarm, assertTime } from "../advance/index.js";
 import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
+import {
+	buyFacility,
+	jobFinishing,
+	newFacilities,
+	prepareFacilityRules,
+	startJob,
+} from "../facilities/index.js";
 import { buyPlot, harvest, plant, preparePlotRules, ripening } from "../plots/index.js";
 import { prepareProgressRules } from "../progress/index.js";
 import { streamSeed } from "../random/index.js";
@@ -31,6 +38,7 @@ export function createSim(content: Content): Sim {
 	const progress = prepareProgressRules(content);
 	const storage = prepareStorageRules(content);
 	const plotRules = preparePlotRules(content, progress, storage);
+	const facilityRules = prepareFacilityRules(content, progress, storage);
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
 	return {
@@ -41,6 +49,7 @@ export function createSim(content: Content): Sim {
 			silo: {},
 			barn: {},
 			plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
+			facilities: newFacilities(facilityRules),
 			streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
 		}),
 		apply: (state, action, at) => {
@@ -59,6 +68,10 @@ export function createSim(content: Content): Sim {
 					return harvest(farm, action.plot, plotRules);
 				case "buyPlot":
 					return buyPlot(farm, action.plot, plotRules);
+				case "buyFacility":
+					return buyFacility(farm, action.facility, facilityRules);
+				case "startJob":
+					return startJob(farm, action.facility, action.recipe, facilityRules);
 			}
 		},
 		advance,
@@ -70,4 +83,4 @@ export function createSim(content: Content): Sim {
  * matters: two steps with the same key are a programmer error, which advanceFarm throws on as a
  * RangeError. Each new kind must keep its keys unique (MUST-10.6).
  */
-const sources: readonly StepSource<FarmState>[] = [ripening];
+const sources: readonly StepSource<FarmState>[] = [ripening, jobFinishing];
