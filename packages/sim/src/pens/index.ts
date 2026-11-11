@@ -53,7 +53,7 @@ export function preparePenRules(
 	const pens = content.pens.map((pen): PenRule => ({
 		id: pen.id,
 		price: pen.price,
-		level: unlockLevel(pen.id, content),
+		level: progress.penLevels.get(pen.id) ?? null,
 		animals: pen.animals,
 		feed: pen.feed,
 		troughCapacity: pen.troughCapacity,
@@ -139,12 +139,6 @@ function eat(pen: OwnedPen, rule: PenRule, time: number): OwnedPen {
 		return { status: "producing", readyAt };
 	});
 	return { ...pen, trough, animals };
-}
-
-/** The first Level that lists the pen, in the table's array order (MUST-10.6). */
-function unlockLevel(id: string, content: Content): number | null {
-	const i = content.levels.findIndex((level) => level.pens.includes(id));
-	return i === -1 ? null : i + 1;
 }
 
 function findRule(index: number, rules: PenRules): PenRule | null {
