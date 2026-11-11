@@ -59,7 +59,8 @@ export function createSim(content: Content): Sim {
 }
 
 /**
- * Every feature's automated steps. advance/'s tie key orders them; this list only breaks a tie
- * between two sources' steps with the same key, which each new kind must rule out (MUST-10.6).
+ * Every feature's automated steps. advance/'s tie key orders them, and this list's order never
+ * matters: two steps with the same key are a programmer error, which advanceFarm throws on as a
+ * RangeError. Each new kind must keep its keys unique (MUST-10.6).
  */
 const sources: readonly StepSource<FarmState>[] = [ripening];

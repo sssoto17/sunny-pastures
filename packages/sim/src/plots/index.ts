@@ -51,6 +51,7 @@ export function plant(
 ): ApplyResult {
 	const plot = findPlot(farm, index);
 	if (plot === null) return refuse(`There is no plot ${formatPlotNumber(index)}.`);
+
 	const crop = rules.crops.get(cropId);
 	if (crop === undefined) return refuse(`There is no crop ${cropId}.`);
 	if (plot.status !== "empty") return refuse(`Plot ${formatPlotNumber(index)} isn't empty.`);
@@ -79,6 +80,7 @@ export function harvest(farm: FarmState, index: number, rules: PlotRules): Apply
 	if (plot.status !== "ready") {
 		return refuse(`Plot ${formatPlotNumber(index)} isn't ready to harvest.`);
 	}
+
 	const crop = rules.crops.get(plot.crop);
 	if (crop === undefined) return refuse(`There is no crop ${plot.crop}.`);
 

@@ -30,6 +30,14 @@ describe("planting", () => {
 		expect(sim.apply(farm, { type: "plant", ...target }, 0)).toEqual({ ok: false, reason });
 	});
 
+	it("spends the last coins when the farm has exactly the seed price (MUST-01.1)", () => {
+		const exact = { ...sim.newFarm("farm-1"), coins: wheat.seedPrice };
+		const farm = expectAccepted(sim.apply(exact, { type: "plant", plot: 0, crop: "wheat" }, 0));
+
+		expect(farm.coins).toBe(0);
+		expect(farm.plots[0]?.status).toBe("growing");
+	});
+
 	it("is refused if the farm has too few coins (MUST-01.1)", () => {
 		const poor = { ...sim.newFarm("farm-1"), coins: wheat.seedPrice - 1 };
 
