@@ -9,6 +9,7 @@ import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Content, FarmState } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
+import type { Transition } from "../../state/tests/farms.js";
 
 const params = inject("fastCheck");
 const { wheat } = sliceContent.crops;
@@ -264,25 +265,39 @@ describe.each(contents)("the sim's properties, over %s", (_name, content) => {
 	});
 });
 
+/**
+ * Plays the generated runs over `content` and counts the cases each run reaches: the keys `name`
+ * gives a transition, and the keys `nameRefusal` gives a refusal's reason.
+ */
+const countReached = (
+	content: Content,
+	name: (transition: Transition) => readonly string[],
+	nameRefusal: (reason: string) => readonly string[],
+): ReadonlyMap<string, number> => {
+	const sim = createSim(content);
+	const counts = new Map<string, number>();
+	for (const [id, played] of fc.sample(fc.tuple(farmId, timedActions), params)) {
+		const { transitions, refusals } = play(sim, id, played);
+		const keys = [...transitions.flatMap(name), ...refusals.flatMap(nameRefusal)];
+		for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
+	}
+	return counts;
+};
+
 describe("the generated farms", () => {
 	it("start and collect jobs, fill the barn and cross Levels by collecting, so the job properties aren't vacuous (#84)", () => {
-		const rich = createSim(richContent);
-		const counts = new Map<string, number>();
-		const count = (key: string): void => {
-			counts.set(key, (counts.get(key) ?? 0) + 1);
-		};
-		for (const [id, played] of fc.sample(fc.tuple(farmId, timedActions), params)) {
-			const { transitions, refusals } = play(rich, id, played);
-			for (const { action, before, after } of transitions) {
-				if (action.type === "startJob" || action.type === "collect") {
-					count(`${action.type} ${String(action.facility)}`);
-				}
-				if (action.type === "collect" && levelAt(after.xp) > levelAt(before.xp)) {
-					count("collect reaches a Level");
-				}
-			}
-			for (const reason of refusals) if (reason.startsWith("The barn has room")) count("barn full");
-		}
+		const counts = countReached(
+			richContent,
+			({ action, before, after }) => [
+				...(action.type === "startJob" || action.type === "collect"
+					? [`${action.type} ${String(action.facility)}`]
+					: []),
+				...(action.type === "collect" && levelAt(after.xp) > levelAt(before.xp)
+					? ["collect reaches a Level"]
+					: []),
+			],
+			(reason) => (reason.startsWith("The barn has room") ? ["barn full"] : []),
+		);
 
 		for (const key of [
 			"startJob 0",
@@ -297,26 +312,17 @@ describe("the generated farms", () => {
 	});
 
 	it("keep chickens, fill the barn and cross Levels by collecting eggs, so the pen properties aren't vacuous (#86)", () => {
-		const eggs = createSim(eggContent);
-		const counts = new Map<string, number>();
-		const count = (key: string): void => {
-			counts.set(key, (counts.get(key) ?? 0) + 1);
-		};
-		for (const [id, played] of fc.sample(fc.tuple(farmId, timedActions), params)) {
-			const { transitions, refusals } = play(eggs, id, played);
-			for (const { action, before, after } of transitions) {
-				if (action.type === "buyPen" || action.type === "feed") count(action.type);
-				if (action.type === "collectProducts") count("collectProducts");
-				if (action.type === "collectProducts" && levelAt(after.xp) > levelAt(before.xp)) {
-					count("collectProducts reaches a Level");
-				}
-			}
-			for (const reason of refusals) {
-				if (reason.includes("collecting from the chickenPen")) {
-					count("barn full on collectProducts");
-				}
-			}
-		}
+		const counts = countReached(
+			eggContent,
+			({ action, before, after }) => [
+				...(["buyPen", "feed", "collectProducts"].includes(action.type) ? [action.type] : []),
+				...(action.type === "collectProducts" && levelAt(after.xp) > levelAt(before.xp)
+					? ["collectProducts reaches a Level"]
+					: []),
+			],
+			(reason) =>
+				reason.includes("collecting from the chickenPen") ? ["barn full on collectProducts"] : [],
+		);
 
 		for (const key of [
 			"buyPen",
