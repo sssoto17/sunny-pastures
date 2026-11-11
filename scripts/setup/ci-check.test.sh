@@ -262,5 +262,15 @@ assert "expected one deletion only" test "$(grep -c 'api -X DELETE' <<<"$calls")
 assert "expected #101's PR left open" lacks "$calls" "pr close"
 assert "expected #101's PR not even looked up" lacks "$calls" "pr list"
 
+# cleanup 102 likewise deletes only throwaway/102-project.
+reset
+echo '[{"number":42}]' >"$work/fx/prs.json"
+all_branches
+run cleanup 102
+expect_code 0
+assert "expected 102's branch deleted" contains "$calls" "git/refs/heads/throwaway/102-project"
+assert "expected one deletion only" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 1
+assert "expected #101's PR left open" lacks "$calls" "pr close"
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))
