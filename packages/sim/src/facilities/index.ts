@@ -21,7 +21,7 @@ export interface OwnedFacility {
 	 * (MUST-06.5); null until a job starts. Stored, since the queue forgets it once collected.
 	 */
 	readonly lastRecipe: string | null;
-	/** Whether the farm has bought each add-on for this facility; none when bought (MUST-06.8). */
+	/** Whether the farm has bought each add-on for this facility; none when bought, since an add-on exists on the farm only once bought (MUST-05.6). */
 	readonly addOns: Readonly<Record<AddOn, boolean>>;
 }
 

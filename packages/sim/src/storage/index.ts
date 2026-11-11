@@ -71,6 +71,11 @@ export function take(
 	return { ok: true, state: current };
 }
 
+/** How many of `good` the farm holds, in the good's store (#86: feeding fills a trough from it). */
+export function countStored(farm: FarmState, good: string, rules: StorageRules): number {
+	return countHeld(farm, findStore(good, rules), good);
+}
+
 type Store = "silo" | "barn";
 
 function findStore(good: string, rules: StorageRules): Store {

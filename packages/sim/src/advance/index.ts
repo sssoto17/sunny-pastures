@@ -9,8 +9,10 @@
  *   today. Kinds that produce goods rank before the kinds that will move or use them (the
  *   Collector and the Loop, #88), so a step sees what was produced at the same time (ADR-0003,
  *   section 12).
+ * - `produce` (#86) after `finishJob`, for the same reason: it touches neither storage nor coins
+ *   and changes only its own pen (ADR-0003, section 13).
  */
-const stepKinds = ["ripen", "finishJob"] as const;
+const stepKinds = ["ripen", "finishJob", "produce"] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 

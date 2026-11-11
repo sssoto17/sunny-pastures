@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { sliceContent } from "../../content/index.js";
 import { createSim } from "../../sim/index.js";
 import type { FarmState } from "../../state/index.js";
-import { prepareStorageRules, put, take } from "../index.js";
+import { countStored, prepareStorageRules, put, take } from "../index.js";
 
 const rules = prepareStorageRules(sliceContent);
 const newFarm = createSim(sliceContent).newFarm("farm-1");
@@ -108,5 +108,15 @@ describe("take", () => {
 			ok: false,
 			reason: "Making bread needs 2 wheat, and the silo has 1.",
 		});
+	});
+});
+
+describe("countStored", () => {
+	it("counts a good in its store, 0 when it has no key", () => {
+		const farm = farmWith({ wheat: 4 }, { chickenFeed: 2 });
+
+		expect(countStored(farm, "chickenFeed", rules)).toBe(2);
+		expect(countStored(farm, "wheat", rules)).toBe(4);
+		expect(countStored(farm, "egg", rules)).toBe(0);
 	});
 });
