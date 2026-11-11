@@ -3,7 +3,8 @@
 // approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83);
 // the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
 // lane"); the chicken pen chosen by #86's lane (11 Nov, its PRs' "Decided by the lane"); the tiers
-// chosen by #85's lane (11 Nov, its PRs' "Decided by the lane"). All to be tuned after playtest 1.
+// and cookies chosen by #85's lane (11 Nov, its PRs' "Decided by the lane"). All to be tuned after
+// playtest 1.
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
@@ -227,6 +228,16 @@ export const sliceContent = {
 					output: { good: "bread", amount: 1 },
 					seconds: 300,
 					xp: 2,
+				},
+				cookies: {
+					tier: 2,
+					inputs: [
+						{ good: "wheat", amount: 2 },
+						{ good: "egg", amount: 2 },
+					],
+					output: { good: "cookies", amount: 1 },
+					seconds: 500,
+					xp: 5,
 				},
 			},
 		},
