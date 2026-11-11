@@ -218,8 +218,9 @@ usage: scripts/setup/ci-apps.sh
 Walks you through #101's setup, one stage per screen:
   1. checks gh is signed in;
   2. creates the Actions environments `factory` and `review` if missing, each with a custom
-     deployment-branch policy allowing only `main` and `throwaway/*` (an existing environment
-     is never re-created, so its other protection rules stay);
+     deployment-branch policy allowing `main` and `throwaway/*` (an existing environment is never
+     re-created, so its other protection rules stay; patterns already there beyond those two are
+     listed with a warning, never deleted);
   3-5. sunny-factory: register it (contents, issues and pull requests: read and write), store its
        client ID as FACTORY_APP_CLIENT_ID and its key as FACTORY_APP_PRIVATE_KEY in `factory`,
        install it on sssoto17/sunny-pastures only;
@@ -246,12 +247,13 @@ case ${1-} in
 esac
 
 # ensure_env ENV: create ENV only if it is missing, and give it a custom deployment-branch policy
-# allowing only the branches in BRANCH_POLICIES, adding just the patterns it lacks. Idempotent:
+# allowing the branches in BRANCH_POLICIES, adding just the patterns it lacks; other patterns are
+# listed with a warning, never deleted. Idempotent:
 # GitHub's REST reference doesn't say what a PUT without a body does to existing protection rules,
 # so an environment that exists with the custom policy is never PUT again.
 BRANCH_POLICIES=(main 'throwaway/*')
 ensure_env() {
-  local env=$1 policy have name
+  local env=$1 policy have name extra
   policy=$(gh api "repos/$REPO/environments/$env" --jq \
     '.deployment_branch_policy // {} | "\(.protected_branches) \(.custom_branch_policies)"' 2>/dev/null) ||
     policy=missing
@@ -261,15 +263,25 @@ ensure_env() {
       -F 'deployment_branch_policy[custom_branch_policies]=true' ||
       die 1 "creating or restricting environment $env failed"
   fi
+  # Every policy, as "<type> <name>": ours are branch policies. Others are never deleted, only
+  # reported, since someone put them there on purpose.
   have=$(gh api "repos/$REPO/environments/$env/deployment-branch-policies" \
-    --jq '.branch_policies[] | select((.type // "branch") == "branch") | .name') ||
+    --jq '.branch_policies[] | "\(.type // "branch") \(.name)"') ||
     die 1 "reading the branch policies of $env failed"
   for name in "${BRANCH_POLICIES[@]}"; do
-    grep -qxF -- "$name" <<<"$have" && continue
+    grep -qxF -- "branch $name" <<<"$have" && continue
     gh api -X POST "repos/$REPO/environments/$env/deployment-branch-policies" --silent \
       -f "name=$name" -f type=branch || die 1 "adding branch policy $name to $env failed"
   done
-  printf '  %s✓ environment%s %s: only %s may use it\n' "$GREEN" "$RESET" "$env" "${BRANCH_POLICIES[*]}"
+  extra=$(grep -vxF -e "branch ${BRANCH_POLICIES[0]}" -e "branch ${BRANCH_POLICIES[1]}" <<<"$have" |
+    grep . || true)
+  if [[ -z $extra ]]; then
+    printf '  %s✓ environment%s %s: only %s may use it\n' "$GREEN" "$RESET" "$env" "${BRANCH_POLICIES[*]}"
+  else
+    printf '  %s✓ environment%s %s: %s may use it\n' "$GREEN" "$RESET" "$env" "${BRANCH_POLICIES[*]}"
+    warn "$env also has these patterns, so they can read its secrets too (left as they are):"
+    while IFS= read -r name; do note "    $name"; done <<<"$extra"
+  fi
 }
 
 # intro TITLE: the opening frame. Used instead of the library's banner, whose text promises
