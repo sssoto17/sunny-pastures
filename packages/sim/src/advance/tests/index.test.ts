@@ -67,4 +67,27 @@ describe("advanceFarm", () => {
 	it("throws a RangeError on a time that isn't a safe integer (D7)", () => {
 		expect(() => advanceFarm(makeToy([]), 1.5, [toySource])).toThrow(RangeError);
 	});
+
+	it("throws a RangeError on a source whose run doesn't remove the step it ran", () => {
+		const stuck: StepSource<Toy> = { steps: (farm) => farm.due, run: (farm) => farm };
+
+		expect(() => advanceFarm(makeToy([makeStep(5, 0)]), 20, [stuck])).toThrow(
+			"doesn't come after the one run before it",
+		);
+	});
+
+	it("throws a RangeError on a source that schedules a step before the one it ran", () => {
+		const backwards: StepSource<Toy> = {
+			steps: (farm) => farm.due,
+			run: (farm, ran) => ({ ...farm, due: ran.index === 1 ? [makeStep(ran.at, 0)] : [] }),
+		};
+
+		expect(() => advanceFarm(makeToy([makeStep(5, 1)]), 20, [backwards])).toThrow(RangeError);
+	});
+
+	it("throws a RangeError on a step before the farm's time, rather than run it late (D7)", () => {
+		const overdue = { ...makeToy([makeStep(5, 0)]), time: 8 };
+
+		expect(() => advanceFarm(overdue, 20, [toySource])).toThrow("is overdue");
+	});
 });
