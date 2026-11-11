@@ -16,6 +16,11 @@ export interface Content {
 	 * it adds (MUST-05.4). Level 1's XP is 0, and the thresholds rise strictly (MUST-10.4).
 	 */
 	readonly levels: readonly LevelRow[];
+	/**
+	 * What the plots beyond the start cost (MUST-06.1): the first `first` coins, and each next one
+	 * `growthPerMille` / 1000 times the one before, rounded down (D16: integers only, no Math.pow).
+	 */
+	readonly plotPrice: { readonly first: number; readonly growthPerMille: number };
 }
 
 /** One Level of the Level table: what reaching it takes, pays and unlocks. */
@@ -64,4 +69,5 @@ export const sliceContent = {
 		{ xp: 60, coins: 40, crops: [], plots: 2 },
 		{ xp: 100, coins: 50, crops: [], plots: 2 },
 	],
+	plotPrice: { first: 20, growthPerMille: 1500 },
 } as const satisfies Content;

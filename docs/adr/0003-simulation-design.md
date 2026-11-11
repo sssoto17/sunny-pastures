@@ -254,6 +254,51 @@ Approved by the admin on 8 Nov, in the review of this ADR (PR #100).
 - **A pure-TypeScript deterministic maths library.** More code to verify, for curves that integers
   already express.
 
+## 11. Progress: a derived Level and one purchase rule (#83)
+
+Approved by the admin on 11 Nov, in #83's interface review.
+
+`progress/` owns the Level, unlocks and buying (ADR-0005, section 3). Its interface:
+
+- `levelOf(xp)`: the Level is the number of Level-table rows whose XP the farm has reached
+  (MUST-05.3). It is derived on every call and never stored (section 5).
+- `gainXp(farm, xp)`: every rule that earns XP calls it. It pays the level-up coins of each Level
+  whose XP lies above the farm's old XP and at or below its new XP (MUST-05.4). XP never goes
+  down, so each Level is crossed, and paid, once in a farm's life, however many Levels one gain
+  crosses. The state needs no "paid" flag. That holds within one rules version. A version that
+  moves a Level's XP across farms that already passed it would pay that Level twice, or never, so
+  its `upgrade` handles those farms (ADR-0006, section 6).
+- `purchase(farm, offer)`: the one purchase rule (spec decision 1, MUST-05.6, D3). An offer names
+  what is bought, the Level that unlocks it and its price. A purchase is refused while the farm is
+  below that Level or has too few coins (MUST-05.1). Otherwise the farm pays the price, and the
+  caller adds what was bought. Plots are its first use. Facilities and pens (#84, #86) build on
+  it.
+- `cropLocked(cropId, xp)`: why a crop can't be planted yet, or null once its Level is reached
+  (MUST-01.1). A crop that no Level lists is never unlocked. #89's content check keeps every crop
+  reachable (MUST-05.5).
+
+The Level table lives in content, as one row per Level, Level 1 first. Each row gives the XP that
+reaches the Level, its level-up coins and what it adds: crops, and the extra plots the farm may
+buy. #84–#88 add their own fields. A growing price, such as a plot's, is computed by repeated
+integer steps in content's per-mille (section 10), once in `createSim`.
+
+`buyPlot` names the plot it buys, which must be the farm's next one. An action sent twice
+therefore buys one plot, and the sim refuses the second, on top of ADR-0001's idempotency keys.
+
+**Patterns:** single source of truth for derived values (the Level); policy function (one purchase
+rule shared by every upgrade); integer fixed-point arithmetic (the price curve).
+
+**Rejected:**
+
+- **Storing the Level or the Levels already paid.** Two copies can disagree, and a content change
+  would leave stale values (section 5). Crossing thresholds already pays each Level once.
+- **A purchase rule per feature.** The Level and coin refusals would be written several times and
+  could drift. ADR-0005 puts the shared rule in `progress/`'s interface.
+- **A price list per plot in content.** Simpler to read, but #85's growing costs would need a
+  second list per facility. A first price and a per-mille growth state the curve once.
+- **`Math.pow(growth, n)` for the curve.** Its float result can differ between engines (section 10).
+- **`buyPlot` with no plot.** A resent action would buy a second plot.
+
 ## Vocabulary (D11)
 
 **Automated step** (`GLOSSARY.md`): a change the farm makes by itself at a server time, with no
@@ -275,6 +320,7 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Seeded PRNG, independent streams per purpose | yields, orders | Deterministic, and a draw in one rule doesn't shift another. |
 | Property-based testing | MUST-14 | Generated farms reach the tie and storage cases; a fixed seed makes failures reproducible. |
 | Integer fixed-point arithmetic | multipliers, growing costs | The same result in every JavaScript engine, so client and server hashes agree. |
+| Policy function | `progress/`'s `purchase` | One rule for every upgrade: unlocked at a Level, then bought with coins (section 11). |
 
 ## Consequences
 

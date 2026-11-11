@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { sliceContent } from "../../content/index.js";
 import { createSim } from "../../sim/index.js";
-import { cropLocked, gainXp, levelOf, prepareProgressRules } from "../index.js";
+import { cropLocked, gainXp, levelOf, prepareProgressRules, purchase } from "../index.js";
 
 const rules = prepareProgressRules(sliceContent);
 const newFarm = createSim(sliceContent).newFarm("farm-1");
@@ -39,6 +39,38 @@ describe("gainXp", () => {
 
 	it("returns the farm itself for no XP", () => {
 		expect(gainXp(newFarm, 0, rules)).toBe(newFarm);
+	});
+});
+
+describe("purchase", () => {
+	const offer = { what: "Plot 7", level: 2, price: 20 };
+	const level2 = { ...newFarm, xp: 10, coins: 30 };
+
+	it("takes the price once the farm's Level unlocks it (spec decision 1, MUST-05.6)", () => {
+		expect(purchase(level2, offer, rules)).toEqual({ ok: true, state: { ...level2, coins: 10 } });
+	});
+
+	it("spends the last coins when the farm has exactly the price (MUST-05.1)", () => {
+		const exact = { ...level2, coins: 20 };
+
+		expect(purchase(exact, offer, rules)).toEqual({ ok: true, state: { ...exact, coins: 0 } });
+	});
+
+	it.each([
+		[
+			"below the Level that unlocks it",
+			{ ...level2, xp: 9 },
+			offer,
+			"Plot 7 isn't unlocked: it unlocks at Level 2, and the farm is at Level 1.",
+		],
+		[
+			"with too few coins (MUST-05.1)",
+			{ ...level2, coins: 19 },
+			offer,
+			"Plot 7 costs 20 coins, and the farm has 19.",
+		],
+	])("is refused %s", (_name, farm, wanted, reason) => {
+		expect(purchase(farm, wanted, rules)).toEqual({ ok: false, reason });
 	});
 });
 

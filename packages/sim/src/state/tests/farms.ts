@@ -30,13 +30,20 @@ export interface Run {
 	readonly final: FarmState;
 }
 
-/** Mostly the slice's 6 plots, sometimes one out of range. */
+/** The slice's plots: 6 at the start, and up to 14 with the ones bought (#83). */
+const startPlots = 6;
+const allPlots = Array.from({ length: 14 }, (_plot, i) => i);
+
+/** Mostly a plot the farm can have, sometimes one out of range. */
 const plotIndex = fc.oneof(
-	{ weight: 9, arbitrary: fc.integer({ min: 0, max: 5 }) },
-	{ weight: 1, arbitrary: fc.constantFrom(-1, 6, 7) },
+	{ weight: 9, arbitrary: fc.integer({ min: 0, max: 13 }) },
+	{ weight: 1, arbitrary: fc.constantFrom(-1, 14, 15) },
 );
 
-/** Plant and harvest on plots in and out of range, mostly wheat, sometimes a crop not in content. */
+/**
+ * Plant, harvest and buy on plots in and out of range, mostly wheat, sometimes a crop not in
+ * content. A generated buy rarely names the next plot, so it mostly reaches the refusals.
+ */
 const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({
 		type: fc.constant("plant" as const),
@@ -47,6 +54,7 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 		),
 	}),
 	fc.record({ type: fc.constant("harvest" as const), plot: plotIndex }),
+	fc.record({ type: fc.constant("buyPlot" as const), plot: plotIndex }),
 );
 
 /**
@@ -61,21 +69,31 @@ export const delay = fc.oneof(
 );
 
 /**
- * Tending the field: plant every plot, wait, harvest every plot. Repeated, it fills the silo and
- * spends the coins, so the storage and coin refusals are reached (MUST-01.1, 01.3, 14.4).
+ * Tending the field: plant every plot, wait, harvest every plot. Repeated, it fills the silo,
+ * spends the coins and gains Levels, so the storage, coin and Level cases are reached (MUST-01.1,
+ * 01.3, 05.4, 14.4). Plots the farm hasn't bought are refused and skipped.
  */
-const tend = delay.map((wait): TimedAction[] => {
-	const plots = [0, 1, 2, 3, 4, 5];
-	return [
-		...plots.map((plot) => ({ action: { type: "plant", plot, crop: "wheat" } as const, delay: 0 })),
-		{ action: { type: "harvest", plot: 0 }, delay: Math.abs(wait) },
-		...plots.slice(1).map((plot) => ({ action: { type: "harvest", plot } as const, delay: 0 })),
-	];
-});
+const tend = delay.map((wait): TimedAction[] => [
+	...allPlots.map((plot) => ({
+		action: { type: "plant", plot, crop: "wheat" } as const,
+		delay: 0,
+	})),
+	{ action: { type: "harvest", plot: 0 }, delay: Math.abs(wait) },
+	...allPlots.slice(1).map((plot) => ({ action: { type: "harvest", plot } as const, delay: 0 })),
+]);
+
+/**
+ * Buying plots: each next plot in turn, so the farm buys as many as its Level and coins allow,
+ * and the rest reach the Level, coin and maximum refusals (MUST-06.1).
+ */
+const expand: TimedAction[] = allPlots
+	.slice(startPlots)
+	.map((plot) => ({ action: { type: "buyPlot", plot }, delay: 0 }));
 
 const chunk = fc.oneof(
-	{ weight: 1, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
-	{ weight: 1, arbitrary: tend },
+	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
+	{ weight: 2, arbitrary: tend },
+	{ weight: 1, arbitrary: fc.constant(expand) },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());

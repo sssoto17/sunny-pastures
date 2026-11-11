@@ -4,7 +4,7 @@ import fc from "fast-check";
 import { describe, expect, inject, it } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
-import type { FarmState } from "../../index.js";
+import type { Content, FarmState } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
 
@@ -12,17 +12,31 @@ const params = inject("fastCheck");
 const sim = createSim(sliceContent);
 const { wheat } = sliceContent.crops;
 
-// The slice's approved Level table (admin, 11 Nov, #83), written out rather than read from content,
-// so the expected values don't recompute what the rules do.
+// The slice's approved Level table and plot prices (admin, 11 Nov, #83), written out rather than
+// read from content, so the expected values don't recompute what the rules do.
 const levelXp = [0, 10, 30, 60, 100];
 /** The level-up coins paid in all by the time a farm reaches each Level. */
 const paidBy = [0, 20, 50, 90, 140];
+const mostPlots = [6, 8, 10, 12, 14];
+const plotPrices = [20, 30, 45, 67, 100, 150, 225, 337];
 
 /** The Level a farm with `xp` is at (MUST-05.3). */
 const levelAt = (xp: number): number => levelXp.filter((threshold) => threshold <= xp).length;
 
 /** The level-up coins paid in all by the time a farm has `xp` (MUST-05.4). */
 const paidAt = (xp: number): number => paidBy[levelAt(xp) - 1] ?? NaN;
+
+/**
+ * Test content with the slice's Level table and plot prices, but room and coins to reach every
+ * Level and plot: wheat isn't sold yet (#87), so the slice's silo keeps a farm near Level 2.
+ * 31 XP a harvest crosses Levels 2 and 3 in one gain.
+ */
+const richContent: Content = {
+	...sliceContent,
+	start: { ...sliceContent.start, coins: 2_000 },
+	silo: { capacity: 100_000 },
+	crops: { wheat: { ...wheat, xp: 31 } },
+};
 
 /** A time at or after the farm's, from the generated delays (never before: see 14.7). */
 const addDelay = (farm: FarmState, wait: number): number => farm.time + Math.abs(wait);
@@ -96,43 +110,6 @@ describe("the sim's properties", () => {
 		);
 	});
 
-	it("MUST-14.4: coins and goods stay within their bounds, as safe integers", () => {
-		fc.assert(
-			fc.property(farmId, timedActions, (id, played) => {
-				for (const farm of play(sim, id, played).farms) {
-					assertSafeIntegers(farm);
-					expect(farm.coins).toBeGreaterThanOrEqual(0);
-					const counts = Object.values(farm.silo);
-					expect(counts.every((count) => count > 0)).toBe(true);
-					expect(counts.reduce((total, count) => total + count, 0)).toBeLessThanOrEqual(
-						sliceContent.silo.capacity,
-					);
-				}
-			}),
-			params,
-		);
-	});
-
-	it("MUST-14.5: goods and coins change only by planting and harvesting", () => {
-		fc.assert(
-			fc.property(farmId, timedActions, (id, played) => {
-				for (const { action, before, after } of play(sim, id, played).transitions) {
-					const gained = (after.silo["wheat"] ?? 0) - (before.silo["wheat"] ?? 0);
-					if (action.type === "plant") {
-						expect(after.coins).toBe(before.coins - wheat.seedPrice);
-						expect(gained).toBe(0);
-					} else {
-						// A harvest pays the level-up coins of the Levels its XP reaches (MUST-05.4).
-						expect(after.xp).toBe(before.xp + wheat.xp);
-						expect(after.coins).toBe(before.coins + paidAt(after.xp) - paidAt(before.xp));
-						expect([wheat.baseYield, wheat.baseYield + wheat.bonusYield]).toContain(gained);
-					}
-				}
-			}),
-			params,
-		);
-	});
-
 	it("MUST-14.6: a refused action leaves the farm unchanged", () => {
 		fc.assert(
 			fc.property(farmId, timedActions, (id, played) => {
@@ -194,6 +171,88 @@ describe("the sim's properties", () => {
 				for (const farm of [...farms, sim.advance(final, addDelay(final, wait))]) {
 					expect(JSON.parse(JSON.stringify(farm))).toEqual(farm);
 				}
+			}),
+			params,
+		);
+	});
+});
+
+describe.each([
+	["the slice", sliceContent],
+	["a farm that reaches every Level", richContent],
+])("the Level and plot properties, over %s", (_name, content) => {
+	const levelSim = createSim(content);
+	const crop = content.crops.wheat;
+
+	it("MUST-05.1, 14.4: coins, goods and plots stay within their bounds, as safe integers", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				for (const farm of play(levelSim, id, played).farms) {
+					assertSafeIntegers(farm);
+					expect(farm.coins).toBeGreaterThanOrEqual(0);
+					expect(farm.plots.length).toBeLessThanOrEqual(mostPlots[levelAt(farm.xp) - 1] ?? 0);
+					const counts = Object.values(farm.silo);
+					expect(counts.every((count) => count > 0)).toBe(true);
+					expect(counts.reduce((total, count) => total + count, 0)).toBeLessThanOrEqual(
+						content.silo.capacity,
+					);
+				}
+			}),
+			params,
+		);
+	});
+
+	it("MUST-14.5: goods and coins change only by planting, harvesting and buying", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				for (const { action, before, after } of play(levelSim, id, played).transitions) {
+					const gained = (after.silo["wheat"] ?? 0) - (before.silo["wheat"] ?? 0);
+					if (action.type === "plant") {
+						expect(after.coins).toBe(before.coins - crop.seedPrice);
+						expect(gained).toBe(0);
+					} else if (action.type === "buyPlot") {
+						expect(after.coins).toBe(
+							before.coins - (plotPrices[action.plot - content.start.plots] ?? NaN),
+						);
+						expect(after.plots).toHaveLength(before.plots.length + 1);
+						expect(after.xp).toBe(before.xp);
+						expect(gained).toBe(0);
+					} else {
+						// A harvest pays the level-up coins of the Levels its XP reaches (MUST-05.4).
+						expect(after.xp).toBe(before.xp + crop.xp);
+						expect(after.coins).toBe(before.coins + paidAt(after.xp) - paidAt(before.xp));
+						expect([crop.baseYield, crop.baseYield + crop.bonusYield]).toContain(gained);
+					}
+				}
+			}),
+			params,
+		);
+	});
+
+	it("MUST-05.2, 05.3: XP and the Level never go down", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				const { farms } = play(levelSim, id, played);
+				farms.slice(1).forEach((farm, i) => {
+					const before = farms[i]?.xp ?? 0;
+					expect(farm.xp).toBeGreaterThanOrEqual(before);
+					expect(levelAt(farm.xp)).toBeGreaterThanOrEqual(levelAt(before));
+				});
+			}),
+			params,
+		);
+	});
+
+	it("MUST-05.4: over a run, each Level reached pays its level-up coins exactly once", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				const { log, final } = play(levelSim, id, played);
+				const seeds = log.filter(({ action }) => action.type === "plant").length;
+				const plots = final.plots.length - content.start.plots;
+				const spent =
+					seeds * crop.seedPrice + plotPrices.slice(0, plots).reduce((sum, p) => sum + p, 0);
+
+				expect(final.coins).toBe(content.start.coins - spent + paidAt(final.xp));
 			}),
 			params,
 		);

@@ -1,8 +1,8 @@
-// Plots: planting, ripening and harvesting crops (MUST-01).
+// Plots: buying, planting, ripening and harvesting crops (MUST-01, MUST-06.1).
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
-import { cropLocked, gainXp, prepareProgressRules } from "../progress/index.js";
+import { cropLocked, gainXp, prepareProgressRules, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { mulberry32 } from "../random/index.js";
 import { refuse } from "../state/index.js";
@@ -15,15 +15,24 @@ export type Plot =
 	| { readonly status: "growing"; readonly crop: string; readonly readyAt: number }
 	| { readonly status: "ready"; readonly crop: string };
 
-/** The actions on plots (MUST-01). `plot` is an index in content order. */
+/** The actions on plots (MUST-01, MUST-06.1). `plot` is an index in content order. */
 export type PlotAction =
 	| { readonly type: "plant"; readonly plot: number; readonly crop: string }
-	| { readonly type: "harvest"; readonly plot: number };
+	| { readonly type: "harvest"; readonly plot: number }
+	/**
+	 * Buys the next plot. `plot` names it and must be the farm's plot count, so an action sent
+	 * twice buys one plot, not two.
+	 */
+	| { readonly type: "buyPlot"; readonly plot: number };
 
 /** The plot rules for one content, prepared once in createSim. */
 export interface PlotRules {
 	readonly crops: ReadonlyMap<string, CropRules>;
 	readonly siloCapacity: number;
+	/** The plots a new farm starts with. */
+	readonly startPlots: number;
+	/** The plots beyond the start, in the order they are bought: the Level and price of each. */
+	readonly extraPlots: readonly ExtraPlot[];
 	readonly progress: ProgressRules;
 }
 
@@ -45,8 +54,34 @@ export function preparePlotRules(content: Content): PlotRules {
 	return {
 		crops: new Map(crops),
 		siloCapacity: content.silo.capacity,
+		startPlots: content.start.plots,
+		extraPlots: prepareExtraPlots(content),
 		progress: prepareProgressRules(content),
 	};
+}
+
+/**
+ * Buys the next plot for its price, once the farm's Level unlocks it, through the purchase rule
+ * (MUST-06.1, spec decision 1). The plot is added empty, at the end.
+ */
+export function buyPlot(farm: FarmState, index: number, rules: PlotRules): ApplyResult {
+	const count = farm.plots.length;
+	const extra = rules.extraPlots[count - rules.startPlots];
+	if (extra === undefined) {
+		const most = rules.startPlots + rules.extraPlots.length;
+		return refuse(`The farm can't have more than ${String(most)} plots.`);
+	}
+
+	if (index !== count) return refuse(`The next plot to buy is plot ${formatPlotNumber(count)}.`);
+
+	const bought = purchase(
+		farm,
+		{ what: `Plot ${formatPlotNumber(count)}`, ...extra },
+		rules.progress,
+	);
+	if (!bought.ok) return bought;
+
+	return { ok: true, state: { ...bought.state, plots: [...farm.plots, { status: "empty" }] } };
 }
 
 /**
@@ -130,6 +165,27 @@ export const ripening: StepSource<FarmState> = {
 };
 
 const uint32End = 2 ** 32;
+
+interface ExtraPlot {
+	/** The Level that unlocks it. */
+	readonly level: number;
+	readonly price: number;
+}
+
+/**
+ * Each Level unlocks its `plots` after the ones before it, and each plot costs growthPerMille /
+ * 1000 times the one before, rounded down: integer steps, never Math.pow (D16).
+ */
+function prepareExtraPlots(content: Content): ExtraPlot[] {
+	const { first, growthPerMille } = content.plotPrice;
+	const levels = content.levels.flatMap((row, i) => Array.from({ length: row.plots }, () => i + 1));
+	let price = first;
+	return levels.map((level) => {
+		const extra = { level, price };
+		price = Math.floor((price * growthPerMille) / 1000);
+		return extra;
+	});
+}
 
 interface CropRules {
 	readonly id: string;

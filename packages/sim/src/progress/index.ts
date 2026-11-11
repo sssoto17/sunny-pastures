@@ -1,7 +1,8 @@
 // Progress: the Level, what it unlocks, and buying (MUST-05; ADR-0005, section 3). The Level is
 // derived from XP through the Level table, never stored (D12).
 import type { Content } from "../content/index.js";
-import type { FarmState } from "../state/index.js";
+import { refuse } from "../state/index.js";
+import type { ApplyResult, FarmState } from "../state/index.js";
 
 /** The progress rules for one content, prepared once in createSim. */
 export interface ProgressRules {
@@ -26,6 +27,32 @@ export function prepareProgressRules(content: Content): ProgressRules {
 /** The Level a farm with `xp` is at, from 1 (MUST-05.3): the Levels whose XP it has reached. */
 export function levelOf(xp: number, rules: ProgressRules): number {
 	return rules.levels.filter((level) => level.xp <= xp).length;
+}
+
+/** Something the farm can buy: unlocked at `level`, then bought for `price` coins. */
+export interface Offer {
+	/** What is bought, as the subject of a refusal sentence, for example "Plot 7". */
+	readonly what: string;
+	readonly level: number;
+	readonly price: number;
+}
+
+/**
+ * The purchase rule every upgrade uses (spec decision 1, MUST-05.6, #72 D3): refused while the
+ * offer is locked or the farm has too few coins (MUST-05.1); otherwise the farm pays the price.
+ * The caller then adds what was bought, so it exists on the farm only once bought.
+ */
+export function purchase(farm: FarmState, offer: Offer, rules: ProgressRules): ApplyResult {
+	const locked = lockedReason(offer.what, offer.level, farm.xp, rules);
+	if (locked !== null) return refuse(locked);
+
+	if (farm.coins < offer.price) {
+		return refuse(
+			`${offer.what} costs ${String(offer.price)} coins, and the farm has ${String(farm.coins)}.`,
+		);
+	}
+
+	return { ok: true, state: { ...farm, coins: farm.coins - offer.price } };
 }
 
 /**
