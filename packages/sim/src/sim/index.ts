@@ -5,6 +5,7 @@ import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
 import {
 	buyFacility,
+	buyTier,
 	collect,
 	jobFinishing,
 	newFacilities,
@@ -89,7 +90,7 @@ export function createSim(content: Content): Sim {
 			}
 
 			// An action that crosses a Level adds order slots, drawn as automated steps at `at`, so the
-			// farm is advanced to `at` again after it (MUST-04.1; ADR-0003, section 14).
+			// farm is advanced to `at` again after it (MUST-04.1; ADR-0003, section 15).
 			const result = applyAction(advance(state, at), action);
 			return result.ok ? { ok: true, state: advance(result.state, at) } : result;
 		},
@@ -116,6 +117,8 @@ export function createSim(content: Content): Sim {
 				return collectProducts(farm, action.pen, penRules);
 			case "collect":
 				return collect(farm, action.facility, facilityRules);
+			case "buyTier":
+				return buyTier(farm, action.facility, action.tier, facilityRules);
 		}
 	}
 }

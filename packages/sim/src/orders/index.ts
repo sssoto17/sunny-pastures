@@ -1,5 +1,5 @@
 // The order board: orders drawn from the orders stream, and slots refilling (MUST-04; ADR-0005,
-// section 3; ADR-0003, section 14). #87's next part adds delivering and discarding.
+// section 3; ADR-0003, section 15). #87's next part adds delivering and discarding.
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content, GoodCount, OrderGood } from "../content/index.js";
 import { levelOf } from "../progress/index.js";
