@@ -5,7 +5,7 @@ import { createSim, sliceContent } from "../../index.js";
 describe("newFarm", () => {
 	const sim = createSim(sliceContent);
 
-	it("starts at time 0 with the content's coins, no XP, empty storage and empty plots", () => {
+	it("starts at time 0 with the content's coins, no XP, empty storage and plots, and no facilities", () => {
 		const farm = sim.newFarm("farm-1");
 
 		expect(farm.time).toBe(0);
@@ -13,6 +13,7 @@ describe("newFarm", () => {
 		expect(farm.xp).toBe(0);
 		expect(farm.silo).toEqual({});
 		expect(farm.barn).toEqual({});
+		expect(farm.facilities).toEqual([null, null]);
 		expect(farm.plots).toHaveLength(sliceContent.start.plots);
 		expect(farm.plots.every((plot) => plot.status === "empty")).toBe(true);
 	});

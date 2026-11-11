@@ -19,6 +19,9 @@ const levelXp = [0, 10, 30, 60, 100];
 const paidBy = [0, 20, 50, 90, 140];
 const mostPlots = [6, 8, 10, 12, 14];
 const plotPrices = [20, 30, 45, 67, 100, 150, 225, 337];
+/** The feed mill's and the bakery's prices, and the Levels that unlock them (#84). */
+const facilityPrices = [30, 50];
+const facilityLevels = [2, 3];
 
 /** The Level a farm with `xp` is at (MUST-05.3). */
 const levelAt = (xp: number): number => levelXp.filter((threshold) => threshold <= xp).length;
@@ -213,6 +216,16 @@ describe.each([
 					if (action.type === "plant") {
 						expect(after.coins).toBe(before.coins - crop.seedPrice);
 						expect(gained).toBe(0);
+					} else if (action.type === "buyFacility") {
+						expect(after.coins).toBe(before.coins - (facilityPrices[action.facility] ?? NaN));
+						expect(levelAt(after.xp)).toBeGreaterThanOrEqual(
+							facilityLevels[action.facility] ?? NaN,
+						);
+						expect(before.facilities[action.facility]).toBeNull();
+						expect(after.facilities[action.facility]).toEqual({ tier: 1, jobs: [] });
+						expect(after.xp).toBe(before.xp);
+						expect(after.silo).toEqual(before.silo);
+						expect(after.barn).toEqual(before.barn);
 					} else if (action.type === "buyPlot") {
 						expect(after.coins).toBe(
 							before.coins - (plotPrices[action.plot - content.start.plots] ?? NaN),
@@ -252,8 +265,10 @@ describe.each([
 				const { log, final } = play(levelSim, id, played);
 				const seeds = log.filter(({ action }) => action.type === "plant").length;
 				const plots = final.plots.length - content.start.plots;
+				const facilities = facilityPrices.filter((_price, i) => final.facilities[i] !== null);
 				const spent =
-					seeds * crop.seedPrice + plotPrices.slice(0, plots).reduce((sum, p) => sum + p, 0);
+					seeds * crop.seedPrice +
+					[...plotPrices.slice(0, plots), ...facilities].reduce((sum, p) => sum + p, 0);
 
 				expect(final.coins).toBe(content.start.coins - spent + paidAt(final.xp));
 			}),

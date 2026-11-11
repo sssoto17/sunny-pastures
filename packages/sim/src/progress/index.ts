@@ -1,6 +1,6 @@
 // Progress: the Level, what it unlocks, and buying (MUST-05; ADR-0005, section 3). The Level is
 // derived from XP through the Level table, never stored (D12).
-import type { Content } from "../content/index.js";
+import type { Content, LevelRow } from "../content/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
 
@@ -10,18 +10,18 @@ export interface ProgressRules {
 	readonly levels: readonly { readonly xp: number; readonly coins: number }[];
 	/** The Level that unlocks each crop. */
 	readonly cropLevels: ReadonlyMap<string, number>;
+	/** The Level that unlocks each facility (#84). */
+	readonly facilityLevels: ReadonlyMap<string, number>;
 }
 
 /** Copies what the rules read, so a later change to the content object can't reach them. */
 export function prepareProgressRules(content: Content): ProgressRules {
-	// The first Level that lists a crop unlocks it. Built from the table's array order, never from
-	// object keys (MUST-10.6).
-	const cropLevels = new Map<string, number>();
-	content.levels.forEach((level, i) => {
-		for (const crop of level.crops) if (!cropLevels.has(crop)) cropLevels.set(crop, i + 1);
-	});
 	const levels = content.levels.map(({ xp, coins }) => ({ xp, coins }));
-	return { levels, cropLevels };
+	return {
+		levels,
+		cropLevels: mapUnlockLevels(content, (level) => level.crops),
+		facilityLevels: mapUnlockLevels(content, (level) => level.facilities),
+	};
 }
 
 /** The Level a farm with `xp` is at, from 1 (MUST-05.3): the Levels whose XP it has reached. */
@@ -33,7 +33,8 @@ export function levelOf(xp: number, rules: ProgressRules): number {
 export interface Offer {
 	/** What is bought, as the subject of a refusal sentence, for example "Plot 7". */
 	readonly what: string;
-	readonly level: number;
+	/** The Level that unlocks it, or null if no Level does: then it is never bought. */
+	readonly level: number | null;
 	readonly price: number;
 }
 
@@ -62,6 +63,21 @@ export function purchase(farm: FarmState, offer: Offer, rules: ProgressRules): A
  */
 export function cropLocked(cropId: string, xp: number, rules: ProgressRules): string | null {
 	return lockedReason(`The crop ${cropId}`, rules.cropLevels.get(cropId) ?? null, xp, rules);
+}
+
+/**
+ * The first Level that lists an id unlocks it. Built from the table's array order, never from
+ * object keys (MUST-10.6).
+ */
+function mapUnlockLevels(
+	content: Content,
+	listed: (level: LevelRow) => readonly string[],
+): ReadonlyMap<string, number> {
+	const unlocks = new Map<string, number>();
+	content.levels.forEach((level, i) => {
+		for (const id of listed(level)) if (!unlocks.has(id)) unlocks.set(id, i + 1);
+	});
+	return unlocks;
 }
 
 /** Why `what`, unlocked at `level` (null: at none), isn't unlocked yet, or null if it is. */
