@@ -8,10 +8,12 @@
  * - `finishJob` (#84) after `ripen`: neither touches storage, so their rank changes no outcome
  *   today. Kinds that produce goods rank before the kinds that move or use them, so a step sees
  *   what was produced at the same time (ADR-0003, section 12).
- * - `moveGoods` (#88), the Collector, after the producers: a job finishing in a facility with a
- *   Collector is this step, which moves its goods into the barn if they fit (ADR-0003, section 13).
+ * - `produce` (#86) after `finishJob`, for the same reason: it touches neither storage nor coins
+ *   and changes only its own pen (ADR-0003, section 13).
+ * - `moveGoods` (#88), the Collector, after every producer: a job finishing in a facility with a
+ *   Collector is this step, which moves its goods into the barn if they fit (ADR-0003, section 14).
  */
-const stepKinds = ["ripen", "finishJob", "moveGoods"] as const;
+const stepKinds = ["ripen", "finishJob", "produce", "moveGoods"] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 

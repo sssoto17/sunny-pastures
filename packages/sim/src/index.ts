@@ -8,11 +8,13 @@ export type {
 	Facility,
 	GoodCount,
 	LevelRow,
+	Pen,
 	Recipe,
 } from "./content/index.js";
 export type { FacilityAction, Job, OwnedFacility } from "./facilities/index.js";
 export { stateHash } from "./hash/index.js";
 export { createSim } from "./sim/index.js";
 export type { Sim } from "./sim/index.js";
+export type { Animal, OwnedPen, PenAction } from "./pens/index.js";
 export type { Plot, PlotAction } from "./plots/index.js";
 export type { Action, ApplyResult, FarmState } from "./state/index.js";

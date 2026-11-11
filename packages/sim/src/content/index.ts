@@ -2,7 +2,8 @@
 // values are the admin's (spec, "How to read this spec"; CONSTRAINTS.md, "Content change" row):
 // approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83);
 // the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
-// lane"); the add-ons' prices and Levels by #88's lane (11 Nov). All to be tuned after playtest 1.
+// lane"); the chicken pen by #86's lane, and the add-ons' prices and Levels by #88's lane (11 Nov,
+// their PRs' "Decided by the lane"). All to be tuned after playtest 1.
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
@@ -26,6 +27,8 @@ export interface Content {
 	readonly plotPrice: { readonly first: number; readonly growthPerMille: number };
 	/** The facilities, in content order: a facility's index here is its index in the state (D12). */
 	readonly facilities: readonly Facility[];
+	/** The animal pens, in content order: a pen's index here is its index in the state (D12). */
+	readonly pens: readonly Pen[];
 	/** Each add-on's price in coins, the same for every facility (MUST-06.5, 06.6; #88). */
 	readonly addOns: Readonly<Record<AddOn, { readonly price: number }>>;
 }
@@ -48,6 +51,8 @@ export interface LevelRow {
 	readonly plots: number;
 	/** Facility ids it unlocks for buying (MUST-05.6). */
 	readonly facilities: readonly string[];
+	/** Pen ids it unlocks for buying (spec decision 1, MUST-05.6). */
+	readonly pens: readonly string[];
 	/** Add-ons it unlocks for buying, for every facility (MUST-05.5, 05.6; #88). */
 	readonly addOns: readonly AddOn[];
 }
@@ -83,6 +88,25 @@ export interface GoodCount {
 	readonly amount: number;
 }
 
+/** An animal pen the farm can buy once a Level unlocks it (MUST-02). */
+export interface Pen {
+	readonly id: string;
+	/** Coins that buying it costs. */
+	readonly price: number;
+	/** The animals it holds, each producing on its own (MUST-02.3); #72 D3 puts more in M6. */
+	readonly animals: number;
+	/** The good the animals eat, one portion per product (MUST-02.1). */
+	readonly feed: string;
+	/** Portions the trough holds: 1 at the start (MUST-02.5); larger troughs are M6 (MUST-06.3). */
+	readonly troughCapacity: number;
+	/** The good each portion becomes (MUST-02.1). */
+	readonly product: string;
+	/** Whole seconds from eating a portion to producing (MUST-02.3, MUST-10.4); in ms once (D7). */
+	readonly seconds: number;
+	/** XP each product collected gives (MUST-02.4, 05.2). */
+	readonly xp: number;
+}
+
 export interface Crop {
 	/** Coins that planting costs (MUST-01.1). */
 	readonly seedPrice: number;
@@ -112,11 +136,19 @@ export const sliceContent = {
 		},
 	},
 	levels: [
-		{ xp: 0, coins: 0, crops: ["wheat"], plots: 0, facilities: [], addOns: [] },
-		{ xp: 10, coins: 20, crops: [], plots: 2, facilities: ["feedMill"], addOns: [] },
-		{ xp: 30, coins: 30, crops: [], plots: 2, facilities: ["bakery"], addOns: [] },
-		{ xp: 60, coins: 40, crops: [], plots: 2, facilities: [], addOns: ["collector"] },
-		{ xp: 100, coins: 50, crops: [], plots: 2, facilities: [], addOns: ["loop"] },
+		{ xp: 0, coins: 0, crops: ["wheat"], plots: 0, facilities: [], pens: [], addOns: [] },
+		{
+			xp: 10,
+			coins: 20,
+			crops: [],
+			plots: 2,
+			facilities: ["feedMill"],
+			pens: ["chickenPen"],
+			addOns: [],
+		},
+		{ xp: 30, coins: 30, crops: [], plots: 2, facilities: ["bakery"], pens: [], addOns: [] },
+		{ xp: 60, coins: 40, crops: [], plots: 2, facilities: [], pens: [], addOns: ["collector"] },
+		{ xp: 100, coins: 50, crops: [], plots: 2, facilities: [], pens: [], addOns: ["loop"] },
 	],
 	plotPrice: { first: 20, growthPerMille: 1500 },
 	facilities: [
@@ -147,6 +179,18 @@ export const sliceContent = {
 					xp: 2,
 				},
 			},
+		},
+	],
+	pens: [
+		{
+			id: "chickenPen",
+			price: 30,
+			animals: 3,
+			feed: "chickenFeed",
+			troughCapacity: 1,
+			product: "egg",
+			seconds: 180,
+			xp: 1,
 		},
 	],
 	addOns: { loop: { price: 80 }, collector: { price: 60 } },

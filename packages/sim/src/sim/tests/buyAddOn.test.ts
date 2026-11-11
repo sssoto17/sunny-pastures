@@ -74,8 +74,8 @@ describe("buying an add-on", () => {
 		[
 			"for an add-on not in content",
 			workshop(5, 1_000),
-			buy(feedMill, "conveyor" as AddOn),
-			"There is no add-on conveyor.",
+			buy(feedMill, "sprinkler" as AddOn),
+			"There is no add-on sprinkler.",
 		],
 	])("is refused %s", (_name, farm, action, reason) => {
 		expect(sim.apply(farm, action, 0)).toEqual({ ok: false, reason });

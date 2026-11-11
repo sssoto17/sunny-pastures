@@ -21,7 +21,7 @@ export interface OwnedFacility {
 	 * (MUST-06.5); null until a job starts. Stored, since the queue forgets it once collected.
 	 */
 	readonly lastRecipe: string | null;
-	/** Whether the farm has bought each add-on for this facility; none when bought (MUST-06.8). */
+	/** Whether the farm has bought each add-on for this facility; none when bought, since an add-on exists on the farm only once bought (MUST-05.6). */
 	readonly addOns: Readonly<Record<AddOn, boolean>>;
 }
 
@@ -221,17 +221,25 @@ export const jobFinishing: StepSource<FarmState> = {
  * The Collector (MUST-06.6): a job finishing in its facility is a `moveGoods` step, which finishes
  * the job and then moves the facility's done jobs into the barn, oldest first, while they fit. It
  * decides once, as the job finishes: goods that don't fit wait in the facility as a done job until
- * collected by hand or moved at the facility's next finish (ADR-0003, section 13).
+ * collected by hand or moved at the facility's next finish (ADR-0003, section 14).
  */
 export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
 	return {
 		steps: (farm) => findFinishes(farm, "moveGoods", (owned) => owned.addOns.collector),
 		run: (farm, step) => {
+			// A step comes from the farm's entry, one per content facility (ADR-0003, section 12), so a
+			// facility that isn't in content is a broken farm: a programmer error (D15).
+			const facility = rules.facilities[step.index];
+			if (facility === undefined) {
+				throw new RangeError(
+					`The farm has a Collector on facility ${String(step.index + 1)}, which isn't in content.`,
+				);
+			}
+
 			let current = finishJob(farm, step);
 			for (;;) {
 				const owned = current.facilities[step.index] ?? null;
-				const facility = rules.facilities[step.index];
-				if (owned?.jobs[0]?.status !== "done" || facility === undefined) return current;
+				if (owned?.jobs[0]?.status !== "done") return current;
 
 				const moved = collectOldest(current, step.index, owned, facility, rules);
 				if (!moved.ok) return current;

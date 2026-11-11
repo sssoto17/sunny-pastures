@@ -30,6 +30,30 @@ describe("compareSteps", () => {
 		expect([makeStep(11, 0), finish].sort(compareSteps)).toEqual([finish, makeStep(11, 0)]);
 	});
 
+	it("ranks the kinds ripen, then finishJob, then produce, before the index and slot (MUST-10.6)", () => {
+		const step = (at: number, kind: AutomatedStep["kind"], index: number): AutomatedStep => ({
+			at,
+			kind,
+			index,
+			slot: 0,
+		});
+		const steps = [
+			step(10, "produce", 0),
+			step(10, "finishJob", 3),
+			step(10, "ripen", 9),
+			step(5, "produce", 9),
+			step(20, "ripen", 0),
+		];
+
+		expect([...steps].sort(compareSteps)).toEqual([
+			step(5, "produce", 9),
+			step(10, "ripen", 9),
+			step(10, "finishJob", 3),
+			step(10, "produce", 0),
+			step(20, "ripen", 0),
+		]);
+	});
+
 	it("ranks every kind: producing goods, then the Collector moving them (MUST-10.6, #88)", () => {
 		// Each kind at a higher index and slot than the next, so only the kind can order them.
 		const at = (kind: AutomatedStep["kind"], index: number): AutomatedStep => ({
@@ -38,11 +62,11 @@ describe("compareSteps", () => {
 			index,
 			slot: index,
 		});
-		const ranked = [at("ripen", 3), at("finishJob", 2), at("moveGoods", 1)];
+		const ranked = [at("ripen", 4), at("finishJob", 3), at("produce", 2), at("moveGoods", 1)];
 
 		expect([...ranked].reverse().sort(compareSteps)).toEqual(ranked);
-		expect([at("moveGoods", 0), at("finishJob", 9)].sort(compareSteps)).toEqual([
-			at("finishJob", 9),
+		expect([at("moveGoods", 0), at("produce", 9)].sort(compareSteps)).toEqual([
+			at("produce", 9),
 			at("moveGoods", 0),
 		]);
 	});
