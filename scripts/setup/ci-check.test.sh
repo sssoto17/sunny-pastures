@@ -178,6 +178,31 @@ assert "expected nothing pushed to the pushurl" test -z "$(git -C "$work/other.g
 assert "expected nothing pushed to sunny-pastures" \
   test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
 
+# Two push URLs, the official one first and a foreign one second: git would push to both. Refused.
+reset
+git init -q --bare "$work/other.git"
+git -C "$work/clone" config --add remote.origin.pushurl "$GH_URL"
+git -C "$work/clone" config --add remote.origin.pushurl "$work/other.git"
+run start 101
+expect_code 2
+assert "expected the second push URL refused" contains "$err" "a push URL of origin"
+assert "expected nothing pushed to the second pushurl" test -z "$(git -C "$work/other.git" for-each-ref)"
+assert "expected nothing pushed to sunny-pastures" \
+  test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+assert "expected no URL printed" lacks "$err" "$work/other.git"
+
+# Two URLs (no pushurl, so both are push URLs too), the official one first: refused.
+reset
+git init -q --bare "$work/other.git"
+git -C "$work/clone" config --add remote.origin.url "$work/other.git"
+run start 101
+expect_code 2
+assert "expected the second URL refused" contains "$err" "a fetch URL of origin"
+assert "expected nothing pushed to the second url" test -z "$(git -C "$work/other.git" for-each-ref)"
+assert "expected nothing pushed to sunny-pastures" \
+  test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+assert "expected no URL printed" lacks "$err" "$work/other.git"
+
 # A pushInsteadOf rewrite does the same through config: refused.
 reset
 git init -q --bare "$work/other.git"

@@ -75,15 +75,19 @@ start() {
   # Both the fetch and the push URL, as git resolves them (insteadOf, pushInsteadOf and pushurl
   # applied), must be exactly sunny-pastures on GitHub, with no userinfo. Neither is ever printed:
   # a URL can carry a credential.
-  local kind url
+  # Every URL counts: git fetches from the first but pushes to each push URL (--all lists them).
+  local kind urls url
   for kind in fetch push; do
     if [[ $kind == push ]]; then
-      url=$(git -C "$repo" remote get-url --push origin 2>/dev/null) || url=""
+      urls=$(git -C "$repo" remote get-url --push --all origin 2>/dev/null) || urls=""
     else
-      url=$(git -C "$repo" remote get-url origin 2>/dev/null) || url=""
+      urls=$(git -C "$repo" remote get-url --all origin 2>/dev/null) || urls=""
     fi
-    official_url "$url" ||
-      die 2 "the $kind URL of origin in $repo isn't $REPO on GitHub: nothing pushed"
+    [[ -n $urls ]] || die 2 "origin in $repo has no $kind URL: nothing pushed"
+    while IFS= read -r url; do
+      official_url "$url" ||
+        die 2 "a $kind URL of origin in $repo isn't $REPO on GitHub: nothing pushed"
+    done <<<"$urls"
   done
   git -C "$repo" fetch -q origin main || die 1 "git fetch origin main failed"
   if git -C "$repo" ls-remote --exit-code -q origin "refs/heads/$branch" >/dev/null 2>&1; then
