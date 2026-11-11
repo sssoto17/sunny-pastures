@@ -299,6 +299,58 @@ rule shared by every upgrade); integer fixed-point arithmetic (the price curve).
 - **`Math.pow(growth, n)` for the curve.** Its float result can differ between engines (section 10).
 - **`buyPlot` with no plot.** A resent action would buy a second plot.
 
+## 12. Pens, troughs and storage (#86)
+
+Chosen by #86's lane on 11 Nov, unattended; the admin reviews it in #86's PR ("Decided by the
+lane").
+
+`pens/` owns the animal pens (ADR-0005, section 3). Content lists pens in an array; the state has
+one entry per content pen, `null` until bought (MUST-05.6). A bought pen stores its trough's
+portions, one status per animal in slot order (`idle`, or `producing` with the `readyAt` it lays
+at) and the products waiting. A pen is unlocked by the Level table's `pens` field and bought
+through `purchase` (section 11). Its actions name the pen, so `buyPen` sent twice buys one.
+
+- **Feeding** takes as much feed as fits and the barn holds, then idle animals eat from the
+  trough at once, in slot order. So no animal is idle while the trough holds feed.
+- **Producing** is an automated step of kind `produce`, keyed by the pen's index and the animal's
+  slot. The animal adds one product to the pen, then eats the next portion at the time it
+  produced, if the trough holds one (MUST-02.3). When animals produce at the same time and one
+  portion is left, the lowest slot eats it (MUST-10.6).
+- **Collecting** puts every waiting product in the barn and gives the pen's XP per product
+  through `gainXp`.
+- **Each `readyAt` is stored when the animal eats**, read from content once, so a later rules
+  version doesn't move it (ADR-0006, section 7). The next portion's time is read from the rules
+  running when the animal produces. Across a release, a gap is advanced under the new version
+  (ADR-0006, section 4), so a portion eaten in that gap uses the new duration. A portion eaten
+  before the release keeps its stored time.
+
+`produce` ranks after `ripen` in `stepKinds`. Neither touches storage or coins, and each changes
+only its own plot or pen, so their rank changes no outcome today. Kinds that produce goods rank
+before the kinds that will move or use them (the Collector and Farmhands, #88), so a step sees
+what was produced at the same time.
+
+`storage/` owns the silo and the barn: `put` (refused if the store can't hold it all), `take`
+(refused naming the first short input) and `held`. A good is in the silo if content lists it as
+a crop, otherwise in the barn. Harvesting, feeding and collecting call it, and the store keeps
+state/'s "a key only above 0" invariant in one place.
+
+**Patterns:** discriminated unions for the animals' statuses (section 5); a step source per
+feature, closed over its prepared rules (section 2); a shared storage module at the second
+occurrence (ADR-0005, section 3).
+
+**Rejected:**
+
+- **One status per pen** (the pen is producing until a time). Animals in one pen eat at different
+  times, and MUST-02.3 is per animal.
+- **A count of producing animals with one shared end time.** It can't hold animals that ate at
+  different times, and it would lose the stored laid time ADR-0006 section 7 asks for.
+- **Eating at the next step instead of at once.** An animal would wait idle beside a full
+  trough, and when it eats would depend on unrelated steps.
+- **Eggs straight to the barn as they are laid.** MUST-02.4 keeps products in the pen until
+  collected, and a full barn would then need a rule for where an egg goes.
+- **Storage rules inside each feature.** Harvesting and collecting would each check the room and
+  the zero-count invariant, and could drift.
+
 ## Vocabulary (D11)
 
 **Automated step** (`GLOSSARY.md`): a change the farm makes by itself at a server time, with no
@@ -321,6 +373,7 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Property-based testing | MUST-14 | Generated farms reach the tie and storage cases; a fixed seed makes failures reproducible. |
 | Integer fixed-point arithmetic | multipliers, growing costs | The same result in every JavaScript engine, so client and server hashes agree. |
 | Policy function | `progress/`'s `purchase` | One rule for every upgrade: unlocked at a Level, then bought with coins (section 11). |
+| Shared module at the second occurrence; a step source per feature | `storage/`; `pens/`'s `producing` | One room check and zero-count rule for every store, and each feature schedules its own automated steps (section 12). |
 
 ## Consequences
 

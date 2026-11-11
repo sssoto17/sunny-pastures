@@ -4,8 +4,13 @@
 /**
  * The kinds of automated step, in the order they run when they fall at the same time
  * (MUST-10.6). A kind's rank is its position here; each new kind is placed deliberately.
+ *
+ * - `produce` (#86) after `ripen`: neither touches storage or coins, and each changes only its
+ *   own plot or pen, so their rank changes no outcome today. Kinds that produce goods rank before
+ *   the kinds that will move or use them (the Collector and Farmhands, #88), so a step sees what
+ *   was produced at the same time (ADR-0003, section 12).
  */
-const stepKinds = ["ripen"] as const;
+const stepKinds = ["ripen", "produce"] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 

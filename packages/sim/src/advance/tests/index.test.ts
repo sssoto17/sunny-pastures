@@ -22,6 +22,21 @@ describe("compareSteps", () => {
 		]);
 	});
 
+	it("ranks the kinds ripen, then produce, before the index and slot (MUST-10.6)", () => {
+		const produce = (at: number, index: number, slot: number): AutomatedStep => ({
+			...makeStep(at, index, slot),
+			kind: "produce",
+		});
+		const steps = [produce(10, 0, 0), makeStep(10, 5, 2), produce(5, 9, 9), makeStep(20, 0)];
+
+		expect([...steps].sort(compareSteps)).toEqual([
+			produce(5, 9, 9),
+			makeStep(10, 5, 2),
+			produce(10, 0, 0),
+			makeStep(20, 0),
+		]);
+	});
+
 	it("is 0 only for the same step", () => {
 		expect(compareSteps(makeStep(10, 1), makeStep(10, 1))).toBe(0);
 		expect(compareSteps(makeStep(10, 1), makeStep(10, 2))).toBeLessThan(0);
