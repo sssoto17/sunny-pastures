@@ -476,7 +476,7 @@ Collector is SHOULD-08.
   it; `restartRecipe` ranks last of all kinds (the admin, 11 Nov: after #87's order refills too),
   so a slot the Collector frees is refilled at the same time, and a slot its waiting goods hold is
   not. A restart only adds a running job that ends later; one that takes barn goods (cookies take
-  eggs, section 14) frees room, which the Collector uses a ms later, so no step falls due behind
+  eggs, #85, MUST-03.1) frees room, which the Collector uses a ms later, so no step falls due behind
   one already run at the same time (MUST-10.6).
 
 **Patterns:** level-triggered automated steps (the Collector acts a ms after its oldest job's goods
