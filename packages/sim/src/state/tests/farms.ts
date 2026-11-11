@@ -22,11 +22,15 @@ export interface Transition extends LoggedAction {
 	readonly after: FarmState;
 }
 
-/** A played run: every farm it went through, the log of accepted actions and its transitions. */
+/**
+ * A played run: every farm it went through, the log of accepted actions, its transitions and the
+ * reasons of the actions refused.
+ */
 export interface Run {
 	readonly farms: readonly FarmState[];
 	readonly log: readonly LoggedAction[];
 	readonly transitions: readonly Transition[];
+	readonly refusals: readonly string[];
 	readonly final: FarmState;
 }
 
@@ -46,9 +50,16 @@ const facilityIndex = fc.oneof(
 	{ weight: 1, arbitrary: fc.constantFrom(-1, 2) },
 );
 
+/** Mostly the slice's recipes, sometimes one the facility lacks or not in content. */
+const recipe = fc.oneof(
+	{ weight: 9, arbitrary: fc.constantFrom("chickenFeed", "bread") },
+	{ weight: 1, arbitrary: fc.constant("cake") },
+);
+
 /**
- * Plant, harvest and buy on plots and facilities in and out of range, mostly wheat, sometimes a crop not in
- * content. A generated buy rarely names the next plot, so it mostly reaches the refusals.
+ * Plant, harvest, buy, start jobs and collect, on plots and facilities in and out of range, mostly
+ * wheat, sometimes a crop not in content. A generated buy rarely names the next plot, so it mostly
+ * reaches the refusals.
  */
 const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({
@@ -62,6 +73,8 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({ type: fc.constant("harvest" as const), plot: plotIndex }),
 	fc.record({ type: fc.constant("buyPlot" as const), plot: plotIndex }),
 	fc.record({ type: fc.constant("buyFacility" as const), facility: facilityIndex }),
+	fc.record({ type: fc.constant("startJob" as const), facility: facilityIndex, recipe }),
+	fc.record({ type: fc.constant("collect" as const), facility: facilityIndex }),
 );
 
 /**
@@ -103,10 +116,37 @@ const expand: TimedAction[] = [
 	})),
 ];
 
+/**
+ * Running the facilities: buy both (refused while locked or once bought), fill both queues and one
+ * more (refused: full), wait, then collect each job. Jobs queue behind each other and finish while the farm waits, so the queue and input cases
+ * are reached (MUST-03.2, 03.3, 03.5). With a small barn and XP enough to cross a Level, as the
+ * harness's test content has, collects fill the barn, are refused once it is full and reach
+ * Levels (MUST-03.4, 05.4, 14.4); the harness checks that they do. Facilities the farm hasn't
+ * bought are refused and skipped.
+ */
+const produce = delay.map((wait): TimedAction[] => {
+	const buyFacilities = [0, 1].map((facility): TimedAction => ({
+		action: { type: "buyFacility", facility },
+		delay: 0,
+	}));
+	const starts = (["chickenFeed", "bread"] as const).flatMap((made, facility) =>
+		[0, 1, 2].map((): TimedAction => ({
+			action: { type: "startJob", facility, recipe: made },
+			delay: 0,
+		})),
+	);
+	const collects = [0, 1, 0, 1].map((facility, i): TimedAction => ({
+		action: { type: "collect", facility },
+		delay: i === 0 ? Math.abs(wait) : 0,
+	}));
+	return [...buyFacilities, ...starts, ...collects];
+});
+
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
 	{ weight: 2, arbitrary: tend },
 	{ weight: 1, arbitrary: fc.constant(expand) },
+	{ weight: 2, arbitrary: produce },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());
@@ -118,17 +158,21 @@ export function play(sim: Sim, id: string, played: readonly TimedAction[]): Run 
 	let farm = sim.newFarm(id);
 	const farms = [farm];
 	const transitions: Transition[] = [];
+	const refusals: string[] = [];
 	for (const { action: next, delay: wait } of played) {
 		const at = farm.time + wait;
 		const result = sim.apply(farm, next, at);
-		if (!result.ok) continue;
+		if (!result.ok) {
+			refusals.push(result.reason);
+			continue;
+		}
 
 		transitions.push({ action: next, at, before: farm, after: result.state });
 		farm = result.state;
 		farms.push(farm);
 	}
 	const log = transitions.map(({ action: next, at }) => ({ action: next, at }));
-	return { farms, log, transitions, final: farm };
+	return { farms, log, transitions, refusals, final: farm };
 }
 
 /** Replays a log from `farm`; throws on a refusal, as ADR-0001's replay does. */

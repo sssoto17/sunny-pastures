@@ -1,5 +1,6 @@
 // The property harness (ADR-0003, section 9, D10): MUST-01.2, MUST-14.1-14.7, idempotent advance and the
-// JSON round trip, over the real slice content, with fast-check's fixed seed from the root config.
+// JSON round trip, over the real slice content and over test content that reaches every Level, so
+// generated farms run jobs (#84), with fast-check's fixed seed from the root config.
 import fc from "fast-check";
 import { describe, expect, inject, it } from "vitest";
 
@@ -9,7 +10,6 @@ import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
 
 const params = inject("fastCheck");
-const sim = createSim(sliceContent);
 const { wheat } = sliceContent.crops;
 
 // The slice's approved Level table and plot prices (admin, 11 Nov, #83), written out rather than
@@ -22,6 +22,22 @@ const plotPrices = [20, 30, 45, 67, 100, 150, 225, 337];
 /** The feed mill's and the bakery's prices, and the Levels that unlock them (#84). */
 const facilityPrices = [30, 50];
 const facilityLevels = [2, 3];
+const facilitySlots = 2;
+/** The slice's recipes (#84): the wheat each takes, the goods it makes, its time and XP. */
+const sliceRecipes = new Map(
+	Object.entries({
+		chickenFeed: { wheat: 2, good: "chickenFeed", amount: 2, ms: 60_000, xp: 1 },
+		bread: { wheat: 3, good: "bread", amount: 1, ms: 300_000, xp: 2 },
+	} as const satisfies Record<string, TestRecipe>),
+);
+
+interface TestRecipe {
+	readonly wheat: number;
+	readonly good: string;
+	readonly amount: number;
+	readonly ms: number;
+	readonly xp: number;
+}
 
 /** The Level a farm with `xp` is at (MUST-05.3). */
 const levelAt = (xp: number): number => levelXp.filter((threshold) => threshold <= xp).length;
@@ -29,22 +45,43 @@ const levelAt = (xp: number): number => levelXp.filter((threshold) => threshold 
 /** The level-up coins paid in all by the time a farm has `xp` (MUST-05.4). */
 const paidAt = (xp: number): number => paidBy[levelAt(xp) - 1] ?? NaN;
 
+/** The test content's job XP: enough that a collect crosses a Level (MUST-05.4). */
+const richJobXp = 31;
+const richRecipes = new Map(
+	[...sliceRecipes].map(([id, recipe]) => [id, { ...recipe, xp: richJobXp }] as const),
+);
+
 /**
  * Test content with the slice's Level table and plot prices, but room and coins to reach every
  * Level and plot: wheat isn't sold yet (#87), so the slice's silo keeps a farm near Level 2.
- * 31 XP a harvest crosses Levels 2 and 3 in one gain.
+ * 31 XP a harvest crosses Levels 2 and 3 in one gain. A small barn fills after a few collects, so
+ * collects reach its bound and its refusal, and 31 XP a collect lets a collect cross a Level.
  */
 const richContent: Content = {
 	...sliceContent,
 	start: { ...sliceContent.start, coins: 2_000 },
 	silo: { capacity: 100_000 },
+	barn: { capacity: 4 },
 	crops: { wheat: { ...wheat, xp: 31 } },
+	facilities: sliceContent.facilities.map((facility) => ({
+		...facility,
+		recipes: Object.fromEntries(
+			Object.entries(facility.recipes).map(([id, recipe]) => [id, { ...recipe, xp: richJobXp }]),
+		),
+	})),
 };
 
 /** A time at or after the farm's, from the generated delays (never before: see 14.7). */
 const addDelay = (farm: FarmState, wait: number): number => farm.time + Math.abs(wait);
 
-describe("the sim's properties", () => {
+const contents = [
+	["the slice", sliceContent, sliceRecipes],
+	["a farm that reaches every Level", richContent, richRecipes],
+] as const;
+
+describe.each(contents)("the sim's properties, over %s", (_name, content) => {
+	const sim = createSim(content);
+
 	it("MUST-01.2: a crop is ready exactly its grow time after planting, not a ms before", () => {
 		const growMs = wheat.growSeconds * 1000;
 		fc.assert(
@@ -92,7 +129,7 @@ describe("the sim's properties", () => {
 				const until = log[at]?.at ?? taken.time + wait;
 				const advanced = sim.advance(taken, taken.time + (wait % (until - taken.time + 1)));
 				const snapshot = JSON.parse(JSON.stringify(advanced)) as FarmState;
-				const replayed = replay(createSim(sliceContent), snapshot, log.slice(at));
+				const replayed = replay(createSim(content), snapshot, log.slice(at));
 
 				// A cut after the last action leaves the snapshot ahead of `final`: compare at one time.
 				expect(stateHash(replayed)).toBe(stateHash(sim.advance(final, replayed.time)));
@@ -105,7 +142,7 @@ describe("the sim's properties", () => {
 		fc.assert(
 			fc.property(farmId, timedActions, (id, played) => {
 				const { log, final } = play(sim, id, played);
-				const other = createSim(sliceContent);
+				const other = createSim(content);
 
 				expect(stateHash(replay(other, other.newFarm(id), log))).toBe(stateHash(final));
 			}),
@@ -180,14 +217,44 @@ describe("the sim's properties", () => {
 	});
 });
 
-describe.each([
-	["the slice", sliceContent],
-	["a farm that reaches every Level", richContent],
-])("the Level and plot properties, over %s", (_name, content) => {
+describe("the generated farms", () => {
+	it("start and collect jobs, fill the barn and cross Levels by collecting, so the job properties aren't vacuous (#84)", () => {
+		const rich = createSim(richContent);
+		const counts = new Map<string, number>();
+		const count = (key: string): void => {
+			counts.set(key, (counts.get(key) ?? 0) + 1);
+		};
+		for (const [id, played] of fc.sample(fc.tuple(farmId, timedActions), params)) {
+			const { transitions, refusals } = play(rich, id, played);
+			for (const { action, before, after } of transitions) {
+				if (action.type === "startJob" || action.type === "collect") {
+					count(`${action.type} ${String(action.facility)}`);
+				}
+				if (action.type === "collect" && levelAt(after.xp) > levelAt(before.xp)) {
+					count("collect reaches a Level");
+				}
+			}
+			for (const reason of refusals) if (reason.startsWith("The barn has room")) count("barn full");
+		}
+
+		for (const key of [
+			"startJob 0",
+			"startJob 1",
+			"collect 0",
+			"collect 1",
+			"collect reaches a Level",
+			"barn full",
+		]) {
+			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+		}
+	});
+});
+
+describe.each(contents)("the Level and plot properties, over %s", (_name, content, recipes) => {
 	const levelSim = createSim(content);
 	const crop = content.crops.wheat;
 
-	it("MUST-05.1, 14.4: coins, goods and plots stay within their bounds, as safe integers", () => {
+	it("MUST-05.1, 14.4: coins, goods, plots and queues stay within their bounds, as safe integers", () => {
 		fc.assert(
 			fc.property(farmId, timedActions, (id, played) => {
 				for (const farm of play(levelSim, id, played).farms) {
@@ -202,18 +269,61 @@ describe.each([
 						expect(counts.every((count) => count > 0)).toBe(true);
 						expect(counts.reduce((total, count) => total + count, 0)).toBeLessThanOrEqual(capacity);
 					}
+					for (const owned of farm.facilities) {
+						const jobs = owned?.jobs ?? [];
+						expect(jobs.length).toBeLessThanOrEqual(facilitySlots);
+						// Done jobs come first, and each running job finishes after the farm's time and
+						// no sooner than the one before it (MUST-03.3).
+						const ends = jobs.flatMap((job) => (job.status === "running" ? [job.readyAt] : []));
+						expect(
+							jobs.slice(0, jobs.length - ends.length).every((job) => job.status === "done"),
+						).toBe(true);
+						expect(ends.every((end, i) => end > farm.time && end >= (ends[i - 1] ?? end))).toBe(
+							true,
+						);
+					}
 				}
 			}),
 			params,
 		);
 	});
 
-	it("MUST-14.5: goods and coins change only by planting, harvesting and buying", () => {
+	it("MUST-14.5: goods and coins change only by planting, harvesting, buying and jobs", () => {
 		fc.assert(
 			fc.property(farmId, timedActions, (id, played) => {
-				for (const { action, before, after } of play(levelSim, id, played).transitions) {
+				for (const { action, at, before, after } of play(levelSim, id, played).transitions) {
 					const gained = (after.silo["wheat"] ?? 0) - (before.silo["wheat"] ?? 0);
-					if (action.type === "plant") {
+					if (action.type !== "collect") expect(after.barn).toEqual(before.barn);
+					if (action.type === "startJob") {
+						// The inputs leave the silo, and the job ends the recipe's time after the later
+						// of now and the job before it (MUST-03.2, 03.3).
+						const made = recipes.get(action.recipe);
+						const jobs = before.facilities[action.facility]?.jobs ?? [];
+						const last = jobs[jobs.length - 1];
+						const from = last?.status === "running" ? Math.max(at, last.readyAt) : at;
+						const queue = after.facilities[action.facility]?.jobs ?? [];
+						expect(gained).toBe(-(made?.wheat ?? NaN));
+						expect(queue).toHaveLength(jobs.length + 1);
+						expect(queue[queue.length - 1]).toEqual({
+							status: "running",
+							recipe: action.recipe,
+							readyAt: from + (made?.ms ?? NaN),
+						});
+						expect(after.coins).toBe(before.coins);
+						expect(after.xp).toBe(before.xp);
+					} else if (action.type === "collect") {
+						// The oldest job, done by the action's time, gives its goods to the barn and its XP
+						// (MUST-03.4, 05.2, 05.4).
+						const jobs = levelSim.advance(before, at).facilities[action.facility]?.jobs ?? [];
+						expect(jobs[0]?.status).toBe("done");
+						const made = recipes.get(jobs[0]?.recipe ?? "");
+						const good = made?.good ?? "";
+						expect(after.facilities[action.facility]?.jobs).toHaveLength(jobs.length - 1);
+						expect((after.barn[good] ?? 0) - (before.barn[good] ?? 0)).toBe(made?.amount);
+						expect(after.xp).toBe(before.xp + (made?.xp ?? NaN));
+						expect(after.coins).toBe(before.coins + paidAt(after.xp) - paidAt(before.xp));
+						expect(after.silo).toEqual(before.silo);
+					} else if (action.type === "plant") {
 						expect(after.coins).toBe(before.coins - crop.seedPrice);
 						expect(gained).toBe(0);
 					} else if (action.type === "buyFacility") {
