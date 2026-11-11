@@ -2,6 +2,7 @@
 // change here meets CONSTRAINTS.md's "Interface change" row. Plain JSON data with readonly types
 // (ADR-0003, section 5, D12); the invariants the property tests check are below. Each feature
 // module owns its part of the state and its actions (ADR-0005, section 3); this module composes them.
+import type { FacilityAction, OwnedFacility } from "../facilities/index.js";
 import type { OwnedPen, PenAction } from "../pens/index.js";
 import type { Plot, PlotAction } from "../plots/index.js";
 
@@ -17,6 +18,8 @@ export interface FarmState {
 	readonly barn: Readonly<Record<string, number>>;
 	/** In content order. */
 	readonly plots: readonly Plot[];
+	/** One entry per content facility, in content order: null until bought (MUST-05.6). */
+	readonly facilities: readonly (OwnedFacility | null)[];
 	/** One entry per content pen, in content order: null until bought (MUST-05.6). */
 	readonly pens: readonly (OwnedPen | null)[];
 	/** The mulberry32 state of each stream, an unsigned 32-bit integer (ADR-0003, section 7). */
@@ -24,7 +27,7 @@ export interface FarmState {
 }
 
 /** Something a player chooses to do, applied at a server time (`GLOSSARY.md`). */
-export type Action = PlotAction | PenAction;
+export type Action = PlotAction | FacilityAction | PenAction;
 
 /** A refusal is data, not a throw, and carries no state (ADR-0003, section 4, D15). */
 export type ApplyResult =

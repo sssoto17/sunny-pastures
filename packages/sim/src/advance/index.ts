@@ -4,8 +4,13 @@
 /**
  * The kinds of automated step, in the order they run when they fall at the same time
  * (MUST-10.6). A kind's rank is its position here; each new kind is placed deliberately.
+ *
+ * - `finishJob` (#84) after `ripen`: neither touches storage, so their rank changes no outcome
+ *   today. Kinds that produce goods rank before the kinds that will move or use them (the
+ *   Collector and the Loop, #88), so a step sees what was produced at the same time (ADR-0003,
+ *   section 12).
  */
-const stepKinds = ["ripen"] as const;
+const stepKinds = ["ripen", "finishJob"] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 

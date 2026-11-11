@@ -6,7 +6,7 @@ import { purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
-import { countHeld, take } from "../storage/index.js";
+import { countStored, take } from "../storage/index.js";
 import type { StorageRules } from "../storage/index.js";
 
 /** A bought pen (ADR-0003, section 5: pens and troughs are stored facts). */
@@ -100,7 +100,7 @@ export function feed(farm: FarmState, index: number, rules: PenRules): ApplyResu
 
 	// As much as fits and the barn holds. With none held, ask for a full trough, so take's
 	// refusal names the shortage.
-	const inBarn = countHeld(farm, rule.feed, rules.storage);
+	const inBarn = countStored(farm, rule.feed, rules.storage);
 	const amount = inBarn === 0 ? room : Math.min(room, inBarn);
 	const taken = take(farm, [{ good: rule.feed, amount }], `Feeding the ${rule.id}`, rules.storage);
 	if (!taken.ok) return taken;

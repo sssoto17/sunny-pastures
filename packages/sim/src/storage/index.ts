@@ -1,5 +1,5 @@
 // Storage: the silo and the barn, and putting goods in and taking them out (MUST-06.4; ADR-0005,
-// section 3). Harvesting, feeding and collecting from pens share these rules (#86).
+// section 3). Harvesting, starting jobs and collecting them share these rules (#84).
 import type { Content, GoodCount } from "../content/index.js";
 import { refuse } from "../state/index.js";
 import type { ApplyResult, FarmState } from "../state/index.js";
@@ -31,8 +31,8 @@ export function put(
 	what: string,
 	rules: StorageRules,
 ): ApplyResult {
-	const store = storeOf(goods.good, rules);
-	const room = capacityOf(store, rules) - sum(farm[store]);
+	const store = findStore(goods.good, rules);
+	const room = findCapacity(store, rules) - sumGoods(farm[store]);
 	if (goods.amount > room) {
 		const unit = store === "silo" ? "crop" : "good";
 		return refuse(
@@ -42,13 +42,13 @@ export function put(
 
 	return {
 		ok: true,
-		state: withCount(farm, store, goods.good, countHeld(farm, goods.good, rules) + goods.amount),
+		state: setCount(farm, store, goods.good, countHeld(farm, store, goods.good) + goods.amount),
 	};
 }
 
 /**
  * Takes every input from its store, in list order. Refused, naming the first input that is short,
- * unless the farm holds them all; `what` names the cause ("Feeding").
+ * unless the farm holds them all; `what` names the cause ("Making bread").
  */
 export function take(
 	farm: FarmState,
@@ -58,42 +58,46 @@ export function take(
 ): ApplyResult {
 	let current = farm;
 	for (const { good, amount } of inputs) {
-		const store = storeOf(good, rules);
-		const count = countHeld(current, good, rules);
-		if (count < amount) {
+		const store = findStore(good, rules);
+		const held = countHeld(current, store, good);
+		if (held < amount) {
 			return refuse(
-				`${what} needs ${String(amount)} ${good}, and the ${store} has ${String(count)}.`,
+				`${what} needs ${String(amount)} ${good}, and the ${store} has ${String(held)}.`,
 			);
 		}
 
-		current = withCount(current, store, good, count - amount);
+		current = setCount(current, store, good, held - amount);
 	}
 	return { ok: true, state: current };
 }
 
-/** How many of `good` the farm's store for it holds. */
-export function countHeld(farm: FarmState, good: string, rules: StorageRules): number {
-	return farm[storeOf(good, rules)][good] ?? 0;
+/** How many of `good` the farm holds, in the good's store (#86: feeding fills a trough from it). */
+export function countStored(farm: FarmState, good: string, rules: StorageRules): number {
+	return countHeld(farm, findStore(good, rules), good);
 }
 
 type Store = "silo" | "barn";
 
-function storeOf(good: string, rules: StorageRules): Store {
+function findStore(good: string, rules: StorageRules): Store {
 	return rules.crops.has(good) ? "silo" : "barn";
 }
 
-function capacityOf(store: Store, rules: StorageRules): number {
+function findCapacity(store: Store, rules: StorageRules): number {
 	return store === "silo" ? rules.siloCapacity : rules.barnCapacity;
 }
 
+function countHeld(farm: FarmState, store: Store, good: string): number {
+	return farm[store][good] ?? 0;
+}
+
 /** A store's fill. A sum, so the order of the goods' keys can't matter (MUST-10.6). */
-function sum(goods: FarmState[Store]): number {
-	return Object.values(goods).reduce((total, count) => total + count, 0);
+function sumGoods(goods: FarmState[Store]): number {
+	return Object.values(goods).reduce((total, held) => total + held, 0);
 }
 
 /** A good has a key only while its count is above 0, so equal farms hash equally (state/). */
-function withCount(farm: FarmState, store: Store, good: string, count: number): FarmState {
+function setCount(farm: FarmState, store: Store, good: string, held: number): FarmState {
 	const others = Object.entries(farm[store]).filter(([key]) => key !== good);
-	const goods = Object.fromEntries(count > 0 ? [...others, [good, count]] : others);
+	const goods = Object.fromEntries(held > 0 ? [...others, [good, held]] : others);
 	return { ...farm, [store]: goods };
 }
