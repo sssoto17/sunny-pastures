@@ -1,11 +1,14 @@
-// The order board: orders drawn from the orders stream, and slots refilling (MUST-04; ADR-0005,
-// section 3; ADR-0003, section 15). #87's next part adds delivering and discarding.
+// The order board: orders drawn from the orders stream, delivering and discarding them, and slots
+// refilling (MUST-04; ADR-0005, section 3; ADR-0003, section 15).
+import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content, GoodCount, OrderGood } from "../content/index.js";
-import { levelOf } from "../progress/index.js";
+import { gainXp, levelOf } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { mulberry32 } from "../random/index.js";
-import type { FarmState } from "../state/index.js";
+import { refuse } from "../state/index.js";
+import type { ApplyResult, FarmState } from "../state/index.js";
+import { take } from "../storage/index.js";
 import type { StorageRules } from "../storage/index.js";
 
 /** One slot of the board (ADR-0003, section 5: order slots are stored facts). */
@@ -24,6 +27,11 @@ export interface Order {
 	readonly coins: number;
 	readonly xp: number;
 }
+
+/** The actions on the board (MUST-04.4). `slot` is an index into the board. */
+export type OrderAction =
+	| { readonly type: "deliver"; readonly slot: number }
+	| { readonly type: "discard"; readonly slot: number };
 
 /** The order rules for one content, prepared once in createSim. */
 export interface OrderRules {
@@ -74,6 +82,36 @@ export function fillNewBoard(farm: FarmState, rules: OrderRules): FarmState {
 		current = drawInto(current, current.board.length, rules);
 	}
 	return current;
+}
+
+/**
+ * Delivers the order in slot `index`: all its goods leave storage, through `take`, and it pays its coins
+ * and its XP, with the level-up coins of any Level it reaches (MUST-04.4, 05.2, 05.4). Refused if
+ * any good is short (spec decision 2). The slot empties until the delivered delay of the farm's
+ * Level after the delivery, stored now (MUST-04.5; ADR-0006, section 7).
+ */
+export function deliver(farm: FarmState, index: number, rules: OrderRules): ApplyResult {
+	const order = findOrder(farm, index);
+	if (typeof order === "string") return refuse(order);
+
+	const what = `Delivering order ${formatSlotNumber(index)}`;
+	const taken = take(farm, order.goods, what, rules.storage);
+	if (!taken.ok) return taken;
+
+	const paid = gainXp(
+		{ ...taken.state, coins: taken.state.coins + order.coins },
+		order.xp,
+		rules.progress,
+	);
+	return { ok: true, state: empty(paid, index, findLevel(paid, rules).deliveredMs) };
+}
+
+/** Discards the order in slot `index`: it empties until the longer, discarded delay (MUST-04.5). */
+export function discard(farm: FarmState, index: number, rules: OrderRules): ApplyResult {
+	const order = findOrder(farm, index);
+	if (typeof order === "string") return refuse(order);
+
+	return { ok: true, state: empty(farm, index, findLevel(farm, rules).discardedMs) };
 }
 
 /**
@@ -221,8 +259,33 @@ function drawInto(farm: FarmState, index: number, rules: OrderRules): FarmState 
 	return { ...filled, streams: { ...farm.streams, orders: stream } };
 }
 
+/** The open order in `index`, or why there is none, as a sentence. */
+function findOrder(farm: FarmState, index: number): Order | string {
+	const slot = Number.isSafeInteger(index) && index >= 0 ? farm.board[index] : undefined;
+	if (slot === undefined) {
+		return Number.isSafeInteger(index) && index >= 0
+			? `There is no order slot ${formatSlotNumber(index)}.`
+			: "There is no such order slot.";
+	}
+	if (slot.status !== "open") return `Order slot ${formatSlotNumber(index)} is empty.`;
+
+	return slot.order;
+}
+
+/** Empties `index` until `delay` ms from the farm's time, stored now (ADR-0006, section 7). */
+function empty(farm: FarmState, index: number, delay: number): FarmState {
+	const refillAt = farm.time + delay;
+	assertTime(refillAt);
+	return replaceSlot(farm, index, { status: "empty", refillAt });
+}
+
 function makeStep(at: number, index: number): AutomatedStep {
 	return { at, kind: "refillSlot", index, slot: 0 };
+}
+
+/** Players count order slots from 1. */
+function formatSlotNumber(index: number): string {
+	return String(index + 1);
 }
 
 /** Sets the slot at `index`, or adds it at the end when `index` is the board's length. */

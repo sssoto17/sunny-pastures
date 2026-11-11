@@ -12,7 +12,13 @@ import {
 	prepareFacilityRules,
 	startJob,
 } from "../facilities/index.js";
-import { createRefilling, fillNewBoard, prepareOrderRules } from "../orders/index.js";
+import {
+	createRefilling,
+	deliver,
+	discard,
+	fillNewBoard,
+	prepareOrderRules,
+} from "../orders/index.js";
 import {
 	buyPen,
 	collectProducts,
@@ -119,6 +125,10 @@ export function createSim(content: Content): Sim {
 				return collect(farm, action.facility, facilityRules);
 			case "buyTier":
 				return buyTier(farm, action.facility, action.tier, facilityRules);
+			case "deliver":
+				return deliver(farm, action.slot, orderRules);
+			case "discard":
+				return discard(farm, action.slot, orderRules);
 		}
 	}
 }

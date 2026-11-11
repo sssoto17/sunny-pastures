@@ -3,7 +3,7 @@
 // (ADR-0003, section 5, D12); the invariants the property tests check are below. Each feature
 // module owns its part of the state and its actions (ADR-0005, section 3); this module composes them.
 import type { FacilityAction, OwnedFacility } from "../facilities/index.js";
-import type { OrderSlot } from "../orders/index.js";
+import type { OrderAction, OrderSlot } from "../orders/index.js";
 import type { OwnedPen, PenAction } from "../pens/index.js";
 import type { Plot, PlotAction } from "../plots/index.js";
 
@@ -33,7 +33,7 @@ export interface FarmState {
 }
 
 /** Something a player chooses to do, applied at a server time (`GLOSSARY.md`). */
-export type Action = PlotAction | FacilityAction | PenAction;
+export type Action = PlotAction | FacilityAction | PenAction | OrderAction;
 
 /** A refusal is data, not a throw, and carries no state (ADR-0003, section 4, D15). */
 export type ApplyResult =
