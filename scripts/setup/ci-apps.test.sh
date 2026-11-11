@@ -3,7 +3,8 @@
 # terminal, so no screen clearing). `gh` is a fake on PATH: it logs its arguments to $work/calls
 # and saves what `gh secret set` reads on stdin to $work/stdin.<NAME>.<env>. Each test plants
 # fake .pem keys holding a unique marker and checks the marker reaches `gh secret set` on stdin,
-# with --env, and never appears in the wizard's output or in any gh argument.
+# with --env, and never appears in the wizard's output or in any gh argument. Environments live
+# in $work/env.<name> (its policy, "false true" when custom) and $work/policies.<name>.
 # Run: bash scripts/setup/ci-apps.test.sh
 set -uo pipefail
 
@@ -18,12 +19,25 @@ cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
 printf '%s\n' "$*" >>"$dir/calls"
+envof() { local e=${1#repos/sssoto17/sunny-pastures/environments/}; echo "${e%%/*}"; }
+case "$*" in
+  "api repos/sssoto17/sunny-pastures/environments/"*"/deployment-branch-policies --jq "*)
+    cat "$dir/policies.$(envof "$2")" 2>/dev/null; exit 0 ;;
+  "api repos/sssoto17/sunny-pastures/environments/"*" --jq "*)
+    [[ -f $dir/env.$(envof "$2") ]] || { echo "fake: HTTP 404" >&2; exit 1; }
+    cat "$dir/env.$(envof "$2")"; exit 0 ;;
+  "api -X PUT repos/sssoto17/sunny-pastures/environments/"*)
+    [[ $* == *"protected_branches]=false"*"custom_branch_policies]=true"* ]] &&
+      echo "false true" >"$dir/env.$(envof "$4")"; exit 0 ;;
+  "api -X POST repos/sssoto17/sunny-pastures/environments/"*"/deployment-branch-policies --silent -f name="*" -f type=branch")
+    n=${7#name=}; echo "$n" >>"$dir/policies.$(envof "$4")"; exit 0 ;;
+esac
 case "$1 $2" in
   "auth status") [[ -f $dir/signed-out ]] && exit 1; exit 0 ;;
   "secret set")
     [[ -f $dir/fail-secret ]] && { echo "fake: HTTP 500" >&2; exit 1; }
     cat >"$dir/stdin.$3.$5"; echo "✓ Set Actions secret $3"; exit 0 ;;
-  "variable set" | "api -X") exit 0 ;;
+  "variable set") exit 0 ;;
   "variable list") echo "${5^^}_APP_CLIENT_ID" ;;
   "secret list") echo "${5^^}_APP_PRIVATE_KEY" ;;
   *) echo "fake: unexpected gh call: $*" >&2; exit 99 ;;
@@ -37,7 +51,8 @@ plant() { # name marker -> a fake PEM key at $work/keys/<name>.pem
     >"$work/keys/$1.pem"
 }
 reset() {
-  rm -f "$work"/calls "$work"/stdin.* "$work"/signed-out "$work"/fail-secret "$work"/keys/*
+  rm -f "$work"/calls "$work"/stdin.* "$work"/signed-out "$work"/fail-secret "$work"/keys/* \
+    "$work"/env.* "$work"/policies.*
   fkey=$(marker factory) rkey=$(marker reviewer)
   plant factory "$fkey"
   plant reviewer "$rkey"
@@ -92,8 +107,12 @@ cp "$work/keys/factory.pem" "$work/factory.expected"
 cp "$work/keys/reviewer.pem" "$work/reviewer.expected"
 run "$(happy_input)"
 expect_code 0
-assert "expected both environments created" contains "$calls" "api -X PUT repos/sssoto17/sunny-pastures/environments/factory --silent"
-assert "expected the review environment" contains "$calls" "environments/review --silent"
+for env in factory review; do
+  assert "expected $env created with a custom branch policy" contains "$calls" \
+    "api -X PUT repos/sssoto17/sunny-pastures/environments/$env --silent -F deployment_branch_policy[protected_branches]=false -F deployment_branch_policy[custom_branch_policies]=true"
+  assert "expected $env open to main and throwaway/* only" \
+    test "$(cat "$work/policies.$env")" == $'main\nthrowaway/*'
+done
 assert "expected the factory client ID as an env variable" \
   contains "$calls" "variable set FACTORY_APP_CLIENT_ID --env factory --repo sssoto17/sunny-pastures --body Iv23factory"
 assert "expected the reviewer client ID as an env variable" \
@@ -115,6 +134,30 @@ assert "expected the permissions in the registration URL" \
 assert "expected the reviewer's permissions" contains "$out" "name=sunny-reviewer&url=https://github.com/sssoto17/sunny-pastures&public=false&contents=write&pull_requests=write"
 assert "expected no Administration or Workflows permission requested" lacks "$out" "administration=write"
 assert "expected names in the summary" contains "$out" "FACTORY_APP_PRIVATE_KEY (factory)"
+
+# --- re-run: environments that already have the policy are left alone -------------------------
+reset
+for env in factory review; do
+  echo "false true" >"$work/env.$env"
+  printf 'main\nthrowaway/*\n' >"$work/policies.$env"
+done
+run "$(happy_input)"
+expect_code 0
+assert "expected no environment PUT on a re-run" lacks "$calls" "api -X PUT"
+assert "expected no branch policy POST on a re-run" lacks "$calls" "api -X POST"
+
+# --- an environment without a custom policy, or missing one pattern: only what is missing -------
+reset
+echo "null null" >"$work/env.factory"        # exists, all branches allowed
+echo "false true" >"$work/env.review"
+echo main >"$work/policies.review"
+run "$(happy_input)"
+expect_code 0
+assert "expected factory restricted" contains "$calls" "api -X PUT repos/sssoto17/sunny-pastures/environments/factory"
+assert "expected review not PUT again" lacks "$calls" "api -X PUT repos/sssoto17/sunny-pastures/environments/review"
+assert "expected review to get only throwaway/*" \
+  test "$(grep -c 'environments/review/deployment-branch-policies --silent' <<<"$calls")" -eq 1
+assert "expected review's policies complete" test "$(cat "$work/policies.review")" == $'main\nthrowaway/*'
 
 # --- a wrong path, then a file that isn't a key, then the key; keep the file -----------------
 reset
@@ -150,6 +193,7 @@ run "$(happy_input)"
 expect_code 2
 assert "expected the sign-in hint" contains "$err" "gh auth login"
 assert "expected no write" lacks "$calls" "set"
+assert "expected no environment write" lacks "$calls" "api -X"
 
 # --- input ends early: refused, nothing stored ------------------------------------------------
 reset
