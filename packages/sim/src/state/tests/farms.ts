@@ -40,9 +40,16 @@ const plotIndex = fc.oneof(
 	{ weight: 1, arbitrary: fc.constantFrom(-1, 14, 15) },
 );
 
+/** Mostly the slice's one pen (#86), sometimes one content doesn't have. */
+const penIndex = fc.oneof(
+	{ weight: 9, arbitrary: fc.constant(0) },
+	{ weight: 1, arbitrary: fc.constantFrom(-1, 1) },
+);
+
 /**
  * Plant, harvest and buy on plots in and out of range, mostly wheat, sometimes a crop not in
- * content. A generated buy rarely names the next plot, so it mostly reaches the refusals.
+ * content; buy, feed and collect from pens in and out of range. A generated buy rarely names the
+ * next plot, so it mostly reaches the refusals.
  */
 const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({
@@ -55,6 +62,9 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	}),
 	fc.record({ type: fc.constant("harvest" as const), plot: plotIndex }),
 	fc.record({ type: fc.constant("buyPlot" as const), plot: plotIndex }),
+	fc.record({ type: fc.constant("buyPen" as const), pen: penIndex }),
+	fc.record({ type: fc.constant("feed" as const), pen: penIndex }),
+	fc.record({ type: fc.constant("collectProducts" as const), pen: penIndex }),
 );
 
 /**
@@ -90,10 +100,31 @@ const expand: TimedAction[] = allPlots
 	.slice(startPlots)
 	.map((plot) => ({ action: { type: "buyPlot", plot }, delay: 0 }));
 
+/** Feeding the pen once per chicken and once more for the trough, then collecting after `wait`. */
+const feedAndCollect = (wait: number): TimedAction[] => [
+	...Array.from({ length: 4 }, () => ({ action: { type: "feed", pen: 0 } as const, delay: 0 })),
+	{ action: { type: "collectProducts", pen: 0 }, delay: Math.abs(wait) },
+];
+
+/**
+ * Keeping chickens: buy the pen, then feed and collect twice. The farm's chicken feed comes from
+ * content's start until #84's feed mill makes it, so chickens lay, eat the next portion at the
+ * time they lay, and fill the barn (MUST-02, 14.4). Refused and skipped while the pen is locked or
+ * unaffordable, its trough is full or the barn has no feed.
+ */
+const keepChickens = fc
+	.tuple(delay, delay)
+	.map(([first, second]): TimedAction[] => [
+		{ action: { type: "buyPen", pen: 0 }, delay: 0 },
+		...feedAndCollect(first),
+		...feedAndCollect(second),
+	]);
+
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
 	{ weight: 2, arbitrary: tend },
 	{ weight: 1, arbitrary: fc.constant(expand) },
+	{ weight: 1, arbitrary: keepChickens },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());
