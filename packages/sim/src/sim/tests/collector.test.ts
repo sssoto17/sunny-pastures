@@ -17,6 +17,14 @@ const collecting = (wheat: number, barn: Record<string, number> = {}): FarmState
 	facilities: [ownedFacility([], collector), ownedFacility([], collector)],
 });
 
+const done = { status: "done", recipe: "chickenFeed" } as const;
+
+/** A full barn, and two feed jobs waiting for room in the feed mill. */
+const fullBarn: FarmState = {
+	...collecting(0, { bread: 50 }),
+	facilities: [ownedFacility([done, done], collector), ownedFacility([], collector)],
+};
+
 describe("the Collector", () => {
 	it("moves a job's goods into the barn as it finishes, not a ms before, with its XP (MUST-06.6)", () => {
 		const farm = applyAll(collecting(4), [
@@ -64,12 +72,7 @@ describe("the Collector", () => {
 	});
 
 	it("moves every waiting job that fits in one step once the barn has room, with their XP", () => {
-		const done = { status: "done", recipe: "chickenFeed" } as const;
-		const full = {
-			...collecting(0, { bread: 50 }),
-			facilities: [ownedFacility([done, done], collector), ownedFacility([], collector)],
-		};
-		const held = sim.advance(full, feedMs);
+		const held = sim.advance(fullBarn, feedMs);
 		expect(held.facilities[feedMill]?.jobs).toEqual([done, done]);
 
 		// Room for 4 (an order delivered, say): both jobs' 2 feed move at that time, in one step.
@@ -122,12 +125,7 @@ describe("the Collector", () => {
 	});
 
 	it("moves goods that waited for room once the barn has room again, in their order (MUST-06.6, 07.2)", () => {
-		const done = { status: "done", recipe: "chickenFeed" } as const;
-		const full = {
-			...collecting(0, { bread: 50 }),
-			facilities: [ownedFacility([done, done], collector), ownedFacility([], collector)],
-		};
-		const held = sim.advance(full, 1_000_000);
+		const held = sim.advance(fullBarn, 1_000_000);
 		expect(held.facilities[feedMill]?.jobs).toEqual([done, done]);
 
 		// Room for 3 (an order delivered, say): the oldest job's 2 feed move, the next waits.
