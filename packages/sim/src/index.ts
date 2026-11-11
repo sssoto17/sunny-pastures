@@ -5,11 +5,13 @@ export type {
 	Content,
 	Crop,
 	Facility,
+	FacilityTier,
 	GoodCount,
 	LevelRow,
 	OrderGood,
 	Pen,
 	Recipe,
+	TierRow,
 } from "./content/index.js";
 export type { FacilityAction, Job, OwnedFacility } from "./facilities/index.js";
 export { stateHash } from "./hash/index.js";
