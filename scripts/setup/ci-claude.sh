@@ -303,8 +303,10 @@ mode=$(gh api "repos/$REPO/actions/permissions" --jq .allowed_actions) ||
 sel=repos/$REPO/actions/permissions/selected-actions
 owned=$(gh api "$sel" --jq .github_owned_allowed) || die 1 "reading the selected actions failed"
 verified=$(gh api "$sel" --jq .verified_allowed) || die 1 "reading the selected actions failed"
+# Read the list into a variable first: a failed read must stop here, not empty the list we write.
+listed=$(gh api "$sel" --jq '.patterns_allowed // [] | .[]') || die 1 "reading the selected actions failed"
 patterns=()
-while IFS= read -r p; do [[ -z $p ]] || patterns+=("$p"); done < <(gh api "$sel" --jq '.patterns_allowed[]')
+while IFS= read -r p; do [[ -z $p ]] || patterns+=("$p"); done <<<"$listed"
 say "Allowed now: GitHub-owned $owned, verified creators $verified, patterns:"
 for p in "${patterns[@]}"; do note "  $p"; done
 fields=()
@@ -326,12 +328,12 @@ pause
 
 stage "Check what is set (names only)"
 for env in factory review; do
-  say "Environment $env, secrets:"
-  gh secret list --env "$env" --repo "$REPO" --json name --jq '.[].name' | sed 's/^/    /'
+  names=$(gh secret list --env "$env" --repo "$REPO" --json name --jq '.[].name') ||
+    die 1 "gh secret list --env $env failed"
+  say "Environment $env, secrets:"; note "  ${names//$'\n'/, }"
 done
-say "Allowed action patterns:"
-gh api "$sel" --jq '.patterns_allowed[]' |
-  sed 's/^/    /'
+listed=$(gh api "$sel" --jq '.patterns_allowed // [] | .[]') || die 1 "reading the selected actions failed"
+say "Allowed action patterns:"; note "  ${listed//$'\n'/, }"
 say "Next: scripts/setup/ci-check.sh start 103."
 pause
 
