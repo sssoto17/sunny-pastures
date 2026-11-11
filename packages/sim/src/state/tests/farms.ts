@@ -56,6 +56,12 @@ const penIndex = fc.oneof(
 	{ weight: 1, arbitrary: fc.constantFrom(-1, 1) },
 );
 
+/** Mostly a slot the slice's board can have (3 to 7, #87), sometimes one out of range. */
+const slotIndex = fc.oneof(
+	{ weight: 9, arbitrary: fc.integer({ min: 0, max: 6 }) },
+	{ weight: 1, arbitrary: fc.constantFrom(-1, 7, 9) },
+);
+
 /** Mostly the slice's recipes, sometimes one the facility lacks or not in content. */
 const recipe = fc.oneof(
 	{ weight: 9, arbitrary: fc.constantFrom("chickenFeed", "bread", "cookies") },
@@ -69,9 +75,10 @@ const tier = fc.oneof(
 );
 
 /**
- * Plant, harvest, buy, start jobs, buy tiers and collect, on plots and facilities in and out of range, mostly
- * wheat, sometimes a crop not in content; buy, feed and collect from pens in and out of range. A
- * generated buy rarely names the next plot, so it mostly reaches the refusals.
+ * Plant, harvest, buy, start jobs, buy tiers and collect, on plots and facilities in and out of
+ * range, mostly wheat, sometimes a crop not in content; buy, feed and collect from pens in and out
+ * of range; deliver and discard orders in slots in and out of range. A generated buy rarely names
+ * the next plot, so it mostly reaches the refusals.
  */
 const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({
@@ -91,6 +98,8 @@ const action: fc.Arbitrary<Action> = fc.oneof(
 	fc.record({ type: fc.constant("buyPen" as const), pen: penIndex }),
 	fc.record({ type: fc.constant("feed" as const), pen: penIndex }),
 	fc.record({ type: fc.constant("collectProducts" as const), pen: penIndex }),
+	fc.record({ type: fc.constant("deliver" as const), slot: slotIndex }),
+	fc.record({ type: fc.constant("discard" as const), slot: slotIndex }),
 );
 
 /**
@@ -246,6 +255,32 @@ const bake = delay.map((wait): TimedAction[] => {
 	];
 });
 
+/** Delivering the order in every slot the board can have, at the farm's time. */
+const deliverAll = Array.from({ length: 7 }, (_slot, slot): TimedAction => ({
+	action: { type: "deliver", slot },
+	delay: 0,
+}));
+
+/**
+ * Trading (#87): plant the start's plots, deliver every order the farm can fill and discard one,
+ * then harvest after `wait` and deliver again. Only the start's plots, so the chunk stays short:
+ * the properties play every generated run at 1,000 runs in CI. Wheat orders are filled, the others mostly refused for a
+ * short good; deliveries pay XP that crosses Levels and opens slots (MUST-04.1, 04.4). Planting
+ * and delivering at one time make a refill fall with a ripening when the delivered delay is the
+ * grow time, as the slice's is at Level 1 and 2, so the tie key is reached (MUST-10.6).
+ */
+const trade = fc.tuple(delay, slotIndex).map(([wait, slot]): TimedAction[] => {
+	const plots = allPlots.slice(0, startPlots);
+	return [
+		...plots.map((plot) => ({ action: { type: "plant", plot, crop: "wheat" } as const, delay: 0 })),
+		...deliverAll,
+		{ action: { type: "discard", slot }, delay: 0 },
+		{ action: { type: "harvest", plot: 0 }, delay: Math.abs(wait) },
+		...plots.slice(1).map((plot) => ({ action: { type: "harvest", plot } as const, delay: 0 })),
+		...deliverAll,
+	];
+});
+
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
 	{ weight: 2, arbitrary: tend },
@@ -254,6 +289,7 @@ const chunk = fc.oneof(
 	{ weight: 2, arbitrary: keepChickens },
 	{ weight: 2, arbitrary: buyTiers },
 	{ weight: 2, arbitrary: bake },
+	{ weight: 1, arbitrary: trade },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());
