@@ -25,7 +25,7 @@ cat >"$work/gitconfig" <<'EOF'
   defaultBranch = main
 EOF
 # The test clone's origin is the real URL, as on the admin's machine; git rewrites it to the bare
-# repo here, while `git config remote.origin.url` (what the script checks) still reads the URL.
+# repo here, and the git shim below maps it back in `remote get-url`, which the script checks.
 printf '[url "%s"]\n  insteadOf = %s\n' "$work/origin.git" "$GH_URL" >>"$work/gitconfig"
 export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
 
@@ -53,6 +53,18 @@ esac
 if [[ -n $jqp ]]; then jq -r "$jqp" "$dir/fx/$key.json"; else cat "$dir/fx/$key.json"; fi
 FAKE
 chmod +x "$work/bin/gh"
+# git: the real one, except that `remote get-url` shows the local bare repo as GitHub's URL, as
+# the admin's clone would. Any other URL (a pushurl elsewhere, one with a token) shows as itself.
+real_git=$(command -v git)
+cat >"$work/bin/git" <<FAKE
+#!/usr/bin/env bash
+if [[ " \$* " == *" remote get-url "* ]]; then
+  "$real_git" "\$@" | sed "s|^$work/origin.git\$|$GH_URL|"
+  exit "\${PIPESTATUS[0]}"
+fi
+exec "$real_git" "\$@"
+FAKE
+chmod +x "$work/bin/git"
 
 reset() {
   rm -rf "$work/origin.git" "$work/seed" "$work/clone" "$work/calls" "$work/fx" \
@@ -139,10 +151,41 @@ out=$(cd "$work/other" && PATH="$work/bin:$PATH" bash "$work/other/scripts/setup
 code=$?
 err=$(cat "$work/err")
 expect_code 2
-assert "expected the wrong origin named" contains "$err" "not sssoto17/sunny-pastures: nothing pushed"
+assert "expected the wrong origin refused" contains "$err" "isn't sssoto17/sunny-pastures on GitHub: nothing pushed"
 assert "expected nothing pushed to the other repo" test -z "$(git -C "$work/other.git" for-each-ref)"
 assert "expected nothing pushed to sunny-pastures" \
   test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+
+# An origin URL carrying a token: refused, and the token is never shown.
+reset
+git -C "$work/clone" remote set-url origin "https://x-access-token:FAKE_SECRET_$RANDOM@github.com/sssoto17/sunny-pastures.git"
+secret=$(git -C "$work/clone" config --get remote.origin.url | sed 's/.*:\(FAKE_SECRET_[0-9]*\)@.*/\1/')
+run start 101
+expect_code 2
+assert "expected the fetch URL refused" contains "$err" "fetch URL of origin"
+assert "token in stdout" lacks "$out" "$secret"
+assert "token in stderr" lacks "$err" "$secret"
+assert "expected no URL printed at all" lacks "$err" "github.com"
+
+# A pushurl that sends the push elsewhere: refused, nothing pushed anywhere.
+reset
+git init -q --bare "$work/other.git"
+git -C "$work/clone" config remote.origin.pushurl "$work/other.git"
+run start 101
+expect_code 2
+assert "expected the push URL refused" contains "$err" "push URL of origin"
+assert "expected nothing pushed to the pushurl" test -z "$(git -C "$work/other.git" for-each-ref)"
+assert "expected nothing pushed to sunny-pastures" \
+  test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+
+# A pushInsteadOf rewrite does the same through config: refused.
+reset
+git init -q --bare "$work/other.git"
+git -C "$work/clone" config "url.$work/other.git.pushInsteadOf" "$GH_URL"
+run start 101
+expect_code 2
+assert "expected the rewritten push URL refused" contains "$err" "push URL of origin"
+assert "expected nothing pushed to the rewrite" test -z "$(git -C "$work/other.git" for-each-ref)"
 
 # The branch is there now: refused, nothing pushed.
 reset
