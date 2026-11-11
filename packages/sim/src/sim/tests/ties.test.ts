@@ -134,39 +134,39 @@ describe.each(contents)(
 		const world = makeWorld(content);
 		const { sim } = world;
 
-		it("give the same hash when advance is split at the tie, or a ms before it, or the farm's keys are in another order", () => {
+		/** Checks every tie in the generated runs, with the run's last wait. */
+		const forEachTie = (check: (tie: Tie, wait: number) => void): void => {
 			fc.assert(
 				fc.property(farmId, timedActions, delay, (id, played, wait) => {
-					for (const { at, from } of findRunTies(world, id, played, wait)) {
-						const to = at + Math.abs(wait);
-						const whole = stateHash(sim.advance(from, to));
-
-						expect(stateHash(sim.advance(sim.advance(from, at), to))).toBe(whole);
-						expect(stateHash(sim.advance(sim.advance(from, at - 1), to))).toBe(whole);
-						expect(stateHash(sim.advance(reverseKeys(from), to))).toBe(whole);
-					}
+					for (const tie of findRunTies(world, id, played, wait)) check(tie, wait);
 				}),
 				params,
 			);
+		};
+
+		it("give the same hash when advance is split at the tie, or a ms before it, or the farm's keys are in another order", () => {
+			forEachTie(({ at, from }, wait) => {
+				const to = at + Math.abs(wait);
+				const whole = stateHash(sim.advance(from, to));
+
+				expect(stateHash(sim.advance(sim.advance(from, at), to))).toBe(whole);
+				expect(stateHash(sim.advance(sim.advance(from, at - 1), to))).toBe(whole);
+				expect(stateHash(sim.advance(reverseKeys(from), to))).toBe(whole);
+			});
 		});
 
-		it("give the last barn space to the lower facility index: the feed mill's goods move if they fit (MUST-10.6)", () => {
-			fc.assert(
-				fc.property(farmId, timedActions, delay, (id, played, wait) => {
-					for (const { at, from } of findRunTies(world, id, played, wait)) {
-						const before = sim.advance(from, at - 1);
-						const isEachCollecting = before.facilities.every((owned) => owned?.addOns.collector);
-						if (!isEachCollecting || barnRoom(world, before) < made[0].goods) continue;
+		it("give the last barn space to the lower facility index: the feed mill's goods move whenever there is room for them (MUST-10.6)", () => {
+			forEachTie(({ at, from }) => {
+				const before = sim.advance(from, at - 1);
+				const isEachCollecting = before.facilities.every((owned) => owned?.addOns.collector);
+				if (!isEachCollecting || barnRoom(world, before) < made[0].goods) return;
 
-						// The feed mill's oldest job, waiting or finishing now, fits, so it moves at the tie
-						// whatever the bakery's goods would take.
-						const after = sim.advance(from, at);
-						const feed = (farm: FarmState): number => farm.barn["chickenFeed"] ?? 0;
-						expect(feed(after)).toBeGreaterThanOrEqual(feed(before) + made[0].goods);
-					}
-				}),
-				params,
-			);
+				// The feed mill's oldest job, waiting or finishing now, has room, so it moves at the tie
+				// whatever the bakery's goods would take.
+				const after = sim.advance(from, at);
+				const feed = (farm: FarmState): number => farm.barn["chickenFeed"] ?? 0;
+				expect(feed(after)).toBeGreaterThanOrEqual(feed(before) + made[0].goods);
+			});
 		});
 	},
 );
