@@ -1,7 +1,7 @@
 // The sim speed row (CONSTRAINTS.md; ADR-0003, section 8): advance across 30 days on the largest
 // content farm, and one apply. Reported in the PR, not gating yet (#41). The largest farm is every
 // plot the Level table allows bought (#83) and planted, each ripening at a different time, every
-// facility bought with its queue full of jobs (#84), and every pen bought with each animal
+// facility bought at its highest tier with that tier's queue full of jobs (#84, #85), and every pen bought with each animal
 // producing and its trough full (#86).
 import { expect, it } from "vitest";
 
@@ -27,12 +27,17 @@ const planted: FarmState = Array.from({ length: mostPlots })
 		return expectAccepted(sim.apply(owned, plant, farm.time + 1_000));
 	}, rich);
 const working: FarmState = sliceContent.facilities.reduce<FarmState>((farm, facility, index) => {
-	const bought = expectAccepted(
-		sim.apply(farm, { type: "buyFacility", facility: index }, farm.time),
+	const bought = facility.tiers.reduce(
+		(current, _tier, i) =>
+			expectAccepted(
+				sim.apply(current, { type: "buyTier", facility: index, tier: i + 2 }, current.time),
+			),
+		expectAccepted(sim.apply(farm, { type: "buyFacility", facility: index }, farm.time)),
 	);
+	const { slots } = facility.tiers[facility.tiers.length - 1] ?? facility;
 	const [recipe = ""] = Object.keys(facility.recipes);
 	const start = { type: "startJob", facility: index, recipe } as const;
-	return Array.from({ length: facility.slots }).reduce<FarmState>(
+	return Array.from({ length: slots }).reduce<FarmState>(
 		(current) =>
 			expectAccepted(sim.apply({ ...current, silo: { wheat: 10 } }, start, current.time)),
 		bought,

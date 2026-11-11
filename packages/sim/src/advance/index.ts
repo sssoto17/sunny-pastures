@@ -11,7 +11,7 @@
  * - `produce` (#86) after `finishJob`, for the same reason: it touches neither storage nor coins
  *   and changes only its own pen (ADR-0003, section 13).
  * - `moveGoods` (#88), the Collector, after every producer, so goods made at a time move at it: one
- *   step per facility and time, as a job finishes or once waiting goods fit (ADR-0003, section 14).
+ *   step per facility and time, as a job finishes or once waiting goods fit (ADR-0003, section 15).
  *   No later-ranked step frees barn room today, so a move never falls due behind one already run.
  */
 const stepKinds = ["ripen", "finishJob", "produce", "moveGoods"] as const;

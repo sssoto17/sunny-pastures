@@ -6,6 +6,7 @@ import type { Content } from "../content/index.js";
 import {
 	buyAddOn,
 	buyFacility,
+	buyTier,
 	collect,
 	createCollecting,
 	jobFinishing,
@@ -114,6 +115,8 @@ export function createSim(content: Content): Sim {
 				return collect(farm, action.facility, facilityRules);
 			case "buyAddOn":
 				return buyAddOn(farm, action.facility, action.addOn, facilityRules);
+			case "buyTier":
+				return buyTier(farm, action.facility, action.tier, facilityRules);
 		}
 	}
 }

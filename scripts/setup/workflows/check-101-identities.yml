@@ -1,0 +1,165 @@
+# THROWAWAY: #101's identity checks. Never merge into main. scripts/setup/ci-check.sh copies this
+# file to .github/workflows/ on the branch throwaway/101-identities and pushes it; the push runs
+# it. A branch can't use workflow_dispatch (it needs the file on the default branch first), so the
+# trigger is a push to that branch. Each job prints `RESULT ...` lines with non-secret fields only;
+# `ci-check.sh results 101` collects them. "Check N" is the Nth checkbox of #101, so the jobs
+# appear in dependency order, not check order. Actions pinned to full SHAs (ADR-0002, area 8).
+name: check-101-identities
+
+on:
+  push:
+    branches: [throwaway/101-identities]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-101
+  cancel-in-progress: false
+
+env:
+  PR_BRANCH: throwaway/101-factory-pr
+  TAG: v0.0.0-throwaway-101
+
+jobs:
+  # Check 1: a PR opened with the factory's token is authored by sunny-factory[bot]. The branch
+  # starts from main, so the PR touches no workflow file (the App has no Workflows permission).
+  factory-pr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: factory
+    outputs:
+      pr: ${{ steps.pr.outputs.pr }}
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      - id: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          r="repos/$GITHUB_REPOSITORY"
+          main=$(gh api "$r/git/ref/heads/main" --jq .object.sha)
+          gh api -X POST "$r/git/refs" -f "ref=refs/heads/$PR_BRANCH" -f "sha=$main" --silent
+          gh api -X PUT "$r/contents/throwaway-101.md" --silent -f "branch=$PR_BRANCH" \
+            -f "message=chore: throwaway file for the identity check" \
+            -f "content=$(printf 'Throwaway for #101. Close unmerged.\n' | base64 -w0)"
+          pr=$(gh api -X POST "$r/pulls" -f "head=$PR_BRANCH" -f base=main \
+            -f "title=Throwaway: #101 identity check (close unmerged)" \
+            -f "body=Opened by the factory App for #101's checks. Never merge; close unmerged." \
+            --jq .number)
+          echo "pr=$pr" >>"$GITHUB_OUTPUT"
+          gh api "$r/pulls/$pr" --jq '"RESULT pr=\(.number) author=\(.user.login)"'
+
+  # Check 2: sunny-reviewer approves; read reviewDecision. While `main` requires 0 approvals,
+  # reviewDecision may stay empty: the review's own state (APPROVED) is the record. It also opens
+  # a file-level thread for check 4.
+  reviewer:
+    needs: factory-pr
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: review
+    env:
+      PR: ${{ needs.factory-pr.outputs.pr }}
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.REVIEWER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          r="repos/$GITHUB_REPOSITORY"
+          gh api -X POST "$r/pulls/$PR/reviews" -f event=APPROVE --silent \
+            -f "body=Throwaway approval for #101's check."
+          head=$(gh api "$r/pulls/$PR" --jq .head.sha)
+          gh api -X POST "$r/pulls/$PR/comments" --silent -f "commit_id=$head" \
+            -f path=throwaway-101.md -f subject_type=file \
+            -f "body=Throwaway thread for #101: the factory App resolves it."
+          sleep 5
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json reviewDecision,latestReviews --jq \
+            '"RESULT review_decision=\(.reviewDecision)", (.latestReviews[] | "RESULT review=\(.author.login):\(.state)")'
+
+  # Check 4: the factory App resolves the reviewer's thread; read resolvedBy back.
+  factory-resolve:
+    needs: [factory-pr, reviewer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: factory
+    env:
+      PR: ${{ needs.factory-pr.outputs.pr }}
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          q='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){
+            reviewThreads(first:20){nodes{id isResolved path}}}}}'
+          thread=$(gh api graphql -f "query=$q" -f "o=${GITHUB_REPOSITORY%/*}" \
+            -f "n=${GITHUB_REPOSITORY#*/}" -F "p=$PR" --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+              | select(.path == "throwaway-101.md" and (.isResolved | not)) | .id' | head -n1)
+          [ -n "$thread" ] || { echo "RESULT thread=not found"; exit 1; }
+          m='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved resolvedBy{login}}}}'
+          gh api graphql -f "query=$m" -f "t=$thread" --jq '.data.resolveReviewThread.thread
+            | "RESULT thread_resolved=\(.isResolved) resolved_by=\(.resolvedBy.login // "null")"'
+
+  # Check 3: the factory App pushes a v* tag at main's commit, by API and by git; both should be
+  # refused by the `release tags` ruleset. If either succeeds, the job fails: delete the tag by hand.
+  factory-tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: factory
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          ok=true
+          if gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" \
+            -f "sha=$(git rev-parse HEAD)" --silent 2>err; then
+            echo "RESULT tag_api=CREATED (unexpected; delete $TAG by hand)"; ok=false
+          else
+            echo "RESULT tag_api=refused: $(tr '\n' ' ' <err | cut -c1-300)"
+          fi
+          gh auth setup-git # git asks gh for the token: it never appears in a URL
+          git tag "$TAG"
+          if git push origin "refs/tags/$TAG" 2>err; then
+            echo "RESULT tag_push=PUSHED (unexpected; delete $TAG by hand)"; ok=false
+          else
+            echo "RESULT tag_push=refused: $(grep -E 'GH0|rule|denied|error' err | tr '\n' ' ' | cut -c1-300)"
+          fi
+          $ok
+
+  # Check 5: with `permissions:` read-only, the job's GITHUB_TOKEN can't write (a branch at main).
+  readonly-token:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          r="repos/$GITHUB_REPOSITORY"
+          main=$(gh api "$r/git/ref/heads/main" --jq .object.sha)
+          if gh api -X POST "$r/git/refs" -f "ref=refs/heads/throwaway/101-readonly-probe" \
+            -f "sha=$main" --silent 2>err; then
+            echo "RESULT readonly_write=ALLOWED (unexpected; delete branch throwaway/101-readonly-probe)"
+            exit 1
+          fi
+          echo "RESULT readonly_write=refused: $(tr '\n' ' ' <err | cut -c1-300)"
