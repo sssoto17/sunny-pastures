@@ -6,11 +6,11 @@ import fc from "fast-check";
 import { describe, expect, inject, it } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
-import type { Content, FarmState, Sim } from "../../index.js";
+import type { Content, FarmState, Order, Sim } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
 import type { Transition } from "../../state/tests/farms.js";
-import { expectDrawn } from "./expectDrawn.js";
+import { listDrawFaults } from "./orderTerms.js";
 
 const params = inject("fastCheck");
 const { wheat } = sliceContent.crops;
@@ -178,14 +178,9 @@ const isProducible = (farm: FarmState, good: string): boolean =>
 		egg: farm.pens[0] !== null,
 	})[good] ?? false;
 
-/** The open order in `slot` of the farm advanced to `at`, which a deliver or discard there acted on. */
-const findOrder = (
-	sim: ReturnType<typeof createSim>,
-	farm: FarmState,
-	at: number,
-	slot: number,
-) => {
-	const found = sim.advance(farm, at).board[slot];
+/** The open order in `slot` of a farm already advanced to an action's time: the one it acted on. */
+const findOrder = (advanced: FarmState, slot: number): Order | null => {
+	const found = advanced.board[slot];
 	return found?.status === "open" ? found.order : null;
 };
 
@@ -595,7 +590,7 @@ describe.each([
 	const levelSim = createSim(content);
 	const crop = content.crops.wheat;
 
-	it("MUST-05.1, 14.4: coins, goods, plots, queues, pens and the board stay within their bounds, as safe integers", () => {
+	it("MUST-05.1, 14.4: coins, goods, plots, queues and pens stay within their bounds, as safe integers", () => {
 		fc.assert(
 			fc.property(farmId, timedActions, (id, played) => {
 				for (const farm of play(levelSim, id, played).farms) {
@@ -626,19 +621,6 @@ describe.each([
 						expect(ends.every((end, i) => end > farm.time && end >= (ends[i - 1] ?? end))).toBe(
 							true,
 						);
-					}
-					// MUST-04.1, 04.2: a slot per the Level's count, each open order asking for 1–3 different
-					// goods unlocked at the farm's Level in set amounts, and each empty one refilling
-					// within the longest delay, never overdue (MUST-04.5, 04.6).
-					expect(farm.board).toHaveLength(boardSlots[levelAt(farm.xp) - 1] ?? NaN);
-					for (const slot of farm.board) {
-						if (slot.status === "empty") {
-							expect(slot.refillAt).toBeGreaterThan(farm.time);
-							expect(slot.refillAt).toBeLessThanOrEqual(farm.time + (discardedMs[0] ?? NaN));
-							continue;
-						}
-
-						expectDrawn(slot.order, levelAt(farm.xp));
 					}
 					expect(farm.pens).toHaveLength(1);
 					const [pen] = farm.pens;
@@ -687,7 +669,7 @@ describe.each([
 						// The order's goods leave storage, whole, and it pays its coins and XP with the
 						// level-up coins of the Levels it reaches; its slot waits the delivered delay of the
 						// Level reached (MUST-04.4, 04.5, 05.4).
-						const order = findOrder(levelSim, before, at, action.slot);
+						const order = findOrder(advanced, action.slot);
 						expect(order).not.toBeNull();
 						let [silo, barn] = [advanced.silo, advanced.barn];
 						for (const { good, amount } of order?.goods ?? []) {
@@ -705,7 +687,7 @@ describe.each([
 						});
 					} else if (action.type === "discard") {
 						// Only the slot changes: it waits the discarded delay of the farm's Level (MUST-04.5).
-						expect(findOrder(levelSim, before, at, action.slot)).not.toBeNull();
+						expect(findOrder(advanced, action.slot)).not.toBeNull();
 						const emptied = {
 							status: "empty",
 							refillAt: at + (discardedMs[levelAt(before.xp) - 1] ?? NaN),
@@ -835,8 +817,8 @@ describe.each([
 					// Cookies take their eggs from the barn as the job starts (#85).
 					if (action.type === "startJob") made -= recipes.get(action.recipe)?.eggs ?? NaN;
 					if (action.type === "deliver") {
-						for (const { good, amount } of findOrder(levelSim, before, at, action.slot)?.goods ??
-							[]) {
+						for (const { good, amount } of findOrder(levelSim.advance(before, at), action.slot)
+							?.goods ?? []) {
 							if (good === "chickenFeed" || good === "egg") made -= amount;
 						}
 					}
@@ -883,7 +865,7 @@ describe.each([
 					(total, { action, at, before }) =>
 						total +
 						(action.type === "deliver"
-							? (findOrder(levelSim, before, at, action.slot)?.coins ?? NaN)
+							? (findOrder(levelSim.advance(before, at), action.slot)?.coins ?? NaN)
 							: 0),
 					0,
 				);
@@ -903,6 +885,28 @@ describe.each([
 			params,
 		);
 	});
+	it("MUST-04.1, 04.2, 04.5, 04.6: the board has the Level's slots, each a valid order or refilling in time", () => {
+		fc.assert(
+			fc.property(farmId, timedActions, (id, played) => {
+				for (const farm of play(levelSim, id, played).farms) {
+					// MUST-04.1, 04.2: a slot per the Level's count, each open order asking for 1–3 different
+					// goods unlocked at the farm's Level in set amounts, and each empty one refilling
+					// within the longest delay, never overdue (MUST-04.5, 04.6).
+					expect(farm.board).toHaveLength(boardSlots[levelAt(farm.xp) - 1] ?? NaN);
+					const latest = farm.time + (discardedMs[0] ?? NaN);
+					const faults = farm.board.flatMap((slot) => {
+						if (slot.status === "open") return listDrawFaults(slot.order, levelAt(farm.xp));
+
+						const isInTime = slot.refillAt > farm.time && slot.refillAt <= latest;
+						return isInTime ? [] : [`refills at ${String(slot.refillAt)} ms`];
+					});
+					expect(faults).toEqual([]);
+				}
+			}),
+			params,
+		);
+	});
+
 	it("MUST-04.3: at most one open order asks for a good the farm can't produce", () => {
 		fc.assert(
 			fc.property(farmId, timedActions, delay, (id, played, wait) => {

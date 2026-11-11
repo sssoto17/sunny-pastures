@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createSim, sliceContent } from "../../index.js";
 import type { Content, FarmState, Order, OrderSlot } from "../../index.js";
 import { expectAccepted } from "./expectAccepted.js";
-import { expectDrawn } from "./expectDrawn.js";
+import { orderTerms as terms } from "./orderTerms.js";
 import { plantWheat } from "./plantWheat.js";
 
 const sim = createSim(sliceContent);
@@ -71,7 +71,22 @@ describe("drawing an order", () => {
 		const orders = newFarms(allAtOnce).flatMap(listOrders);
 
 		expect(orders).toHaveLength(5 * 40);
-		for (const order of orders) expectDrawn(order, 3);
+		for (const order of orders) {
+			const goods = order.goods.map(({ good }) => good);
+			expect(goods.length).toBeGreaterThanOrEqual(1);
+			expect(goods.length).toBeLessThanOrEqual(3);
+			expect(new Set(goods).size).toBe(goods.length);
+			let [coins, xp] = [0, 0];
+			for (const { good, amount } of order.goods) {
+				const term = terms.get(good);
+				expect(term?.level).toBeLessThanOrEqual(3);
+				expect(amount).toBeGreaterThanOrEqual(term?.min ?? NaN);
+				expect(amount).toBeLessThanOrEqual(term?.max ?? NaN);
+				coins += amount * (term?.coins ?? NaN);
+				xp += amount * (term?.xp ?? NaN);
+			}
+			expect([order.coins, order.xp]).toEqual([coins, xp]);
+		}
 		// Every unlocked good appears, and so do orders of one, two and three kinds.
 		const drawn = new Set(orders.flatMap((order) => order.goods.map(({ good }) => good)));
 		expect([...drawn].sort()).toEqual(["bread", "chickenFeed", "egg", "wheat"]);

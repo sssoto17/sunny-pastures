@@ -262,23 +262,24 @@ const deliverAll = Array.from({ length: 7 }, (_slot, slot): TimedAction => ({
 }));
 
 /**
- * Trading (#87): plant every plot, deliver every order the farm can fill and discard one, then
- * harvest after `wait` and deliver again. Wheat orders are filled, the others mostly refused for a
+ * Trading (#87): plant the start's plots, deliver every order the farm can fill and discard one,
+ * then harvest after `wait` and deliver again. Only the start's plots, so the chunk stays short:
+ * the properties play every generated run at 1,000 runs in CI. Wheat orders are filled, the others mostly refused for a
  * short good; deliveries pay XP that crosses Levels and opens slots (MUST-04.1, 04.4). Planting
  * and delivering at one time make a refill fall with a ripening when the delivered delay is the
  * grow time, as the slice's is at Level 1 and 2, so the tie key is reached (MUST-10.6).
  */
-const trade = fc.tuple(delay, slotIndex).map(([wait, slot]): TimedAction[] => [
-	...allPlots.map((plot) => ({
-		action: { type: "plant", plot, crop: "wheat" } as const,
-		delay: 0,
-	})),
-	...deliverAll,
-	{ action: { type: "discard", slot }, delay: 0 },
-	{ action: { type: "harvest", plot: 0 }, delay: Math.abs(wait) },
-	...allPlots.slice(1).map((plot) => ({ action: { type: "harvest", plot } as const, delay: 0 })),
-	...deliverAll,
-]);
+const trade = fc.tuple(delay, slotIndex).map(([wait, slot]): TimedAction[] => {
+	const plots = allPlots.slice(0, startPlots);
+	return [
+		...plots.map((plot) => ({ action: { type: "plant", plot, crop: "wheat" } as const, delay: 0 })),
+		...deliverAll,
+		{ action: { type: "discard", slot }, delay: 0 },
+		{ action: { type: "harvest", plot: 0 }, delay: Math.abs(wait) },
+		...plots.slice(1).map((plot) => ({ action: { type: "harvest", plot } as const, delay: 0 })),
+		...deliverAll,
+	];
+});
 
 const chunk = fc.oneof(
 	{ weight: 2, arbitrary: fc.array(fc.record({ action, delay }), { maxLength: 12 }) },
@@ -288,7 +289,7 @@ const chunk = fc.oneof(
 	{ weight: 2, arbitrary: keepChickens },
 	{ weight: 2, arbitrary: buyTiers },
 	{ weight: 2, arbitrary: bake },
-	{ weight: 2, arbitrary: trade },
+	{ weight: 1, arbitrary: trade },
 );
 
 export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());
