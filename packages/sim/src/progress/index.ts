@@ -1,7 +1,8 @@
 // Progress: the Level, what it unlocks, and buying (MUST-05; ADR-0005, section 3). The Level is
 // derived from XP through the Level table, never stored (D12).
 import type { Content } from "../content/index.js";
-import type { FarmState } from "../state/index.js";
+import { refuse } from "../state/index.js";
+import type { ApplyResult, FarmState } from "../state/index.js";
 
 /** The progress rules for one content, prepared once in createSim. */
 export interface ProgressRules {
@@ -28,6 +29,32 @@ export function levelOf(xp: number, rules: ProgressRules): number {
 	return rules.levels.filter((level) => level.xp <= xp).length;
 }
 
+/** Something the farm can buy: unlocked at `level`, then bought for `price` coins. */
+export interface Offer {
+	/** What is bought, as the subject of a refusal sentence, for example "Plot 7". */
+	readonly what: string;
+	readonly level: number;
+	readonly price: number;
+}
+
+/**
+ * The purchase rule every upgrade uses (spec decision 1, MUST-05.6, #72 D3): refused while the
+ * offer is locked or the farm has too few coins (MUST-05.1); otherwise the farm pays the price.
+ * The caller then adds what was bought, so it exists on the farm only once bought.
+ */
+export function purchase(farm: FarmState, offer: Offer, rules: ProgressRules): ApplyResult {
+	const locked = lockedReason(offer.what, offer.level, farm.xp, rules);
+	if (locked !== null) return refuse(locked);
+
+	if (farm.coins < offer.price) {
+		return refuse(
+			`${offer.what} costs ${String(offer.price)} coins, and the farm has ${String(farm.coins)}.`,
+		);
+	}
+
+	return { ok: true, state: { ...farm, coins: farm.coins - offer.price } };
+}
+
 /**
  * Why a farm with `xp` can't plant the crop yet, as a sentence for a refusal, or null if the
  * crop is unlocked (MUST-01.1, 01.5). A crop no Level lists is never unlocked; #89's content check
@@ -49,7 +76,7 @@ function lockedReason(
 	const current = levelOf(xp, rules);
 	if (current >= level) return null;
 
-	return `${what} isn't unlocked: it unlocks at Level ${String(level)}, and the farm is at Level ${String(current)}.`;
+	return `${what} isn't unlocked: it unlocks at Level ${String(level)}, and you're at Level ${String(current)}.`;
 }
 
 /**

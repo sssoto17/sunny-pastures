@@ -3,7 +3,7 @@
 import { advanceFarm, assertTime } from "../advance/index.js";
 import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
-import { harvest, plant, preparePlotRules, ripening } from "../plots/index.js";
+import { buyPlot, harvest, plant, preparePlotRules, ripening } from "../plots/index.js";
 import { streamSeed } from "../random/index.js";
 import { refuse } from "../state/index.js";
 import type { Action, ApplyResult, FarmState } from "../state/index.js";
@@ -52,6 +52,8 @@ export function createSim(content: Content): Sim {
 					return plant(farm, action.plot, action.crop, plotRules);
 				case "harvest":
 					return harvest(farm, action.plot, plotRules);
+				case "buyPlot":
+					return buyPlot(farm, action.plot, plotRules);
 			}
 		},
 		advance,

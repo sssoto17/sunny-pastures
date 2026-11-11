@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { sliceContent } from "../../content/index.js";
 import { createSim } from "../../sim/index.js";
-import { cropLocked, gainXp, levelOf, prepareProgressRules } from "../index.js";
+import { cropLocked, gainXp, levelOf, prepareProgressRules, purchase } from "../index.js";
 
 const rules = prepareProgressRules(sliceContent);
 const newFarm = createSim(sliceContent).newFarm("farm-1");
@@ -42,11 +42,63 @@ describe("gainXp", () => {
 	});
 });
 
+describe("purchase", () => {
+	const offer = { what: "Plot 7", level: 2, price: 20 };
+	const level2 = { ...newFarm, xp: 10, coins: 30 };
+
+	it("takes the price once the farm's Level unlocks it (spec decision 1, MUST-05.6)", () => {
+		expect(purchase(level2, offer, rules)).toEqual({ ok: true, state: { ...level2, coins: 10 } });
+	});
+
+	it("spends the last coins when the farm has exactly the price (MUST-05.1)", () => {
+		const exact = { ...level2, coins: 20 };
+
+		expect(purchase(exact, offer, rules)).toEqual({ ok: true, state: { ...exact, coins: 0 } });
+	});
+
+	it.each([
+		[
+			"below the Level that unlocks it",
+			{ ...level2, xp: 9 },
+			offer,
+			"Plot 7 isn't unlocked: it unlocks at Level 2, and you're at Level 1.",
+		],
+		[
+			"with too few coins (MUST-05.1)",
+			{ ...level2, coins: 19 },
+			offer,
+			"Plot 7 costs 20 coins, and the farm has 19.",
+		],
+	])("is refused %s", (_name, farm, wanted, reason) => {
+		expect(purchase(farm, wanted, rules)).toEqual({ ok: false, reason });
+	});
+});
+
 describe("cropLocked", () => {
 	it.each([
 		["wheat at Level 1", "wheat", 0, null],
 		["a crop no Level lists", "rye", 1_000, "The crop rye isn't unlocked at any Level."],
 	])("says whether a crop can be planted: %s (MUST-01.1, 01.5)", (_name, crop, xp, reason) => {
 		expect(cropLocked(crop, xp, rules)).toBe(reason);
+	});
+
+	it("unlocks a crop at the first Level that lists it", () => {
+		// Test content: corn listed at Level 2 and again at Level 4.
+		const [level1, level2, level3, level4, ...rest] = sliceContent.levels;
+		const twice = prepareProgressRules({
+			...sliceContent,
+			levels: [
+				level1,
+				{ ...level2, crops: ["corn"] },
+				level3,
+				{ ...level4, crops: ["corn"] },
+				...rest,
+			],
+		});
+
+		expect(cropLocked("corn", level2.xp, twice)).toBeNull();
+		expect(cropLocked("corn", level2.xp - 1, twice)).toBe(
+			"The crop corn isn't unlocked: it unlocks at Level 2, and you're at Level 1.",
+		);
 	});
 });

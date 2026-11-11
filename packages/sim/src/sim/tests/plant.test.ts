@@ -92,7 +92,7 @@ describe("planting", () => {
 
 			expect(cornSim.apply(farm, plantCorn, 0)).toEqual({
 				ok: false,
-				reason: "The crop corn isn't unlocked: it unlocks at Level 2, and the farm is at Level 1.",
+				reason: "The crop corn isn't unlocked: it unlocks at Level 2, and you're at Level 1.",
 			});
 		});
 
