@@ -41,7 +41,11 @@ export function compareSteps(a: AutomatedStep, b: AutomatedStep): number {
 /**
  * Runs every automated step at or before `to`, steps at exactly `to` included, so advancing in
  * one call or in several runs the same steps in the same order (MUST-14.1). Returns `farm` itself
- * when `to` is before its time (D7). Throws a RangeError if `to` isn't a safe integer.
+ * when `to` is before its time (D7).
+ *
+ * Throws a RangeError if `to` isn't a safe integer, and on a programmer error in a source or the
+ * farm: a step before the farm's time, or a step that doesn't come after the one run before it in
+ * MUST-10.6's order (a source whose run didn't remove its step would otherwise loop forever).
  */
 export function advanceFarm<F extends { readonly time: number }>(
 	farm: F,
@@ -52,13 +56,16 @@ export function advanceFarm<F extends { readonly time: number }>(
 	if (to < farm.time) return farm;
 
 	let current = farm;
+	let ran: AutomatedStep | null = null;
 	for (
 		let next = findEarliest(current, to, sources);
 		next !== null;
 		next = findEarliest(current, to, sources)
 	) {
-		const at = Math.max(current.time, next.step.at);
-		current = next.source.run({ ...current, time: at }, next.step);
+		const { source, step } = next;
+		assertInOrder(step, ran, current.time);
+		current = source.run({ ...current, time: step.at }, step);
+		ran = step;
 	}
 	return current.time === to ? current : { ...current, time: to };
 }
@@ -67,6 +74,24 @@ export function advanceFarm<F extends { readonly time: number }>(
 export function assertTime(time: number): void {
 	if (!Number.isSafeInteger(time)) {
 		throw new RangeError(`A time must be integer ms, got ${String(time)}.`);
+	}
+}
+
+/**
+ * A step is never overdue: every farm the rules return has run all its steps at or before its time
+ * (this loop), and a source schedules steps at or after the time it runs at. One before the farm's
+ * time means a corrupt snapshot or a buggy source, so it throws rather than run late (D7).
+ */
+function assertInOrder(step: AutomatedStep, ran: AutomatedStep | null, time: number): void {
+	if (step.at < time) {
+		throw new RangeError(
+			`An automated step at ${String(step.at)} ms is overdue: the farm is at ${String(time)} ms.`,
+		);
+	}
+	if (ran !== null && compareSteps(step, ran) <= 0) {
+		throw new RangeError(
+			`An automated step (${step.kind}, index ${String(step.index)}, at ${String(step.at)} ms) doesn't come after the one run before it.`,
+		);
 	}
 }
 
