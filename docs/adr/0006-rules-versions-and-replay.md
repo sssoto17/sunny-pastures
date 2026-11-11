@@ -90,7 +90,7 @@ Reads still never write (ADR-0001). An inactive farm costs nothing until its pla
 
 A base snapshot is a cache like every other snapshot. Each log row's version is the source of
 truth (section 5), so if a base snapshot is missing, `load` replays the same farm from the older
-snapshot and the version upgrade.
+snapshot and gives it the version upgrade.
 
 **Pattern:** lazy migration on the next write (the lazy-offline-progress choice of ADR-0001
 applied to versions). As in ADR-0003, an avoided word ("migration", "event") appears only in a
