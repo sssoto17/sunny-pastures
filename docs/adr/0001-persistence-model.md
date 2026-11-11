@@ -358,8 +358,9 @@ Because B100 won:
 - **M2/M3 decision: replaying old logs after a rules change.** If new rules refuse an
   action the old rules accepted, `replay` throws and that farm can't load. **Decided 11 Nov
   (#31):** every log row and snapshot records its rules version, a replay never crosses a version,
-  and a base snapshot holds the farm upgraded to the new version. That adds a rules version to
-  the `actions` and `snapshots` keys above
+  and a base snapshot holds the farm upgraded to the new version. That adds a `rules_version`
+  column to `actions` and to `snapshots`, whose key above becomes (farm, seq, rules version): a
+  base snapshot can sit at any seq, beside a 100th-action snapshot at the same seq
   ([ADR-0006](0006-rules-versions-and-replay.md)).
 - **M3 checks its transaction use before building on it (#28).** Every query inside a
   transaction uses the transaction handle, and a saturating stress run shows 0

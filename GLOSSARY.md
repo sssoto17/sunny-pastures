@@ -35,20 +35,19 @@ instead of from the first action. The log is the source of truth; a snapshot is 
 _Avoid_: save, checkpoint, backup
 
 **Rules version**:
-A whole number naming one frozen set of content, and so one version of the rules. Every logged
-action and every snapshot records the rules version it was written under. A change to content
-after release adds a new rules version; it never edits a released one.
+A whole number naming one set of content, and so one version of the rules. Every logged action
+and every snapshot records the rules version it was written under. Once released, a rules
+version's content never changes.
 _Avoid_: content version, schema version, revision
 
-**Upgrade**:
-Bringing a farm from one rules version's shape to the next, such as adding a new good or plot,
-without changing anything the two versions share.
-_Avoid_: migrate, rebase, convert
+**Version upgrade**:
+Bringing a farm from one rules version's shape to the next, such as adding a new good or plot.
+Not a facility's or pen's upgrade, which the player buys.
+_Avoid_: migrate, rebase, convert, upgrade (alone)
 
 **Base snapshot**:
-The snapshot that holds a farm upgraded to a new rules version, written with the farm's first
-action under that version. A replay never crosses a rules version: it upgrades the farm where its
-log steps up a version.
+The snapshot that holds a farm just after its version upgrade to a new rules version, written
+with the farm's first action under that version.
 _Avoid_: rebase, migration snapshot
 
 **Audit**:

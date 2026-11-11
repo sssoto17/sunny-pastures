@@ -7,8 +7,8 @@ status: accepted
 ADR-0001 chose store B100: a farm is the result of replaying its append-only action log from the
 latest snapshot, and `replay` throws if the rules refuse a logged action. Content is tuned after
 playtest 1 (grow times, prices, yields, XP), and under B100 tuning is a rules change: replayed
-under today's content, an old harvest can be refused (the farm can't load) or a farm can rebuild
-to a different farm (MUST-13.6), and every stored snapshot would disagree with its log
+under today's content, an old harvest can be refused (the farm can't load) or a farm's replay can
+reach a different farm (MUST-13.6), and every stored snapshot would disagree with its log
 (MUST-16.3). ADR-0001 left this open; ADR-0003 kept every option open by making the rules a
 function of content (`createSim(content)`, no version field in the state). This ADR chooses how
 logs stay replayable, before M3 builds the log and snapshot schema (#74) and before the first
@@ -22,7 +22,9 @@ adversarial review of the chosen design, against MUST-13.6, MUST-16.3, MUST-16.4
 ADR-0001, then found eleven issues. Six are fixed in the sections below, four are accepted as
 trade-offs ([Consequences](#consequences)), and one needed a new decision (Q10).
 
-"Rules version", "snapshot", "base snapshot" and "upgrade" are used as `GLOSSARY.md` defines them.
+"Rules version", "snapshot", "base snapshot" and "version upgrade" are used as `GLOSSARY.md`
+defines them. In this ADR, "upgrade" alone always means a version upgrade, and `upgrade` is its
+function in the registry; it is never a facility's upgrade.
 
 ## 1. A base snapshot per rules version (Q1)
 
@@ -30,6 +32,10 @@ Every log row and every snapshot records the rules version it was written under.
 crosses a version inside the rules: when the log steps from version N to a later version, the farm
 is **upgraded** at that seq (section 6) and the rest of the log is replayed under the later
 version. The snapshot that holds the upgraded farm is the **base snapshot** of that version.
+
+This is #31's option "logs are frozen at a cut-off, with a snapshot as the new base", adapted:
+the cut-off is per farm, at its last action before the release, and the base is written lazily
+(section 3) rather than for every farm at once.
 
 **Patterns:** Event Sourcing with versioned events and snapshots (as ADR-0001); Upcaster
 (section 6); Registry of versions (section 2).
@@ -42,7 +48,7 @@ version. The snapshot that holds the upgraded farm is the **base snapshot** of t
 - **A migration that rewrites old logs.** It breaks the append-only log that ADR-0001 makes the
   source of truth, and it destroys the history an audit checks (T10).
 - **Allowing only rules changes that never refuse an earlier valid action.** It can't hold for
-  tuning (a longer grow time refuses an old harvest), and even an accepted replay can rebuild a
+  tuning (a longer grow time refuses an old harvest), and even an accepted replay can reach a
   different farm, which MUST-13.6 forbids.
 - **An eager rewrite of every farm at deploy** (one of #31's options, "fresh snapshots for every
   farm"): see section 3.
@@ -83,11 +89,12 @@ current version, and no snapshot is ever written at seq 0.
 Reads still never write (ADR-0001). An inactive farm costs nothing until its player returns.
 
 A base snapshot is a cache like every other snapshot. Each log row's version is the source of
-truth (section 5), so if a base snapshot is missing, `load` rebuilds the same farm from the older
-snapshot and the upgrade.
+truth (section 5), so if a base snapshot is missing, `load` replays the same farm from the older
+snapshot and upgrades it.
 
-**Pattern:** lazy migration, on the next write (the lazy-offline-progress choice of ADR-0001
-applied to versions).
+**Pattern:** lazy migration on the next write (the lazy-offline-progress choice of ADR-0001
+applied to versions). As in ADR-0003, an avoided word ("migration", "event") appears only in a
+pattern's name; the docs and code say *upgrade* and *action*.
 
 **Rejected:**
 
@@ -103,6 +110,8 @@ version is advanced entirely under the later version. `load` returns the farm up
 unadvanced at its last action, and the handler advances it to `at` as for any farm. No release
 time is recorded anywhere, and the server's result matches what a client on the new version
 predicts.
+
+**Pattern:** none (a choice of which rules apply).
 
 **Rejected:** advancing under N up to the release time, then under the new version. Every version
 would need an activation server time, and a deploy isn't atomic across instances: an old instance
@@ -125,6 +134,13 @@ could advance a farm past the "release time" after a new one had served it.
 A version the running code doesn't know (higher than its current version) makes `load` throw a
 store error. That is section 8's case.
 
+**Pattern:** Event Sourcing replay with a version step (section 1); each row's version is the
+single source of truth for the rules it was accepted under.
+
+**Rejected:** trusting the snapshot's version alone for the rows after it. A missing or edited base
+snapshot would then replay later rows under the wrong rules, and the snapshot would stop being a
+cache.
+
 ## 6. An upgrade brings a farm to the next version's shape (Q7)
 
 Each version after the first provides `upgrade(farm)`, which takes a farm in the previous version's
@@ -136,8 +152,12 @@ content and changes nothing else. A farm that skipped versions is upgraded one s
 total: it never throws. A content change that would invalidate a stored fact (a cap lowered below
 what the farm holds, a good removed) is handled explicitly in that version's `upgrade`, for
 example by keeping the excess or converting it to coins, and that choice is part of the content
-change's review. It keeps every fact both versions share (coins, XP, goods, running timers) unless
+change's review. It keeps every fact both versions share (coins, XP, goods, work in flight) unless
 the version's `upgrade` says otherwise.
+
+So MUST-13.6's "each farm rebuilds to the same farm it had before the release" holds exactly up
+to the boundary: the replay under the old version gives the farm as it was. A declared `upgrade`
+is the only change at the boundary, and it is reviewed with the content change that needs it.
 
 **Pattern:** Upcaster (event sourcing), chained one version at a time.
 
@@ -145,13 +165,16 @@ the version's `upgrade` says otherwise.
 entry as its default). The default handling would spread through every rule, and a removal or
 rename could never ship.
 
-## 7. Running timers keep their stored end time (Q6)
+## 7. Work in flight keeps its stored end time (Q6)
 
 When a plot is planted, a job starts, a trough starts emptying or an order slot starts its refill
 delay, the state stores the server time it ends, read from content once. Work in flight at a
 release ends when the player was told it would; only work started under the new version uses its
 durations. This is a state-shape rule for #82, #84, #86, #87 and #88, and it fits ADR-0003's
 "facts are stored" (section 5).
+
+**Pattern:** store facts, not derived values (ADR-0003, section 5): an end time is fixed when the
+work starts.
 
 **Rejected:** storing the start time and deriving the end from the current content. A tuning would
 apply retroactively, and a crop the player saw nearly ripe could fall back.
@@ -172,6 +195,9 @@ deploy, when an old instance can meet a farm a new one has already moved on. **A
 is never withdrawn:** a rollback ships the old content again as a new version, so it is a fix
 forward.
 
+**Patterns:** feature switch in content (a behaviour change is data in a new version); monotonic
+version with fix-forward (commit check, 503 on an unknown version).
+
 **Rejected:**
 
 - **Keeping old sim builds side by side**, each pinned to its version. Any change would be
@@ -187,7 +213,8 @@ forward.
 
 `stateAt(t)` (ADR-0001, MUST-16.2) replays the rows with `at ≤ t` as section 5 does, then advances
 to `t` under the version of the next row after `t`, or under the current version if there is none.
-That is what `load` gives the player, so an audit sees what the player got. For a farm with no
+That is what `load` gives the player on their next return, so once the farm has acted again an
+audit sees what the player got. For a farm with no
 base snapshot yet, the answer for a `t` in its release gap follows the current version, and can
 shift if another release lands before the farm acts again (Consequences).
 
@@ -200,6 +227,9 @@ is flagged. Comparing the answer hashes covers the tail after the newest snapsho
 
 **Rejected:** advancing a gap under the old version until a base exists. History would be stable
 until the farm acts, but the audit would disagree with what `load` produces for the same farm.
+
+**Pattern:** the same versioned replay as section 5, plus a per-row hash comparison
+(tamper evidence).
 
 ## 10. The rules-version check (Q9)
 
@@ -223,6 +253,9 @@ logs with their hashes. After playtest 1, a sample of real logs is added. Their 
 pseudonymised first; the farm id seeds the PRNG streams (ADR-0003, section 7), so the hashes are
 recorded by replaying the pseudonymised log under its own version.
 
+**Pattern:** golden-file tests (recorded logs and hashes) plus property-based testing (generated
+farms for the upgrade).
+
 **Rejected:**
 
 - **Generated logs only.** No personal data, but they only cover the paths the generator reaches.
@@ -235,6 +268,12 @@ The registry is server-only. The client imports only the current version's conte
 doesn't grow with each tuning. Every game API answer carries the rules version, and a client
 running a different version reloads instead of predicting under the wrong rules (MUST-12). The
 upgrade runs only on the server: the client receives farms already upgraded.
+
+**Pattern:** version negotiation by tag: the answer names its rules version, and a mismatch
+means reload.
+
+**Rejected:** shipping the registry to the client. The bundle would grow with every version, and
+the client never replays an old log.
 
 ## Patterns
 
@@ -257,7 +296,7 @@ upgrade runs only on the server: the client receives farms already upgraded.
   carries the rules version.
 - **The determinism gate (#48)** runs per released version: a script's expected hash changes only
   when a new version is added, never for a released one.
-- **The sim tickets store end times for running timers** (#82, #84, #86, #87, #88), and #82's
+- **The sim tickets store an end time for all work in flight** (#82, #84, #86, #87, #88), and #82's
   `createSim(content)` is what the registry calls per version. The registry, `upgrade` and the
   rules-version check are built before the first release (M3); a build issue carries them.
 - **#89's content check runs on every version in the registry**, not only the current one.
