@@ -102,7 +102,59 @@ const DATE_ALLOWED = [
 const injectCall = (key) => `CallExpression[callee.name='inject'][arguments.0.value='${key}']`;
 const PROPERTY_TIMEOUT = `CallExpression[callee.object.name='vi'][callee.property.name='setConfig'] > ObjectExpression > Property[key.name='testTimeout'] > ${injectCall("propertyTimeout")}`;
 
+// The Floor's unfinished work (CONSTRAINTS.md; #135 moved it here from the floor guard's line
+// patterns): a stub that throws, a `catch` or rejection handler that swallows the error. Selectors
+// ignore comments, so a body holding only comments counts as empty, which no-empty and
+// no-empty-function allow. The guard makes a directive that switches these off unwaivable.
+const STUB_MESSAGE = "/^\\s*(not[\\s_-]+(yet[\\s_-]+)?implemented|unimplemented)\\b/i";
+// A function that does nothing: an empty or comment-only body, a bare `return`, or an arrow that
+// gives undefined, null or `void <literal>`.
+const NOOP = ({ isNullNothing }) => {
+	// esquery reads a path that isn't there as the text "undefined", so each check names the type.
+	const nothing = (path) => [
+		`[${path}.type='Identifier'][${path}.name='undefined']`,
+		`[${path}.type='UnaryExpression'][${path}.operator='void'][${path}.argument.type='Literal']`,
+		...(isNullNothing ? [`[${path}.type='Literal'][${path}.raw='null']`] : []),
+	];
+	return [
+		":function[body.type='BlockStatement'][body.body.length=0]",
+		":function[body.body.length=1][body.body.0.type='ReturnStatement']:not([body.body.0.argument])",
+		...nothing("body.body.0.argument").map((n) => `:function[body.body.length=1]${n}`),
+		...nothing("body").map((n) => `ArrowFunctionExpression${n}`),
+	].join(", ");
+};
+const HANDLER = [
+	"CallExpression:matches([callee.property.name='catch'], [callee.property.value='catch']) > .arguments:first-child",
+	"CallExpression[callee.property.name='then'] > .arguments:nth-child(2)",
+].join(", ");
+const FLOOR_SYNTAX = [
+	{
+		selector: `:matches(Literal[value=${STUB_MESSAGE}], TemplateLiteral > TemplateElement.quasis:first-child[value.raw=${STUB_MESSAGE}], Identifier[name=/^(not_?(yet_?)?implemented|unimplemented)/i])`,
+		message:
+			"A not-implemented stub is unfinished work, never waivable (CONSTRAINTS.md, Floor; #135).",
+	},
+	{
+		selector: "CatchClause > BlockStatement.body[body.length=0]",
+		message:
+			"A catch that is empty or holds only comments swallows the error (CONSTRAINTS.md, Floor; #135).",
+	},
+	{
+		selector: `:matches(${NOOP({ isNullNothing: true })}):matches(${HANDLER})`,
+		message:
+			"A rejection handler that does nothing swallows the error (CONSTRAINTS.md, Floor; #135).",
+	},
+	{
+		// A no-op passed by name (`.catch(noop)`) can't be followed to its definition, so the no-op is
+		// reported where it's written (#133's known limits). Returning null is a value (React).
+		selector: `:matches(${NOOP({ isNullNothing: false })}):not(${HANDLER})`,
+		message:
+			"A function that does nothing is a stub; a handler that ignores an error swallows it (CONSTRAINTS.md, Floor; #135).",
+	},
+];
+
+// A later block's options replace an earlier block's, so the sim's list starts with the floor's.
 const SIM_SYNTAX = [
+	...FLOOR_SYNTAX,
 	{
 		selector: `Identifier[name='Date']:not(${DATE_ALLOWED})`,
 		message:
@@ -158,6 +210,15 @@ export default defineConfig(
 	{
 		files: ["**/*.mjs", "**/*.js"],
 		languageOptions: { globals: nodeGlobals },
+	},
+	{
+		// Unfinished work, in every file ESLint reads (#135). The presets already turn the first two
+		// on; written here, the floor guard sees them if they're dropped.
+		rules: {
+			"no-empty": ["error", { allowEmptyCatch: false }],
+			"@typescript-eslint/no-empty-function": "error",
+			"no-restricted-syntax": ["error", ...FLOOR_SYNTAX],
+		},
 	},
 	{
 		// The code conventions (ADR-0005, section 6) for apps/ and packages/; .github/scripts is CI
