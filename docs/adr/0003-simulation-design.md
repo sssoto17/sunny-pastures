@@ -624,9 +624,10 @@ proves each rule with the smallest change to the slice that breaks it alone.
   never gets a Level. A recipe or pen whose input's Level is later than its own fails MUST-10.4's
   "produced by some unlocked route".
 - **Readings of the spec it encodes.** MUST-06.2's "every 2nd tier adds a queue slot, up to a
-  maximum": a tier never has fewer slots than the tier below, adds at most one, and two tiers in a
-  row never both add one, so the admin's 2/3/3 (11 Nov, #85) passes and 2/3/4 doesn't; the maximum
-  is content's. MUST-02.5's "at the start a trough holds one portion": `troughCapacity` is 1 until
+  maximum" (the admin's reading, 12 Nov): tier 2 adds exactly one slot, each later even tier adds
+  one until the slots stop rising, odd tiers add none, and once an even tier adds none no later
+  tier adds one. So the admin's 2/3/3 (11 Nov, #85) passes, and 2/2/2, 2/2/3 and 2/3/4 don't; where
+  the slots stop is content's. MUST-02.5's "at the start a trough holds one portion": `troughCapacity` is 1 until
   M6's trough upgrades (MUST-06.3). MUST-03.6's strawberry cake is M6's, so in the slice cookies
   stand in for it and need goods from crops and animals (#72 D4). MUST-05.5's storage capacity and
   trough upgrades are M6's too (#72 D3): the Level table has no lists for them yet, so the check
