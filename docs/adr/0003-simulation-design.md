@@ -221,6 +221,14 @@ Each property runs 100 times at task end and 1,000 times in CI. The root Vitest 
 count from `SIM_PROPERTY_RUNS`, which `ci / test` sets (#40), and hands it to the tests with the
 fixed seed (`fc.assert(property, inject('fastCheck'))`), so no sim test reads the environment.
 
+A property's time grows with its run count, so its timeout does too (#200): the config also
+provides `propertyTimeout`, 15 ms per run and never below Vitest's 5 s default, and each property
+test file applies it with `vi.setConfig({ testTimeout: inject('propertyTimeout') })`, which Vitest
+resets after the file. At 1,000 runs that is 15 s, about 3× the slowest property measured in CI
+(3.7 s on main, 5.7 s on #88's stack): enough for a slow runner, tight enough that a property
+several times slower still fails. Rejected: a global `testTimeout` (it would loosen every unit
+test), 50 ms per run (50 s at 1,000 runs hides a tenfold slowdown), and fewer runs (the Floor).
+
 **Pattern:** property-based testing (fast-check, fixed seed).
 
 **Rejected:**

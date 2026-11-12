@@ -1,10 +1,12 @@
 import fc from "fast-check";
-import { describe, expect, inject, it } from "vitest";
+import { describe, expect, inject, it, vi } from "vitest";
 
 import { stateHash } from "../../index.js";
 import { mulberry32 } from "../../random/index.js";
 
 const params = inject("fastCheck");
+// #200: the timeout scales with the run count; Vitest resets it after this file.
+vi.setConfig({ testTimeout: inject("propertyTimeout") });
 
 /** JSON values with keys and strings over all of Unicode, astral characters included. */
 const jsonValue = fc.jsonValue({ stringUnit: "binary" });
