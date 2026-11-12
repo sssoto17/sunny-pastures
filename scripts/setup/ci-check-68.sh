@@ -13,8 +13,8 @@ T68_THREADS='query($owner: String!, $name: String!, $pr: Int!) { repository(owne
 # An open thread holds a PR through required conversation resolution, so the App's approval plus
 # auto-merge can't merge (a) or a wrongly approved (c). (e) and (f) never get the App's approval:
 # their rows come from paths, in code (post-review.sh).
-T68_HOLD="Hold (ci-check.sh start 68): this open thread keeps a throwaway PR from merging while"
-T68_HOLD+=" allow_auto_merge is on for #68's tests. Leave it open; cleanup 68 closes the PR unmerged."
+T68_HOLD="Hold (ci-check.sh start 68): this open thread keeps a throwaway PR from merging once"
+T68_HOLD+=" allow_auto_merge goes on for #68's tests. Leave it open; cleanup 68 closes it unmerged."
 
 t68_file() { # letter: the file its change touches
   case $1 in
