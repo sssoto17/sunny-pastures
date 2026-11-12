@@ -257,11 +257,10 @@ guard keeps only the job a diff reader does well: seeing that those checks stay 
 | A new tsconfig with neither `extends` nor `strict` | `tsconfigs.test.mjs`: every tsconfig and jsconfig, read with the TypeScript API, is as strict as `tsconfig.base.json` | Removed the new-file check. **Kept** `STRICT_KEYS`: a strict option relaxed in the diff, the base's own included |
 
 **What the guard adds, so the rules stay on.**
-- A directive that switches off a rule holding unfinished work is `unfinished-work`, which no
-  Exceptions row waives, as the stub it would hide can't be: a blanket `eslint-disable`, one
-  naming `no-empty`, `no-empty-function`, `no-restricted-syntax` or `no-warning-comments`, or an
-  inline `/* eslint … */` config for one. `no-restricted-syntax` also holds the sim's purity and
-  property rules, so disabling those is unwaivable too.
+- A directive that switches off a rule holding unfinished work is unwaivable `unfinished-work`,
+  like the stub it hides: a blanket `eslint-disable`, or a disable or inline config naming
+  `no-empty`, `no-empty-function`, `no-restricted-syntax` (which also holds the sim's purity and
+  property rules) or `no-warning-comments`.
 - An inline `/* eslint rule: … */` config is `silenced-checker`; a comment naming ESLint isn't.
 - A line of `eslint.config.*` removed and not added back anywhere in the file is
   `config-loosened`. A selector deleted from the floor's lists carries no `"error"`, which was all
@@ -278,24 +277,22 @@ emptying a list can't empty the expectation. Limits: one probe per selector (the
 cover other spellings); sim-only selectors aren't probed (`sim-purity.test.mjs` is).
 
 **Patterns.** *Parse, don't pattern-match*: ESLint's AST and the TypeScript API read code and
-configs as the tools that run them do. *Guard the guards*: the diff reader keeps the parsers on, and the snippet tests show each rule
-still catches its variants (a selector that stops matching fails them).
-*Fail closed* for the comment scan. **Alternatives considered.** A custom ESLint plugin (the admin
-prefers maintained rules; selectors suffice); `linterOptions.noInlineConfig` (it would also refuse
-every `eslint-disable`, the Exceptions route); extending the frozen regexes (#133's lesson).
+configs as the tools that run them do. *Guard the guards*: the diff reader keeps the parsers on,
+and the snippet tests show each rule still catches its variants. *Fail closed* for the comment
+scan. **Alternatives considered.** A custom ESLint plugin (the admin prefers maintained rules;
+selectors suffice); `linterOptions.noInlineConfig` (it would also refuse every `eslint-disable`,
+the Exceptions route); extending the frozen regexes (#133's lesson).
 
-**One carve-out.** `requireProvided`'s own test (`packages/sim/src/state/tests/provided.test.ts`)
-passes a settings object through as data and runs no property, so it alone may write `numRuns`.
-Rewriting it would read to the guard as a cut run count.
+**One carve-out.** `packages/sim/src/state/tests/provided.test.ts` passes settings through as
+data and runs no property, so it alone may write `numRuns` (rewriting it reads as a cut count).
 
-**Known limits.** A stub message built from parts (`'Not ' + 'implemented'`) passes, and so does a
-settings key from a variable (`{ [key]: 1 }`). A rule deleted together with its snippet-test rows
-passes the guard's test check (rows hold no `expect`), though not the removed-line check above.
-A no-op handler that comes from outside the linted code (`.catch(console.debug)`,
-an import from a dependency) isn't seen; a no-op written in the repo is reported where it's
-defined. Settings built without a run-shaping key's name (`JSON.parse` of a string) pass lint;
-`property-settings.test.mjs` and review cover the config side. Files ESLint ignores (`.claude/`,
-`.agents/`, build output) lose the code-pattern check; adding to `ignores` is `config-loosened`.
+**Known limits.** A stub message built from parts (`'Not ' + 'implemented'`) passes, and so do
+settings whose keys aren't written out (`{ [key]: 1 }`, `JSON.parse`); `property-settings.test.mjs`
+and review cover the config side. A rule deleted with its snippet-test rows passes the guard's
+test check (rows hold no `expect`), not the removed-line check. A no-op handler from outside the
+linted code (`.catch(console.debug)`, a dependency's export) isn't seen; one written in the repo
+is reported where it's defined. Files ESLint ignores (`.claude/`, `.agents/`, build output) lose
+the code-pattern check; adding to `ignores` is `config-loosened`.
 
 ### The coverage gate
 

@@ -577,6 +577,9 @@ describe("floor guard, end to end", () => {
 	it.each([
 		["/* eslint reads this file with the root config */\n", 0],
 		["/* eslint no-empty: 0 -- a real one */\n", 1],
+		['/* eslint "no-empty": "off" */\n', 1],
+		["/* eslint 'no-empty': 'off' */\n", 1],
+		['/* eslint {"no-restricted-syntax": "off"} */\n', 1],
 	])("tells prose from an inline config: %s", (code, exit) => {
 		setup();
 		repo.write({ "packages/sim/src/s.ts": code });
