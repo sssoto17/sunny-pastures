@@ -10,8 +10,8 @@ Last checked: 2026-11-12.
 
 Write each Bash call so a rule in `.claude/settings.json` can match it, or it prompts (#205):
 
-- No `cd … &&` prefix, in a subshell or not: use the working directory, absolute paths or
-  `git -C`.
+- No `cd … &&` prefix, in a subshell or not: run from the session's working directory and use
+  absolute paths. `git -C <dir> …` matches no allow rule yet, so it still prompts.
 - Run checks with `pnpm check:fast`, `pnpm check:task`, `pnpm test`, `pnpm lint` or
   `pnpm typecheck`, not `pnpm vitest`, `pnpm exec` or `pnpm -s eslint`/`tsc` directly.
 - Prefer a script under `scripts/` over a one-off loop or heredoc; one you'll repeat becomes one.
@@ -130,7 +130,7 @@ boundary. The sandbox and the hooks are what enforce.
 
 `cd` in a Bash command carries over to the next command. If a session `cd`s into another
 worktree, it keeps working there. The coordinating session must stay in the main folder, so
-use `git -C <path>` or absolute paths to look into a worktree.
+use absolute paths, or `git -C <path>` (which prompts), to look into a worktree.
 `.claude/hooks/block-branch-switch.sh` blocks a top-level `cd` into `.claude/worktrees/` from the
 main folder. A session that owns a worktree enters it with the worktree tool before its first
 edit. That moves the session's working directory into the worktree, where `cd` is allowed.
