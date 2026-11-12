@@ -14,7 +14,7 @@ set -euo pipefail
 r="repos/$GITHUB_REPOSITORY" v="$RUNNER_TEMP/verdict.json" t="$RUNNER_TEMP/threads.json"
 printf '%s' "$VERDICT" >"$v"
 # The whole shape, or nothing is posted: a missing or null field must never read as "none".
-valid='def strings(nonempty): type == "array" and all(.[]; type == "string" and (if nonempty then length > 0 else true end));
+valid='def strings(nonempty): type == "array" and all(.[]; type == "string" and (if nonempty then test("\\S") else true end));
   type == "object" and (.summary | type == "string") and (.escalation_path | type == "string")
   and (.escalation_rows | strings(true)) and (.resolve_threads | strings(false))
   and (.findings | type == "array" and all(.[]; type == "object" and (.path | type == "string")
