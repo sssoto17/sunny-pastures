@@ -557,7 +557,7 @@ export const parseRules = (lines) => {
 	const text = (n) => source.slice(n.start.offset, n.end.offset);
 	const child = (n, type) => n?.children.find((c) => c.type === type);
 	const span = (n) => lines.slice(n.start.line - 1, n.end.line).join("\n");
-	const at = (n, kind) => ({
+	const ruleOf = (n, kind) => ({
 		kind,
 		section,
 		sectionNo,
@@ -586,13 +586,14 @@ export const parseRules = (lines) => {
 		const cells = (row) =>
 			row.children
 				.filter((c) => c.type === "tableHeader" || c.type === "tableData")
-				.map((c) => (child(c, "tableContent") ? text(child(c, "tableContent")).trim() : ""));
+				.map((c) => child(c, "tableContent"))
+				.map((content) => (content ? text(content).trim() : ""));
 		const headers = cells(child(child(n, "tableHead"), "tableRow"));
 		const header = { line: n.start.line, text: lines[n.start.line - 1], topLevel };
 		const body = child(n, "tableBody")?.children.filter((c) => c.type === "tableRow") ?? [];
 		return body.map((row) => {
 			const c = cells(row);
-			const r = at(row, "row");
+			const r = ruleOf(row, "row");
 			return { ...r, key: c[0], text: lines[row.start.line - 1], cells: c, headers, table: header };
 		});
 	};
@@ -622,7 +623,7 @@ export const parseRules = (lines) => {
 		for (const c of n.children) {
 			if (c.type === "listItemPrefix") {
 				close();
-				item = { ...at(c, "item"), from: c.end.offset };
+				item = { ...ruleOf(c, "item"), from: c.end.offset };
 			} else if (item && !BETWEEN.has(c.type)) {
 				item.end = Math.max(item.end, c.end.line);
 				nestedBlock(c, nested);
@@ -633,12 +634,12 @@ export const parseRules = (lines) => {
 	for (const n of blockTree(source).children) {
 		if (HEADINGS.has(n.type)) heading(n, false);
 		else if (n.type === "content")
-			rules.push(...n.children.filter((c) => !BETWEEN.has(c.type)).map((c) => at(c, "para")));
+			rules.push(...n.children.filter((c) => !BETWEEN.has(c.type)).map((c) => ruleOf(c, "para")));
 		else if (n.type === "table") rules.push(...table(n, true));
 		else if (LISTS.has(n.type)) list(n);
 		// A block quote or a footnote reads as one paragraph, as the line reader read a quote.
 		else if (n.type === "blockQuote" || n.type === "gfmFootnoteDefinition") {
-			rules.push(at(n, "para"));
+			rules.push(ruleOf(n, "para"));
 			nestedBlock(n, []);
 		} else if (n.type === "htmlFlow" && !/^\s*<!--/.test(text(n)))
 			html.push({ line: n.start.line, sectionNo });

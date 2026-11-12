@@ -203,8 +203,8 @@ reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
 `CONSTRAINTS.md` with `micromark` 4.0.3 and `micromark-extension-gfm` 3.0.0, root devDependencies
 pinned exactly (admin decision, 12 Nov). Its rules didn't change; only how it reads the file did.
 - *What the hand-written reading did.* `parseRules` walked the file line by line with regexes:
-  fences, ATX and setext headings, HTML comments, HTML blocks of types 1, 6 and 7, GFM tables
-  that needed a delimiter row, list items with their indented lines, and paragraphs. It was frozen
+  fences, ATX and setext headings, HTML comments (type 2), HTML blocks of types 1, 6 and 7, GFM
+  tables that needed a delimiter row, list items with their indented lines, and paragraphs. It was frozen
   on 9 Nov with three known misses: an HTML block opened inside a fence, a delimiter row with the
   wrong cell count, and a lone tag ending a list item.
 - *What replaces it.* micromark's events become a small tree of block nodes. Headings, paragraphs,
@@ -254,8 +254,9 @@ run; a 2 never reads as clean.
 **Alternatives considered.**
 - *An AST-based checker (the TypeScript compiler API, or custom ESLint rules).* It would see
   through spelling tricks that line patterns miss. It's not adopted inside the guard: the floor job
-  runs with Node only and no install. #135 moved the code patterns to ESLint and the tsconfig check
-  to a test instead (next section).
+  ran with Node only and no install. #135 moved the code patterns to ESLint and the tsconfig check
+  to a test instead (next section). Since #132 the floor job installs the base branch's
+  dependencies, but only the Markdown parser uses that.
 - *Running the PR's own guard.* Rejected in #96: a PR could switch it off.
 - *A review bot instead of a script.* It's not deterministic, and it's the reviewer most open to
   manipulation (ADR-0002, area 2). The bot reviews as well, but it doesn't replace the guard.
