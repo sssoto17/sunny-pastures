@@ -106,15 +106,18 @@ if [[ -n $rows ]]; then
   fi
 fi
 
+reviews=$(gh api --paginate "$r/pulls/$PR/reviews?per_page=100")
+dismiss() { # state message: dismiss this App's own reviews in that state
+  local ids id
+  ids=$(jq -r --arg u "${BOT}[bot]" --arg s "$1" '.[] | select(.user.login == $u and .state == $s) | .id' <<<"$reviews")
+  for id in $ids; do
+    gh api -X PUT "$r/pulls/$PR/reviews/$id/dismissals" --silent -f event=DISMISS -f message="$2"
+  done
+}
 # On an escalated PR this App never approves, so once its findings are all fixed it dismisses its
 # own Request changes, which would otherwise block for good.
 if [[ $escalated == true ]] && ((nfind == 0 && still_open == 0)); then
-  reviews=$(gh api --paginate "$r/pulls/$PR/reviews?per_page=100")
-  ids=$(jq -r --arg u "${BOT}[bot]" '.[] | select(.user.login == $u and .state == "CHANGES_REQUESTED") | .id' <<<"$reviews")
-  for id in $ids; do
-    gh api -X PUT "$r/pulls/$PR/reviews/$id/dismissals" --silent -f event=DISMISS \
-      -f message="Its findings are fixed. The PR is escalated and waits for the admin."
-  done
+  dismiss CHANGES_REQUESTED "Its findings are fixed. The PR is escalated and waits for the admin."
 fi
 
 labelled_now=$(has_label) # read again: a label added during this run still holds the approval
@@ -124,6 +127,9 @@ if ((nfind > 0)) || [[ -n $unplaced ]]; then
 elif [[ $escalated == true || $labelled_now == true ]] || ((still_open > 0)); then
   event=COMMENT
 fi
+# A later COMMENT doesn't replace an APPROVE, so an earlier approval that no longer holds (say
+# review:admin was added after it) is dismissed (ADR-0002, test (e)).
+[[ $event == APPROVE ]] || dismiss APPROVED "This review no longer approves the PR: $event."
 body=$(jq -r .summary "$v")
 [[ -z $unplaced ]] || body+=$'\n\nRequired findings without a place in the diff:\n'"$unplaced"
 ((still_open == 0)) || body+=$'\n\n'"$still_open earlier finding thread(s) still open."

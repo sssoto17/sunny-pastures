@@ -152,6 +152,21 @@ describe("post-review.sh", () => {
 		expect(r.calls).toContain("-f event=COMMENT");
 	});
 
+	it("dismisses its own earlier approval once review:admin is on the PR", () => {
+		const reviews = [
+			{ id: 60, user: { login: "sunny-reviewer[bot]" }, state: "APPROVED" },
+			{ id: 61, user: { login: "sssoto17" }, state: "APPROVED" },
+		];
+		const r = run(verdict(), { labels: ["true"], reviews });
+		expect(r.calls).toContain("pulls/7/reviews/60/dismissals");
+		expect(r.calls).not.toContain("reviews/61/dismissals");
+		expect(r.calls).toContain("-f event=COMMENT");
+
+		const clean = run(verdict(), { reviews });
+		expect(clean.calls).not.toContain("dismissals");
+		expect(clean.calls).toContain("-f event=APPROVE");
+	});
+
 	it("requests changes, placing each finding as well as the diff allows", () => {
 		const findings = [
 			{ path: "a.ts", line: 3, body: "bug" },
