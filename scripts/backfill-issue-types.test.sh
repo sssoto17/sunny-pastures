@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+# Tests for backfill-issue-types.sh through its command line, with `gh` replaced by a fake on
+# PATH that never reaches GitHub. Cases serve the rows the script's --jq filter produces; the
+# filter case runs that filter with jq over a REST page (gh uses gojq; nothing here differs).
+# Run: bash scripts/backfill-issue-types.test.sh (needs jq)
+set -uo pipefail
+
+script="$(cd "$(dirname "$0")" && pwd)/backfill-issue-types.sh"
+pass=0
+fail=0
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/backfill-issue-types-test.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+mkdir -p "$work/bin"
+
+# --- fake gh ----------------------------------------------------------------------------------
+# Each call appends its arguments to $work/calls, one per line, then a "--" line. The types
+# query serves $work/types; the mutation records "node<TAB>type id" in $work/set; the issue list
+# serves $work/rows (or its --jq filter over $work/page.json); the read-back of #N serves
+# $work/readback.N, else the name of the type set on I_N, else "-". $work/fail-types,
+# fail-set.<node> and fail-list make those calls exit 1.
+cat >"$work/bin/gh" <<'FAKE'
+#!/usr/bin/env bash
+dir=$(dirname "$0")/..
+for a in "$@"; do printf '%s\n' "$a"; done >>"$dir/calls"
+printf -- '--\n' >>"$dir/calls"
+if [[ $1 == api && $2 == graphql ]]; then
+  if [[ $* == *"query=mutation"* ]]; then
+    for a in "$@"; do
+      case $a in
+        issue=*) node=${a#issue=} ;;
+        type=*) type=${a#type=} ;;
+      esac
+    done
+    [[ -f $dir/fail-set.$node ]] && { echo "fake: updateIssue failed" >&2; exit 1; }
+    printf '%s\t%s\n' "$node" "$type" >>"$dir/set"
+    exit
+  fi
+  [[ -f $dir/fail-types ]] && { echo "fake: graphql failed" >&2; exit 1; }
+  cat "$dir/types"
+  exit
+fi
+if [[ $1 == api && $2 == -X ]]; then
+  [[ -f $dir/fail-list ]] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+  if [[ -f $dir/page.json ]]; then
+    while (($#)) && [[ $1 != --jq ]]; do shift; done
+    jq -r "$2" "$dir/page.json"
+    exit
+  fi
+  cat "$dir/rows"
+  exit
+fi
+if [[ $1 == api && $2 =~ /issues/([0-9]+)$ ]]; then
+  n=${BASH_REMATCH[1]}
+  [[ -f $dir/readback.$n ]] && { cat "$dir/readback.$n"; exit; }
+  id=$(awk -F'\t' -v n="I_$n" '$1 == n { t = $2 } END { print t }' "$dir/set" 2>/dev/null)
+  name=$(awk -F'\t' -v i="$id" '$1 == i { print $2 }' "$dir/types")
+  echo "${name:--}"
+  exit
+fi
+echo "fake: unexpected gh call: $*" >&2
+exit 99
+FAKE
+chmod +x "$work/bin/gh"
+
+# --- fixtures ---------------------------------------------------------------------------------
+# A filter row: number, kind, node id, native type or "-", labels joined by \x1f (written "|").
+T=$'\t'
+US=$'\x1f'
+row() { # number kind type labels
+  printf '%s%s%s%sI_%s%s%s%s%s\n' "$1" "$T" "$2" "$T" "$1" "$T" "$3" "$T" "${4//|/$US}"
+}
+reset() { # rows... -> a fresh state serving those rows
+  rm -f "$work"/calls "$work"/rows "$work"/set "$work"/fail-* "$work"/readback.* "$work"/page.json
+  printf 'IT_task%sTask\nIT_bug%sBug\nIT_feature%sFeature\n' "$T" "$T" "$T" >"$work/types"
+  printf '%s' "$*" >"$work/rows"
+}
+
+run() { # args... -> sets code, out, err, calls
+  out=$(PATH="$work/bin:$PATH" bash "$script" "$@" 2>"$work/err")
+  code=$?
+  err=$(cat "$work/err")
+  calls=$(cat "$work/calls" 2>/dev/null || true)
+}
+
+ok() { pass=$((pass + 1)); }
+bad() { # message
+  fail=$((fail + 1))
+  printf 'FAIL: %s\n  args: %s\n  exit: %s\n  stdout: %s\n  stderr: %s\n  gh calls:\n%s\n' \
+    "$1" "${args[*]-}" "$code" "$out" "$err" "    ${calls//$'\n'/$'\n'    }"
+}
+assert() { # message command... -> ok if the command succeeds
+  if "${@:2}"; then ok; else bad "$1"; fi
+}
+contains() { [[ $1 == *"$2"* ]]; }
+expect_code() { assert "expected exit $1" test "$code" -eq "$1"; }
+expect_err() { assert "expected stderr to contain: $1" contains "$err" "$1"; }
+expect_out_is() { assert "expected stdout to be exactly: $1" test "$out" == "$1"; }
+expect_no_gh() { assert "expected no gh calls at all" test -z "$calls"; }
+expect_no_writes() {
+  if grep -q '^query=mutation' <<<"$calls"; then bad "expected no writes"; else ok; fi
+}
+# The gh calls joined into one line each.
+call_lines() { awk '$0 == "--" { print line; line = ""; next } { line = line (line == "" ? "" : " ") $0 }' <<<"$calls"; }
+expect_call() { # substring of one joined call line
+  if call_lines | grep -qF -- "$1"; then ok; else bad "expected a gh call containing: $1"; fi
+}
+case_() { args=("$@"); run "$@"; }
+
+mixed="$(row 41 issue - 'chore|area:ci-cd')
+$(row 28 issue - 'bug|area:db')
+$(row 154 issue - 'area:sim|feature')
+$(row 1 issue - 'triage|idea|area:ui')
+$(row 33 issue - 'design|area:docs')
+$(row 102 issue - 'spike|area:tools')"
+
+# --- usage ------------------------------------------------------------------------------------
+for bad_args in "--help:0" "-h:0" "--force:2" "28:2" "--apply --dry-run:2"; do
+  reset ""
+  read -ra words <<<"${bad_args%:*}"
+  case_ "${words[@]}"
+  expect_code "${bad_args##*:}"
+  expect_err "usage:"
+  expect_no_gh
+done
+
+# --- the dry run is the default and writes nothing ----------------------------------------------
+# Every type label maps (triage-labels.md, Types), and the list is in ascending issue order.
+want="#1${T}idea${T}Task
+#28${T}bug${T}Bug
+#33${T}design${T}Task
+#41${T}chore${T}Task
+#102${T}spike${T}Task
+#154${T}feature${T}Feature"
+for mode in "" --dry-run; do
+  reset "$mixed"
+  if [[ -n $mode ]]; then case_ "$mode"; else case_; fi
+  expect_code 0
+  expect_out_is "$want"
+  expect_err "dry run: would set 6, skipped 0, already typed 0. Run with --apply to write."
+  expect_no_writes
+done
+expect_call "api -X GET repos/sssoto17/sunny-pastures/issues -f state=open -f per_page=100 --paginate --jq"
+
+# --- skipped, already typed and PRs -------------------------------------------------------------
+reset "$(row 10 issue - 'area:docs')
+$(row 11 issue - 'bug|chore|area:db')
+$(row 12 issue Task 'chore')
+$(row 13 issue Bug 'feature')
+$(row 14 pr - 'chore')
+$(row 15 issue - '-')
+$(row 16 issue - 'chore|area:ideas')"
+case_
+expect_code 0
+expect_out_is "#10${T}skip: no type label
+#11${T}skip: 2 type labels (bug, chore)
+#15${T}skip: no type label
+#16${T}chore${T}Task"
+expect_err "would set 1, skipped 3, already typed 2"
+expect_err "scripts/issue-fields.sh <n> --type <Task|Bug|Feature>"
+
+# --- apply: writes each by id, reads each back --------------------------------------------------
+reset "$mixed"
+case_ --apply
+expect_code 0
+expect_out_is "#1${T}idea${T}Task${T}set
+#28${T}bug${T}Bug${T}set
+#33${T}design${T}Task${T}set
+#41${T}chore${T}Task${T}set
+#102${T}spike${T}Task${T}set
+#154${T}feature${T}Feature${T}set"
+expect_err "set 6, failed 0, skipped 0, already typed 0"
+expect_call "-f issue=I_154 -f type=IT_feature"
+expect_call "api repos/sssoto17/sunny-pastures/issues/41 --jq .type.name // \"-\""
+
+# A failed write and a read-back that differs are listed; the rest still run.
+reset "$mixed"
+touch "$work/fail-set.I_28"
+echo Task >"$work/readback.154"
+case_ --apply
+expect_code 1
+expect_out_is "#1${T}idea${T}Task${T}set
+#33${T}design${T}Task${T}set
+#41${T}chore${T}Task${T}set
+#102${T}spike${T}Task${T}set"
+expect_err "#28: the write failed"
+expect_err "#154: the read-back shows Task, expected Feature"
+expect_err "set 4, failed 2"
+
+# --- reads that fail write nothing ---------------------------------------------------------------
+reset "$mixed"
+touch "$work/fail-types"
+case_ --apply
+expect_code 3
+expect_err "could not read the repo's issue types; nothing was written"
+expect_no_writes
+
+reset "$mixed"
+printf 'IT_task%sTask\nIT_bug%sBug\n' "$T" "$T" >"$work/types"
+case_ --apply
+expect_code 3
+expect_err 'the repo offers no "Feature" issue type; nothing was written'
+expect_no_writes
+
+reset "$mixed"
+touch "$work/fail-list"
+case_ --apply
+expect_code 3
+expect_out_is ""
+expect_err "could not read the open issues"
+expect_no_writes
+
+reset "28${T}issue"
+case_ --apply
+expect_code 3
+expect_err "unexpected row from GitHub"
+expect_no_writes
+
+# --- the --jq filter over a REST page ---------------------------------------------------------
+# GitHub's REST issue carries the native type as .type, null when unset (seen on #158, 12 Nov).
+# A missing jq is a failure, not a skip (CONSTRAINTS.md, "Guarding the bar").
+args=("--jq filter")
+if ! command -v jq >/dev/null; then
+  code="" out="" err="" calls=""
+  bad "jq is not installed: install it to run the --jq filter case"
+else
+  reset ""
+  cat >"$work/page.json" <<'JSON'
+[
+  {"number": 120, "node_id": "PR_1", "pull_request": {"url": "x"}, "labels": [], "type": null},
+  {"number": 28, "node_id": "I_28", "type": null, "labels": [{"name": "bug"}, {"name": "area:db"}]},
+  {"number": 33, "node_id": "I_33", "type": {"id": 7, "name": "Task"}, "labels": [{"name": "design"}]},
+  {"number": 5, "node_id": "I_5", "labels": [{"name": "x,chore"}, {"name": "idea"}]},
+  {"number": 6, "node_id": "I_6", "type": null, "labels": []}
+]
+JSON
+  run
+  expect_code 0
+  expect_out_is "#5${T}idea${T}Task
+#6${T}skip: no type label
+#28${T}bug${T}Bug"
+  expect_err "would set 2, skipped 1, already typed 1"
+fi
+
+printf '%d passed, %d failed\n' "$pass" "$fail"
+((fail == 0))
