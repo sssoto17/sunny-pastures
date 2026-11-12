@@ -346,6 +346,13 @@ export default defineConfig(
 					message:
 						"A file that uses inject('fastCheck') applies the property timeout too: vi.setConfig({ testTimeout: inject('propertyTimeout') }) (#208, ADR-0003 section 9).",
 				},
+				{
+					// Without the root config (Vitest run from packages/sim), inject gives undefined and
+					// fast-check picks a random seed; requireProvided throws instead (#213).
+					selector: `${injectCall("fastCheck")}:not(CallExpression[callee.name='requireProvided'] > .arguments)`,
+					message:
+						"Read the fast-check settings through the guard: requireProvided('fastCheck', inject('fastCheck')) (#213, ADR-0003 section 9).",
+				},
 			],
 		},
 	},

@@ -190,12 +190,12 @@ describe("sim purity rules", () => {
 		const code = [
 			"import fc from 'fast-check';",
 			"import { inject, vi } from 'vitest';",
-			"const params = inject('fastCheck');",
+			"const params = requireProvided('fastCheck', inject('fastCheck'));",
 			"const p = fc.property(fc.nat(), () => true);",
 			"fc.assert(p);",
 			"fc.check(p);",
 			"fc.assert(p, params);",
-			"fc.check(p, inject('fastCheck'));",
+			"fc.check(p, requireProvided('fastCheck', inject('fastCheck')));",
 			"export const a = Date.now();",
 			"export const b = new Date();",
 			"vi.setConfig({ testTimeout: inject('propertyTimeout') });",
@@ -211,20 +211,49 @@ describe("sim purity rules", () => {
 	// #208: a property file that leaves out the timeout gets Vitest's 5 s default, which only
 	// fails at CI's 1,000 runs. Lint reports the file instead, on its first line.
 	it.each([
-		["the fast-check settings without the property timeout", ["inject('fastCheck');"], ["1"]],
+		[
+			"the fast-check settings without the property timeout",
+			["requireProvided('fastCheck', inject('fastCheck'));"],
+			["1"],
+		],
 		[
 			"both, in either quote style",
-			['inject("fastCheck");', 'vi.setConfig({ testTimeout: inject("propertyTimeout") });'],
+			[
+				'requireProvided("fastCheck", inject("fastCheck"));',
+				'vi.setConfig({ testTimeout: inject("propertyTimeout") });',
+			],
 			[],
 		],
 		[
 			"the property timeout outside vi.setConfig",
-			["inject('fastCheck');", "inject('propertyTimeout');"],
+			["requireProvided('fastCheck', inject('fastCheck'));", "inject('propertyTimeout');"],
 			["1"],
 		],
 		["neither", ["inject('other');"], []],
 	])("report a sim test file that uses %s", async (_case, lines, findingLines) => {
 		const code = ["import { inject, vi } from 'vitest';", ...lines].join("\n");
+		expect(await purityFindings(code, "packages/sim/src/sim/tests/x.test.ts")).toEqual(
+			findingLines.map((line) => `${line} no-restricted-syntax`),
+		);
+	});
+
+	// #213: run without the root config, inject('fastCheck') gives undefined and fast-check picks a
+	// random seed. Lint reports a read that requireProvided doesn't check, on its line.
+	it.each([
+		["read straight into the settings", ["const params = inject('fastCheck');"], ["3"]],
+		["passed straight to fc.assert", ["fc.assert(p, inject('fastCheck'));"], ["3"]],
+		["checked by requireProvided", ["requireProvided('fastCheck', inject('fastCheck'));"], []],
+		[
+			"checked by another function",
+			["const params = check('fastCheck', inject('fastCheck'));"],
+			["3"],
+		],
+	])("report the fast-check settings %s", async (_case, lines, findingLines) => {
+		const code = [
+			"import { inject, vi } from 'vitest';",
+			"vi.setConfig({ testTimeout: inject('propertyTimeout') });",
+			...lines,
+		].join("\n");
 		expect(await purityFindings(code, "packages/sim/src/sim/tests/x.test.ts")).toEqual(
 			findingLines.map((line) => `${line} no-restricted-syntax`),
 		);

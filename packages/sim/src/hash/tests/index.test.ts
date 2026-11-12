@@ -3,8 +3,9 @@ import { describe, expect, inject, it, vi } from "vitest";
 
 import { stateHash } from "../../index.js";
 import { mulberry32 } from "../../random/index.js";
+import { requireProvided } from "../../state/tests/provided.js";
 
-const params = inject("fastCheck");
+const params = requireProvided("fastCheck", inject("fastCheck"));
 // #200: the timeout scales with the run count; Vitest resets it after this file.
 vi.setConfig({ testTimeout: inject("propertyTimeout") });
 

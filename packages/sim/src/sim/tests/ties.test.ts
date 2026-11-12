@@ -6,10 +6,11 @@ import { describe, expect, inject, it, vi } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Content, FarmState, Sim } from "../../index.js";
-import { delay, farmId, play, timedActions } from "../../state/tests/farms.js";
+import { delay, farmId, play, reachMargin, timedActions } from "../../state/tests/farms.js";
+import { requireProvided } from "../../state/tests/provided.js";
 import { richContent } from "./richContent.js";
 
-const params = inject("fastCheck");
+const params = requireProvided("fastCheck", inject("fastCheck"));
 // #200: the timeout scales with the run count; Vitest resets it after this file.
 vi.setConfig({ testTimeout: inject("propertyTimeout") });
 
@@ -198,7 +199,7 @@ describe.each(contents)(
 );
 
 describe("the generated ties", () => {
-	it("are reached by the generated farms over both contents, so MUST-14.8 isn't vacuous", () => {
+	it("are reached by the generated farms, once for every 20 runs over both contents, so MUST-14.8 isn't vacuous", () => {
 		const counts = new Map<string, number>();
 		const worlds = contents.map(([, content]) => makeWorld(content));
 		for (const [id, played, wait] of fc.sample(fc.tuple(farmId, timedActions, delay), params)) {
@@ -216,7 +217,7 @@ describe("the generated ties", () => {
 			"Loops tie for the last wheat",
 			"a Collector's waiting goods stop a Loop at the tie",
 		]) {
-			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin(params.numRuns));
 		}
 	});
 });

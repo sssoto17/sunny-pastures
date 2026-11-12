@@ -2,9 +2,10 @@ import fc from "fast-check";
 import { describe, expect, inject, it, vi } from "vitest";
 
 import { assertSafeIntegers } from "../../state/index.js";
+import { requireProvided } from "../../state/tests/provided.js";
 import { mulberry32, streamSeed } from "../index.js";
 
-const params = inject("fastCheck");
+const params = requireProvided("fastCheck", inject("fastCheck"));
 // #200: the timeout scales with the run count; Vitest resets it after this file.
 vi.setConfig({ testTimeout: inject("propertyTimeout") });
 const uint32End = 2 ** 32;
