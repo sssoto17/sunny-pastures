@@ -43,6 +43,20 @@ describe("R17 tierSpeed", () => {
 		expect(listFailures(content)).toEqual([["tierSpeed", "facilities[0].tiers[0].timePerMille"]]);
 	});
 
+	// 0 per mille makes every tier-2 job 0 s (R3), and tier 3's 600 is no longer below tier 2's.
+	it("rejects a tier with timePerMille 0 (MUST-06.2)", () => {
+		const content = draftSlice();
+		const [tier2] = findFacility(content, "bakery").tiers;
+		if (tier2 !== undefined) tier2.timePerMille = 0;
+
+		expect(listFailures(content)).toEqual([
+			["tierTime", "facilities[1].recipes.bread.seconds"],
+			["tierTime", "facilities[1].recipes.cookies.seconds"],
+			["tierSpeed", "facilities[1].tiers[0].timePerMille"],
+			["tierSpeed", "facilities[1].tiers[1].timePerMille"],
+		]);
+	});
+
 	it("rejects tier 3 no faster than tier 2 (#189)", () => {
 		const content = draftSlice();
 		const [, tier3] = findFacility(content, "feedMill").tiers;
@@ -54,16 +68,22 @@ describe("R17 tierSpeed", () => {
 
 describe("R18 tierSlots", () => {
 	it.each([
-		["two tiers in a row adding a slot, 2/3/4", [3, 4], "facilities[1].tiers[1].slots"],
-		["a tier with fewer slots than the one below, 2/3/2", [3, 2], "facilities[1].tiers[1].slots"],
-		["a tier adding two slots, 2/4/4", [4, 4], "facilities[1].tiers[0].slots"],
-	])("rejects %s (MUST-06.2)", (_name, [tier2Slots, tier3Slots], path) => {
+		["tier 3 adding a slot after tier 2 did, 2/3/4", [3, 4], ["facilities[1].tiers[1].slots"]],
+		["a tier with fewer slots than the one below, 2/3/2", [3, 2], ["facilities[1].tiers[1].slots"]],
+		["tier 2 adding two slots, 2/4/4", [4, 4], ["facilities[1].tiers[0].slots"]],
+		["tier 2 adding no slot, 2/2/2", [2, 2], ["facilities[1].tiers[0].slots"]],
+		[
+			"the slot added at tier 3 instead of tier 2, 2/2/3",
+			[2, 3],
+			["facilities[1].tiers[0].slots", "facilities[1].tiers[1].slots"],
+		],
+	])("rejects %s (MUST-06.2)", (_name, [tier2Slots, tier3Slots], paths) => {
 		const content = draftSlice();
 		const [tier2, tier3] = findFacility(content, "bakery").tiers;
 		if (tier2 !== undefined) tier2.slots = tier2Slots ?? 0;
 		if (tier3 !== undefined) tier3.slots = tier3Slots ?? 0;
 
-		expect(listFailures(content)).toEqual([["tierSlots", path]]);
+		expect(listFailures(content)).toEqual(paths.map((path) => ["tierSlots", path]));
 	});
 
 	it("rejects a facility with no slot at tier 1 (MUST-03.5)", () => {
@@ -75,12 +95,34 @@ describe("R18 tierSlots", () => {
 		expect(listFailures(content)).toEqual([["tierSlots", "facilities[1].slots"]]);
 	});
 
-	it("accepts the slot added at tier 3 instead, 2/2/3", () => {
+	it("accepts the admin's 2/3/3: tier 2 adds a slot, tier 3 none (11 Nov, #85)", () => {
 		const content = draftSlice();
-		const [tier2] = findFacility(content, "bakery").tiers;
-		if (tier2 !== undefined) tier2.slots = 2;
+		findFacility(content, "bakery").tiers.forEach((tier) => {
+			tier.slots = 3;
+		});
 
 		expect(listFailures(content)).toEqual([]);
+	});
+
+	// Tiers 4–6 are SHOULD-08 (R19 reports them), but they show the maximum: tier 4 adds none, so
+	// tier 6 may not add one.
+	it("rejects a slot added after an even tier added none, 2/3/3/3/3/4", () => {
+		const content = draftSlice();
+		findFacility(content, "feedMill").tiers = [800, 600, 400, 300, 200].map((timePerMille, j) => ({
+			price: 60 * (j + 1),
+			slots: j === 4 ? 4 : 3,
+			timePerMille,
+		}));
+		findLevel(content, 5).tiers.push(
+			{ facility: "feedMill", tier: 4 },
+			{ facility: "feedMill", tier: 5 },
+			{ facility: "feedMill", tier: 6 },
+		);
+
+		expect(listFailures(content)).toEqual([
+			["tierCount", "facilities[0].tiers.length"],
+			["tierSlots", "facilities[0].tiers[4].slots"],
+		]);
 	});
 });
 

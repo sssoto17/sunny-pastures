@@ -36,8 +36,9 @@ export function checkTierTimes(content: Content): ContentFailure[] {
 /**
  * R17 (MUST-06.2; #189): each tier shortens jobs: its `timePerMille` is above 0, below 1000, and
  * below the tier before's. R18 (MUST-03.5, 06.2): a facility has at least 1 slot at tier 1, and
- * "every 2nd tier adds a queue slot" reads as: no tier has fewer slots than the tier below, a tier
- * adds at most one, and two tiers in a row never both add one (the admin's 2/3/3, 11 Nov, #85).
+ * "every 2nd tier adds a queue slot, up to a maximum" reads as: tier 2 adds exactly one slot, each
+ * later even tier adds one until the slots stop rising, odd tiers add none, and once an even tier
+ * adds none no later tier adds one (the admin's 2/3/3, 11 Nov, #85; confirmed 12 Nov).
  * R19 (MUST-06.2): at most two tier rows, so tier 3 is the highest. R20 (#189): every tier costs
  * more than 0.
  */
@@ -60,7 +61,9 @@ export function checkTiers(content: Content): ContentFailure[] {
 				),
 			);
 		}
+		let hasReachedMax = false;
 		facility.tiers.forEach((row, j) => {
+			const tier = j + 2;
 			const path = `${at}.tiers[${String(j)}]`;
 			const below = facility.tiers[j - 1];
 			const perMilleBelow = below?.timePerMille ?? 1000;
@@ -77,18 +80,17 @@ export function checkTiers(content: Content): ContentFailure[] {
 
 			const slotsBelow = below?.slots ?? facility.slots;
 			const added = row.slots - slotsBelow;
-			const addedBelow =
-				below === undefined ? 0 : below.slots - (facility.tiers[j - 2]?.slots ?? facility.slots);
-			if (added < 0 || added > 1 || (added === 1 && addedBelow === 1)) {
+			if (!listSlotsAdded(tier, hasReachedMax).includes(added)) {
 				failures.push(
 					fail(
 						"tierSlots",
 						`${path}.slots`,
 						row.slots,
-						`from ${String(slotsBelow)} slots below, every 2nd tier adds one (MUST-06.2).`,
+						`tier ${String(tier)} adds ${String(added)} to ${String(slotsBelow)} slots: every 2nd tier adds one, up to a maximum (MUST-06.2).`,
 					),
 				);
 			}
+			if (tier % 2 === 0 && added !== 1) hasReachedMax = true;
 			if (row.price <= 0) {
 				failures.push(
 					fail("tierPrice", `${path}.price`, row.price, "a tier costs more than 0 coins (#189)."),
@@ -113,4 +115,14 @@ export function checkTiers(content: Content): ContentFailure[] {
 		});
 		return failures;
 	});
+}
+
+/**
+ * The slots tier `tier` may add (MUST-06.2): one at tier 2, none at an odd tier or once an even
+ * tier has added none (the maximum is reached), and one or none at a later even tier.
+ */
+function listSlotsAdded(tier: number, hasReachedMax: boolean): readonly number[] {
+	if (tier % 2 === 1 || hasReachedMax) return [0];
+
+	return tier === 2 ? [1] : [0, 1];
 }
