@@ -14,6 +14,13 @@ import {
 	startJob,
 } from "../facilities/index.js";
 import {
+	createRefilling,
+	deliver,
+	discard,
+	fillNewBoard,
+	prepareOrderRules,
+} from "../orders/index.js";
+import {
 	buyPen,
 	collectProducts,
 	createProducing,
@@ -33,7 +40,8 @@ export interface Sim {
 	/** A new farm (spec decision 5) at time 0, its streams seeded from `farmId` (D9). */
 	newFarm(farmId: string): FarmState;
 	/**
-	 * Advances the farm to `at`, then applies `action`. A refusal is returned, never thrown, and
+	 * Advances the farm to `at`, applies `action`, then runs the steps it made due at `at` (the
+	 * order slots a Level it crosses adds, MUST-04.1). A refusal is returned, never thrown, and
 	 * carries no state (D15); an `at` before the farm's time is refused (D7, MUST-14.7). Throws a
 	 * RangeError if `at` isn't a safe integer.
 	 */
@@ -51,6 +59,7 @@ export function createSim(content: Content): Sim {
 	const plotRules = preparePlotRules(content, progress, storage);
 	const facilityRules = prepareFacilityRules(content, progress, storage);
 	const penRules = preparePenRules(content, progress, storage);
+	const orderRules = prepareOrderRules(content, progress, storage);
 	// Every feature's automated steps. advance/'s tie key orders them, and this list's order never
 	// matters: two steps with the same key are a programmer error, which advanceFarm throws on as a
 	// RangeError. Each new kind must keep its keys unique (MUST-10.6).
@@ -58,21 +67,27 @@ export function createSim(content: Content): Sim {
 		ripening,
 		jobFinishing,
 		createProducing(penRules),
+		createRefilling(orderRules),
 	];
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
 	return {
-		newFarm: (farmId) => ({
-			time: 0,
-			coins: content.start.coins,
-			xp: 0,
-			silo: {},
-			barn: {},
-			plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
-			facilities: newFacilities(facilityRules),
-			pens: newPens(penRules),
-			streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
-		}),
+		newFarm: (farmId) =>
+			fillNewBoard(
+				{
+					time: 0,
+					coins: content.start.coins,
+					xp: 0,
+					silo: {},
+					barn: {},
+					plots: Array.from({ length: content.start.plots }, () => ({ status: "empty" }) as const),
+					facilities: newFacilities(facilityRules),
+					pens: newPens(penRules),
+					board: [],
+					streams: { yields: streamSeed(farmId, "yields"), orders: streamSeed(farmId, "orders") },
+				},
+				orderRules,
+			),
 		apply: (state, action, at) => {
 			assertTime(at);
 			if (at < state.time) {
@@ -81,32 +96,42 @@ export function createSim(content: Content): Sim {
 				);
 			}
 
-			const farm = advance(state, at);
-			switch (action.type) {
-				case "plant":
-					return plant(farm, action.plot, action.crop, plotRules);
-				case "harvest":
-					return harvest(farm, action.plot, plotRules);
-				case "buyPlot":
-					return buyPlot(farm, action.plot, plotRules);
-				case "buyFacility":
-					return buyFacility(farm, action.facility, facilityRules);
-				case "startJob":
-					return startJob(farm, action.facility, action.recipe, facilityRules);
-				case "buyPen":
-					return buyPen(farm, action.pen, penRules);
-				case "feed":
-					return feed(farm, action.pen, penRules);
-				case "collectProducts":
-					return collectProducts(farm, action.pen, penRules);
-				case "collect":
-					return collect(farm, action.facility, facilityRules);
-				case "buyAddOn":
-					return buyAddOn(farm, action.facility, action.addOn, facilityRules);
-				case "buyTier":
-					return buyTier(farm, action.facility, action.tier, facilityRules);
-			}
+			// An action that crosses a Level adds order slots, drawn as automated steps at `at`, so the
+			// farm is advanced to `at` again after it (MUST-04.1; ADR-0003, section 15).
+			const result = applyAction(advance(state, at), action);
+			return result.ok ? { ok: true, state: advance(result.state, at) } : result;
 		},
 		advance,
 	};
+
+	function applyAction(farm: FarmState, action: Action): ApplyResult {
+		switch (action.type) {
+			case "plant":
+				return plant(farm, action.plot, action.crop, plotRules);
+			case "harvest":
+				return harvest(farm, action.plot, plotRules);
+			case "buyPlot":
+				return buyPlot(farm, action.plot, plotRules);
+			case "buyFacility":
+				return buyFacility(farm, action.facility, facilityRules);
+			case "startJob":
+				return startJob(farm, action.facility, action.recipe, facilityRules);
+			case "buyPen":
+				return buyPen(farm, action.pen, penRules);
+			case "feed":
+				return feed(farm, action.pen, penRules);
+			case "collectProducts":
+				return collectProducts(farm, action.pen, penRules);
+			case "collect":
+				return collect(farm, action.facility, facilityRules);
+			case "buyAddOn":
+				return buyAddOn(farm, action.facility, action.addOn, facilityRules);
+			case "buyTier":
+				return buyTier(farm, action.facility, action.tier, facilityRules);
+			case "deliver":
+				return deliver(farm, action.slot, orderRules);
+			case "discard":
+				return discard(farm, action.slot, orderRules);
+		}
+	}
 }

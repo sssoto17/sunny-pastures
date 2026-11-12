@@ -3,6 +3,7 @@
 // (ADR-0003, section 5, D12); the invariants the property tests check are below. Each feature
 // module owns its part of the state and its actions (ADR-0005, section 3); this module composes them.
 import type { FacilityAction, OwnedFacility } from "../facilities/index.js";
+import type { OrderAction, OrderSlot } from "../orders/index.js";
 import type { OwnedPen, PenAction } from "../pens/index.js";
 import type { Plot, PlotAction } from "../plots/index.js";
 
@@ -22,12 +23,17 @@ export interface FarmState {
 	readonly facilities: readonly (OwnedFacility | null)[];
 	/** One entry per content pen, in content order: null until bought (MUST-05.6). */
 	readonly pens: readonly (OwnedPen | null)[];
+	/**
+	 * The order board, one entry per slot the farm's Level gives (MUST-04.1): it only grows, as the
+	 * Level does, and every slot holds an open order or refills at a stored time.
+	 */
+	readonly board: readonly OrderSlot[];
 	/** The mulberry32 state of each stream, an unsigned 32-bit integer (ADR-0003, section 7). */
 	readonly streams: { readonly yields: number; readonly orders: number };
 }
 
 /** Something a player chooses to do, applied at a server time (`GLOSSARY.md`). */
-export type Action = PlotAction | FacilityAction | PenAction;
+export type Action = PlotAction | FacilityAction | PenAction | OrderAction;
 
 /** A refusal is data, not a throw, and carries no state (ADR-0003, section 4, D15). */
 export type ApplyResult =
