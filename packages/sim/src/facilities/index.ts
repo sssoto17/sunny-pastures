@@ -291,7 +291,7 @@ export const jobFinishing: StepSource<FarmState> = {
  * and slot 0. It falls when one of the facility's jobs finishes, which it finishes in place of
  * `finishJob`, and a ms after the farm's time whenever the facility's oldest job is done and its
  * goods fit, so goods that waited move as soon as the barn has room. It moves the done jobs into the barn,
- * oldest first, while they fit; the rest wait in their slots (ADR-0003, section 15).
+ * oldest first, while they fit; the rest wait in their slots (ADR-0003, section 16).
  */
 export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
 	return {
@@ -359,7 +359,7 @@ function finishDue(farm: FarmState, index: number): FarmState {
  * it fills, one job a step. Its limit is the queue (the admin, 11 Nov): a done job keeps its slot
  * until collected, by hand or by the Collector, so it stops when every slot is taken, barn room or
  * not, and resumes as soon as one frees; it also stops when the inputs run out (MUST-06.5, 07.2;
- * ADR-0003, section 15).
+ * ADR-0003, section 16).
  */
 export function createLooping(rules: FacilityRules): StepSource<FarmState> {
 	return {
