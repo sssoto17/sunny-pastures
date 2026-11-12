@@ -12,9 +12,17 @@
  *   and changes only its own pen (ADR-0003, section 13).
  * - `moveGoods` (#88), the Collector, after every producer, so goods made at a time move at it: one
  *   step per facility and time, as a job finishes or a ms after waiting goods fit (ADR-0003,
- *   section 15), so room a later-ranked step frees never makes a move due behind it.
+ *   section 16), so room a later-ranked step frees never makes a move due behind it.
+ * - `refillSlot` (#87) after the producers. A refill reads the Level (how many slots, which goods
+ *   are unlocked) and what is producible (MUST-04.3), and a step at the same time can change the
+ *   Level (#88's Collector gains XP), so a refill sees what the steps before it did. A slot that a
+ *   new Level adds is drawn at the time the Level is crossed, which only ranks after the step that
+ *   crossed it if refills rank after every kind that gains XP. A refill changes only its own slot
+ *   and the orders stream, which no other kind reads, so it never makes an earlier-ranked step due
+ *   at its own time. The admin decided on 11 Nov that #88's `restartRecipe` (the Loop) ranks last,
+ *   after `refillSlot`, and its `moveGoods` (the Collector) before it (ADR-0003, section 15).
  */
-const stepKinds = ["ripen", "finishJob", "produce", "moveGoods"] as const;
+const stepKinds = ["ripen", "finishJob", "produce", "moveGoods", "refillSlot"] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 
@@ -23,7 +31,7 @@ export interface AutomatedStep {
 	/** Server time in integer ms. */
 	readonly at: number;
 	readonly kind: StepKind;
-	/** The facility, pen or plot index, in content order. */
+	/** The facility, pen or plot index, in content order, or the order slot's index. */
 	readonly index: number;
 	/** The queue slot, or 0 where there is no queue. */
 	readonly slot: number;

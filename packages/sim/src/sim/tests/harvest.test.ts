@@ -17,8 +17,12 @@ describe("harvesting", () => {
 		expect(farm.silo).toEqual({ wheat: 2 });
 		expect(farm.plots[0]).toEqual({ status: "empty" });
 		expect(farm.xp).toBe(1);
-		// The yields stream moved one draw; farm-1's draw is above the bonus threshold.
-		expect(farm.streams).toEqual({ yields: 3150588026, orders: 0xe8550433 });
+		// The yields stream moved one draw, and the orders stream none; farm-1's draw is above the
+		// bonus threshold.
+		expect(farm.streams).toEqual({
+			yields: 3150588026,
+			orders: sim.newFarm("farm-1").streams.orders,
+		});
 	});
 
 	it("pays the level-up coins of the Level its XP reaches (MUST-05.4)", () => {

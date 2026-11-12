@@ -1,0 +1,77 @@
+# THROWAWAY: #102's checks of reading the user-owned Project 3 from Actions. Never merge into main.
+# scripts/setup/ci-check.sh copies this file to .github/workflows/ on the branch
+# throwaway/102-project and pushes it; the push runs it (workflow_dispatch needs the file on the
+# default branch first). Each job prints `RESULT ...` lines: yes or no, the token's kind and
+# scopes, and field values from the board, never a token or an issue title.
+# Actions pinned to full SHAs (ADR-0002, area 8).
+name: check-102-project
+
+on:
+  push:
+    branches: [throwaway/102-project]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-102
+  cancel-in-progress: false
+
+env:
+  OWNER: sssoto17
+  PROJECT: '3'
+
+jobs:
+  # Check 1: can a sunny-factory installation token read the Project? Expected no.
+  app-token:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: factory
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          q='query($o:String!,$n:Int!){user(login:$o){projectV2(number:$n){title}}}'
+          if gh api graphql -f "query=$q" -f "o=$OWNER" -F "n=$PROJECT" \
+            --jq '.data.user.projectV2.title' >out 2>err && [ -s out ]; then
+            echo "RESULT app_reads_project=yes"
+          else
+            echo "RESULT app_reads_project=no: $(tr '\n' ' ' <err | cut -c1-200)"
+          fi
+
+  # Checks 2 and 3: does PROJECT_READ_TOKEN (classic read:project, or the fine-grained fallback)
+  # return this repo's issue numbers with Status and Mode? Hidden items show as content: null.
+  pat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: sweep
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_READ_TOKEN }}
+    steps:
+      - run: |
+          case "$GH_TOKEN" in
+            ghp_*) kind=classic ;; github_pat_*) kind=fine-grained ;; "") kind=missing ;; *) kind=other ;;
+          esac
+          scopes=$(gh api -i user 2>/dev/null | tr -d '\r' | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: *//p')
+          echo "RESULT token_kind=$kind scopes=${scopes:-none listed}"
+          q='query($o:String!,$n:Int!){user(login:$o){projectV2(number:$n){items(first:50){nodes{
+            content{__typename ... on Issue{number repository{nameWithOwner}}}
+            status: fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}
+            mode: fieldValueByName(name:"Mode"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}'
+          if ! gh api graphql -f "query=$q" -f "o=$OWNER" -F "n=$PROJECT" >items.json 2>err; then
+            echo "RESULT pat_reads_project=no: $(tr '\n' ' ' <err | cut -c1-200)"
+            exit 0
+          fi
+          jq -r --arg repo "$GITHUB_REPOSITORY" '.data.user.projectV2.items.nodes as $all
+            | [$all[] | select(.content.repository.nameWithOwner == $repo)] as $mine
+            | "RESULT pat_reads_project=yes items=\($all | length) this_repo_issues=\($mine | length)"
+              + " hidden_items=\([$all[] | select(.content == null)] | length)"
+              + " readable=\(if ($mine | map(select(.status != null and .mode != null)) | length) > 0
+                             then "yes" else "no" end)",
+              ($mine[:5][] | "RESULT #\(.content.number) Status=\(.status.name // "-") Mode=\(.mode.name // "-")")' \
+            items.json

@@ -4,7 +4,8 @@
 # and saves what `gh secret set` reads on stdin to $work/stdin.<NAME>.<env>. Each test plants
 # fake .pem keys holding a unique marker and checks the marker reaches `gh secret set` on stdin,
 # with --env, and never appears in the wizard's output or in any gh argument. Environments live
-# in $work/env.<name> (its policy, "false true" when custom) and $work/policies.<name>.
+# in $work/env.<name> (its policy, "false true" when custom) and $work/policies.<name>, one
+# "<type> <name>" line per deployment-branch policy.
 # Run: bash scripts/setup/ci-apps.test.sh
 set -uo pipefail
 
@@ -30,7 +31,7 @@ case "$*" in
     [[ $* == *"protected_branches]=false"*"custom_branch_policies]=true"* ]] &&
       echo "false true" >"$dir/env.$(envof "$4")"; exit 0 ;;
   "api -X POST repos/sssoto17/sunny-pastures/environments/"*"/deployment-branch-policies --silent -f name="*" -f type=branch")
-    n=${7#name=}; echo "$n" >>"$dir/policies.$(envof "$4")"; exit 0 ;;
+    n=${7#name=}; echo "branch $n" >>"$dir/policies.$(envof "$4")"; exit 0 ;;
 esac
 case "$1 $2" in
   "auth status") [[ -f $dir/signed-out ]] && exit 1; exit 0 ;;
@@ -111,7 +112,7 @@ for env in factory review; do
   assert "expected $env created with a custom branch policy" contains "$calls" \
     "api -X PUT repos/sssoto17/sunny-pastures/environments/$env --silent -F deployment_branch_policy[protected_branches]=false -F deployment_branch_policy[custom_branch_policies]=true"
   assert "expected $env open to main and throwaway/* only" \
-    test "$(cat "$work/policies.$env")" == $'main\nthrowaway/*'
+    test "$(cat "$work/policies.$env")" == $'branch main\nbranch throwaway/*'
 done
 assert "expected the factory client ID as an env variable" \
   contains "$calls" "variable set FACTORY_APP_CLIENT_ID --env factory --repo sssoto17/sunny-pastures --body Iv23factory"
@@ -139,7 +140,7 @@ assert "expected names in the summary" contains "$out" "FACTORY_APP_PRIVATE_KEY 
 reset
 for env in factory review; do
   echo "false true" >"$work/env.$env"
-  printf 'main\nthrowaway/*\n' >"$work/policies.$env"
+  printf 'branch main\nbranch throwaway/*\n' >"$work/policies.$env"
 done
 run "$(happy_input)"
 expect_code 0
@@ -150,14 +151,30 @@ assert "expected no branch policy POST on a re-run" lacks "$calls" "api -X POST"
 reset
 echo "null null" >"$work/env.factory"        # exists, all branches allowed
 echo "false true" >"$work/env.review"
-echo main >"$work/policies.review"
+echo "branch main" >"$work/policies.review"
 run "$(happy_input)"
 expect_code 0
 assert "expected factory restricted" contains "$calls" "api -X PUT repos/sssoto17/sunny-pastures/environments/factory"
 assert "expected review not PUT again" lacks "$calls" "api -X PUT repos/sssoto17/sunny-pastures/environments/review"
 assert "expected review to get only throwaway/*" \
   test "$(grep -c 'environments/review/deployment-branch-policies --silent' <<<"$calls")" -eq 1
-assert "expected review's policies complete" test "$(cat "$work/policies.review")" == $'main\nthrowaway/*'
+assert "expected review's policies complete" test "$(cat "$work/policies.review")" == $'branch main\nbranch throwaway/*'
+
+# --- other patterns already there: kept, listed with a warning, and no "only" claim --------------
+reset
+for env in factory review; do
+  echo "false true" >"$work/env.$env"
+  printf 'branch main\nbranch throwaway/*\n' >"$work/policies.$env"
+done
+printf 'branch release/*\ntag v*\n' >>"$work/policies.factory"
+run "$(happy_input)"
+expect_code 0
+assert "expected nothing deleted" lacks "$calls" "DELETE"
+assert "expected the extra branch pattern listed" contains "$out" "release/*"
+assert "expected the extra tag pattern listed" contains "$out" "tag v*"
+assert "expected the warning" contains "$out" "factory also has these patterns"
+assert "expected no 'only' claim for factory" lacks "$out" "factory: only"
+assert "expected the 'only' line for review, which has none" contains "$out" "review: only main throwaway/*"
 
 # --- a wrong path, then a file that isn't a key, then the key; keep the file -----------------
 reset

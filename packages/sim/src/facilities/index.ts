@@ -291,7 +291,7 @@ export const jobFinishing: StepSource<FarmState> = {
  * and slot 0. It falls when one of the facility's jobs finishes, which it finishes in place of
  * `finishJob`, and a ms after the farm's time whenever the facility's oldest job is done and its
  * goods fit, so goods that waited move as soon as the barn has room. It moves the done jobs into the barn,
- * oldest first, while they fit; the rest wait in their slots (ADR-0003, section 15).
+ * oldest first, while they fit; the rest wait in their slots (ADR-0003, section 16).
  */
 export function createCollecting(rules: FacilityRules): StepSource<FarmState> {
 	return {
