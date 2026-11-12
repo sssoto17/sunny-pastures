@@ -34,9 +34,12 @@ cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
 printf '%s\n' "$*" >>"$dir/calls"
-jqp="" key=""
+jqp="" key="" head=""
 args=("$@")
-for ((i = 0; i < $#; i++)); do [[ ${args[i]} == --jq ]] && jqp=${args[i + 1]}; done
+for ((i = 0; i < $#; i++)); do
+  [[ ${args[i]} == --jq ]] && jqp=${args[i + 1]}
+  [[ ${args[i]} == --head ]] && head=${args[i + 1]}
+done
 case "$*" in
   # Exit codes to answer with, one a call, from fx/auth (then 0): a passing failure, or a real one.
   "auth status -h github.com --active")
@@ -47,15 +50,20 @@ case "$*" in
   "run list --repo "*" --branch "*) key=runs ;;
   "run view "*" --json jobs"*) key=jobs ;;
   "run view "*" --log") cat "$dir/fx/log"; exit 0 ;;
+  "api repos/"*"/pulls/"*"/reviews"*) key=reviews ;;
   "pr list "*"--state all"*) key=prs ;;
   "pr list "*"--state open"*) key=prs ;;
   "run list --repo "*" --commit "*) key=commit-runs ;;
   "api repos/"*"/git/ref/"*)
     ref=${2#repos/*/git/ref/}; grep -qxF "$ref" "$dir/fx/refs" 2>/dev/null; exit ;;
+  "pr create "*) echo "https://github.com/sssoto17/sunny-pastures/pull/77"; exit 0 ;;
   "pr close "* | "api -X DELETE "*) exit 0 ;;
   *) echo "fake: unexpected gh call: $*" >&2; exit 99 ;;
 esac
-if [[ -n $jqp ]]; then jq -r "$jqp" "$dir/fx/$key.json"; else cat "$dir/fx/$key.json"; fi
+fx=$(cat "$dir/fx/$key.json")
+# --head filters PRs on GitHub's side; here against a fixture PR's headRefName.
+[[ -n $head ]] && fx=$(jq --arg h "$head" 'map(select(.headRefName == $h))' <<<"$fx")
+if [[ -n $jqp ]]; then jq -r "$jqp" <<<"$fx"; else printf '%s\n' "$fx"; fi
 FAKE
 chmod +x "$work/bin/gh"
 # git: the real one, except that `remote get-url` shows the local bare repo as GitHub's URL, as
@@ -76,6 +84,7 @@ reset() {
     "$work/other.git" "$work/other"
   mkdir -p "$work/fx"
   printf 'X-Oauth-Scopes: gist, read:org, repo, workflow\r\n' >"$work/fx/scopes"
+  echo '[]' >"$work/fx/reviews.json"
   git init -q --bare "$work/origin.git"
   git clone -q "$work/origin.git" "$work/seed" 2>/dev/null
   echo hello >"$work/seed/README.md"
@@ -277,10 +286,73 @@ assert "expected the scope warning" contains "$err" "gh auth refresh -h github.c
 assert "expected the 103 workflow pushed" \
   git -C "$work/origin.git" cat-file -e throwaway/103-claude:.github/workflows/check-103-claude.yml
 
+# --- start 103: a base branch with the marker hooks, the check branch on it, and the PR -------
+# The action restores .claude/ from the PR's base branch, so the markers live on the base.
+reset
+run start 103
+expect_code 0
+base=throwaway/103-base head=throwaway/103-claude
+assert "expected the base branch pushed" git -C "$work/origin.git" show-ref -q --verify "refs/heads/$base"
+assert "expected only .claude/settings.json on the base" \
+  test "$(git -C "$work/origin.git" diff --name-only main "$base")" == ".claude/settings.json"
+hooks=$(git -C "$work/origin.git" show "$base:.claude/settings.json" |
+  jq -r '[.hooks.SessionStart[].hooks[].command, .hooks.UserPromptSubmit[].hooks[].command] | join("|")')
+assert "expected both marker hooks on the base" \
+  test "$hooks" == 'echo SessionStart >> "$RUNNER_TEMP/hook-marker"|echo UserPromptSubmit >> "$RUNNER_TEMP/hook-marker"'
+assert "expected only the workflow between base and check branch" \
+  test "$(git -C "$work/origin.git" diff --name-only "$base" "$head")" == ".github/workflows/check-103-claude.yml"
+assert "expected the PR opened from the check branch onto the base" \
+  contains "$calls" "pr create --repo sssoto17/sunny-pastures --base $base --head $head"
+assert "expected the PR number printed" contains "$out" "PR #77"
+assert "expected no URL printed" lacks "$out" "https://"
+assert "expected no leftover worktree" test "$(git -C "$work/clone" worktree list | grep -c .)" -eq 1
+
+# The repo's own settings stay: the markers are added beside its hooks.
+reset
+mkdir -p "$work/seed/.claude"
+echo '{"permissions":{"allow":["Bash(ls)"]},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}' \
+  >"$work/seed/.claude/settings.json"
+git -C "$work/seed" add .claude && git -C "$work/seed" commit -qm settings && git -C "$work/seed" push -q origin main
+run start 103
+expect_code 0
+settings=$(git -C "$work/origin.git" show throwaway/103-base:.claude/settings.json)
+assert "expected the repo's permissions kept" test "$(jq -r '.permissions.allow[0]' <<<"$settings")" == "Bash(ls)"
+assert "expected the repo's hook kept, the marker after it" \
+  test "$(jq -r '[.hooks.SessionStart[].hooks[].command] | join("|")' <<<"$settings")" == \
+  'true|echo SessionStart >> "$RUNNER_TEMP/hook-marker"'
+
+# A leftover base branch: refused before anything is pushed.
+reset
+git -C "$work/seed" push -q origin main:refs/heads/throwaway/103-base
+run start 103
+expect_code 2
+assert "expected the cleanup hint" contains "$err" "cleanup 103"
+assert "expected no check branch pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway/103-claude)"
+assert "expected no PR opened" lacks "$calls" "pr create"
+
+# The 103 draft (no harness runs the YAML): the action supports no push event, so it runs on the
+# PR, only for the check branch; it never asks for an OIDC token, and reads the action's output.
+draft103=$(cat "$src/workflows/check-103-claude.yml")
+assert "expected a pull_request trigger" contains "$draft103" $'on:\n  pull_request:\n    types: [opened, synchronize, reopened]'
+assert "expected no push trigger" lacks "$draft103" $'\n  push:'
+assert "expected the job guarded to the check branch" contains "$draft103" "if: github.head_ref == 'throwaway/103-claude'"
+assert "expected the token handed over, so no OIDC exchange" contains "$draft103" 'github_token: ${{ github.token }}'
+assert "expected no id-token permission" lacks "$draft103" "id-token"
+assert "expected only contents: read" contains "$draft103" $'permissions:\n  contents: read\n\n'
+assert "expected the execution file from the action's output" \
+  contains "$draft103" '${{ steps.claude.outputs.execution_file }}'
+assert "expected no marker edit in the checkout (the action undoes it)" lacks "$draft103" "hooks.SessionStart"
+
+# --- start 101 and 102 push only: no PR from the admin's gh ----------------------------------
+reset
+run start 101
+assert "expected no PR opened by start 101" lacks "$calls" "pr create"
+
 # --- start 102: its own branch and workflow ----------------------------------------------------
 reset
 run start 102
 expect_code 0
+assert "expected no PR opened by start 102" lacks "$calls" "pr create"
 assert "expected the 102 workflow pushed" \
   git -C "$work/origin.git" cat-file -e throwaway/102-project:.github/workflows/check-102-project.yml
 
@@ -289,13 +361,13 @@ reset
 echo '[]' >"$work/fx/runs.json"
 run results 103
 expect_code 3
-echo '[{"databaseId":7,"status":"in_progress","conclusion":"","url":"https://example.test/run/7"}]' \
+echo '[{"databaseId":7,"workflowName":"check-103-claude","status":"in_progress","conclusion":"","url":"https://example.test/run/7"}]' \
   >"$work/fx/runs.json"
 run results 103
 expect_code 3
 assert "expected the run's state" contains "$err" "run 7 is in_progress"
 
-echo '[{"databaseId":7,"status":"completed","conclusion":"failure","url":"https://example.test/run/7"}]' \
+echo '[{"databaseId":7,"workflowName":"check-103-claude","status":"completed","conclusion":"failure","url":"https://example.test/run/7"}]' \
   >"$work/fx/runs.json"
 cat >"$work/fx/jobs.json" <<'EOF'
 {"jobs":[{"name":"claude (timeout)","conclusion":"cancelled",
@@ -312,10 +384,23 @@ assert "expected the RESULT line" contains "$out" "claude (timeout): RESULT subt
 assert "expected no echoed script line" lacks "$out" "matrix.check"
 assert "expected no other log line" lacks "$out" "Runner version"
 
+# On the throwaway PR, ci and Labeler run on the same branch, and may be newer: results reads
+# the check's own run.
+cat >"$work/fx/runs.json" <<'EOF'
+[{"databaseId":11,"workflowName":"ci","status":"in_progress","conclusion":"","url":"https://example.test/run/11"},
+ {"databaseId":10,"workflowName":"Labeler","status":"completed","conclusion":"success","url":"https://example.test/run/10"},
+ {"databaseId":7,"workflowName":"check-103-claude","status":"completed","conclusion":"failure","url":"https://example.test/run/7"}]
+EOF
+: >"$work/calls"
+run results 103
+expect_code 0
+assert "expected the check-103 run, not a newer ci run" contains "$out" "Run: https://example.test/run/7"
+assert "expected the runs' workflow names asked for" contains "$calls" "workflowName"
+
 # --- results 101 also reads the PR, its CI runs and the tag ------------------------------------
-echo '[{"databaseId":8,"status":"completed","conclusion":"success","url":"https://example.test/run/8"}]' \
+echo '[{"databaseId":8,"workflowName":"check-101-identities","status":"completed","conclusion":"success","url":"https://example.test/run/8"}]' \
   >"$work/fx/runs.json"
-echo '[{"number":42,"headRefOid":"abc123","author":{"login":"app/sunny-factory"},"reviewDecision":"APPROVED","state":"OPEN"}]' \
+echo '[{"number":42,"headRefName":"throwaway/101-factory-pr","headRefOid":"abc123","author":{"login":"app/sunny-factory"},"reviewDecision":"APPROVED","state":"OPEN"}]' \
   >"$work/fx/prs.json"
 echo '[{"workflowName":"ci","event":"pull_request","status":"completed","conclusion":"success"}]' \
   >"$work/fx/commit-runs.json"
@@ -326,18 +411,42 @@ assert "expected the PR's author and decision" \
 assert "expected the CI run on its head" contains "$out" "ci (pull_request): completed success"
 assert "expected the head commit asked for" contains "$calls" "--commit abc123"
 assert "expected the tag absent" contains "$out" 'Tag `v0.0.0-throwaway-101` does not exist.'
-echo '[{"number":42,"headRefOid":"abc123","author":{"login":"app/sunny-factory"},"reviewDecision":"","state":"OPEN"}]' \
+echo '[{"number":42,"headRefName":"throwaway/101-factory-pr","headRefOid":"abc123","author":{"login":"app/sunny-factory"},"reviewDecision":"","state":"OPEN"}]' \
   >"$work/fx/prs.json"
 run results 101
 assert "expected an empty decision shown, state kept in place" \
   contains "$out" 'reviewDecision `(empty)`, state `OPEN`'
 assert "expected the note on an empty decision" contains "$out" "0 approvals"
+# PR #199 (11 Nov): the App's APPROVE, then its file comment, which GitHub records as a second
+# review, COMMENTED. latestReviews showed only the COMMENTED one; results reports the approval.
+cat >"$work/fx/reviews.json" <<'EOF'
+[{"user":{"login":"sunny-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-11-11T23:10:39Z"},
+ {"user":{"login":"sunny-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-11-11T23:10:40Z"}]
+EOF
+: >"$work/calls"
+run results 101
+assert "expected the PR's reviews read back" contains "$calls" "api repos/sssoto17/sunny-pastures/pulls/42/reviews"
+assert "expected the App's approval reported" contains "$out" 'Approved by `sunny-reviewer[bot]`.'
+assert "expected every review of the App, in order" \
+  contains "$out" '`sunny-reviewer[bot]`: APPROVED, COMMENTED'
+echo '[{"user":{"login":"sunny-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-11-11T23:10:40Z"}]' \
+  >"$work/fx/reviews.json"
+run results 101
+assert "expected a missing approval said plainly" contains "$out" "Approved by nobody."
 echo tags/v0.0.0-throwaway-101 >"$work/fx/refs"
 run results 101
 assert "expected an existing tag flagged" contains "$out" "EXISTS"
 
+# The draft's reviewer job (no harness runs the YAML): it reads its approval back by the id the
+# POST returned, never as the App's latest review, which its own file comment replaces.
+reviewer_job=$(sed -n '/^  reviewer:/,/^  [a-z-]*:$/p' "$draft")
+assert "expected the approval's id kept" contains "$reviewer_job" 'approval=$(gh api -X POST "$r/pulls/$PR/reviews" -f event=APPROVE --jq .id'
+assert "expected the approval read back by its id" contains "$reviewer_job" '"$r/pulls/$PR/reviews/$approval"'
+assert "expected no latestReviews in the reviewer job" lacks "$reviewer_job" "latestReviews"
+assert "expected review_decision still reported" contains "$reviewer_job" "RESULT review_decision="
+
 # --- results 102 adds what to do next, and never suggests the repo scope as a way out ----------
-echo '[{"databaseId":9,"status":"completed","conclusion":"success","url":"https://example.test/run/9"}]' \
+echo '[{"databaseId":9,"workflowName":"check-102-project","status":"completed","conclusion":"success","url":"https://example.test/run/9"}]' \
   >"$work/fx/runs.json"
 run results 102
 expect_code 0
@@ -345,9 +454,11 @@ assert "expected the fallback named" contains "$out" "ci-project.sh --fine-grain
 assert "expected the stop rule" contains "$out" "Bring the alternatives back to the admin"
 assert "expected repo only as a never" contains "$out" "Never widen a classic token to the repo scope"
 
+pr101='{"number":42,"headRefName":"throwaway/101-factory-pr"}' # #101's PR, open in the cleanup tests
+
 # --- cleanup 101: closes the PR unmerged, deletes the three branches ---------------------------
 reset
-echo '[{"number":42}]' >"$work/fx/prs.json"
+echo "[$pr101]" >"$work/fx/prs.json"
 printf '%s\n' heads/throwaway/101-identities heads/throwaway/101-factory-pr >"$work/fx/refs"
 run cleanup 101
 expect_code 0
@@ -363,31 +474,48 @@ code=$?
 expect_code 2
 assert "expected nothing deleted" test "$(grep -c DELETE "$work/calls")" -eq 2
 
-# --- cleanup of another issue never touches #101's PR or branches --------------------------------
-# Every throwaway branch exists, and #101's PR is open: cleanup 103 deletes only its own branch.
+# --- cleanup 103: closes its own PR unmerged, deletes its two branches, never touches #101's ------
 all_branches() {
   printf 'heads/%s\n' throwaway/101-identities throwaway/101-factory-pr throwaway/101-readonly-probe \
-    throwaway/102-project throwaway/103-claude >"$work/fx/refs"
+    throwaway/102-project throwaway/103-base throwaway/103-claude >"$work/fx/refs"
 }
 reset
-echo '[{"number":42}]' >"$work/fx/prs.json"
+echo "[$pr101, {\"number\":77,\"headRefName\":\"throwaway/103-claude\"}]" >"$work/fx/prs.json"
 all_branches
 run cleanup 103
 expect_code 0
-assert "expected 103's branch deleted" contains "$calls" "git/refs/heads/throwaway/103-claude"
-assert "expected one deletion only" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 1
-assert "expected #101's PR left open" lacks "$calls" "pr close"
-assert "expected #101's PR not even looked up" lacks "$calls" "pr list"
+assert "expected 103's PR looked up by its head" contains "$calls" "pr list --repo sssoto17/sunny-pastures --head throwaway/103-claude --state open"
+assert "expected 103's PR closed with a comment" contains "$calls" "pr close 77 --repo sssoto17/sunny-pastures --comment"
+assert "expected #101's PR left open" lacks "$calls" "pr close 42"
+assert "expected #101's PR not even looked up" lacks "$calls" "--head throwaway/101-factory-pr"
+assert "expected no merge" lacks "$calls" "pr merge"
+assert "expected the check branch deleted" contains "$calls" "api -X DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/103-claude"
+assert "expected the base branch deleted" contains "$calls" "api -X DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/103-base"
+assert "expected only those two deleted" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 2
+assert "expected the PR closed before its base is deleted" \
+  test "$(grep -n 'pr close' <<<"$calls" | cut -d: -f1)" -lt "$(grep -n 'DELETE.*103-base' <<<"$calls" | cut -d: -f1)"
+assert "expected the closed PR reported" contains "$out" "closed PR #77 unmerged"
+
+# No PR (start failed before opening it, or it's closed already): still deletes both branches.
+reset
+echo "[$pr101]" >"$work/fx/prs.json"
+all_branches
+run cleanup 103
+expect_code 0
+assert "expected no PR closed" lacks "$calls" "pr close"
+assert "expected the check branch deleted" contains "$calls" "git/refs/heads/throwaway/103-claude"
+assert "expected the base branch deleted" contains "$calls" "git/refs/heads/throwaway/103-base"
 
 # cleanup 102 likewise deletes only throwaway/102-project.
 reset
-echo '[{"number":42}]' >"$work/fx/prs.json"
+echo "[$pr101]" >"$work/fx/prs.json"
 all_branches
 run cleanup 102
 expect_code 0
 assert "expected 102's branch deleted" contains "$calls" "git/refs/heads/throwaway/102-project"
 assert "expected one deletion only" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 1
 assert "expected #101's PR left open" lacks "$calls" "pr close"
+assert "expected no PR looked up" lacks "$calls" "pr list"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))

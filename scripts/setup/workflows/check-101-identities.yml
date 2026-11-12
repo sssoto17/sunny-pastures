@@ -55,7 +55,8 @@ jobs:
 
   # Check 2: sunny-reviewer approves; read reviewDecision. While `main` requires 0 approvals,
   # reviewDecision may stay empty: the review's own state (APPROVED) is the record. It also opens
-  # a file-level thread for check 4.
+  # a file-level thread for check 4. That comment is a second review of the App's (COMMENTED), so
+  # the approval is read back by its own id, not as the App's latest review.
   reviewer:
     needs: factory-pr
     runs-on: ubuntu-24.04
@@ -73,15 +74,18 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           r="repos/$GITHUB_REPOSITORY"
-          gh api -X POST "$r/pulls/$PR/reviews" -f event=APPROVE --silent \
-            -f "body=Throwaway approval for #101's check."
+          approval=$(gh api -X POST "$r/pulls/$PR/reviews" -f event=APPROVE --jq .id \
+            -f "body=Throwaway approval for #101's check.")
           head=$(gh api "$r/pulls/$PR" --jq .head.sha)
           gh api -X POST "$r/pulls/$PR/comments" --silent -f "commit_id=$head" \
             -f path=throwaway-101.md -f subject_type=file \
             -f "body=Throwaway thread for #101: the factory App resolves it."
           sleep 5
-          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json reviewDecision,latestReviews --jq \
-            '"RESULT review_decision=\(.reviewDecision)", (.latestReviews[] | "RESULT review=\(.author.login):\(.state)")'
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json reviewDecision \
+            --jq '"RESULT review_decision=\(.reviewDecision)"'
+          gh api "$r/pulls/$PR/reviews/$approval" --jq '"RESULT review=\(.user.login):\(.state)"'
+          gh api "$r/pulls/$PR/reviews?per_page=100" --jq \
+            '"RESULT reviews=\(map("\(.user.login):\(.state)") | join(","))"'
 
   # Check 4: the factory App resolves the reviewer's thread; read resolvedBy back.
   factory-resolve:
