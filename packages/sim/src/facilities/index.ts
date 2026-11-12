@@ -440,7 +440,7 @@ interface AddOnRule {
 	readonly level: number | null;
 }
 
-/** A fixed table, so a name never comes from content (`code-style.md`). */
+/** The names players read, fixed in the rules: content holds prices and Levels, not words. */
 const addOnNames = { loop: "Loop", collector: "Collector" } as const satisfies Record<
 	AddOn,
 	string

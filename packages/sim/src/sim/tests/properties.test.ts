@@ -12,6 +12,7 @@ import { delay, farmId, play, replay, timedActions } from "../../state/tests/far
 import type { Transition } from "../../state/tests/farms.js";
 import { listDrawFaults } from "./orderTerms.js";
 import { ownedFacility } from "./ownedFacility.js";
+import { richContent, richFeedSeconds, richJobXp } from "./richContent.js";
 
 const params = inject("fastCheck");
 // #200: the timeout scales with the run count; Vitest resets it after this file.
@@ -106,42 +107,12 @@ const levelAt = (xp: number): number => levelXp.filter((threshold) => threshold 
 /** The level-up coins paid in all by the time a farm has `xp` (MUST-05.4). */
 const paidAt = (xp: number): number => paidBy[levelAt(xp) - 1] ?? NaN;
 
-/** The test content's job XP: enough that a collect crosses two Levels in one gain (MUST-05.4). */
-const richJobXp = 51;
-/** The test content's chicken feed time: 61 s, so tiers 2 and 3 round down to 48 s and 36 s (D16). */
-const richFeedSeconds = 61;
 const richRecipes = new Map(
 	[...sliceRecipes].map(([id, recipe]) => {
 		const ms = id === "chickenFeed" ? [richFeedSeconds * 1000, 48_000, 36_000] : recipe.ms;
 		return [id, { ...recipe, ms, xp: richJobXp }] as const;
 	}),
 );
-
-/**
- * Test content with the slice's Level table and plot prices, but room and coins to reach every
- * Level and plot: wheat isn't sold yet (#87), so the slice's silo keeps a farm near Level 2.
- * 9 XP a harvest keeps a farm that has bought a facility below Level 5 for a while, so collects
- * reach Levels (#85: at 31 a harvest, one tending reached Level 5 before any collect), and 51 XP
- * a collect from 18 or 27 XP crosses Levels 3 and 4 in one gain. A small barn fills after a few
- * collects, so collects reach its bound and its refusal. Chicken feed's 61 s doesn't divide by the
- * tiers' per mille, so a job time that isn't rounded down to whole seconds fails 14.5 (#85).
- */
-const richContent: Content = {
-	...sliceContent,
-	start: { ...sliceContent.start, coins: 2_000 },
-	silo: { capacity: 100_000 },
-	barn: { capacity: 4 },
-	crops: { wheat: { ...wheat, xp: 9 } },
-	facilities: sliceContent.facilities.map((facility) => ({
-		...facility,
-		recipes: Object.fromEntries(
-			Object.entries(facility.recipes).map(([id, recipe]) => [
-				id,
-				{ ...recipe, xp: richJobXp, ...(id === "chickenFeed" ? { seconds: richFeedSeconds } : {}) },
-			]),
-		),
-	})),
-};
 
 /**
  * A purchase changes neither XP nor goods: the coins it costs are checked beside it, and `gained`
@@ -862,7 +833,7 @@ describe.each([
 						// A one-portion trough takes one portion a feeding (MUST-02.2, 02.5).
 						expect(after.barn).toEqual(changeGood(before.barn, "chickenFeed", -1));
 						expect([after.xp, after.coins]).toEqual([before.xp, before.coins]);
-						expect(after.silo).toEqual(before.silo);
+						expect(gained).toBe(0);
 					} else if (action.type === "collectProducts") {
 						// Every egg waiting at the action's time goes to the barn, for the content's XP each,
 						// with the level-up coins of the Levels it reaches (MUST-02.4, 05.2, 05.4).
@@ -872,7 +843,7 @@ describe.each([
 						expect(after.pens[0]?.products).toBe(0);
 						expect(after.xp).toBe(before.xp + waiting * eggXp);
 						expect(after.coins).toBe(before.coins + paidAt(after.xp) - paidAt(before.xp));
-						expect(after.silo).toEqual(before.silo);
+						expect(gained).toBe(0);
 					} else if (action.type === "buyPen") {
 						expect(after.coins).toBe(before.coins - penPrice);
 						expect(levelAt(after.xp)).toBeGreaterThanOrEqual(penLevel);
@@ -883,7 +854,7 @@ describe.each([
 							products: 0,
 						});
 						expect(after.xp).toBe(before.xp);
-						expect(after.silo).toEqual(before.silo);
+						expect(gained).toBe(0);
 					} else if (action.type === "startJob") {
 						// The inputs leave the silo, and the job ends the recipe's time at the facility's
 						// tier now after the later of now and the job before it (MUST-03.2, 03.3, 06.2).

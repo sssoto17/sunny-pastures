@@ -121,6 +121,23 @@ describe("advanceFarm", () => {
 		expect(farm.time).toBe(20);
 	});
 
+	it("runs the same steps in the same order whatever the order of its sources (MUST-10.6)", () => {
+		const byParity = (parity: number): StepSource<Toy> => ({
+			steps: (farm) => farm.due.filter((due) => due.index % 2 === parity),
+			run: (farm, ran) => toySource.run(farm, ran),
+		});
+		const toy = makeToy([makeStep(10, 1), makeStep(10, 0), makeStep(5, 3)]);
+
+		expect(advanceFarm(toy, 30, [byParity(1), byParity(0)]).log).toEqual(
+			advanceFarm(toy, 30, [byParity(0), byParity(1)]).log,
+		);
+		expect(advanceFarm(toy, 10, [byParity(1), byParity(0)]).log).toEqual([
+			"5:3@5",
+			"10:0@10",
+			"10:1@10",
+		]);
+	});
+
 	it("returns the farm unchanged for a time before its own (D7)", () => {
 		const farm = { ...makeToy([makeStep(5, 0)]), time: 8 };
 
