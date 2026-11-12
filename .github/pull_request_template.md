@@ -23,11 +23,14 @@ Closes # <!-- or "Part of #N" for an earlier part of a split; the last part says
 
 ## Review
 
-<!-- ADR-0002, area 2. The reviewer bot reviews every PR. -->
+<!-- ADR-0002, area 2. The reviewer bot reviews every PR. These are facts, not to-dos, so they
+     are plain lines (docs/agents/issue-tracker.md, "Checkboxes"). -->
 
-- [ ] Meets a row of the escalation criteria (`CONSTRAINTS.md`, "Admin review"), code-owned paths
-  included: labelled `review:admin`, with a comment naming the rows <!-- which rows -->
-- [ ] Touches a path in CODEOWNERS, and the admin asked for it: <!-- which, and where they asked -->
+- Admin review: no <!-- or "yes (rows: …)" when the PR meets a row of the escalation criteria
+  (`CONSTRAINTS.md`, "Admin review"), code-owned paths included: then it's labelled
+  `review:admin`, with a comment naming the rows -->
+- Code-owned paths: none <!-- or the CODEOWNERS paths it touches and where the admin asked for
+  them, e.g. ".github/… (admin asked in #N)" -->
 
 ## Concerns
 

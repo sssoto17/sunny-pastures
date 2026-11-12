@@ -14,6 +14,19 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## Checkboxes
+
+Use a checkbox only for an item someone will tick; write yes/no facts as plain lines. An unticked
+box reads as work still waiting, so a box that means "doesn't apply" when left empty misleads the
+reader. The admin's rule of 12 Nov (#214), for issue and PR bodies alike.
+
+- **Items to tick:** an issue's "Acceptance criteria" (every issue template) and a PR's "How it
+  was verified". The coordinator ticks an issue's criteria when a reviewer confirms them. A lane
+  ticks its own PR's boxes as it meets them.
+- **Plain lines:** facts such as the PR template's Review section, `Admin review: no` or
+  `Admin review: yes (rows: Code-owned path)`, and `Code-owned paths: none` or
+  `Code-owned paths: .github/… (admin asked in #N)`.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
