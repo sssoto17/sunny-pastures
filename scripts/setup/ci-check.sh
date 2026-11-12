@@ -29,9 +29,9 @@ usage: scripts/setup/ci-check.sh start|results|cleanup 101|102
 
   start 101    push throwaway/101-identities with check-101-identities.yml; the push runs it
   start 102    push throwaway/102-project with check-102-project.yml (needs 101's App)
-  start 68     open throwaway PRs (a), (c), (e) and (f) onto main for the reviewer to review;
-               refuses while the repo's allow_auto_merge is off (test (b) needs it)
-  push 68 a    one more commit on (a)'s branch: test (d)
+  start 68     open throwaway PRs (a), (c), (e) and (f) onto main for the reviewer to review
+  push 68 a    one more commit on (a)'s branch: tests (b) and (d); refuses while the repo's
+               allow_auto_merge is off or the App hasn't approved (a)
   push 68 e    one more commit on (e)'s branch: the reviewer's next run, for test (e)
   results N    print the latest run of N's workflow as Markdown, for a comment on issue N:
                  scripts/setup/ci-check.sh results 101 > .scratch/101-results.md

@@ -487,17 +487,16 @@ for args in "push 68" "push 68 b" "push 101 a" "resolve 101" "start 68 a" "resul
   assert "expected usage for $args" contains "$err" "usage:"
 done
 
-# --- start 68 refuses while allow_auto_merge is off: nothing pushed, nothing opened -----------
+# --- start 68 runs with allow_auto_merge off: (a) is approved first, (b) waits for push 68 a ---
 reset
 run start 68
-expect_code 2
-assert "expected the setting named" contains "$err" "allow_auto_merge is off, so test (b) can't run"
-assert "expected the command to turn it on" contains "$err" "-F allow_auto_merge=true"
-assert "expected nothing pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
-assert "expected no PR opened" lacks "$calls" "pr create"
+expect_code 0
+assert "expected the PRs opened with the setting off" test "$(grep -c '^pr create' <<<"$calls")" -eq 4
+assert "expected the next step named" contains "$out" "once (a) reads APPROVED"
+assert "expected the setting never changed" lacks "$calls" "PATCH"
 
 # Without thread resolution on main, a hold thread wouldn't hold: refused, nothing opened.
-echo true >"$work/fx/auto"
+reset
 echo '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,
   "required_approving_review_count":1,"dismiss_stale_reviews_on_push":true}}]' >"$work/fx/rules.json"
 run start 68
@@ -508,7 +507,6 @@ assert "expected no PR opened" lacks "$calls" "pr create"
 
 # --- start 68: one branch and one draft PR per test, held, then marked ready -------------------
 reset
-echo true >"$work/fx/auto"
 head_before=$(git -C "$work/clone" rev-parse HEAD)
 run start 68
 expect_code 0
@@ -525,6 +523,7 @@ for l in a c e f; do
 done
 assert "expected never merge in the body" contains "$calls" "**Never merge**"
 assert "expected the PR linked to #68" contains "$calls" "Part of #68"
+assert "expected the body to say it's a throwaway test PR" contains "$calls" "a throwaway test PR for #68 step 4"
 assert "expected no label when throwaway doesn't exist" lacks "$calls" "--label"
 assert "expected a one-line change in AGENTS.md" \
   test "$(git -C "$work/origin.git" diff --numstat main throwaway/68-f | cut -f1,2)" == $'1\t1'
@@ -560,12 +559,10 @@ assert "expected no PR opened" lacks "$calls" "pr create"
 
 # An existing throwaway label is added; a wrong origin is refused.
 reset
-echo true >"$work/fx/auto"
 : >"$work/fx/label"
 run start 68
 assert "expected the existing label added" contains "$calls" "--draft --label throwaway --title"
 reset
-echo true >"$work/fx/auto"
 git -C "$work/clone" remote set-url origin "https://x-access-token:FAKE_SECRET_68@github.com/sssoto17/sunny-pastures.git"
 run start 68
 expect_code 2
@@ -575,11 +572,25 @@ assert "expected nothing pushed" test -z "$(git -C "$work/origin.git" for-each-r
 
 # --- push 68 a (test d) and push 68 e: one more commit each ------------------------------------
 reset
-echo true >"$work/fx/auto"
 run start 68
 echo '[{"number":71,"headRefName":"throwaway/68-a","isCrossRepository":false}]' >"$work/fx/prs.json"
 echo '{"reviewDecision":"REVIEW_REQUIRED"}' >"$work/fx/view-71.json"
 export CI_CHECK_WAIT_SECONDS=0
+# (b) runs on the fresh approval after this push: refused while allow_auto_merge is off.
+echo false >"$work/fx/auto"
+run push 68 a
+expect_code 2
+assert "expected the setting named" contains "$err" "allow_auto_merge is off"
+assert "expected the command to turn it on" contains "$err" "-F allow_auto_merge=true"
+assert "expected nothing pushed" test "$(git -C "$work/origin.git" rev-list --count main..throwaway/68-a)" -eq 1
+# (d) needs an approval to dismiss: refused until the App's latest review of (a) is APPROVED.
+echo true >"$work/fx/auto"
+echo '[{"user":{"login":"sunny-reviewer[bot]"},"state":"COMMENTED"}]' >"$work/fx/reviews-71.json"
+run push 68 a
+expect_code 2
+assert "expected (a)'s approval asked for" contains "$err" "(a) isn't approved by sunny-reviewer yet"
+assert "expected nothing pushed" test "$(git -C "$work/origin.git" rev-list --count main..throwaway/68-a)" -eq 1
+echo '[{"user":{"login":"sunny-reviewer[bot]"},"state":"APPROVED"}]' >"$work/fx/reviews-71.json"
 run push 68 a
 expect_code 0
 assert "expected one more commit on (a)" test "$(git -C "$work/origin.git" rev-list --count main..throwaway/68-a)" -eq 2

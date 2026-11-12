@@ -62,11 +62,7 @@ t68_pr() { # letter [state]: the number of our PR from throwaway/68-<letter>, or
 }
 
 start_68() {
-  local auto rules l b url pr label=()
-  auto=$(gh api "repos/$REPO" --jq .allow_auto_merge) || die 1 "gh api repos/$REPO failed"
-  [[ $auto == true ]] || die 2 "allow_auto_merge is off, so test (b) can't run: nothing opened.
-Turn it on for the test window only (runbook, scripts/setup/README.md), then start 68 again:
-  gh api -X PATCH repos/$REPO --silent -F allow_auto_merge=true"
+  local rules l b url pr label=()
   # The hold threads and tests (a), (c) and (d) rest on main's rules: check them, don't assume them.
   rules=$(gh api "repos/$REPO/rules/branches/main" --jq '[.[] | select(.type == "pull_request") | .parameters]
     | any(.required_review_thread_resolution) and any(.required_approving_review_count >= 1)
@@ -93,8 +89,9 @@ dismissal: a hold thread wouldn't hold, and (a)-(d) would read nothing. Nothing 
     # reviewed); marking it ready starts the review.
     url=$(gh pr create --repo "$REPO" --base main --head "$b" --draft "${label[@]}" \
       --title "THROWAWAY #68 ($l): $(t68_what "$l")" \
-      --body "Throwaway PR for test ($l) of the reviewer App (ADR-0002, admin checklist step 12),
-opened by \`scripts/setup/ci-check.sh start 68\`. **Never merge**: \`cleanup 68\` closes it unmerged.
+      --body "This is a throwaway test PR for #68 step 4: test ($l) of the reviewer App (ADR-0002, admin
+checklist step 12). Its change is a small sample made for that test, not part of #68's deliverables.
+Opened by \`scripts/setup/ci-check.sh start 68\`. **Never merge**: \`cleanup 68\` closes it unmerged.
 
 Part of #68") || die 1 "gh pr create for $b failed"
     pr=${url##*/}
@@ -107,12 +104,26 @@ Part of #68") || die 1 "gh pr create for $b failed"
     printf 'test (%s): opened PR #%s, %s\n' "$l" "$pr" "$url"
   done
   printf 'Each review takes about 1-3 minutes. Then: scripts/setup/ci-check.sh results 68\n'
+  printf 'Turn allow_auto_merge on once (a) reads APPROVED, then push 68 a (runbook).\n'
 }
 
 # One more commit on a throwaway branch: for (a) that is test (d); for (e) it starts the reviewer's
 # next run after a thread was resolved (resolving starts no workflow).
 push_68() {
-  local b=throwaway/68-$letter pr decision
+  local b=throwaway/68-$letter pr decision auto
+  # (a)'s push makes one fresh approval cover (b) and (d): that needs auto-merge allowed, and an
+  # approval to dismiss. Both are checked before anything is pushed.
+  if [[ $letter == a ]]; then
+    auto=$(gh api "repos/$REPO" --jq .allow_auto_merge) || die 1 "gh api repos/$REPO failed"
+    [[ $auto == true ]] || die 2 "allow_auto_merge is off, so test (b) can't run: nothing pushed.
+Once (a) reads APPROVED, turn it on for the test window only (runbook), then push 68 a again:
+  gh api -X PATCH repos/$REPO --silent -F allow_auto_merge=true"
+    pr=$(t68_pr a open) || die 1 "gh pr list failed"
+    [[ -n $pr ]] || die 2 "no open PR from $b: run start 68 first"
+    decision=$(gh api "repos/$REPO/pulls/$pr/reviews?per_page=100" --jq \
+      '[.[] | select(.user.login == "sunny-reviewer[bot]")] | last | .state // ""') || die 1 "gh api reviews failed"
+    [[ $decision == APPROVED ]] || die 2 "(a) isn't approved by sunny-reviewer yet: wait for its review (results 68)"
+  fi
   t68_repo
   git -C "$repo" fetch -q origin "refs/heads/$b" || die 1 "git fetch of $b failed: run start 68 first"
   t68_worktree FETCH_HEAD w
