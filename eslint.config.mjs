@@ -109,8 +109,10 @@ const PROPERTY_TIMEOUT = `CallExpression[callee.object.name='vi'][callee.propert
 const STUB_MESSAGE = "/^\\s*(not[\\s_-]+(yet[\\s_-]+)?implemented|unimplemented)\\b/i";
 // A function that does nothing: an empty or comment-only body, a bare `return`, or an arrow that
 // gives undefined (cast or not), null or `void` of a name or literal.
-// A block of nothing but empty statements (`{}`, `{ ; }`); selectors don't see comments.
-const NOTHING_BLOCK = "BlockStatement.body:not(:has(> :not(EmptyStatement)))";
+// A block of nothing but empty statements, bare `return;` and `void e;` (`{}`, `{ ; }`,
+// `{ void e; }`); selectors don't see comments.
+const NOTHING_BLOCK =
+	"BlockStatement.body:not(:has(> :not(EmptyStatement, ReturnStatement:not([argument]), ExpressionStatement[expression.operator='void'][expression.argument.type=/^(Identifier|Literal)$/])))";
 const NOOP = ({ isNullNothing }) => {
 	// esquery reads a path that isn't there as the text "undefined", so each check names the type.
 	const nothing = (path) => [

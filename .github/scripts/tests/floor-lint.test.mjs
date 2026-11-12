@@ -103,6 +103,13 @@ describe("swallowed errors", () => {
 		// Review of #135: an empty statement, `void` on a name, a cast of undefined.
 		["a .catch holding only an empty statement", ["p.catch(() => {;});"]],
 		["a catch holding only an empty statement", ["try { f(); } catch { ; }"]],
+		// Review of the #135 stack: the statement forms of a handler that does nothing.
+		["a catch that only voids its error", ["try { f(); } catch (e) { void e; }"]],
+		[
+			"a catch that only returns",
+			["export const g = () => {", "\ttry { f(); } catch { return; }", "};"],
+		],
+		["a .catch block that only voids its error", ["p.catch((e) => { void e; });"]],
 		["a .catch returning void of its error", ["p.catch((e) => void e);"]],
 		["a .catch returning undefined cast", ["p.catch(() => <>undefined as never);"]],
 		["a .catch returning undefined asserted", ["p.catch(() => <>undefined!);"]],
