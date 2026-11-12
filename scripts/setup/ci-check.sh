@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# Runs the throwaway checks for #101 (the two Apps), #102 (reading the Project) and #103 (Claude
-# in Actions), collects their results and cleans up. `start` builds its branches from origin/main
-# in a temporary worktree, so your checkout and main are never touched. For 101 and 102 it pushes a
-# branch plus one draft workflow from scripts/setup/workflows/, and the push runs it. 103's
-# workflow is already on main (.github/workflows/check-103-claude.yml, on pull_request_target), so
-# start pushes no workflow: it pushes throwaway/103-base (main plus two marker hooks in
-# .claude/settings.json) and throwaway/103-claude (the base plus one text file), then opens a PR
-# from the second onto the first with your gh, which runs the workflow from main (the action has
-# no push event, and restores .claude/ from the PR's base). `results` prints
-# a Markdown summary of non-secret fields for the issue comment. `cleanup` closes the throwaway PR
-# unmerged and deletes the branches.
-# Run ci-apps.sh, ci-project.sh and ci-claude.sh first. Tests: scripts/setup/ci-check.test.sh.
+# Runs the throwaway checks for #101 (the two Apps) and #102 (reading the Project), collects their
+# results and cleans up. `start` builds its branch from origin/main in a temporary worktree, so
+# your checkout and main are never touched: it pushes a branch plus one draft workflow from
+# scripts/setup/workflows/, and the push runs it. `results` prints a Markdown summary of non-secret
+# fields for the issue comment. `cleanup` closes the throwaway PR unmerged and deletes the branches.
+# #103's check (Claude in Actions) ran on 12 Nov; its results are on #103, and its workflow left
+# main with #227.
+# Run ci-apps.sh and ci-project.sh first. Tests: scripts/setup/ci-check.test.sh.
 # shellcheck disable=SC2016 # single-quoted jq programs and Markdown backticks, by design
 set -euo pipefail
 
@@ -26,30 +22,25 @@ TAG=v0.0.0-throwaway-101
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/setup/ci-check.sh start|results|cleanup 101|102|103
+usage: scripts/setup/ci-check.sh start|results|cleanup 101|102
 
   start 101    push throwaway/101-identities with check-101-identities.yml; the push runs it
   start 102    push throwaway/102-project with check-102-project.yml (needs 101's App)
-  start 103    push throwaway/103-base (main plus marker hooks) and throwaway/103-claude (that
-               plus one text file), then open a PR from 103-claude onto 103-base with your gh;
-               the PR runs check-103-claude.yml from main: three short Claude runs. Needs jq,
-               and that workflow merged on main
   results N    print the latest run of N's workflow as Markdown, for a comment on issue N:
                  scripts/setup/ci-check.sh results 101 > .scratch/101-results.md
                then read it and post it: gh issue comment 101 --body-file .scratch/101-results.md
-  cleanup N    close N's throwaway PR unmerged (101, 103) and delete N's throwaway branches
+  cleanup N    close N's throwaway PR unmerged (101) and delete N's throwaway branches
                (asks first)
 
 It works on the clone it lives in, whatever directory you run it from, and refuses unless that
-clone's origin is sssoto17/sunny-pastures. Nothing it prints is secret: logins, states, exit codes,
-costs and minutes. Pushing a workflow file over HTTPS with gh's credentials (start 101 and 102)
-needs the `workflow` scope: gh auth refresh -h github.com -s workflow (it prints a one-time code,
-not a token).
+clone's origin is sssoto17/sunny-pastures. Nothing it prints is secret: logins, states, exit codes
+and minutes. Pushing a workflow file over HTTPS with gh's credentials (start 101 and 102) needs the
+`workflow` scope: gh auth refresh -h github.com -s workflow (it prints a one-time code, not a
+token).
 
 Exit codes: 0 done; 1 a git or gh command failed; 2 refused (usage, gh signed out twice in a row,
 a throwaway branch already exists, an origin URL that isn't sunny-pastures, here or in the
-worktree start pushes from, 103's workflow not on main yet); 3 no finished run yet: wait and run
-results again.
+worktree start pushes from); 3 no finished run yet: wait and run results again.
 EOF
 }
 
@@ -60,14 +51,11 @@ die() { # code message
 
 [[ ${1-} == -h || ${1-} == --help ]] && { usage; exit 0; }
 (($# == 2)) || { usage; exit 2; }
-# base: a branch start pushes first, carrying #103's marker hooks; start then opens a PR onto
-# it, and needs jq. Its workflow is on main, not a draft. pr_head: the branch of the throwaway PR
-# that cleanup closes.
-cmd=$1 issue=$2 base="" pr_head=""
+# pr_head: the branch of the throwaway PR that cleanup closes.
+cmd=$1 issue=$2 pr_head=""
 case $issue in
   101) branch=throwaway/101-identities workflow=check-101-identities.yml pr_head=$FACTORY_PR_BRANCH ;;
   102) branch=throwaway/102-project workflow=check-102-project.yml ;;
-  103) branch=throwaway/103-claude workflow=check-103-claude.yml base=throwaway/103-base pr_head=$branch ;;
   *) usage; exit 2 ;;
 esac
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -110,96 +98,43 @@ start() {
   repo=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null) ||
     die 2 "$here isn't inside a git clone of $REPO"
   check_urls "$repo" "in $repo"
-  [[ -z $base ]] || command -v jq >/dev/null || die 2 "start $issue needs jq: install it first"
   git -C "$repo" fetch -q origin main || die 1 "git fetch origin main failed"
-  # pull_request_target runs the workflow from main: without it there, the PR would run nothing.
-  if [[ -n $base ]] && ! git -C "$repo" cat-file -e "origin/main:.github/workflows/$workflow" 2>/dev/null; then
-    die 2 "$workflow isn't on main yet: merge its PR first"
+  if git -C "$repo" ls-remote --exit-code -q origin "refs/heads/$branch" >/dev/null 2>&1; then
+    die 2 "$branch already exists on origin: run cleanup $issue first"
   fi
-  local b
-  for b in ${base:+"$base"} "$branch"; do
-    if git -C "$repo" ls-remote --exit-code -q origin "refs/heads/$b" >/dev/null 2>&1; then
-      die 2 "$b already exists on origin: run cleanup $issue first"
-    fi
-  done
-  # Only 101 and 102 push a workflow file; 103's is on main already.
-  [[ -n $base ]] || scopes=$(gh api -i user 2>/dev/null | tr -d '\r' | grep -i '^x-oauth-scopes:' || true)
-  if [[ -n ${scopes-} && $scopes != *workflow* ]]; then
+  scopes=$(gh api -i user 2>/dev/null | tr -d '\r' | grep -i '^x-oauth-scopes:' || true)
+  if [[ -n $scopes && $scopes != *workflow* ]]; then
     printf "ci-check: gh's token lacks the workflow scope; an HTTPS push of a workflow file will\n" >&2
     printf 'be refused. If you push over HTTPS: gh auth refresh -h github.com -s workflow\n' >&2
   fi
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-check.XXXXXX")
   trap 'git -C "$repo" worktree remove --force "$tmp/wt" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
   git -C "$repo" worktree add -q --detach "$tmp/wt" origin/main || die 1 "git worktree add failed"
-  local refspecs=()
-  if [[ -n $base ]]; then
-    add_marker_hooks "$tmp/wt/.claude/settings.json"
-    git -C "$tmp/wt" add .claude/settings.json || die 1 "git add failed"
-    git -C "$tmp/wt" commit -q -m "chore: throwaway marker hooks for #$issue (never merge)" ||
-      die 1 "git commit failed"
-    refspecs+=("$(git -C "$tmp/wt" rev-parse HEAD):refs/heads/$base")
-    # The head only needs a diff for the PR; the workflow never reads it.
-    printf 'Throwaway for #%s. Never merge; close unmerged.\n' "$issue" >"$tmp/wt/throwaway-$issue.md"
-    git -C "$tmp/wt" add "throwaway-$issue.md" || die 1 "git add failed"
-    git -C "$tmp/wt" commit -q -m "chore: throwaway PR head for #$issue (never merge)" ||
-      die 1 "git commit failed"
-  else
-    mkdir -p "$tmp/wt/.github/workflows"
-    cp "$here/workflows/$workflow" "$tmp/wt/.github/workflows/$workflow"
-    git -C "$tmp/wt" add ".github/workflows/$workflow"
-    git -C "$tmp/wt" commit -q -m "chore: throwaway check workflow for #$issue (never merge)" ||
-      die 1 "git commit failed"
-  fi
-  refspecs+=("HEAD:refs/heads/$branch")
+  mkdir -p "$tmp/wt/.github/workflows"
+  cp "$here/workflows/$workflow" "$tmp/wt/.github/workflows/$workflow"
+  git -C "$tmp/wt" add ".github/workflows/$workflow"
+  git -C "$tmp/wt" commit -q -m "chore: throwaway check workflow for #$issue (never merge)" ||
+    die 1 "git commit failed"
   # Config can differ inside a linked worktree (an includeIf on its gitdir), so check the URLs
   # again where the push runs, right before it (#198).
   check_urls "$tmp/wt" "in the worktree"
-  git -C "$tmp/wt" push -q --atomic origin "${refspecs[@]}" ||
+  git -C "$tmp/wt" push -q origin "HEAD:refs/heads/$branch" ||
     die 1 "git push failed. Missing workflow scope? gh auth refresh -h github.com -s workflow"
-  if [[ -z $base ]]; then
-    printf 'Pushed %s; the push starts %s. Follow it with:\n' "$branch" "$workflow"
-  else
-    local pr
-    pr=$(gh pr create --repo "$REPO" --base "$base" --head "$branch" \
-      --title "Throwaway for #$issue's checks. Never merge; close unmerged" \
-      --body "Throwaway for #$issue's checks. Never merge; close unmerged.") ||
-      die 1 "pushed $base and $branch, but opening the PR failed: run cleanup $issue, then start $issue again"
-    printf 'Pushed %s and %s; opened PR #%s, which starts %s. Follow it with:\n' \
-      "$base" "$branch" "${pr##*/}" "$workflow"
-    printf '  gh run list --repo %s --workflow %s --event pull_request_target\n' "$REPO" "$workflow"
-  fi
-  [[ -n $base ]] || printf '  gh run list --repo %s --branch %s\n' "$REPO" "$branch"
+  printf 'Pushed %s; the push starts %s. Follow it with:\n' "$branch" "$workflow"
+  printf '  gh run list --repo %s --branch %s\n' "$REPO" "$branch"
   printf 'When it has finished: scripts/setup/ci-check.sh results %s\n' "$issue"
-}
-
-# The marker hooks of #103: two harmless hooks beside the repo's own, each appending its event's
-# name to a file outside the checkout. The base branch carries them, because on a PR the action
-# restores .claude/ from the base branch before Claude starts.
-add_marker_hooks() { # settings-file
-  local f=$1
-  mkdir -p "$(dirname "$f")"
-  [[ -f $f ]] || echo '{}' >"$f"
-  jq --tab '
-    def mark(e): {hooks: [{type: "command", command: ("echo " + e + " >> \"$RUNNER_TEMP/hook-marker\"")}]};
-    .hooks.SessionStart += [mark("SessionStart")]
-    | .hooks.UserPromptSubmit += [mark("UserPromptSubmit")]' "$f" >"$f.new" ||
-    die 1 "adding the marker hooks to .claude/settings.json failed"
-  mv "$f.new" "$f"
 }
 
 results() {
   local run id status url
-  # 101 and 102: the check's own run on its branch, filtered by the workflow's name (its file name
-  # without .yml), not with --workflow, which has GitHub resolve a file that exists only on a
-  # throwaway branch. 103's workflow is on main, so --workflow finds it; its pull_request_target
-  # runs are listed by event, not by a branch.
-  local runs_of=(--branch "$branch") where="on $branch"
-  [[ -n $base ]] && runs_of=(--workflow "$workflow" --event pull_request_target) where="of $workflow"
-  run=$(gh run list --repo "$REPO" "${runs_of[@]}" --limit 50 \
+  # The check's own run on its branch, filtered by the workflow's name (its file name without
+  # .yml), not with --workflow, which has GitHub resolve a file that exists only on a throwaway
+  # branch.
+  run=$(gh run list --repo "$REPO" --branch "$branch" --limit 50 \
     --json databaseId,status,conclusion,url,workflowName --jq 'map(select(.workflowName == "'"${workflow%.yml}"'"))
       | .[0] // empty | "\(.databaseId)\t\(.status)\t\(.url)"') ||
     die 1 "gh run list failed"
-  [[ -n $run ]] || die 3 "no run $where yet: run start $issue first"
+  [[ -n $run ]] || die 3 "no run on $branch yet: run start $issue first"
   IFS=$'\t' read -r id status url <<<"$run"
   [[ $status == completed ]] || die 3 "run $id is $status: wait for it ($url)"
   printf '## Results of the throwaway check for #%s\n\nRun: %s\n\n' "$issue" "$url"
@@ -262,7 +197,7 @@ cleanup() {
   printf 'Run results first: the run logs stay, the branches go. Go ahead? [y/N] '
   read -r reply || true
   [[ $reply =~ ^[Yy] ]] || die 2 "nothing changed"
-  # The PR first: deleting its base branch would close it without the comment.
+  # The PR first, so it closes with the comment.
   if [[ -n $pr_head ]]; then
     # --head matches the branch name only, so a fork's PR could match it too: only ours.
     pr=$(gh pr list --repo "$REPO" --head "$pr_head" --state open --json number,isCrossRepository \
@@ -275,7 +210,6 @@ cleanup() {
   fi
   local branches=("$branch")
   [[ $issue == 101 ]] && branches+=("$FACTORY_PR_BRANCH" "$PROBE_BRANCH")
-  [[ -n $base ]] && branches+=("$base")
   for b in "${branches[@]}"; do
     if gh api "repos/$REPO/git/ref/heads/$b" --silent >/dev/null 2>&1; then
       gh api -X DELETE "repos/$REPO/git/refs/heads/$b" --silent || die 1 "deleting $b failed"

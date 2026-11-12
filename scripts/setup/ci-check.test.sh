@@ -10,7 +10,6 @@ command -v jq >/dev/null || { echo "ci-check.test: needs jq" >&2; exit 2; }
 
 src="$(cd "$(dirname "$0")" && pwd)"
 draft="$src/workflows/check-101-identities.yml"
-wf103="$src/../../.github/workflows/check-103-claude.yml" # on main, not a draft
 GH_URL=https://github.com/sssoto17/sunny-pastures.git
 pass=0
 fail=0
@@ -89,10 +88,7 @@ reset() {
   git init -q --bare "$work/origin.git"
   git clone -q "$work/origin.git" "$work/seed" 2>/dev/null
   echo hello >"$work/seed/README.md"
-  # main carries 103's workflow, as on GitHub once its PR is merged; start 103 needs it there.
-  mkdir -p "$work/seed/.github/workflows"
-  cp "$wf103" "$work/seed/.github/workflows/"
-  git -C "$work/seed" add README.md .github
+  git -C "$work/seed" add README.md
   git -C "$work/seed" commit -qm init
   git -C "$work/seed" push -q origin main
   git clone -q "$GH_URL" "$work/clone"
@@ -131,22 +127,29 @@ run start
 expect_code 2
 run start 104
 expect_code 2
+# 103's check ran on 12 Nov and its workflow is gone from main (#227): no longer a target.
+for c in start results cleanup; do
+  run "$c" 103
+  expect_code 2
+  assert "expected usage for $c 103" contains "$err" "usage:"
+done
+assert "expected 103 gone from the usage" lacks "$err" "103"
 
 # --- gh auth status: only the active github.com account, retried once (#198) ------------------
 reset
 echo '[]' >"$work/fx/runs.json"
-run results 103
+run results 102
 assert "expected only the active github.com account checked" \
   contains "$calls" "auth status -h github.com --active"
 printf '1\n' >"$work/fx/auth"
 : >"$work/calls"
-run results 103
+run results 102
 expect_code 3
 assert "expected a passing failure retried, then on" test "$(grep -c '^auth status' <<<"$calls")" -eq 2
 assert "expected no signed-out message after a passing failure" lacks "$err" "signed out"
 : >"$work/calls"
 printf '1\n1\n' >"$work/fx/auth"
-run results 103
+run results 102
 expect_code 2
 assert "expected the signed-out message after two failures" contains "$err" "gh is signed out"
 assert "expected exactly two tries" test "$(grep -c '^auth status' <<<"$calls")" -eq 2
@@ -253,7 +256,7 @@ assert "expected nothing pushed to the rewrite" test -z "$(git -C "$work/other.g
 # Config that applies only in linked worktrees (#198): a pushurl that the clone itself doesn't
 # show. The push runs in a worktree, so the check runs there too: refused, nothing pushed, and
 # no URL printed. A linked worktree's gitdir is <clone>/.git/worktrees/<name>; the clone's isn't.
-for issue in 101 103; do
+for issue in 101 102; do
   reset
   git init -q --bare "$work/other.git"
   printf '[remote "origin"]\n  pushurl = %s\n' "$work/other.git" >"$work/wt-only.gitconfig"
@@ -282,7 +285,6 @@ expect_code 2
 assert "expected the cleanup hint" contains "$err" "cleanup 101"
 
 # --- without the workflow scope: start 101 warns and still pushes (an SSH remote needs none) ---
-# start 103 pushes no workflow file, so it doesn't ask about scopes at all.
 reset
 printf 'X-Oauth-Scopes: gist, read:org, repo\r\n' >"$work/fx/scopes"
 run start 101
@@ -290,102 +292,6 @@ expect_code 0
 assert "expected the scope warning" contains "$err" "gh auth refresh -h github.com -s workflow"
 assert "expected the 101 workflow pushed" \
   git -C "$work/origin.git" cat-file -e throwaway/101-identities:.github/workflows/check-101-identities.yml
-reset
-printf 'X-Oauth-Scopes: gist, read:org, repo\r\n' >"$work/fx/scopes"
-run start 103
-expect_code 0
-assert "expected no scope warning for 103" lacks "$err" "workflow scope"
-assert "expected no scope lookup for 103" lacks "$calls" "api -i user"
-
-# --- start 103: a base branch with the marker hooks, a head on it, and the PR -----------------
-# The workflow runs from main on pull_request_target; the action restores .claude/ from the PR's
-# base branch, so the markers live on the base. The head only adds a text file, for a diff.
-reset
-run start 103
-expect_code 0
-base=throwaway/103-base head=throwaway/103-claude
-assert "expected the base branch pushed" git -C "$work/origin.git" show-ref -q --verify "refs/heads/$base"
-assert "expected only .claude/settings.json on the base" \
-  test "$(git -C "$work/origin.git" diff --name-only main "$base")" == ".claude/settings.json"
-hooks=$(git -C "$work/origin.git" show "$base:.claude/settings.json" |
-  jq -r '[.hooks.SessionStart[].hooks[].command, .hooks.UserPromptSubmit[].hooks[].command] | join("|")')
-assert "expected both marker hooks on the base" \
-  test "$hooks" == 'echo SessionStart >> "$RUNNER_TEMP/hook-marker"|echo UserPromptSubmit >> "$RUNNER_TEMP/hook-marker"'
-assert "expected the head to add only its text file" \
-  test "$(git -C "$work/origin.git" diff --name-only "$base" "$head")" == "throwaway-103.md"
-assert "expected main's workflow on both branches, unchanged" \
-  test -z "$(git -C "$work/origin.git" diff --name-only main "$head" -- .github)"
-assert "expected the PR opened from the check branch onto the base" \
-  contains "$calls" "pr create --repo sssoto17/sunny-pastures --base $base --head $head"
-assert "expected the PR number printed" contains "$out" "PR #77"
-assert "expected the run list hint by workflow and event" \
-  contains "$out" "gh run list --repo sssoto17/sunny-pastures --workflow check-103-claude.yml --event pull_request_target"
-assert "expected no URL printed" lacks "$out" "https://"
-assert "expected no leftover worktree" test "$(git -C "$work/clone" worktree list | grep -c .)" -eq 1
-
-# The repo's own settings stay: the markers are added beside its hooks.
-reset
-mkdir -p "$work/seed/.claude"
-echo '{"permissions":{"allow":["Bash(ls)"]},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"true"}]}]}}' \
-  >"$work/seed/.claude/settings.json"
-git -C "$work/seed" add .claude && git -C "$work/seed" commit -qm settings && git -C "$work/seed" push -q origin main
-run start 103
-expect_code 0
-settings=$(git -C "$work/origin.git" show throwaway/103-base:.claude/settings.json)
-assert "expected the repo's permissions kept" test "$(jq -r '.permissions.allow[0]' <<<"$settings")" == "Bash(ls)"
-assert "expected the repo's hook kept, the marker after it" \
-  test "$(jq -r '[.hooks.SessionStart[].hooks[].command] | join("|")' <<<"$settings")" == \
-  'true|echo SessionStart >> "$RUNNER_TEMP/hook-marker"'
-
-# A leftover base branch: refused before anything is pushed.
-reset
-git -C "$work/seed" push -q origin main:refs/heads/throwaway/103-base
-run start 103
-expect_code 2
-assert "expected the cleanup hint" contains "$err" "cleanup 103"
-assert "expected no check branch pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway/103-claude)"
-assert "expected no PR opened" lacks "$calls" "pr create"
-
-# Before 103's workflow is merged, start 103 would open a PR that runs nothing: refused first.
-reset
-git -C "$work/seed" rm -q .github/workflows/check-103-claude.yml
-git -C "$work/seed" commit -qm "no 103 workflow" && git -C "$work/seed" push -q origin main
-run start 103
-expect_code 2
-assert "expected the merge hint" contains "$err" "check-103-claude.yml isn't on main yet"
-assert "expected nothing pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
-assert "expected no PR opened" lacks "$calls" "pr create"
-
-# 103's workflow (no harness runs the YAML). It lives on main, so it runs on pull_request_target
-# (the action has no push event; a pull_request run's refs/pull/N/merge is refused by the factory
-# environment), only for our own head onto the base; it checks out no PR code, never asks for an
-# OIDC token, and reads the action's output.
-assert "expected no 103 draft left beside the others" test ! -e "$src/workflows/check-103-claude.yml"
-wf=$(cat "$wf103")
-assert "expected a pull_request_target trigger onto the base branch only" contains "$wf" \
-  $'on:\n  pull_request_target:\n    types: [opened, synchronize, reopened]\n    branches: [throwaway/103-base]'
-assert "expected no pull_request trigger" lacks "$wf" $'\n  pull_request:'
-assert "expected no push trigger" lacks "$wf" $'\n  push:'
-assert "expected the job guarded to the base" contains "$wf" "github.event.pull_request.base.ref == 'throwaway/103-base' &&"
-assert "expected the job guarded to the head" contains "$wf" "github.event.pull_request.head.ref == 'throwaway/103-claude' &&"
-assert "expected the job guarded to this repo's head" \
-  contains "$wf" "github.event.pull_request.head.repo.full_name == github.repository"
-assert "expected nothing checked out by ref (the default branch only)" lacks "$wf" "ref:"
-assert "expected no PR head sha anywhere" lacks "$wf" "head.sha"
-assert "expected the head ref never expanded into a step" lacks "$wf" "github.head_ref"
-assert "expected the checkout without credentials" contains "$wf" "persist-credentials: false"
-assert "expected no API key" contains "$wf" "ANTHROPIC_API_KEY: ''"
-assert "expected the token handed over, so no OIDC exchange" contains "$wf" 'github_token: ${{ github.token }}'
-assert "expected no id-token permission" lacks "$wf" "id-token"
-assert "expected only contents: read" contains "$wf" $'permissions:\n  contents: read'
-assert "expected nothing granted beyond it" \
-  test "$(sed -n '/^permissions:/,/^$/p' <<<"$wf" | grep -c ':')" -eq 2
-assert "expected one permissions block" test "$(grep -c 'permissions:' <<<"$wf")" -eq 1
-assert "expected the execution file from the action's output" \
-  contains "$wf" '${{ steps.claude.outputs.execution_file }}'
-assert "expected no marker edit in the checkout (the action undoes it)" lacks "$wf" "hooks.SessionStart"
-assert "expected the removal note" contains "$wf" "# REMOVAL:"
-
 # --- start 101 and 102 push only: no PR from the admin's gh ----------------------------------
 reset
 run start 101
@@ -402,46 +308,46 @@ assert "expected the 102 workflow pushed" \
 # --- results: no run, a running one, a finished one -------------------------------------------
 reset
 echo '[]' >"$work/fx/runs.json"
-run results 103
+run results 102
 expect_code 3
-echo '[{"databaseId":7,"workflowName":"check-103-claude","status":"in_progress","conclusion":"","url":"https://example.test/run/7"}]' \
+echo '[{"databaseId":7,"workflowName":"check-102-project","status":"in_progress","conclusion":"","url":"https://example.test/run/7"}]' \
   >"$work/fx/runs.json"
-run results 103
+run results 102
 expect_code 3
 assert "expected the run's state" contains "$err" "run 7 is in_progress"
 
-echo '[{"databaseId":7,"workflowName":"check-103-claude","status":"completed","conclusion":"failure","url":"https://example.test/run/7"}]' \
+echo '[{"databaseId":7,"workflowName":"check-102-project","status":"completed","conclusion":"failure","url":"https://example.test/run/7"}]' \
   >"$work/fx/runs.json"
 cat >"$work/fx/jobs.json" <<'EOF'
-{"jobs":[{"name":"claude (timeout)","conclusion":"cancelled",
+{"jobs":[{"name":"pat","conclusion":"cancelled",
   "startedAt":"2026-11-16T10:00:00Z","completedAt":"2026-11-16T10:04:01Z"}]}
 EOF
 printf '%s\n' \
-  $'claude (timeout)\tReport\t2026-11-16T10:00:01.1Z \e[36;1mecho "RESULT check=${{ matrix.check }}"\e[0m' \
-  $'claude (timeout)\tReport\t2026-11-16T10:00:02.2Z RESULT subtype=success total_cost_usd=0.012' \
-  $'claude (timeout)\tSet up job\t2026-11-16T10:00:00.0Z Runner version 2.330' >"$work/fx/log"
-run results 103
+  $'pat\tReport\t2026-11-16T10:00:01.1Z \e[36;1mecho "RESULT check=${{ matrix.check }}"\e[0m' \
+  $'pat\tReport\t2026-11-16T10:00:02.2Z RESULT readable=yes total=3' \
+  $'pat\tSet up job\t2026-11-16T10:00:00.0Z Runner version 2.330' >"$work/fx/log"
+run results 102
 expect_code 0
-assert "expected the job row with billed minutes" contains "$out" "| claude (timeout) | cancelled | 241 | 5 |"
-assert "expected the RESULT line" contains "$out" "claude (timeout): RESULT subtype=success total_cost_usd=0.012"
+assert "expected the job row with billed minutes" contains "$out" "| pat | cancelled | 241 | 5 |"
+assert "expected the RESULT line" contains "$out" "pat: RESULT readable=yes total=3"
 assert "expected no echoed script line" lacks "$out" "matrix.check"
 assert "expected no other log line" lacks "$out" "Runner version"
 
-# On the throwaway PR, ci and Labeler run too, and may be newer: results reads the check's own
-# run. 103's runs are pull_request_target runs of a workflow on main: listed by workflow and event.
+# On the throwaway branch, ci and Labeler run too, and may be newer: results reads the check's own
+# run, listed by its branch and picked by its workflow's name.
 cat >"$work/fx/runs.json" <<'EOF'
 [{"databaseId":11,"workflowName":"ci","status":"in_progress","conclusion":"","url":"https://example.test/run/11"},
  {"databaseId":10,"workflowName":"Labeler","status":"completed","conclusion":"success","url":"https://example.test/run/10"},
- {"databaseId":7,"workflowName":"check-103-claude","status":"completed","conclusion":"failure","url":"https://example.test/run/7"}]
+ {"databaseId":7,"workflowName":"check-102-project","status":"completed","conclusion":"failure","url":"https://example.test/run/7"}]
 EOF
 : >"$work/calls"
-run results 103
+run results 102
 expect_code 0
-assert "expected the check-103 run, not a newer ci run" contains "$out" "Run: https://example.test/run/7"
+assert "expected the check-102 run, not a newer ci run" contains "$out" "Run: https://example.test/run/7"
 assert "expected the runs' workflow names asked for" contains "$calls" "workflowName"
-assert "expected 103's runs listed by workflow and event" \
-  contains "$calls" "run list --repo sssoto17/sunny-pastures --workflow check-103-claude.yml --event pull_request_target"
-assert "expected 103's runs not listed by branch" lacks "$calls" "--branch throwaway/103-claude"
+assert "expected 102's runs listed by branch" \
+  contains "$calls" "run list --repo sssoto17/sunny-pastures --branch throwaway/102-project"
+assert "expected no --workflow lookup" lacks "$calls" "--workflow"
 
 # --- results 101 also reads the PR, its CI runs and the tag ------------------------------------
 echo '[{"databaseId":8,"workflowName":"check-101-identities","status":"completed","conclusion":"success","url":"https://example.test/run/8"}]' \
@@ -515,45 +421,38 @@ assert "expected the PR branch deleted" contains "$calls" "git/refs/heads/throwa
 assert "expected a missing branch skipped" lacks "$calls" "DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/101-readonly-probe"
 
 # Declined: nothing changes.
-out=$(cd "$work/clone" && printf 'n\n' | PATH="$work/bin:$PATH" bash "$script" cleanup 103 2>"$work/err")
+out=$(cd "$work/clone" && printf 'n\n' | PATH="$work/bin:$PATH" bash "$script" cleanup 102 2>"$work/err")
 code=$?
 expect_code 2
 assert "expected nothing deleted" test "$(grep -c DELETE "$work/calls")" -eq 2
 
-# --- cleanup 103: closes its own PR unmerged, deletes its two branches, never touches #101's ------
 all_branches() {
   printf 'heads/%s\n' throwaway/101-identities throwaway/101-factory-pr throwaway/101-readonly-probe \
-    throwaway/102-project throwaway/103-base throwaway/103-claude >"$work/fx/refs"
+    throwaway/102-project >"$work/fx/refs"
 }
-reset
 # A fork's PR with the same head name, newer: never ours to close.
-echo "[$pr101, {\"number\":78,\"headRefName\":\"throwaway/103-claude\",\"isCrossRepository\":true},
-  {\"number\":77,\"headRefName\":\"throwaway/103-claude\",\"isCrossRepository\":false}]" >"$work/fx/prs.json"
-all_branches
-run cleanup 103
-expect_code 0
-assert "expected 103's PR looked up by its head" contains "$calls" "pr list --repo sssoto17/sunny-pastures --head throwaway/103-claude --state open"
-assert "expected 103's PR closed with a comment" contains "$calls" "pr close 77 --repo sssoto17/sunny-pastures --comment"
-assert "expected #101's PR left open" lacks "$calls" "pr close 42"
-assert "expected a fork's PR with the same head name left alone" lacks "$calls" "pr close 78"
-assert "expected #101's PR not even looked up" lacks "$calls" "--head throwaway/101-factory-pr"
-assert "expected no merge" lacks "$calls" "pr merge"
-assert "expected the check branch deleted" contains "$calls" "api -X DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/103-claude"
-assert "expected the base branch deleted" contains "$calls" "api -X DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/103-base"
-assert "expected only those two deleted" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 2
-assert "expected the PR closed before its base is deleted" \
-  test "$(grep -n 'pr close' <<<"$calls" | cut -d: -f1)" -lt "$(grep -n 'DELETE.*103-base' <<<"$calls" | cut -d: -f1)"
-assert "expected the closed PR reported" contains "$out" "closed PR #77 unmerged"
-
-# No PR (start failed before opening it, or it's closed already): still deletes both branches.
 reset
-echo "[$pr101]" >"$work/fx/prs.json"
+echo "[{\"number\":43,\"headRefName\":\"throwaway/101-factory-pr\",\"isCrossRepository\":true}, $pr101]" \
+  >"$work/fx/prs.json"
 all_branches
-run cleanup 103
+run cleanup 101
+expect_code 0
+assert "expected the PR looked up by its head" contains "$calls" "pr list --repo sssoto17/sunny-pastures --head throwaway/101-factory-pr --state open"
+assert "expected our PR closed with a comment" contains "$calls" "pr close 42 --repo sssoto17/sunny-pastures --comment"
+assert "expected a fork's PR with the same head name left alone" lacks "$calls" "pr close 43"
+assert "expected the PR closed before any branch is deleted" \
+  test "$(grep -n 'pr close' <<<"$calls" | cut -d: -f1)" -lt "$(grep -n 'DELETE' <<<"$calls" | head -n1 | cut -d: -f1)"
+assert "expected the closed PR reported" contains "$out" "closed PR #42 unmerged"
+assert "expected 102's branch left alone" lacks "$calls" "throwaway/102-project"
+
+# No PR (closed already): still deletes the branches.
+reset
+echo '[]' >"$work/fx/prs.json"
+all_branches
+run cleanup 101
 expect_code 0
 assert "expected no PR closed" lacks "$calls" "pr close"
-assert "expected the check branch deleted" contains "$calls" "git/refs/heads/throwaway/103-claude"
-assert "expected the base branch deleted" contains "$calls" "git/refs/heads/throwaway/103-base"
+assert "expected the three branches deleted" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 3
 
 # cleanup 102 likewise deletes only throwaway/102-project.
 reset
