@@ -24,6 +24,7 @@ a="$*"; printf '%s\\n' "\${a//$'\\n'/\\\\n}" >>"$d/calls"
 case "$*" in
   "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-abc}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" ;;
   *"enablePullRequestAutoMerge"*) [ -z "$FAIL_AUTO" ] ;;
+  *"disablePullRequestAutoMerge"*) [ -z "$FAIL_DISABLE" ] ;;
   "api repos/o/r/issues/7/labels --jq"*) head -n1 "$d/labels"; tail -n +2 "$d/labels" >"$d/l2"; [ -s "$d/l2" ] && mv "$d/l2" "$d/labels"; true ;;
   "api graphql -F owner"*) cat "$d/threads.json" ;;
   "api --paginate repos/o/r/pulls/7/reviews"*) cat "$d/reviews.json" ;;
@@ -285,6 +286,14 @@ describe("post-review.sh", () => {
 		expect(held.calls).toContain("-f event=COMMENT");
 		expect(held.calls).not.toContain("enablePullRequestAutoMerge");
 		expect(held.calls).toMatch(/disablePullRequestAutoMerge[\s\S]*event=COMMENT/);
+
+		// A refused disable still posts the review that withholds the approval.
+		const stuck = run(verdict(), {
+			labels: ["true"],
+			env: { FAKE_AUTO: "true", FAIL_DISABLE: "1" },
+		});
+		expect(stuck.code).toBe(0);
+		expect(stuck.calls).toContain("-f event=COMMENT");
 
 		const findings = [{ path: "a.ts", line: 3, body: "bug" }];
 		const changes = run(verdict({ findings }));

@@ -162,7 +162,9 @@ fi
 if [[ $event != APPROVE ]]; then
   dismiss APPROVED "This review no longer approves the PR: $event."
   # Auto-merge must not outlive the approval it came with (ADR-0002, test (e)).
-  [[ $auto_on != true ]] || set_auto disable
+  if [[ $auto_on == true ]] && ! set_auto disable; then
+    echo "::warning::auto-merge is still on: turn it off by hand (gh pr merge $PR --disable-auto)"
+  fi
 fi
 body=$(jq -r .summary "$v")
 [[ -z $unplaced ]] || body+=$'\n\nRequired findings without a place in the diff:\n'"$unplaced"
