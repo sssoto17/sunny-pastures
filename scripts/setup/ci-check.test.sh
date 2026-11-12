@@ -377,7 +377,9 @@ assert "expected the checkout without credentials" contains "$wf" "persist-crede
 assert "expected no API key" contains "$wf" "ANTHROPIC_API_KEY: ''"
 assert "expected the token handed over, so no OIDC exchange" contains "$wf" 'github_token: ${{ github.token }}'
 assert "expected no id-token permission" lacks "$wf" "id-token"
-assert "expected only contents: read" contains "$wf" $'permissions:\n  contents: read #'
+assert "expected only contents: read" contains "$wf" $'permissions:\n  contents: read'
+assert "expected nothing granted beyond it" \
+  test "$(sed -n '/^permissions:/,/^$/p' <<<"$wf" | grep -c ':')" -eq 2
 assert "expected one permissions block" test "$(grep -c 'permissions:' <<<"$wf")" -eq 1
 assert "expected the execution file from the action's output" \
   contains "$wf" '${{ steps.claude.outputs.execution_file }}'

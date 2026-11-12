@@ -15,7 +15,9 @@
 #
 # pull_request_target hands secrets to a run on a PR, so nothing from the PR head is checked out:
 # the checkout has no `ref`, which on this event is the default branch. The head carries one text
-# file and the job never reads it.
+# file and the job never reads it. What does run with the secret besides main's code: the hooks in
+# .claude/ on throwaway/103-base, which only a writer can push. Any writer can already run a
+# workflow of their own on a throwaway/* push with this environment, so this adds no new reach.
 #
 # Each job prints `RESULT ...` lines with non-secret fields only; `ci-check.sh results 103` collects
 # them with the minutes. Low caps: at most 3 turns a run, 10 minutes a job. Actions pinned to full
