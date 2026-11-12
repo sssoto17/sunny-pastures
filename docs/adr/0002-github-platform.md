@@ -359,6 +359,10 @@ The flow:
   that knows a reason the PR can't show (for example "can't be split") writes it in the PR
   template's Review section (A2), which the bot reads. A body that asks for more caution is
   harmless even though the PR wrote it.
+  - **Scope re-checked before auto-merge (#68 step 1, 12 Nov).** Both kinds were checked path by
+    path and row by row. CODEOWNERS is unchanged. In `CONSTRAINTS.md`, the Content change row now
+    covers only content values, and the weakened-bar row is gone now that `guard / floor` is
+    required. The reasons are in `CONSTRAINTS.md`'s interview record.
   - **The escalation is a thread.** The bot posts a file-level review thread on the file that
     triggered the row, "escalated: <rows>", which mentions `@sssoto17` so the admin is notified.
     A review summary or a plain comment wouldn't create a thread. Required conversation

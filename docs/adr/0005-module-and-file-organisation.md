@@ -414,7 +414,8 @@ large plugin for one rule.
     from tests by `.test.` alone, so it would count `tests/` helpers as source; it learns
     `/tests/`.
 
-  The "Content change" row (`packages/sim/src/content/**`) keeps its path, and the "Interface
+  The "Content change" row watches the content values, which live in `packages/sim/src/content/`
+  (narrowed from the whole folder in #68 step 1, 12 Nov), and the "Interface
   change" row keeps `packages/*/src/index.ts` (with the addition above). `AGENTS.md` links
   `docs/agents/code-style.md` with one line.
 - **Every new dependency is pinned exactly** and must be at least 7 days old (`pnpm-workspace.yaml`).
