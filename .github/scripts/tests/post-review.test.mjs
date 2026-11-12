@@ -273,6 +273,11 @@ describe("post-review.sh", () => {
 		expect(off.code).toBe(0);
 		expect(off.calls).toContain("-f event=APPROVE");
 		expect(off.out).toContain("auto_merge=refused");
+
+		// Test (d): after a push, the fresh approval finds auto-merge still on and leaves it.
+		const still = run(verdict(), { env: { FAKE_AUTO: "true" } });
+		expect(still.calls).not.toContain("AutoMerge");
+		expect(still.out).toContain("auto_merge=on");
 	});
 
 	it("never turns on auto-merge without an approval, and turns off one that is on", () => {

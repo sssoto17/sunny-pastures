@@ -172,6 +172,6 @@ gh api -X POST "$r/pulls/$PR/reviews" --silent -f commit_id="$HEAD" -f event="$e
 auto=off
 if [[ $event == APPROVE ]]; then
   # Refused while allow_auto_merge is off (or the PR merges as it is): the approval stands.
-  if set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi
+  if [[ $auto_on == true ]] || set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi
 fi
 echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated auto_merge=$auto"
