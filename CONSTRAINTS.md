@@ -380,8 +380,6 @@ the guard sees only the PR's own diff.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| E1 | check-removed | .github/workflows/check-103-claude.yml | #103's check moves from the draft `scripts/setup/workflows/` (never run by GitHub) to `.github/workflows/`; git pairs the two as a rename, so the job's new `if:` reads as a loosened check. The job is new and required nowhere. Remove this row in the follow-up that deletes the workflow or turns it into #68's reviewer | Soto | 2026-12-12 |
-| E7 | rule-removed, rule-narrowed | CONSTRAINTS.md | #68 step 1 (admin, 12 Nov): the "Weakened bar, before `guard / floor`" row is removed because its end condition is met, and the "Content change" row is narrowed from the `content/` folder to content values (Interview record). The guard sees only a PR's own diff, so this row is needed only by the PR that makes the change. Remove it in the next PR that edits this file, or let it expire | Soto | 2026-11-26 |
 
 ## Interview record
 
