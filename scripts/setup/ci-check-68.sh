@@ -6,6 +6,10 @@
 
 T68_ADMIN=sssoto17
 T68_NOTES=docs/spikes/reviewer-app
+T68_RESOLVE=throwaway/68-factory-resolve
+T68_THREADS='query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name)
+  { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { isResolved resolvedBy { login }
+  comments(first: 1) { nodes { author { login } body } } } } } } }'
 # An open thread holds a PR through required conversation resolution, so the App's approval plus
 # auto-merge can't merge (a) or a wrongly approved (c). (e) and (f) never get the App's approval:
 # their rows come from paths, in code (post-review.sh).
@@ -140,4 +144,142 @@ Once (a) reads APPROVED, turn it on for the test window only (runbook), then pus
     die 1 "gh pr view $pr failed"
   printf 'reviewDecision right after the push: `%s` (test (d) expects REVIEW_REQUIRED here, then\n' "${decision:-(empty)}"
   printf 'APPROVED again after the fresh review, in 1-3 minutes).\n'
+}
+
+# Everything results 68 reads, as one JSON object: a PR per letter, and the factory's run.
+t68_collect() {
+  local l pr view reviews threads run
+  data='{}'
+  for l in a c e f; do
+    pr=$(t68_pr "$l") || die 1 "gh pr list failed"
+    [[ -n $pr ]] || continue
+    view=$(gh pr view "$pr" --repo "$REPO" --json number,url,state,headRefOid,reviewDecision,mergeStateStatus,autoMergeRequest,labels,reviewRequests,commits \
+      --jq '{number, url, state, headRefOid, reviewDecision, mergeStateStatus, labels: [.labels[].name],
+        auto: (.autoMergeRequest | if . then {by: (.enabledBy.login // ""), method: .mergeMethod} else null end),
+        requests: [.reviewRequests[] | .login // .name // .slug // ""], commits: (.commits | length),
+        head_author: (.commits[-1].authors[0].login // "")}') || die 1 "gh pr view $pr failed"
+    reviews=$(gh api "repos/$REPO/pulls/$pr/reviews?per_page=100" \
+      --jq 'map({author: .user.login, state, commit: .commit_id})') || die 1 "gh api reviews of PR #$pr failed"
+    threads=$(gh api graphql -F owner="${REPO%/*}" -F name="${REPO#*/}" -F pr="$pr" -f query="$T68_THREADS" \
+      --jq '.data.repository.pullRequest.reviewThreads.nodes') || die 1 "gh api graphql (threads of PR #$pr) failed"
+    data=$(jq --arg l "$l" --argjson v "$view" --argjson r "$reviews" --argjson t "$threads" \
+      '.[$l] = $v + {reviews: $r, threads: $t}' <<<"$data")
+  done
+  run=$(gh run list --repo "$REPO" --branch "$T68_RESOLVE" --limit 50 \
+    --json databaseId,status,conclusion,url,workflowName \
+    --jq 'map(select(.workflowName == "check-68-factory-resolve")) | .[0] // {}') || die 1 "gh run list failed"
+  data=$(jq --argjson run "$run" '.resolve = $run' <<<"$data")
+}
+
+# Pass, fail or not yet run per test, from the collected object. Kept apart from the printing so
+# cleanup 68 asks the same question.
+T68_VERDICTS='
+  def nobot: sub("\\[bot\\]$"; "");
+  def bot: [.reviews[] | select((.author | nobot) == "sunny-reviewer")];
+  def esc: [.threads[] | select(((.comments.nodes[0].author.login // "") | nobot) == "sunny-reviewer"
+    and ((.comments.nodes[0].body // "") | startswith("escalated:")))] | .[0];
+  def latest: bot | last | .state;
+  def seen($p): $p != null and ($p | bot | length) > 0;
+  def t($id; $text; $r; $why): {id: $id, text: $text, result: $r, why: $why};
+  . as $d | [
+  (if seen($d.a) | not then t("a"; "App approval outside CODEOWNERS"; "not yet run"; "no review on (a)")
+   elif $d.a.reviewDecision == "APPROVED" then t("a"; "App approval outside CODEOWNERS"; "pass"; "reviewDecision `APPROVED`")
+   elif ($d.a | latest) == "DISMISSED" then t("a"; "App approval outside CODEOWNERS"; "not yet run"; "waiting for the review after push 68 a")
+   else t("a"; "App approval outside CODEOWNERS"; "fail"; "reviewDecision `\($d.a.reviewDecision)`") end),
+  (if seen($d.a) | not then t("b"; "App turns on auto-merge"; "not yet run"; "no review on (a)")
+   elif ($d.a.auto.by // "" | nobot) == "sunny-reviewer" then t("b"; "App turns on auto-merge"; "pass"; "autoMergeRequest by `\($d.a.auto.by)`")
+   else t("b"; "App turns on auto-merge"; "fail"; "autoMergeRequest `\($d.a.auto // "null" | tostring)`") end),
+  (if seen($d.c) | not then t("c"; "Request changes blocks"; "not yet run"; "no review on (c)")
+   elif $d.c.reviewDecision == "CHANGES_REQUESTED" and $d.c.mergeStateStatus == "BLOCKED"
+   then t("c"; "Request changes blocks"; "pass"; "`CHANGES_REQUESTED`, `BLOCKED`")
+   else t("c"; "Request changes blocks"; "fail"; "`\($d.c.reviewDecision)`, `\($d.c.mergeStateStatus)`") end),
+  (if seen($d.a) | not or $d.a.commits < 2 then t("d"; "a push dismisses the approval"; "not yet run"; "no push 68 a yet")
+   elif ($d.a | bot | map(.state) | index("DISMISSED")) == null then t("d"; "a push dismisses the approval"; "fail"; "no dismissed approval on (a)")
+   elif ($d.a | latest) == "APPROVED" then t("d"; "a push dismisses the approval"; "pass"; "approval `DISMISSED`, then a fresh `APPROVED`")
+   else t("d"; "a push dismisses the approval"; "not yet run"; "dismissed; waiting for the fresh review") end),
+  (if seen($d.e) | not then t("e1"; "escalation thread, no approval"; "not yet run"; "no review on (e)")
+   elif ($d.e | bot | map(.state) | index("APPROVED")) == null and ($d.e.labels | index("review:admin")) != null
+     and (($d.e | esc).comments.nodes[0].body // "" | contains("@\($admin)"))
+   then t("e1"; "escalation thread, no approval"; "pass"; "thread mentions @\($admin), `review:admin`, no `APPROVED`")
+   else t("e1"; "escalation thread, no approval"; "fail"; "see PR #\($d.e.number) below") end),
+  (if ($d.resolve.status // "") == "" then t("e2"; "factory resolves, App reopens"; "not yet run"; "no resolve 68 run")
+   elif $d.resolve.status != "completed" then t("e2"; "factory resolves, App reopens"; "not yet run"; "run \($d.resolve.status)")
+   elif $d.resolve.conclusion == "success" then t("e2"; "factory resolves, App reopens"; "pass"; "run \($d.resolve.url)")
+   else t("e2"; "factory resolves, App reopens"; "fail"; "run `\($d.resolve.conclusion)`: \($d.resolve.url)") end),
+  (($d.e // {threads: []} | esc) as $th |
+   if $th != null and ($th.isResolved | not) and ($d.resolve.conclusion // "") == "success"
+     and ($d.e | bot | last | .commit) == $d.e.headRefOid and ($d.e.head_author | startswith("sunny-factory") | not)
+   then t("e3"; "admin resolves, it stays resolved"; "fail"; "open after push 68 e and its review (resolve first, then push)")
+   elif $th == null or ($th.resolvedBy.login // "") != $admin or ($d.resolve.conclusion // "") != "success"
+   then t("e3"; "admin resolves, it stays resolved"; "not yet run"; "not resolved by @\($admin) after e2")
+   elif ($d.e | bot | last | .commit) != $d.e.headRefOid or ($d.e.head_author | startswith("sunny-factory"))
+   then t("e3"; "admin resolves, it stays resolved"; "not yet run"; "resolved; waiting for push 68 e and its review")
+   else t("e3"; "admin resolves, it stays resolved"; "pass"; "resolved by @\($admin) after the App reviewed the head") end),
+  # What was not tested never reads pass: "not exercised" says what was observed instead.
+  (if seen($d.e) | not then t("e4"; "merges only on admin approval"; "not yet run"; "no review on (e)")
+   elif $d.e.mergeStateStatus != "BLOCKED" then t("e4"; "merges only on admin approval"; "fail"; "`\($d.e.mergeStateStatus)` without your approval")
+   else t("e4"; "merges only on admin approval"; "not exercised"; "observed `\($d.e.reviewDecision)`, `BLOCKED`, no App approval; your `gh` authored (e), so you cannot approve it") end),
+  (if seen($d.f) | not then t("f"; "AGENTS.md waits for the code owner"; "not yet run"; "no review on (f)")
+   elif $d.f.mergeStateStatus != "BLOCKED" or $d.f.reviewDecision == "APPROVED"
+   then t("f"; "AGENTS.md waits for the code owner"; "fail"; "`\($d.f.reviewDecision)`, `\($d.f.mergeStateStatus)`")
+   elif ($d.f | latest) == "APPROVED" then t("f"; "AGENTS.md waits for the code owner"; "pass"; "App approved; `\($d.f.reviewDecision)`, `BLOCKED`")
+   else t("f"; "AGENTS.md waits for the code owner"; "not exercised"; "App withheld approval (Code-owned path row): `\($d.f.reviewDecision)`, `BLOCKED`; the code-owner hold behind an App approval is not reachable with the path rows in code") end)
+  ]'
+
+results_68() {
+  local run
+  t68_collect
+  printf '## Results of #68'"'"'s reviewer tests (a)-(f)\n\n| Test | Result | Read |\n|---|---|---|\n'
+  jq -r --arg admin "$T68_ADMIN" "$T68_VERDICTS"' | .[] | "| (\(.id)) \(.text) | \(.result) | \(.why) |"' <<<"$data"
+  jq -r '(["a", "c", "e", "f"][] as $l | .[$l] // empty |
+    "\n### Test (\($l)): PR #\(.number) (\(.state))\n",
+    "- reviewDecision `\(.reviewDecision // "(empty)")`, mergeStateStatus `\(.mergeStateStatus)`, commits \(.commits)",
+    "- autoMergeRequest: \(if .auto then "enabled by `\(.auto.by)`, \(.auto.method)" else "none" end)",
+    "- labels: \(.labels | map("`\(.)`") | join(", ") | if . == "" then "none" else . end)",
+    "- review requests: \(.requests | map("`\(.)`") | join(", ") | if . == "" then "none" else . end)",
+    "- reviews, oldest first: \(.reviews | map("`\(.author)` \(.state)") | join(", ") | if . == "" then "none" else . end)",
+    "- escalation thread: \([.threads[] | select((.comments.nodes[0].body // "") | startswith("escalated:"))][0]
+       | if . then "resolved `\(.isResolved)`, resolvedBy `\(.resolvedBy.login // "null")`" else "none" end)")' <<<"$data"
+  run=$(jq -r '.resolve.databaseId // empty' <<<"$data")
+  [[ -n $run ]] || return 0
+  printf '\n### resolve 68: %s\n\n```\n' "$(jq -r .resolve.url <<<"$data")"
+  gh run view "$run" --repo "$REPO" --log | grep -E $'^[^\t]*\t[^\t]*\t[^ ]*Z RESULT ' |
+    sed -E $'s/^([^\t]*)\t[^\t]*\t[^ ]* /\\1: /' || true
+  printf '```\n'
+}
+
+cleanup_68() {
+  local reply l pr b all auto
+  printf 'This closes every throwaway PR of #68 unmerged and deletes the throwaway/68-* branches.\n'
+  printf 'Run results 68 first: the branches go. Go ahead? [y/N] '
+  read -r reply || true
+  [[ $reply =~ ^[Yy] ]] || die 2 "nothing changed"
+  t68_collect
+  all=$(jq --arg admin "$T68_ADMIN" "$T68_VERDICTS"' | all(.result == "pass")' <<<"$data")
+  for l in a c e f; do
+    pr=$(t68_pr "$l" open) || die 1 "gh pr list failed"
+    [[ -n $pr ]] || continue
+    gh pr close "$pr" --repo "$REPO" --comment "Throwaway for #68's reviewer tests: closed unmerged." >/dev/null ||
+      die 1 "closing PR #$pr failed"
+    printf 'closed PR #%s unmerged\n' "$pr"
+  done
+  for l in a c e f factory-resolve; do
+    b=throwaway/68-$l
+    if gh api "repos/$REPO/git/ref/heads/$b" --silent >/dev/null 2>&1; then
+      gh api -X DELETE "repos/$REPO/git/refs/heads/$b" --silent || die 1 "deleting $b failed"
+      printf 'deleted branch %s\n' "$b"
+    fi
+  done
+  auto=$(gh api "repos/$REPO" --jq .allow_auto_merge) || auto=unknown
+  [[ $auto != false ]] || return 0
+  if [[ $auto == unknown ]]; then
+    printf '\nCould not read allow_auto_merge. If it is on and Q16 does not hold, turn it off:\n'
+  elif [[ $all == true ]]; then
+    printf '\n(a)-(f) all passed. allow_auto_merge stays on only if the required checks report and\n'
+    printf "#47's escalation criteria are merged (Q16); otherwise turn it off:\n"
+  else
+    printf '\nNot all of (a)-(f) passed ("not exercised" counts as not passed), and allow_auto_merge\n'
+    printf 'is still on. Turn it off now (Q16):\n'
+  fi
+  printf '  gh api -X PATCH repos/%s --silent -F allow_auto_merge=false\n' "$REPO"
 }

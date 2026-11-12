@@ -38,7 +38,9 @@ stale-review dismissal and thread resolution (on since 12 Nov); `start 68` check
   reviewer: it fails unless the reviewer reopened the thread.
 - **Step 6 before step 7:** (e3) passes when the thread is resolved by you and the App has
   reviewed the newest head. Resolve first, then push; a thread open again after step 7 is a fail.
-- **(f):** your `gh` opened it, so you can't approve it. It passes on `BLOCKED` with no approval.
+- **"Not exercised" is never a pass.** The App never approves (f) (Code-owned path row, in code)
+  and you can't approve (e) or (f) (you opened them). (f)'s code-owner hold rests on the ruleset's
+  `require_code_owner_review` (`gh api repos/sssoto17/sunny-pastures/rules/branches/main`: `true`).
 - **To run one test again,** fix the cause, then `cleanup 68` and start over from step 1. For
   step 5 alone, delete its branch first:
   `gh api -X DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/68-factory-resolve`.

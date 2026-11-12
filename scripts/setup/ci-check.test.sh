@@ -53,7 +53,8 @@ case "$*" in
   "run view "*" --log") cat "$dir/fx/log"; exit 0 ;;
   "api repos/"*"/pulls/"*"/reviews"*)
     n=${2#repos/*/pulls/}; n=${n%%/*}; key=reviews; [[ -f $dir/fx/reviews-$n.json ]] && key=reviews-$n ;;
-  "api repos/sssoto17/sunny-pastures --jq .allow_auto_merge") cat "$dir/fx/auto" 2>/dev/null || echo false; exit 0 ;;
+  "api repos/sssoto17/sunny-pastures --jq .allow_auto_merge")
+    [[ -f $dir/fx/auto-fail ]] && exit 1; cat "$dir/fx/auto" 2>/dev/null || echo false; exit 0 ;;
   "api repos/sssoto17/sunny-pastures/labels/throwaway --silent") [[ -f $dir/fx/label ]]; exit ;;
   "api -X POST repos/"*"/comments "* | "pr ready "*) exit 0 ;;
   "pr view "*" --json "*) key=view-$3 ;;
@@ -603,6 +604,163 @@ assert "expected (e) to gain a note file" \
   test "$(git -C "$work/origin.git" diff --name-only main throwaway/68-e | sort | tr '\n' ' ')" == \
   "docs/spikes/reviewer-app/throwaway-e.md packages/sim/src/content/index.ts "
 assert "expected no decision read for (e)" lacks "$out" "reviewDecision"
+
+# --- resolve 68: pushes the factory's workflow on its own branch, no PR -------------------------
+src_wf="$src/workflows/check-68-factory-resolve.yml"
+reset
+run resolve 68
+expect_code 0
+b=throwaway/68-factory-resolve
+assert "expected only the workflow added" \
+  test "$(git -C "$work/origin.git" diff --name-only main "$b")" == ".github/workflows/check-68-factory-resolve.yml"
+assert "expected the draft, byte for byte" \
+  test "$(git -C "$work/origin.git" show "$b:.github/workflows/check-68-factory-resolve.yml")" == "$(cat "$src_wf")"
+assert "expected no PR opened" lacks "$calls" "pr create"
+assert "expected the workflow to run in factory, on its throwaway branch only" \
+  contains "$(cat "$src_wf")" $'    branches: [throwaway/68-factory-resolve]'
+assert "expected the factory environment" contains "$(cat "$src_wf")" "environment: factory"
+assert "expected it to fail unless the reviewer reopened the thread" \
+  contains "$(cat "$src_wf")" '[ "$resolved" = false ]'
+
+# --- results 68 ---------------------------------------------------------------------------------
+fx_view() { # pr decision state auto commits [labels] [head author]
+  cat >"$work/fx/view-$1.json" <<J
+{"number":$1,"url":"https://example.test/pull/$1","state":"OPEN","headRefOid":"h$1","reviewDecision":"$2",
+ "mergeStateStatus":"$3","autoMergeRequest":$4,"labels":[${6-}],"reviewRequests":[],
+ "commits":[$(for ((i = 1; i < $5; i++)); do printf '{"authors":[{"login":"sssoto17","email":"x@example.com"}]},'; done){"authors":[{"login":"${7:-sssoto17}","email":"x@example.com"}]}]}
+J
+}
+fx_reviews() { # pr state[:commit]... -> the App's reviews, oldest first
+  local pr=$1 s out=""
+  shift
+  for s in "$@"; do out+="{\"user\":{\"login\":\"sunny-reviewer[bot]\"},\"state\":\"${s%%:*}\",\"commit_id\":\"${s#*:}\"},"; done
+  echo "[${out%,}]" >"$work/fx/reviews-$pr.json"
+}
+fx_threads() { # pr [resolved resolvedBy]: the admin's hold thread, and the App's escalation if given
+  jq -n --arg r "${2-}" --arg by "${3-}" '[{isResolved: false, resolvedBy: null,
+      comments: {nodes: [{author: {login: "sssoto17"}, body: "Hold (ci-check.sh start 68)"}]}}]
+    + (if $r == "" then [] else [{isResolved: ($r == "true"), resolvedBy: {login: $by},
+      comments: {nodes: [{author: {login: "sunny-reviewer"}, body: "escalated: Content change\n\n@sssoto17: this PR"}]}}] end)
+    | {data: {repository: {pullRequest: {reviewThreads: {nodes: .}}}}}' >"$work/fx/threads-$1.json"
+}
+row() { contains "$out" "| ($1) $2 | $3 |"; }
+reset
+echo '[]' >"$work/fx/prs.json"
+echo '[]' >"$work/fx/runs.json"
+run results 68
+expect_code 0
+for id in a b c d e1 e2 e3 e4 f; do assert "expected ($id) not yet run" grep -q "^| ($id) .* | not yet run |" <<<"$out"; done
+assert "expected nine test rows" test "$(grep -c '^| (' <<<"$out")" -eq 9
+
+# Everything passed: (a) approved after (d)'s push, auto-merge by the App, (c) blocked, (e)'s
+# thread resolved by the admin after the factory's run, (f) blocked.
+cat >"$work/fx/prs.json" <<'J'
+[{"number":71,"headRefName":"throwaway/68-a","isCrossRepository":false},
+ {"number":72,"headRefName":"throwaway/68-c","isCrossRepository":false},
+ {"number":73,"headRefName":"throwaway/68-e","isCrossRepository":false},
+ {"number":74,"headRefName":"throwaway/68-f","isCrossRepository":false}]
+J
+fx_view 71 APPROVED BLOCKED '{"enabledBy":{"login":"sunny-reviewer"},"mergeMethod":"SQUASH","authorEmail":"x@example.com"}' 2
+fx_reviews 71 DISMISSED:h0 APPROVED:h71
+fx_threads 71
+fx_view 72 CHANGES_REQUESTED BLOCKED null 1
+fx_reviews 72 CHANGES_REQUESTED:h72
+fx_threads 72
+fx_view 73 REVIEW_REQUIRED BLOCKED null 4 '{"name":"review:admin"}'
+fx_reviews 73 COMMENTED:h0 COMMENTED:h1 COMMENTED:h73
+fx_threads 73 true sssoto17
+fx_view 74 REVIEW_REQUIRED BLOCKED null 1 '{"name":"review:admin"}'
+fx_reviews 74 COMMENTED:h74
+fx_threads 74
+echo '[{"databaseId":9,"workflowName":"check-68-factory-resolve","status":"completed","conclusion":"success","url":"https://example.test/run/9"}]' \
+  >"$work/fx/runs.json"
+printf '%s\n' $'factory-resolve\tRun\t2026-11-13T10:00:02.2Z RESULT thread_after_review resolved=false resolved_by=null' >"$work/fx/log"
+: >"$work/calls"
+run results 68
+expect_code 0
+assert "expected the seven tested rows to pass" test "$(grep -c '^| ([a-f][0-9]*) .* | pass |' <<<"$out")" -eq 7
+assert "expected (f) not exercised" row f "AGENTS.md waits for the code owner" "not exercised"
+assert "expected what (f) observed" contains "$out" "App withheld approval (Code-owned path row): \`REVIEW_REQUIRED\`, \`BLOCKED\`"
+assert "expected (e4) not exercised" row e4 "merges only on admin approval" "not exercised"
+assert "expected (b)'s reading" contains "$out" 'autoMergeRequest by `sunny-reviewer`'
+assert "expected every review listed" contains "$out" '- reviews, oldest first: `sunny-reviewer[bot]` DISMISSED, `sunny-reviewer[bot]` APPROVED'
+assert "expected the auto-merge detail" contains "$out" 'autoMergeRequest: enabled by `sunny-reviewer`, SQUASH'
+assert "expected (e)'s thread state" contains "$out" 'escalation thread: resolved `true`, resolvedBy `sssoto17`'
+assert "expected (e)'s label" contains "$out" '- labels: `review:admin`'
+assert "expected the hold thread not taken for an escalation" contains "$out" "- escalation thread: none"
+assert "expected the factory run's RESULT line" contains "$out" "factory-resolve: RESULT thread_after_review resolved=false"
+assert "expected no email printed" lacks "$out" "example.com"
+assert "expected (e)'s threads asked by number" contains "$calls" "-F pr=73"
+
+# Failures read as failures: (c) approved, (f) mergeable, (b) no auto-merge, (d) never dismissed.
+fx_view 72 APPROVED CLEAN null 1
+fx_reviews 72 APPROVED:h72
+fx_view 74 REVIEW_REQUIRED CLEAN null 1
+fx_view 71 APPROVED BLOCKED null 2
+fx_reviews 71 APPROVED:h0 APPROVED:h71
+run results 68
+assert "expected (b) to fail" row b "App turns on auto-merge" fail
+assert "expected (c) to fail" row c "Request changes blocks" fail
+assert "expected (d) to fail" row d "a push dismisses the approval" fail
+assert "expected (f) to fail" row f "AGENTS.md waits for the code owner" fail
+fx_view 74 REVIEW_REQUIRED BLOCKED null 1
+fx_reviews 74 APPROVED:h74
+run results 68
+assert "expected (f) to pass once the App approved it" row f "AGENTS.md waits for the code owner" pass
+fx_view 74 APPROVED CLEAN null 1
+run results 68
+assert "expected (f) to fail when the App's approval is enough" row f "AGENTS.md waits for the code owner" fail
+# Request changes that doesn't block is a failure too: the merge state is half of (c).
+fx_view 72 CHANGES_REQUESTED CLEAN null 1
+fx_reviews 72 CHANGES_REQUESTED:h72
+run results 68
+assert "expected (c) to fail when not BLOCKED" row c "Request changes blocks" fail
+# (e) waiting: resolved by the factory, or by the admin before the App has reviewed the head.
+fx_threads 73 true sunny-factory
+run results 68
+assert "expected (e3) not yet run after the factory's resolve" row e3 "admin resolves, it stays resolved" "not yet run"
+fx_threads 73 true sssoto17
+fx_view 73 REVIEW_REQUIRED BLOCKED null 4 '{"name":"review:admin"}' 'sunny-factory[bot]'
+run results 68
+assert "expected (e3) waiting for push 68 e" contains "$out" "waiting for push 68 e"
+# Open again after the admin's push and its review: a fail, not "not yet run".
+fx_threads 73 false null
+fx_view 73 REVIEW_REQUIRED BLOCKED null 5 '{"name":"review:admin"}'
+fx_reviews 73 COMMENTED:h73
+run results 68
+assert "expected (e3) to fail when reopened" row e3 "admin resolves, it stays resolved" fail
+fx_view 73 REVIEW_REQUIRED CLEAN null 5 '{"name":"review:admin"}'
+run results 68
+assert "expected (e4) to fail when (e) could merge without you" row e4 "merges only on admin approval" fail
+fx_reviews 73 APPROVED:h73
+run results 68
+assert "expected (e1) to fail on an approval" row e1 "escalation thread, no approval" fail
+
+# --- cleanup 68 ---------------------------------------------------------------------------------
+printf 'heads/throwaway/68-%s\n' a c e f factory-resolve >"$work/fx/refs"
+: >"$work/calls"
+echo true >"$work/fx/auto"
+run cleanup 68
+expect_code 0
+for pr in 71 72 73 74; do assert "expected PR #$pr closed" contains "$calls" "pr close $pr --repo sssoto17/sunny-pastures --comment"; done
+for l in a c e f factory-resolve; do
+  assert "expected throwaway/68-$l deleted" contains "$calls" "DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/68-$l"
+done
+assert "expected no merge" lacks "$calls" "pr merge"
+assert "expected the reminder to turn auto-merge off" contains "$out" "Not all of (a)-(f) passed"
+assert "expected the command" contains "$out" "-F allow_auto_merge=false"
+echo false >"$work/fx/auto"
+run cleanup 68
+assert "expected no reminder once it's off" lacks "$out" "allow_auto_merge"
+rm "$work/fx/auto"
+: >"$work/fx/auto-fail"
+run cleanup 68
+assert "expected the reminder when the setting can't be read" contains "$out" "Could not read allow_auto_merge"
+rm "$work/fx/auto-fail"
+
+out=$(cd "$work/clone" && printf 'n\n' | PATH="$work/bin:$PATH" bash "$script" cleanup 68 2>"$work/err")
+code=$?
+expect_code 2
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))

@@ -1,0 +1,77 @@
+# THROWAWAY: #68 test (e), the factory's step. Never merge into main. `ci-check.sh resolve 68`
+# copies this file to .github/workflows/ on throwaway/68-factory-resolve, a branch of main with no
+# PR, and pushes it; the push runs it (workflow_dispatch would need the file on main). Environment
+# `factory` admits throwaway/* refs only besides main. As sunny-factory it resolves the reviewer's
+# escalation thread on (e)'s PR, then pushes one commit there, since resolving starts no workflow,
+# and waits for the reviewer's review of that commit: the thread must be open again. RESULT lines
+# carry non-secret fields only; `ci-check.sh results 68` prints them. Actions pinned to full SHAs.
+name: check-68-factory-resolve
+
+on:
+  push:
+    branches: [throwaway/68-factory-resolve]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-68
+  cancel-in-progress: false
+
+env:
+  PR_BRANCH: throwaway/68-e
+  REVIEWER: sunny-reviewer
+
+jobs:
+  factory-resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: factory
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          r="repos/$GITHUB_REPOSITORY"
+          pr=$(gh api "$r/pulls?head=${GITHUB_REPOSITORY%/*}:$PR_BRANCH&state=open" --jq '.[0].number // empty')
+          [ -n "$pr" ] || { echo "RESULT pr=not found: run start 68 first"; exit 1; }
+          echo "RESULT pr=$pr"
+          q='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){
+            reviewThreads(first:100){nodes{id isResolved resolvedBy{login} comments(first:1){nodes{author{login} body}}}}}}}'
+          # The reviewer's escalation thread, as "id resolved resolvedBy".
+          esc() {
+            gh api graphql -f "query=$q" -f "o=${GITHUB_REPOSITORY%/*}" -f "n=${GITHUB_REPOSITORY#*/}" -F "p=$pr" \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(((.comments.nodes[0].author.login // "")
+                | sub("\\[bot\\]$"; "")) == "'"$REVIEWER"'" and ((.comments.nodes[0].body // "") | startswith("escalated:")))]
+                | .[0] // empty | "\(.id) \(.isResolved) \(.resolvedBy.login // "null")"'
+          }
+          found=$(esc) || { echo "RESULT graphql=failed"; exit 1; }
+          read -r thread resolved by <<<"$found"
+          [ -n "${thread:-}" ] || { echo "RESULT thread=not found: wait for (e)'s review"; exit 1; }
+          echo "RESULT thread_before resolved=$resolved resolved_by=$by"
+          m='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved resolvedBy{login}}}}'
+          gh api graphql -f "query=$m" -f "t=$thread" --jq '.data.resolveReviewThread.thread
+            | "RESULT factory_resolved=\(.isResolved) resolved_by=\(.resolvedBy.login // "null")"'
+          # One commit as the factory: the reviewer's next run (synchronize; allowed_bots lists it).
+          note="docs/spikes/reviewer-app/throwaway-e-factory-$GITHUB_RUN_ID.md"
+          head=$(gh api -X PUT "$r/contents/$note" -f "branch=$PR_BRANCH" \
+            -f "message=chore: throwaway commit by the factory for #68 test (e) (never merge)" \
+            -f "content=$(printf 'Throwaway commit by sunny-factory for #68 test (e).\n' | base64 -w0)" \
+            --jq .commit.sha)
+          echo "RESULT factory_pushed=${head:0:7}"
+          for _ in $(seq 30); do
+            sleep 30
+            n=$(gh api "$r/pulls/$pr/reviews?per_page=100" --jq \
+              '[.[] | select(.user.login == "'"$REVIEWER"'[bot]" and .commit_id == "'"$head"'")] | length')
+            [ "$n" -gt 0 ] && break
+          done
+          [ "$n" -gt 0 ] || { echo "RESULT review_of_push=none after 15 minutes"; exit 1; }
+          found=$(esc) || { echo "RESULT graphql=failed"; exit 1; }
+          read -r thread resolved by <<<"$found"
+          echo "RESULT thread_after_review resolved=$resolved resolved_by=$by"
+          [ "$resolved" = false ] # the reviewer reopened what the factory resolved

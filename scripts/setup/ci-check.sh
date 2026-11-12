@@ -23,9 +23,9 @@ TAG=v0.0.0-throwaway-101
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/setup/ci-check.sh start|results|cleanup 101|102
-       scripts/setup/ci-check.sh start 68
+usage: scripts/setup/ci-check.sh start|results|cleanup 101|102|68
        scripts/setup/ci-check.sh push 68 a|e
+       scripts/setup/ci-check.sh resolve 68
 
   start 101    push throwaway/101-identities with check-101-identities.yml; the push runs it
   start 102    push throwaway/102-project with check-102-project.yml (needs 101's App)
@@ -33,11 +33,13 @@ usage: scripts/setup/ci-check.sh start|results|cleanup 101|102
   push 68 a    one more commit on (a)'s branch: tests (b) and (d); refuses while the repo's
                allow_auto_merge is off or the App hasn't approved (a)
   push 68 e    one more commit on (e)'s branch: the reviewer's next run, for test (e)
+  resolve 68   push throwaway/68-factory-resolve with check-68-factory-resolve.yml: the factory
+               App resolves (e)'s escalation thread, pushes, and reads the reviewer's answer
   results N    print the latest run of N's workflow as Markdown, for a comment on issue N:
                  scripts/setup/ci-check.sh results 101 > .scratch/101-results.md
                then read it and post it: gh issue comment 101 --body-file .scratch/101-results.md
-  cleanup N    close N's throwaway PR unmerged (101) and delete N's throwaway branches
-               (asks first)
+  cleanup N    close N's throwaway PRs unmerged (101, 68) and delete N's throwaway branches
+               (asks first); for 68, says whether to turn allow_auto_merge back off
 
 It works on the clone it lives in, whatever directory you run it from, and refuses unless that
 clone's origin is sssoto17/sunny-pastures. Nothing it prints is secret: logins, states, exit codes
@@ -63,7 +65,8 @@ case $cmd:$issue:$# in
   start:101:2 | results:101:2 | cleanup:101:2)
     branch=throwaway/101-identities workflow=check-101-identities.yml pr_head=$FACTORY_PR_BRANCH ;;
   start:102:2 | results:102:2 | cleanup:102:2) branch=throwaway/102-project workflow=check-102-project.yml ;;
-  start:68:2) ;;
+  start:68:2 | results:68:2 | cleanup:68:2) ;;
+  resolve:68:2) branch=throwaway/68-factory-resolve workflow=check-68-factory-resolve.yml ;;
   push:68:3) [[ $letter == a || $letter == e ]] || { usage; exit 2; } ;;
   *) usage; exit 2 ;;
 esac
@@ -231,8 +234,10 @@ cleanup() {
 
 case $cmd:$issue in
   start:68) start_68 ;;
+  results:68) results_68 ;;
+  cleanup:68) cleanup_68 ;;
   push:68) push_68 ;;
-  start:*) start ;;
+  start:* | resolve:*) start ;;
   results:*) results ;;
   cleanup:*) cleanup ;;
 esac
