@@ -229,6 +229,13 @@ resets after the file. At 1,000 runs that is 15 s: 4× the slowest property meas
 main (3.7 s) and 2.6× the slowest on #88's stack (5.7 s), enough for a slow runner and tight
 enough that a property several times slower still fails.
 
+Lint enforces the opt-in (#208): a sim test file that calls `inject('fastCheck')` without that
+`vi.setConfig` line is reported on its first line, so a new property file can't fall back to the
+5 s default and fail only at CI's 1,000 runs. The check covers `packages/sim`, where every
+property test lives, and spots a property file by that call, so aliasing `inject` or reading the
+key from a variable would get past it. The unit tests in the mixed files (`hash`, `random`) share
+the file's 15 s limit at 1,000 runs. They take milliseconds, and 15 s still fails one that hangs.
+
 **Pattern:** property-based testing (fast-check, fixed seed), with a timeout scaled by the run
 count.
 
@@ -238,6 +245,12 @@ count.
   MUST-14.8 needs.
 - **A fresh random seed per run.** A failure couldn't be reproduced, and CI would flake.
 - **A global `testTimeout`.** It would loosen every unit test, not only the properties (#200).
+- **A Vitest `projects` entry for property files (#208).** A project selects files by glob, not
+  by what they call, so a new property file would still need a name or list entry by hand and,
+  without one, would get 5 s as silently as before. Its timeout is per file too.
+- **A timeout on each property test, so unit tests keep 5 s (#208).** It moves the opt-in by
+  hand from each file to each test, and lint can't reliably tell a property `it` from a unit
+  `it` (some properties run inside helpers such as `checkTransitions`), so a missed one would go unreported.
 - **50 ms per run.** 50 s at 1,000 runs would hide a property getting ten times slower (#200).
 - **Fewer runs.** A lowered run count is a weakened bar (`CONSTRAINTS.md`, Floor).
 

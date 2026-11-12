@@ -2,7 +2,7 @@
 // the Collectors compete for the last barn space and the Loops for the last wheat (#88). Splitting
 // advance at that ms, or building the same farm in another internal order, gives the same hash.
 import fc from "fast-check";
-import { describe, expect, inject, it } from "vitest";
+import { describe, expect, inject, it, vi } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Content, FarmState, Sim } from "../../index.js";
@@ -10,6 +10,8 @@ import { delay, farmId, play, timedActions } from "../../state/tests/farms.js";
 import { richContent } from "./richContent.js";
 
 const params = inject("fastCheck");
+// #200: the timeout scales with the run count; Vitest resets it after this file.
+vi.setConfig({ testTimeout: inject("propertyTimeout") });
 
 const slice: Content = sliceContent;
 
