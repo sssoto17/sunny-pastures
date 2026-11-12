@@ -446,8 +446,9 @@ Decided while building #122 (9 Nov), for [Guarding the bar](#guarding-the-bar):
   rule or text, a clause in prose, everyday words) become `note [check]`, so the warning stays
   rare enough to stop at.
 
-Decided in the #68 step-1 grill (12 Nov), re-checking [Admin review](#admin-review-escalation-and-split-size)
-before auto-merge. On 12 Nov, 20 of 21 merged PRs needed the admin:
+Decided in the #68 step-1 grill (12 Nov), re-checking
+[Admin review](#admin-review-escalation-and-split-size) before auto-merge. On 12 Nov, 20 of 21
+merged PRs needed the admin:
 
 - **CODEOWNERS:** unchanged. Every path stays code-owned. Each one holds the rules the agents or
   the reviewer follow, or a place where the bar can be lowered quietly. Handing off `docs/adr/` or

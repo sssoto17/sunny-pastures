@@ -111,6 +111,9 @@ packages/sim/src/
 This is the expected map, not a list of folders to create: a folder appears with the ticket that
 needs it (`AGENTS.md`). #125 creates only `hash/`, `random/` and `state/` for today's code.
 
+(#68 step 1, 12 Nov: the "Content change" row now watches content values in `content/`, not the
+whole folder; `CONSTRAINTS.md`, interview record.)
+
 **Repeated logic becomes a shared module at its second occurrence** (the admin's condition on the
 split). It goes into a module named for its concept, for example `storage/` (fits, put, take),
 used by harvesting, collecting jobs, collecting eggs and the Collector. If an existing module owns
@@ -414,10 +417,10 @@ large plugin for one rule.
     from tests by `.test.` alone, so it would count `tests/` helpers as source; it learns
     `/tests/`.
 
-  The "Content change" row watches the content values, which live in `packages/sim/src/content/`
-  (narrowed from the whole folder in #68 step 1, 12 Nov), and the "Interface
+  The "Content change" row (`packages/sim/src/content/**`) keeps its path, and the "Interface
   change" row keeps `packages/*/src/index.ts` (with the addition above). `AGENTS.md` links
-  `docs/agents/code-style.md` with one line.
+  `docs/agents/code-style.md` with one line. (#68 step 1, 12 Nov: the row now watches content
+  values, not the folder; `CONSTRAINTS.md`, interview record.)
 - **Every new dependency is pinned exactly** and must be at least 7 days old (`pnpm-workspace.yaml`).
   #125 checks each plugin's peer range against ESLint 10.14.0 and Prettier 3.
 - **Tickets #82–#89 follow the map** in section 3, creating each folder when its ticket needs it.
