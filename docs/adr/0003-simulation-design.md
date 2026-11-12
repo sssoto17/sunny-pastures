@@ -609,6 +609,65 @@ step (`startJob` for the Loop, collecting for the Collector).
 - **A top-level `addOns/` module.** Nothing outside facilities has add-ons yet (ADR-0005,
   section 1).
 
+## 17. The content check (#89)
+
+Decided by #89's lane on 12 Nov, under the admin's brief; the admin reviews it in #89's PRs
+("Decided by the lane").
+
+MUST-10.4 asks for a content test. `content/`'s interface gains `checkContent(content)`: it
+returns every rule the content breaks, each as `{ rule, path, message }` (for example `timer`,
+`crops.wheat.growSeconds`, "crops.wheat.growSeconds is 0: a timer is …"), in a fixed order, and
+an empty list for valid content. `content/tests/` runs it on `sliceContent` in `ci / test`, and
+proves each rule with the smallest change to the slice that breaks it alone.
+
+- **A function of a `Content` value**, like `createSim` (section 1). It never imports
+  `sliceContent`, so #154's rules-version check runs it on each registry version's content
+  (ADR-0006, "Consequences").
+- **Not exported from the package.** The registry lives in `packages/sim` and imports
+  `content/index.js`; `apps/web` only runs content the check has passed in CI.
+- **`createSim` doesn't call it.** A frozen rules version must replay its logs for good (ADR-0006,
+  section 2), so a rule added later can't be allowed to stop an old version's `createSim`; CI is
+  where content changes. `prepareOrderRules` keeps its RangeError (section 15), the one rule
+  without which the rules can't run at all.
+- **The rule groups are private siblings** of `content/index.ts` (ADR-0005, section 1), each a
+  function from content to failures. They read content the way the rules do: the first Level
+  that lists an id unlocks it, a tier's job time and each plot price are worked out with the
+  rules' integer steps (sections 10, 11, 14), and nothing is decided by object-key order
+  (MUST-10.6).
+- **A good's earliest Level** is a least fixed point: a crop at its unlock, a recipe's output at
+  the latest of its facility's and tier's Levels and its inputs', a pen's product at the later of
+  the pen's Level and its feed's. Values only fall, so it ends, and a cycle with no outside route
+  never gets a Level. A recipe or pen whose input's Level is later than its own fails MUST-10.4's
+  "produced by some unlocked route".
+- **Readings of the spec it encodes.** MUST-06.2's "every 2nd tier adds a queue slot, up to a
+  maximum": a tier never has fewer slots than the tier below, adds at most one, and two tiers in a
+  row never both add one, so the admin's 2/3/3 (11 Nov, #85) passes and 2/3/4 doesn't; the maximum
+  is content's. MUST-02.5's "at the start a trough holds one portion": `troughCapacity` is 1 until
+  M6's trough upgrades (MUST-06.3). MUST-03.6's strawberry cake is M6's, so in the slice cookies
+  stand in for it and need goods from crops and animals (#72 D4). MUST-05.5's storage capacity and
+  trough upgrades are M6's too (#72 D3): the Level table has no lists for them yet, so the check
+  can't reach them.
+
+**Patterns:** Notification (failures collected and returned as data, not thrown); table-driven
+validation (a list of rule functions, run in turn); a least fixed point for producibility.
+
+**Rejected:**
+
+- **Throwing on the first failure**, as `assertSafeIntegers` does. One failure per run hides the
+  rest, and a test couldn't prove that a change breaks one rule and no other.
+- **A schema library** (zod and the like). A runtime dependency in a package that has none
+  (MUST-10.1), and the rules are mostly cross-references, which a schema states poorly.
+- **Checking inside `createSim`.** See above; it would also turn every test content that bends a
+  rule on purpose (the 4-good barn of `sim/tests/richContent.ts`) into an error.
+- **Properties over generated content.** Slower (#200), and a shrunk random content names a rule
+  less clearly than a one-value change to the slice.
+- **Reusing the rules' own helpers** (`progress/`'s first-listing map and tier key, the plot and
+  tier steps in `plots/` and `facilities/`). The check is an independent reading of what the rules
+  assume: a bug in a shared helper would pass both, and `content/` would import the rules it feeds.
+  The arithmetic is short and fixed by sections 10, 11 and 14.
+- **A top-level `contentCheck/` module.** ADR-0005 (section 3) keeps content one module, and the
+  check belongs with the types it reads.
+
 ## Vocabulary (D11)
 
 **Automated step** (`GLOSSARY.md`): a change the farm makes by itself at a server time, with no
@@ -639,6 +698,7 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Table-driven rules | a facility's tier rows | Each tier's price, slots and job time is a row of content, so tuning or adding a tier changes no code (section 14). |
 | Discriminated union per slot, stored end time | the order board | Each slot is open or refilling at a time fixed when it emptied (section 15). |
 | Seeded draw from a pool filtered first | drawing an order | MUST-04.3 holds at every draw in a fixed number of draws (section 15). |
+| Notification, table-driven validation | `checkContent` | Every broken rule comes back as data in one run, and each rule is one function a test can break alone (section 17). |
 
 ## Consequences
 

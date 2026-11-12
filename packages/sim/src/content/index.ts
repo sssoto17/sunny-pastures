@@ -4,7 +4,9 @@
 // the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
 // lane"); the chicken pen chosen by #86's lane, the tiers and cookies by #85's, the order board by
 // #87's, and the add-ons' prices and Levels by #88's (11 Nov, their PRs' "Decided by the lane").
-// All to be tuned after playtest 1.
+// All to be tuned after playtest 1. `checkContent` holds any content to the rules it must keep
+// (#89); its rule groups are private siblings.
+import { checkNumbers, checkTimers } from "./numbers.js";
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
@@ -25,7 +27,10 @@ export interface Content {
 	 * What the plots beyond the start cost (MUST-06.1): the first `first` coins, and each next one
 	 * `growthPerMille` / 1000 times the one before, rounded down (D16: integers only, no Math.pow).
 	 */
-	readonly plotPrice: { readonly first: number; readonly growthPerMille: number };
+	readonly plotPrice: {
+		readonly first: number;
+		readonly growthPerMille: number;
+	};
 	/** The facilities, in content order: a facility's index here is its index in the state (D12). */
 	readonly facilities: readonly Facility[];
 	/** The animal pens, in content order: a pen's index here is its index in the state (D12). */
@@ -71,7 +76,10 @@ export interface LevelRow {
 	 * Whole seconds an order slot waits at this Level before it refills, after a delivery and after a
 	 * discard (MUST-04.5, MUST-10.4); createSim converts them to ms once (D7).
 	 */
-	readonly refillSeconds: { readonly delivered: number; readonly discarded: number };
+	readonly refillSeconds: {
+		readonly delivered: number;
+		readonly discarded: number;
+	};
 }
 
 /** One tier of one facility, as the Level table names it. */
@@ -170,6 +178,35 @@ export interface Crop {
 	/** XP a harvest gives (MUST-01.3). */
 	readonly xp: number;
 }
+
+/**
+ * A rule of the content check (MUST-10.4; ADR-0003, section 17). #89's PR body maps each to its
+ * source and to the test that breaks it alone.
+ */
+export type ContentRule = "safeInteger" | "timer";
+
+/** One broken rule: `path` names the value (`crops.wheat.growSeconds`), `message` says why. */
+export interface ContentFailure {
+	readonly rule: ContentRule;
+	readonly path: string;
+	/** A full sentence naming the path and its value. */
+	readonly message: string;
+}
+
+/**
+ * The content check (MUST-10.4; #89): every rule `content` breaks, in a fixed order, or none.
+ * Pure and total over any `Content` value, so it runs on every rules version's content
+ * (ADR-0006, "Consequences"); `createSim` doesn't call it (ADR-0003, section 17).
+ */
+export function checkContent(content: Content): readonly ContentFailure[] {
+	return contentChecks.flatMap((check) => check(content));
+}
+
+/** Each rule group in turn: the order only sets the order of the failures (ADR-0003, section 17). */
+const contentChecks: readonly ((content: Content) => readonly ContentFailure[])[] = [
+	checkNumbers,
+	checkTimers,
+];
 
 /** The M4 slice's content, wheat only for now (#72, D1). */
 export const sliceContent = {
