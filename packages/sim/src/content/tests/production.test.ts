@@ -45,6 +45,27 @@ describe("R14 inputProduced", () => {
 		expect(listFailures(content)).toEqual([]);
 	});
 
+	// Rye flour is made from Level 2, but rye only grows from Level 5, so bread (Level 3) waits two
+	// steps down the chain: each recipe's Level is the latest of its inputs' (#89's review).
+	it("rejects an input whose own input is late: rye at Level 5, rye flour, bread at Level 3", () => {
+		const content = draftSlice();
+		content.crops["rye"] = { ...findCrop(content, "wheat") };
+		findLevel(content, 5).crops.push("rye");
+		findFacility(content, "feedMill").recipes["ryeFlour"] = {
+			tier: 1,
+			inputs: [{ good: "rye", amount: 2 }],
+			output: { good: "ryeFlour", amount: 2 },
+			seconds: 60,
+			xp: 1,
+		};
+		findRecipe(content, "bakery", "bread").inputs = [{ good: "ryeFlour", amount: 3 }];
+
+		expect(listFailures(content)).toEqual([
+			["inputProduced", "facilities[0].recipes.ryeFlour.inputs[0].good"],
+			["inputProduced", "facilities[1].recipes.bread.inputs[0].good"],
+		]);
+	});
+
 	// Chicken feed from eggs and eggs from chicken feed: a cycle with no route in, so neither good
 	// is ever produced, though each has a producer.
 	it("rejects a cycle with no route into it", () => {
