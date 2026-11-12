@@ -2,9 +2,9 @@
 // values are the admin's (spec, "How to read this spec"; CONSTRAINTS.md, "Content change" row):
 // approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83);
 // the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
-// lane"); the chicken pen chosen by #86's lane, the tiers and cookies by #85's, and the add-ons'
-// prices and Levels by #88's (11 Nov, their PRs' "Decided by the lane"). All to be tuned after
-// playtest 1.
+// lane"); the chicken pen chosen by #86's lane, the tiers and cookies by #85's, the order board by
+// #87's, and the add-ons' prices and Levels by #88's (11 Nov, their PRs' "Decided by the lane").
+// All to be tuned after playtest 1.
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
@@ -32,6 +32,11 @@ export interface Content {
 	readonly pens: readonly Pen[];
 	/** Each add-on's price in coins, the same for every facility (MUST-06.5, 06.6; #88). */
 	readonly addOns: Readonly<Record<AddOn, { readonly price: number }>>;
+	/**
+	 * What orders may ask for and pay (MUST-04.2), in content order: draws pick from this order,
+	 * never from object keys (MUST-10.6).
+	 */
+	readonly orderGoods: readonly OrderGood[];
 }
 
 /**
@@ -58,6 +63,15 @@ export interface LevelRow {
 	readonly addOns: readonly AddOn[];
 	/** Facility tiers it unlocks for buying (MUST-05.5, 06.2; #85). */
 	readonly tiers: readonly FacilityTier[];
+	/** How many more order slots it gives the board (MUST-04.1): Level 1's are the board's first. */
+	readonly orderSlots: number;
+	/** Goods it unlocks for orders, by the ids in `orderGoods` (MUST-04.2; `GLOSSARY.md`, "Unlocked"). */
+	readonly orderGoods: readonly string[];
+	/**
+	 * Whole seconds an order slot waits at this Level before it refills, after a delivery and after a
+	 * discard (MUST-04.5, MUST-10.4); createSim converts them to ms once (D7).
+	 */
+	readonly refillSeconds: { readonly delivered: number; readonly discarded: number };
 }
 
 /** One tier of one facility, as the Level table names it. */
@@ -133,6 +147,17 @@ export interface Pen {
 	readonly xp: number;
 }
 
+/** A good orders may ask for, once a Level unlocks it for orders (MUST-04.2). */
+export interface OrderGood {
+	readonly good: string;
+	/** The fewest and most an order asks for (MUST-04.2's "set quantities"). */
+	readonly min: number;
+	readonly max: number;
+	/** Coins and XP an order pays for each one asked for (MUST-04.2, 05.2). */
+	readonly coins: number;
+	readonly xp: number;
+}
+
 export interface Crop {
 	/** Coins that planting costs (MUST-01.1). */
 	readonly seedPrice: number;
@@ -171,6 +196,9 @@ export const sliceContent = {
 			pens: [],
 			tiers: [],
 			addOns: [],
+			orderSlots: 3,
+			orderGoods: ["wheat"],
+			refillSeconds: { delivered: 120, discarded: 300 },
 		},
 		{
 			xp: 10,
@@ -181,6 +209,9 @@ export const sliceContent = {
 			pens: ["chickenPen"],
 			tiers: [],
 			addOns: [],
+			orderSlots: 1,
+			orderGoods: ["chickenFeed", "egg"],
+			refillSeconds: { delivered: 120, discarded: 300 },
 		},
 		{
 			xp: 30,
@@ -191,6 +222,9 @@ export const sliceContent = {
 			pens: [],
 			tiers: [{ facility: "feedMill", tier: 2 }],
 			addOns: [],
+			orderSlots: 1,
+			orderGoods: ["bread"],
+			refillSeconds: { delivered: 90, discarded: 240 },
 		},
 		{
 			xp: 60,
@@ -201,6 +235,9 @@ export const sliceContent = {
 			pens: [],
 			tiers: [{ facility: "bakery", tier: 2 }],
 			addOns: ["collector"],
+			orderSlots: 1,
+			orderGoods: [],
+			refillSeconds: { delivered: 90, discarded: 240 },
 		},
 		{
 			xp: 100,
@@ -214,6 +251,9 @@ export const sliceContent = {
 				{ facility: "bakery", tier: 3 },
 			],
 			addOns: ["loop"],
+			orderSlots: 1,
+			orderGoods: [],
+			refillSeconds: { delivered: 60, discarded: 180 },
 		},
 	],
 	plotPrice: { first: 20, growthPerMille: 1500 },
@@ -278,4 +318,10 @@ export const sliceContent = {
 		},
 	],
 	addOns: { loop: { price: 80 }, collector: { price: 60 } },
+	orderGoods: [
+		{ good: "wheat", min: 2, max: 6, coins: 3, xp: 1 },
+		{ good: "chickenFeed", min: 2, max: 4, coins: 4, xp: 1 },
+		{ good: "egg", min: 1, max: 3, coins: 8, xp: 2 },
+		{ good: "bread", min: 1, max: 2, coins: 15, xp: 4 },
+	],
 } as const satisfies Content;

@@ -68,10 +68,11 @@ it); content as data (MUST-10.4).
 
 `advance(state, to)` repeatedly takes the earliest automated step at or before `to` and processes
 it, until none is left. Steps at exactly `to` are processed. When several steps fall at the same
-time, MUST-10.6's key breaks the tie: time, then kind of automated step, then facility, pen or plot
-index, then queue slot. The key is defined once in the sim. `apply` advances to `at` first, then
-applies the action, then advances to `at` again, so a step the action made due at its own time
-runs in the same call (section 15).
+time, MUST-10.6's key breaks the tie: time, then kind of automated step, then facility, pen, plot
+or order slot index, then queue slot. The key is defined once in the sim. `apply` advances to `at` first, then
+applies the action, then advances to `at` once more, so the steps the action made due at `at` run
+before the farm is returned (the order slots a crossed Level adds, section 15; the Loop's
+restarts, section 16).
 
 Because steps at exactly `to` are processed, `advance(advance(s, t1), t2)` and `advance(s, t2)`
 process the same steps in the same order, so time-splitting (MUST-14.1) holds by construction.
@@ -431,7 +432,72 @@ index (table-driven rules); integer fixed-point arithmetic (section 10) for job 
 - **The unlock Level in the tier row.** MUST-05.5 puts every unlock in the Level table.
 - **`buyTier` with no tier.** A resent action would buy two tiers.
 
-## 15. The Loop and the Collector (#88)
+## 15. The order board (#87)
+
+Chosen by #87's lane on 11 Nov, unattended; the admin reviews it in #87's PRs ("Decided by the
+lane").
+
+`orders/` owns the order board (ADR-0005, section 3). The state's `board` has one entry per slot
+the farm's Level gives (MUST-04.1): `open` with its order, or `empty` with the `refillAt` it
+refills at. An order stores its goods (1–3 different goods, in the order drawn), its coins and its
+XP, all fixed when it is drawn. Content gives each Level-table row the order slots it adds, the
+goods it unlocks for orders and the two refill delays at that Level; `content.orderGoods` gives
+each good's fewest and most per order and its coins and XP per good, in content order.
+
+- **Drawing.** An order is drawn from the **orders** stream (section 7), from the goods unlocked
+  for orders at the farm's Level, in content order: one draw for how many kinds (1 to 3, at most
+  the goods there are), then for each kind one draw for which of the goods left and one for its
+  amount. Each draw is a uint32 modulo a count (section 10). Coins and XP are the amounts times
+  each good's coins and XP.
+- **Producible** (`GLOSSARY.md`) is derived, never stored: a crop the Level unlocks, a recipe's
+  output once its facility is bought at the recipe's tier, a pen's product once the pen is bought.
+  It never goes back within a rules version. While another open order asks for a good the farm
+  can't produce, a draw picks only from producible goods, so at most one open order does
+  (MUST-04.3). Level 1 must unlock a crop for orders, so that list is never empty; `createSim`
+  throws a RangeError otherwise.
+- **Delivering** takes every good through `storage/`'s `take`, whole or not at all (spec
+  decision 2, MUST-04.4), adds the coins, and gives the XP through `gainXp` (section 11). **Discarding**
+  only empties the slot. Both store `refillAt`: the farm's time plus the delivered or discarded delay
+  of its Level, read from content once (MUST-04.5; ADR-0006, section 7). The delivered delay is the
+  one of the Level the delivery's XP reaches.
+- **Refilling** is an automated step of kind `refillSlot`, keyed by the slot's index (section 2):
+  an empty slot draws a new order at its `refillAt` (MUST-04.6). A slot that a new Level adds is
+  drawn at once, as a `refillSlot` step at the farm's time with the next index, one slot at a time.
+  `apply` advances to `at` again after the action (section 2), so a Level an action crosses opens
+  its slots before the farm is returned. A new farm draws its Level 1 slots in `newFarm`.
+- **Step kinds.** `refillSlot` ranks after every kind on main (`ripen`, `finishJob`, `produce`).
+  It reads the Level and what is producible, which a step at the same time can change (#88's
+  Collector gains XP), and a slot that a Level adds is due at the time the Level is crossed, which
+  ranks after the step that crossed it only if refills rank after every kind that gains XP;
+  otherwise `advanceFarm` would throw. A refill changes only its slot and the orders stream, which
+  no other kind reads, so it never makes an earlier-ranked step due at its own time. **The admin's
+  decision (b), 11 Nov:** #88's `moveGoods` (the Collector, which gains XP) ranks before
+  `refillSlot`, and its `restartRecipe` (the Loop, which gains none) ranks last, after it. #88
+  isn't merged yet: whichever of #87 and #88 merges second sets that final order,
+  `["ripen", "finishJob", "produce", "moveGoods", "refillSlot", "restartRecipe"]`, with one
+  kind-order test covering all six.
+
+**Patterns:** a discriminated union per slot with a stored end time (section 5, as for animals in
+section 13); a seeded draw from a pool filtered before the draw (section 7); a derived predicate
+for producibility (section 5's single source of truth); the `StepSource` strategy of section 12;
+the shared `storage/` module and `progress/`'s `gainXp` (sections 11, 12).
+
+**Rejected:**
+
+- **Rejection sampling** (draw, and draw again while MUST-04.3 fails). The number of draws per
+  order would be unbounded, and each would shift the orders stream; filtering the pool first takes
+  a fixed number of draws.
+- **A stored flag on each order for "asks for a good the farm can't produce".** It is derived
+  from the farm and content, and two copies can disagree (section 5).
+- **Drawing the next order when the slot empties**, kept hidden until `refillAt`. MUST-04.3 and
+  the unlocked goods are about the moment the order is drawn, and a Level reached during the wait
+  would be ignored.
+- **Growing the board inside `gainXp`.** `progress/` would depend on `orders/`, and a Level crossed
+  by a step (#88's Collector) would still need a step.
+- **A slot count with a list of open orders.** It can't hold an empty slot's stored refill time.
+- **One refill delay for the whole board, or delays per good.** MUST-04.5 gives one pair per Level.
+
+## 16. The Loop and the Collector (#88)
 
 Decided by #88's lane on 11 Nov, under the admin's brief (content values and these shapes are the
 lane's call, reviewed in its PRs' "Decided by the lane"); the Loop's limit is the admin's decision
@@ -540,10 +606,12 @@ action behind it. Code and tickets say *automated step*, never "event", "tick" o
 | Policy function | `progress/`'s `purchase` | One rule for every upgrade: unlocked at a Level, then bought with coins (section 11). |
 | Queue with stored end times | a facility's jobs | Jobs run in start order, and work in flight keeps its end time (section 12). |
 | Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
-| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding and collecting from pens (sections 12, 13). |
+| Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding, collecting from pens and delivering orders (sections 12, 13, 15). |
 | Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
-| Level-triggered automated steps | the Collector, the Loop | The Collector acts a ms after waiting goods fit and the Loop whenever a slot and the inputs are there, so a slot or room freed by any step or action is used at once or at the next ms, never behind a step already run; the queue alone limits a Loop (section 15). |
+| Level-triggered automated steps | the Collector, the Loop | The Collector acts a ms after waiting goods fit and the Loop whenever a slot and the inputs are there, so a slot or room freed by any step or action is used at once or at the next ms, never behind a step already run; the queue alone limits a Loop (section 16). |
 | Table-driven rules | a facility's tier rows | Each tier's price, slots and job time is a row of content, so tuning or adding a tier changes no code (section 14). |
+| Discriminated union per slot, stored end time | the order board | Each slot is open or refilling at a time fixed when it emptied (section 15). |
+| Seeded draw from a pool filtered first | drawing an order | MUST-04.3 holds at every draw in a fixed number of draws (section 15). |
 
 ## Consequences
 

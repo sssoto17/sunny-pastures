@@ -2,9 +2,9 @@
 // content farm, and one apply. Reported in the PR, not gating yet (#41). The largest farm is every
 // plot the Level table allows bought (#83) and planted, each ripening at a different time, every
 // facility bought at its highest tier with that tier's queue full of jobs (#84, #85), every pen
-// bought with each animal producing and its trough full (#86), and every add-on on every facility
-// with a full silo, so the Loops and Collectors run until the wheat or the barn runs out (#88,
-// MUST-07.4).
+// bought with each animal producing and its trough full (#86), every order slot of the top Level
+// discarded, so the whole board refills (#87), and every add-on on every facility with a full silo,
+// so the Loops and Collectors run until the wheat or the barn runs out (#88, MUST-07.4).
 import { expect, it } from "vitest";
 
 import { createSim, sliceContent } from "../../index.js";
@@ -51,13 +51,17 @@ const feedEveryAnimal = sliceContent.pens.flatMap((pen, index) =>
 		() => ({ type: "feed", pen: index }) as const,
 	),
 );
-const fullFarm: FarmState = [
+const fed: FarmState = [
 	...sliceContent.pens.map((_pen, pen) => ({ type: "buyPen", pen }) as const),
 	...feedEveryAnimal,
 ].reduce(
 	(farm, action) =>
 		expectAccepted(sim.apply({ ...farm, barn: { chickenFeed: 10 } }, action, farm.time)),
 	working,
+);
+const fullFarm: FarmState = fed.board.reduce(
+	(farm, _slot, slot) => expectAccepted(sim.apply(farm, { type: "discard", slot }, farm.time)),
+	fed,
 );
 
 /** Every add-on on every facility (MUST-07.4), and a full silo for the Loops to run on (#88). */
@@ -83,7 +87,7 @@ it("advances 30 days and applies an action within the sim speed budget", async (
 }) => {
 	const results = await measure.compare(
 		measure(
-			"advance 30 days, every plot planted, every queue full, every pen fed, every add-on",
+			"advance 30 days, every plot planted, every queue full, every pen fed, the board refilling, every add-on",
 			() => {
 				sim.advance(automatedFarm, automatedFarm.time + thirtyDays);
 			},
@@ -95,7 +99,7 @@ it("advances 30 days and applies an action within the sim speed budget", async (
 
 	expect(
 		results.get(
-			"advance 30 days, every plot planted, every queue full, every pen fed, every add-on",
+			"advance 30 days, every plot planted, every queue full, every pen fed, the board refilling, every add-on",
 		).latency.mean,
 	).toBeLessThan(advanceBudget);
 	expect(results.get("apply one harvest after 30 days").latency.mean).toBeLessThan(applyBudget);

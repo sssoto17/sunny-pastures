@@ -102,3 +102,16 @@ describe("cropLocked", () => {
 		);
 	});
 });
+
+describe("prepareProgressRules", () => {
+	it("unlocks each order good at the first Level that lists it (MUST-04.2, #87)", () => {
+		const rules = prepareProgressRules(sliceContent);
+
+		expect([...rules.orderGoodLevels].sort()).toEqual([
+			["bread", 3],
+			["chickenFeed", 2],
+			["egg", 2],
+			["wheat", 1],
+		]);
+	});
+});

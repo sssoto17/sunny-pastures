@@ -111,7 +111,7 @@ const barnRoom = ({ barnCapacity }: World, farm: FarmState): number =>
  * bakery is left with a free slot, stopped by the wheat alone: a Loop's limits are its queue and
  * its inputs, never the barn (the admin, 11 Nov). A Collector
  * stops a Loop when the facility whose goods didn't fit has a Loop: its goods keep the slot
- * (ADR-0003, sections 2 and 15).
+ * (ADR-0003, sections 2 and 16).
  */
 function classify(world: World, { at, from }: Tie): string[] {
 	const { sim } = world;
