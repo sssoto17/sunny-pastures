@@ -1154,9 +1154,10 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
     runs no PR code: it runs only for a PR from `throwaway/103-claude` onto `throwaway/103-base`,
     and its checkout has no `ref`, so it gets the default branch. It uses the `factory`
     environment, and on this event the run's ref is `main`, so a job like it would get that
-    environment's secrets for any PR; #68's reviewer gets its own environment. #103's results
-    were recorded and #103 closed on 12 Nov, so **#227 deletes the file**, or rewrites it as
-    #68's reviewer, before `CONSTRAINTS.md` Exceptions row E1 expires on 12 Dec.
+    environment's secrets for any PR, so the admin's note for #68 is that the reviewer should
+    use its own environment. #103's results were recorded and #103 closed on 12 Nov, so **#227
+    deletes the file**, or rewrites it as #68's reviewer, before `CONSTRAINTS.md` Exceptions row
+    E1 expires on 12 Dec.
 
 **Alternatives considered.**
 - **Go public now**, for free scanning from M2. Rejected by the admin (Q1): the repo stays
@@ -1902,19 +1903,20 @@ updates:
       all-dev:
         dependency-type: development
     open-pull-requests-limit: 3
-    labels: ["area:ci-cd", "review:admin"]          # code-owned paths (triage-labels.md)
-    commit-message: { prefix: chore, include: scope } # chore(deps): / chore(deps-dev):
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
     cooldown:
       default-days: 7
-    labels: ["area:ci-cd", "review:admin"]
-    commit-message: { prefix: chore, include: scope }
 ```
 
-**Applied 8 Nov, #92 (with #69):** the file above, which is the 7 Nov draft plus two keys on both
-entries, deviations the admin decided on 8 Nov:
+**Applied 8 Nov, #92 (with #69):** `.github/dependabot.yml` is the draft above plus two keys on
+both entries, deviations the admin decided on 8 Nov:
+
+```yaml
+    labels: ["area:ci-cd", "review:admin"]          # code-owned paths (triage-labels.md)
+    commit-message: { prefix: chore, include: scope } # chore(deps): / chore(deps-dev):
+```
 
 - `labels: ["area:ci-cd", "review:admin"]`: Dependabot's PRs touch `package.json`, the lockfile or
   `.github/`, which are `area:ci-cd` and code-owned. Without it, Dependabot would add its own
@@ -2024,10 +2026,11 @@ raises the count. The differences:
   ([available rules, "Additional approval for unattributed Copilot pull requests"](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#additional-approval-for-unattributed-copilot-pull-requests),
   read 12 Nov). What it means here:
   - *Documented:* no effect today, at 0 required approvals.
-  - *Inference:* no effect on `sunny-factory`'s PRs at 1 approval either. The docs name only
-    Copilot opening a PR under its own App identity; they don't say whether another App's PR
-    counts as unattributed. If it did, a factory PR would need two approvals from step 12, the
-    reviewer App's alone wouldn't merge it, and every factory PR would wait for the admin.
+  - *Inference, unconfirmed until #68:* probably no effect on `sunny-factory`'s PRs at 1 approval
+    either. The docs name only Copilot opening a PR under its own App identity; they don't say
+    whether another App's PR counts as unattributed. If it did, a factory PR would need two
+    approvals from step 12, the reviewer App's alone wouldn't merge it, and every factory PR
+    would wait for the admin.
     Dependabot's PRs are code-owned, so the admin approves them anyway. #68 settles it with
     test (a) on a PR the factory App opened (as #101's run did with PR #199).
   - *Inference:* none on the reviewer App, which approves PRs and never opens them, or on PRs
