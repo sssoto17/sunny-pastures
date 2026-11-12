@@ -29,17 +29,18 @@ Project field (Status, Track, Mode, Size, Priority, Week) stays a field and neve
 
 ## Types
 
-Every issue carries **exactly one type**, set when it's filed, unless it's in `triage`. PRs carry
-no type label: the Conventional Commit prefix in the PR title is the type (see **Pull requests**).
+Every issue carries **exactly one type** label, set when it's filed, and the GitHub native issue
+type in the last column (`issue-tracker.md`, **Issue fields**). PRs carry no type label: the
+Conventional Commit prefix in the PR title is the type (see **Pull requests**).
 
-| Label | Use for |
-|---|---|
-| `feature` | New behaviour for the player, the admin or the API |
-| `bug` | Something that worked, or was specified, behaves wrongly |
-| `spike` | Throwaway work that answers a question with measurements or a prototype; its result lands in an ADR or doc |
-| `design` | Work whose output is decisions: a grill, an ADR, glossary terms, the spec. It blocks the issues that depend on it through a native dependency |
-| `chore` | Upkeep with no new behaviour: tooling, config, hooks, dependencies, and docs-only work |
-| `idea` | Wanted but not shaped enough to build. Parked until picked up |
+| Label | Use for | Native type |
+|---|---|---|
+| `feature` | New behaviour for the player, the admin or the API | Feature |
+| `bug` | Something that worked, or was specified, behaves wrongly | Bug |
+| `spike` | Throwaway work that answers a question with measurements or a prototype; its result lands in an ADR or doc | Task |
+| `design` | Work whose output is decisions: a grill, an ADR, glossary terms, the spec. It blocks the issues that depend on it through a native dependency | Task |
+| `chore` | Upkeep with no new behaviour: tooling, config, hooks, dependencies, and docs-only work | Task |
+| `idea` | Wanted but not shaped enough to build. Parked until picked up | Task |
 
 **`idea`** never moves to Ready. To work it, either a `design` issue that blocks it fleshes it
 out, or it's retyped (`feature`, `chore`…) once its body meets definition-of-ready rules 2–5.
@@ -84,10 +85,8 @@ implies.
 This is a solo project: every issue is written by the owner, so there's no reporter to wait on
 and nothing to reject by label. Work is manual by default and carries no label for it.
 
-**`triage`** stands in for the type and the area until the issue is evaluated. It's removed
-when definition-of-ready rule 1 holds (`issue-tracker.md`, **Status rules**): the Project fields
-are set and the issue has one type and one area. The admin decides Priority, Week and Size; an
-agent may propose them in a comment, and leaves `triage` on until the admin has set them.
+**`triage`** marks an issue missing its native type, Priority, Size or Week. Who sets those,
+and what adds and removes the label, is `issue-tracker.md`, **Issue fields**.
 
 ## Blocked
 

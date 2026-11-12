@@ -4,7 +4,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 ## Conventions
 
-- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies. The coordinating session files through `scripts/new-issue.sh` instead: labels, milestone, parent and Project fields in one checked command (`--help`; tests: `bash scripts/new-issue.test.sh`).
+- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies. The coordinating session files through `scripts/new-issue.sh` instead: labels, native issue type, milestone, parent and Project fields in one checked command (`--help`; tests: `bash scripts/new-issue.test.sh`). Whoever files an issue sets its four fields as **Issue fields** below says.
 - **Read an issue**: `gh issue view <number> --json number,title,body,labels,comments`.
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Make an issue a sub-issue of a parent**: `gh issue create --parent <parent> ...`, or `gh issue edit <parent> --add-sub-issue <child>` afterwards (`gh` 2.94+). Older `gh`: `gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<child-db-id>` (database id, as in **Blocking** below). Without sub-issues, put `Part of #<parent>` at the top of the child body.
@@ -70,7 +70,7 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
 - **Add to the Project and set its fields**: one command, with names, not ids:
 
   ```bash
-  scripts/issue-fields.sh 47 --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
+  scripts/issue-fields.sh 47 --type Task --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
   ```
 
   It adds the issue to the Project if it's missing, sets each field you name, then reads the
@@ -87,6 +87,9 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
     allows. Decided by the admin on 7 Nov (#56).
   - **Admin-only values are refused**: `--status Ready` (see **Status rules**) and `--mode Factory`
     (it goes with `factory:ready`, see `triage-labels.md`).
+  - **`--type`** sets GitHub's native issue type (Task, Bug, Feature) on the issue itself. Once
+    the type, Priority, Size and Week are all set, the script removes `triage` and its
+    `Triage:` line says so (see **Issue fields**).
 
 The ids, for reading raw `gh project` output (the script doesn't use this table):
 
@@ -99,7 +102,23 @@ The ids, for reading raw `gh project` output (the script doesn't use this table)
 | Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
 | Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
 
-When a skill publishes tickets, make each one a sub-issue of its workstream parent (see **Grouping**), give it a milestone, add it to the Project and set Track, Mode, Size, Priority and Week (both with `scripts/issue-fields.sh`), and add one type and one area label (see `triage-labels.md`). Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
+When a skill publishes tickets, make each one a sub-issue of its workstream parent (see **Grouping**), give it a milestone, add it to the Project and set the native type, Track, Mode, Size, Priority and Week (all with `scripts/issue-fields.sh`), and add one type and one area label (see `triage-labels.md`). The type, Size, Priority and Week are the skill's proposal (see **Issue fields**). Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status rules**).
+
+## Issue fields
+
+Every issue carries four values: GitHub's native **issue type**, and the Project's **Priority**,
+**Size** and **Week**. The admin's rule of 12 Nov (#158); the other docs point here.
+
+- **The filer proposes, the admin confirms.** The agent that files an issue sets all four when
+  filing; they're its proposal. The issue lands in Backlog, and the admin confirms or changes them
+  when moving it to Ready, which only the admin does (**Status rules**).
+- **`triage` while one is missing.** An issue missing any of the four carries `triage` until all
+  four are set. `scripts/new-issue.sh` adds it when one isn't given, and `scripts/issue-fields.sh`
+  removes it once all four are set.
+- **The native type follows the type label**, and the label stays: `feature` → Feature, `bug` →
+  Bug, and `spike`, `design`, `chore`, `idea` → Task (the repo offers Task, Bug and Feature). The
+  mapping is the Types table in `triage-labels.md`.
+- **No exceptions**: a workstream parent carries all four too (**Grouping**).
 
 ## Workstreams
 
@@ -114,9 +133,9 @@ goal.
 
 - **The parent** is an issue named for the workstream's goal, with no milestone prefix (for
   example #72 "Sim properties", #58 "CI/CD pipeline"). It's in a milestone and on the Project
-  with Track, Mode and Priority set, and has one type and one area label. Its body states the
-  goal and an "Acceptance criteria" list, and links the ADRs and PRs it rests on. Size and Week
-  stay on the tickets, not the parent.
+  with Track and Mode set, carries the four fields every issue does (**Issue fields**), and has
+  one type and one area label. Its body states the goal and an "Acceptance criteria" list, and
+  links the ADRs and PRs it rests on.
 - **It may span milestones**: its tickets keep their own milestones (#58 sits in M4 and has
   tickets in M2, M3 and M4).
 - **Its tickets are its sub-issues** (see **Make an issue a sub-issue of a parent**). A new
@@ -171,7 +190,7 @@ moves an issue to Ready; skills and agents create issues in Backlog and never pr
 The admin may move an issue **Backlog → Ready** only when it is chosen *and* every one of these
 holds (the definition of ready):
 
-1. **Fields set**: milestone, Track, Mode, Size, Priority and Week, plus one type and one area label (`triage-labels.md`). This is also when an issue leaves `triage`.
+1. **Fields set**: milestone, native issue type, Track, Mode, Size, Priority and Week, plus one type and one area label (`triage-labels.md`). The admin confirms the filer's type, Priority, Size and Week here (**Issue fields**).
 2. **Checkable outcome**: the body states the goal and an "Acceptance criteria" list that a reviewer can verify (a test, a command, a file, a number).
 3. **Fits one session**: Size is S or M. An L is split into smaller issues first.
 4. **Unblocked**: no `blocked:*` label, and every native blocker is closed.

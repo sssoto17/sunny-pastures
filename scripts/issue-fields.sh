@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Add an issue to the Sunny Pastures Project (if it isn't on it) and set its fields by name.
-# Field and option ids are looked up from GitHub on every run, never hard-coded. Every name is
-# checked before the first write, so a typo changes nothing. Tests: scripts/issue-fields.test.sh.
+# Add an issue to the Sunny Pastures Project (if it isn't on it) and set its fields and its native
+# issue type by name, then remove `triage` once the four fields every issue carries are set
+# (docs/agents/issue-tracker.md, "Issue fields"). Field, option and type ids are looked up from
+# GitHub on every run, never hard-coded. Every name is checked before the first write, so a typo
+# changes nothing. Tests: scripts/issue-fields.test.sh.
 # Needs bash 4.4+ (empty arrays under set -u) and an authenticated gh with the `project` scope.
 set -euo pipefail
 
@@ -16,23 +18,29 @@ PROJECT=3
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/issue-fields.sh <issue> [--track NAME] [--mode NAME] [--size NAME]
+usage: scripts/issue-fields.sh <issue> [--type NAME] [--track NAME] [--mode NAME] [--size NAME]
                                [--priority NAME] [--week NAME] [--status NAME]
 
 Adds the issue to the Sunny Pastures Project if it's missing, sets the named fields, then prints
 the fields as GitHub stored them. Names ignore case; --week takes "Wk 2" or the full title.
-Each flag also takes the form --size=M.
+Each flag also takes the form --size=M. --type sets GitHub's native issue type (Task, Bug,
+Feature), not the type label.
+
+Triage: once the native type, Priority, Size and Week are all set, a `triage` label is removed
+and the "Triage:" line says so. While one is missing, `triage` is left as it is and the line
+names what's missing (docs/agents/issue-tracker.md, "Issue fields").
 
 Status: a new item, or one with no Status, gets Backlog. A Status already set is left alone
 unless --status is given (--status Backlog may move an issue back). Admin-only values are
 refused: --status Ready and --mode Factory.
 
-After the writes it reads the item back and fails if a field doesn't show the value it set.
+After the writes it reads the issue and its item back and fails if a field doesn't show the
+value it set, or if `triage` is still on once all four are set.
 
 Exit codes: 0 done, 1 a gh call failed or the read-back differs, 2 bad arguments or an unknown
 name (nothing changed).
 
-example: scripts/issue-fields.sh 47 --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
+example: scripts/issue-fields.sh 47 --type Task --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
 EOF
 }
 
@@ -63,6 +71,7 @@ req_names=()
 while (($#)); do
   flag=${1%%=*}
   case $flag in
+    --type) field=Type ;;
     --track) field=Track ;;
     --mode) field=Mode ;;
     --size) field=Size ;;
@@ -95,7 +104,8 @@ while (($#)); do
   req_names+=("$value")
 done
 
-# One read-only lookup: the Project's fields and options, and the issue's item on the Project.
+# One read-only lookup: the Project's fields and options, the repo's issue types, the issue (its
+# node id, native type and labels) and its item on the Project.
 # Each output line is tab-separated: a record type, then its values.
 read -r -d '' QUERY <<'EOF' || true
 query($owner: String!, $repo: String!, $number: Int!, $project: Int!) {
@@ -114,8 +124,11 @@ query($owner: String!, $repo: String!, $number: Int!, $project: Int!) {
     }
   }
   repository(owner: $owner, name: $repo) {
+    issueTypes(first: 25) { nodes { id name isEnabled } }
     issue(number: $number) {
-      url title
+      id url title
+      issueType { name }
+      labels(first: 100) { nodes { name } }
       projectItems(first: 50) {
         nodes {
           id
@@ -140,7 +153,11 @@ read -r -d '' FILTER <<'EOF' || true
   ($p.fields.nodes[] | select(.configuration) | . as $f
     | (.configuration.iterations + .configuration.completedIterations)[]
     | ["option", $f.name, $f.id, "iteration", .id, .title]),
-  (.data.repository.issue // empty | ["issue", .url]),
+  (.data.repository.issueTypes.nodes // [] | .[] | select(.isEnabled)
+    | ["option", "Type", "-", "type", .id, .name]),
+  (.data.repository.issue // empty | ["issue", .url, .id]),
+  (.data.repository.issue.issueType.name // empty | ["value", "Type", .]),
+  (.data.repository.issue.labels.nodes // [] | .[] | ["label", .name]),
   (.data.repository.issue.projectItems.nodes // [] | .[] | select(.project.id == $p.id)
     | ["item", .id],
       (.fieldValues.nodes[] | select(.field) | ["value", .field.name, (.name // .title)]))
@@ -152,19 +169,24 @@ lookup() {
     -F project="$PROJECT" --jq "$FILTER"
 }
 
-# Read the lookup into globals: project_id, issue_url, item_id, the item's current values and
-# the options (parallel arrays opt_*: field name, field id, select/iteration, option id, name).
+# Read the lookup into globals: project_id, issue_url, issue_id, item_id, labels, the current
+# values (the item's fields and the issue's Type) and the options (parallel arrays opt_*: field
+# name, field id, select/iteration/type, option id, name).
 load() { # what-it-means-on-failure
   local rows kind a b c d e
   rows=$(lookup) || die 1 "could not read issue #$issue and the Project from GitHub; $1"
-  project_id="" issue_url="" item_id=""
+  project_id="" issue_url="" issue_id="" item_id="" labels=" "
   current_fields=() current_values=()
   opt_fields=() opt_field_ids=() opt_kinds=() opt_ids=() opt_names=()
   while IFS=$'\t' read -r kind a b c d e; do
     case $kind in
       project) project_id=$a ;;
-      issue) issue_url=$a ;;
+      issue)
+        issue_url=$a
+        issue_id=$b
+        ;;
       item) item_id=$a ;;
+      label) labels+="$a " ;;
       value)
         current_fields+=("$a")
         current_values+=("$b")
@@ -242,16 +264,27 @@ join() { # items... -> "a, b, c", or "nothing"
   printf '%s' "${s%, }"
 }
 
+# The native type is set on the issue, not the item: updateIssue's issueTypeId (GitHub GraphQL
+# reference, "UpdateIssueInput"). gh has no flag for it (gh 2.89).
+read -r -d '' SET_TYPE <<'EOF' || true
+mutation($issue: ID!, $type: ID!) {
+  updateIssue(input: {id: $issue, issueTypeId: $type}) { issue { number } }
+}
+EOF
+
 done_fields=()
 for k in "${!plan[@]}"; do
   j=${plan[k]}
-  if [[ ${opt_kinds[j]} == iteration ]]; then
-    set_flag=--iteration-id
+  if [[ ${opt_kinds[j]} == type ]]; then
+    set_one() { gh api graphql -f query="$SET_TYPE" -f issue="$issue_id" -f type="${opt_ids[j]}" >/dev/null; }
+  elif [[ ${opt_kinds[j]} == iteration ]]; then
+    set_one() { gh project item-edit --project-id "$project_id" --id "$item_id" \
+      --field-id "${opt_field_ids[j]}" --iteration-id "${opt_ids[j]}" >/dev/null; }
   else
-    set_flag=--single-select-option-id
+    set_one() { gh project item-edit --project-id "$project_id" --id "$item_id" \
+      --field-id "${opt_field_ids[j]}" --single-select-option-id "${opt_ids[j]}" >/dev/null; }
   fi
-  if ! gh project item-edit --project-id "$project_id" --id "$item_id" \
-    --field-id "${opt_field_ids[j]}" "$set_flag" "${opt_ids[j]}" >/dev/null; then
+  if ! set_one; then
     left=()
     for l in "${plan[@]:k}"; do left+=("${opt_fields[l]}"); done
     die 1 "could not set ${opt_fields[j]}. set: $(join "${done_fields[@]}"); not set: $(join "${left[@]}"). Re-run the same command."
@@ -261,12 +294,46 @@ done
 
 # Read the item back, so what's printed is what GitHub stored, and check it against the plan.
 load "the fields were written but couldn't be read back; re-run to check"
+
+# Triage: every issue carries a native type, Priority, Size and Week; `triage` stays on while one
+# is missing and comes off here once all four are set (docs/agents/issue-tracker.md, "Issue
+# fields"). Only removed, never added: new-issue.sh adds it when it files an issue.
+missing_four() {
+  local f
+  for f in Type Priority Size Week; do
+    [[ -n $(current "$f") ]] || printf '%s\n' "$f"
+  done
+}
+has_triage() { [[ $labels == *" triage "* ]]; }
+mapfile -t missing < <(missing_four)
+removed=""
+if ((${#missing[@]} == 0)) && has_triage; then
+  gh issue edit "$issue" --repo "$OWNER/$REPO" --remove-label triage >/dev/null ||
+    die 1 "the fields are set, but \`triage\` couldn't be removed. Run: gh issue edit $issue --repo $OWNER/$REPO --remove-label triage"
+  removed=1
+  load "\`triage\` was removed but the issue couldn't be read back; re-run to check"
+fi
+
 printf '%s\n' "$issue_url"
-for field in Status Track Mode Size Priority Week; do
+for field in Type Status Track Mode Size Priority Week; do
   value=$(current "$field")
   printf '%-9s %s\n' "$field:" "${value:--}"
 done
+if has_triage; then
+  triage="yes"
+  ((${#missing[@]})) && triage+=" (missing: $(join "${missing[@]}"))"
+elif [[ -n $removed ]]; then
+  triage="removed (type, Priority, Size and Week are set)"
+else
+  triage="-"
+  ((${#missing[@]})) && triage+=" (missing: $(join "${missing[@]}"))"
+fi
+printf '%-9s %s\n' "Triage:" "$triage"
+
 mismatches=()
+if ((${#missing[@]} == 0)) && has_triage; then
+  mismatches+=("triage is still on, though all four are set")
+fi
 for j in "${plan[@]}"; do
   value=$(current "${opt_fields[j]}")
   if [[ $value != "${opt_names[j]}" ]]; then
