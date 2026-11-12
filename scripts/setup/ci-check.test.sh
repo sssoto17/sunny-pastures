@@ -10,6 +10,7 @@ command -v jq >/dev/null || { echo "ci-check.test: needs jq" >&2; exit 2; }
 
 src="$(cd "$(dirname "$0")" && pwd)"
 draft="$src/workflows/check-101-identities.yml"
+wf103="$src/../../.github/workflows/check-103-claude.yml" # on main, not a draft
 GH_URL=https://github.com/sssoto17/sunny-pastures.git
 pass=0
 fail=0
@@ -47,7 +48,7 @@ case "$*" in
     tail -n +2 "$dir/fx/auth" >"$dir/fx/auth.rest" 2>/dev/null && mv "$dir/fx/auth.rest" "$dir/fx/auth"
     exit "${rc:-0}" ;;
   "api -i user") cat "$dir/fx/scopes"; exit 0 ;;
-  "run list --repo "*" --branch "*) key=runs ;;
+  "run list --repo "*" --branch "* | "run list --repo "*" --workflow "*) key=runs ;;
   "run view "*" --json jobs"*) key=jobs ;;
   "run view "*" --log") cat "$dir/fx/log"; exit 0 ;;
   "api repos/"*"/pulls/"*"/reviews"*) key=reviews ;;
@@ -88,7 +89,10 @@ reset() {
   git init -q --bare "$work/origin.git"
   git clone -q "$work/origin.git" "$work/seed" 2>/dev/null
   echo hello >"$work/seed/README.md"
-  git -C "$work/seed" add README.md
+  # main carries 103's workflow, as on GitHub once its PR is merged; start 103 needs it there.
+  mkdir -p "$work/seed/.github/workflows"
+  cp "$wf103" "$work/seed/.github/workflows/"
+  git -C "$work/seed" add README.md .github
   git -C "$work/seed" commit -qm init
   git -C "$work/seed" push -q origin main
   git clone -q "$GH_URL" "$work/clone"
@@ -277,17 +281,25 @@ run start 101
 expect_code 2
 assert "expected the cleanup hint" contains "$err" "cleanup 101"
 
-# --- start 103 without the workflow scope: warns, still pushes (an SSH remote needs none) ----
+# --- without the workflow scope: start 101 warns and still pushes (an SSH remote needs none) ---
+# start 103 pushes no workflow file, so it doesn't ask about scopes at all.
+reset
+printf 'X-Oauth-Scopes: gist, read:org, repo\r\n' >"$work/fx/scopes"
+run start 101
+expect_code 0
+assert "expected the scope warning" contains "$err" "gh auth refresh -h github.com -s workflow"
+assert "expected the 101 workflow pushed" \
+  git -C "$work/origin.git" cat-file -e throwaway/101-identities:.github/workflows/check-101-identities.yml
 reset
 printf 'X-Oauth-Scopes: gist, read:org, repo\r\n' >"$work/fx/scopes"
 run start 103
 expect_code 0
-assert "expected the scope warning" contains "$err" "gh auth refresh -h github.com -s workflow"
-assert "expected the 103 workflow pushed" \
-  git -C "$work/origin.git" cat-file -e throwaway/103-claude:.github/workflows/check-103-claude.yml
+assert "expected no scope warning for 103" lacks "$err" "workflow scope"
+assert "expected no scope lookup for 103" lacks "$calls" "api -i user"
 
-# --- start 103: a base branch with the marker hooks, the check branch on it, and the PR -------
-# The action restores .claude/ from the PR's base branch, so the markers live on the base.
+# --- start 103: a base branch with the marker hooks, a head on it, and the PR -----------------
+# The workflow runs from main on pull_request_target; the action restores .claude/ from the PR's
+# base branch, so the markers live on the base. The head only adds a text file, for a diff.
 reset
 run start 103
 expect_code 0
@@ -299,11 +311,15 @@ hooks=$(git -C "$work/origin.git" show "$base:.claude/settings.json" |
   jq -r '[.hooks.SessionStart[].hooks[].command, .hooks.UserPromptSubmit[].hooks[].command] | join("|")')
 assert "expected both marker hooks on the base" \
   test "$hooks" == 'echo SessionStart >> "$RUNNER_TEMP/hook-marker"|echo UserPromptSubmit >> "$RUNNER_TEMP/hook-marker"'
-assert "expected only the workflow between base and check branch" \
-  test "$(git -C "$work/origin.git" diff --name-only "$base" "$head")" == ".github/workflows/check-103-claude.yml"
+assert "expected the head to add only its text file" \
+  test "$(git -C "$work/origin.git" diff --name-only "$base" "$head")" == "throwaway-103.md"
+assert "expected main's workflow on both branches, unchanged" \
+  test -z "$(git -C "$work/origin.git" diff --name-only main "$head" -- .github)"
 assert "expected the PR opened from the check branch onto the base" \
   contains "$calls" "pr create --repo sssoto17/sunny-pastures --base $base --head $head"
 assert "expected the PR number printed" contains "$out" "PR #77"
+assert "expected the run list hint by workflow and event" \
+  contains "$out" "gh run list --repo sssoto17/sunny-pastures --workflow check-103-claude.yml --event pull_request_target"
 assert "expected no URL printed" lacks "$out" "https://"
 assert "expected no leftover worktree" test "$(git -C "$work/clone" worktree list | grep -c .)" -eq 1
 
@@ -330,18 +346,43 @@ assert "expected the cleanup hint" contains "$err" "cleanup 103"
 assert "expected no check branch pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway/103-claude)"
 assert "expected no PR opened" lacks "$calls" "pr create"
 
-# The 103 draft (no harness runs the YAML): the action supports no push event, so it runs on the
-# PR, only for the check branch; it never asks for an OIDC token, and reads the action's output.
-draft103=$(cat "$src/workflows/check-103-claude.yml")
-assert "expected a pull_request trigger" contains "$draft103" $'on:\n  pull_request:\n    types: [opened, synchronize, reopened]'
-assert "expected no push trigger" lacks "$draft103" $'\n  push:'
-assert "expected the job guarded to the check branch" contains "$draft103" "if: github.head_ref == 'throwaway/103-claude'"
-assert "expected the token handed over, so no OIDC exchange" contains "$draft103" 'github_token: ${{ github.token }}'
-assert "expected no id-token permission" lacks "$draft103" "id-token"
-assert "expected only contents: read" contains "$draft103" $'permissions:\n  contents: read\n\n'
+# Before 103's workflow is merged, start 103 would open a PR that runs nothing: refused first.
+reset
+git -C "$work/seed" rm -q .github/workflows/check-103-claude.yml
+git -C "$work/seed" commit -qm "no 103 workflow" && git -C "$work/seed" push -q origin main
+run start 103
+expect_code 2
+assert "expected the merge hint" contains "$err" "check-103-claude.yml isn't on main yet"
+assert "expected nothing pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+assert "expected no PR opened" lacks "$calls" "pr create"
+
+# 103's workflow (no harness runs the YAML). It lives on main, so it runs on pull_request_target
+# (the action has no push event; a pull_request run's refs/pull/N/merge is refused by the factory
+# environment), only for our own head onto the base; it checks out no PR code, never asks for an
+# OIDC token, and reads the action's output.
+assert "expected no 103 draft left beside the others" test ! -e "$src/workflows/check-103-claude.yml"
+wf=$(cat "$wf103")
+assert "expected a pull_request_target trigger onto the base branch only" contains "$wf" \
+  $'on:\n  pull_request_target:\n    types: [opened, synchronize, reopened]\n    branches: [throwaway/103-base]'
+assert "expected no pull_request trigger" lacks "$wf" $'\n  pull_request:'
+assert "expected no push trigger" lacks "$wf" $'\n  push:'
+assert "expected the job guarded to the base" contains "$wf" "github.event.pull_request.base.ref == 'throwaway/103-base' &&"
+assert "expected the job guarded to the head" contains "$wf" "github.event.pull_request.head.ref == 'throwaway/103-claude' &&"
+assert "expected the job guarded to this repo's head" \
+  contains "$wf" "github.event.pull_request.head.repo.full_name == github.repository"
+assert "expected nothing checked out by ref (the default branch only)" lacks "$wf" "ref:"
+assert "expected no PR head sha anywhere" lacks "$wf" "head.sha"
+assert "expected the head ref never expanded into a step" lacks "$wf" "github.head_ref"
+assert "expected the checkout without credentials" contains "$wf" "persist-credentials: false"
+assert "expected no API key" contains "$wf" "ANTHROPIC_API_KEY: ''"
+assert "expected the token handed over, so no OIDC exchange" contains "$wf" 'github_token: ${{ github.token }}'
+assert "expected no id-token permission" lacks "$wf" "id-token"
+assert "expected only contents: read" contains "$wf" $'permissions:\n  contents: read #'
+assert "expected one permissions block" test "$(grep -c 'permissions:' <<<"$wf")" -eq 1
 assert "expected the execution file from the action's output" \
-  contains "$draft103" '${{ steps.claude.outputs.execution_file }}'
-assert "expected no marker edit in the checkout (the action undoes it)" lacks "$draft103" "hooks.SessionStart"
+  contains "$wf" '${{ steps.claude.outputs.execution_file }}'
+assert "expected no marker edit in the checkout (the action undoes it)" lacks "$wf" "hooks.SessionStart"
+assert "expected the removal note" contains "$wf" "# REMOVAL:"
 
 # --- start 101 and 102 push only: no PR from the admin's gh ----------------------------------
 reset
@@ -384,8 +425,8 @@ assert "expected the RESULT line" contains "$out" "claude (timeout): RESULT subt
 assert "expected no echoed script line" lacks "$out" "matrix.check"
 assert "expected no other log line" lacks "$out" "Runner version"
 
-# On the throwaway PR, ci and Labeler run on the same branch, and may be newer: results reads
-# the check's own run.
+# On the throwaway PR, ci and Labeler run too, and may be newer: results reads the check's own
+# run. 103's runs are pull_request_target runs of a workflow on main: listed by workflow and event.
 cat >"$work/fx/runs.json" <<'EOF'
 [{"databaseId":11,"workflowName":"ci","status":"in_progress","conclusion":"","url":"https://example.test/run/11"},
  {"databaseId":10,"workflowName":"Labeler","status":"completed","conclusion":"success","url":"https://example.test/run/10"},
@@ -396,6 +437,9 @@ run results 103
 expect_code 0
 assert "expected the check-103 run, not a newer ci run" contains "$out" "Run: https://example.test/run/7"
 assert "expected the runs' workflow names asked for" contains "$calls" "workflowName"
+assert "expected 103's runs listed by workflow and event" \
+  contains "$calls" "run list --repo sssoto17/sunny-pastures --workflow check-103-claude.yml --event pull_request_target"
+assert "expected 103's runs not listed by branch" lacks "$calls" "--branch throwaway/103-claude"
 
 # --- results 101 also reads the PR, its CI runs and the tag ------------------------------------
 echo '[{"databaseId":8,"workflowName":"check-101-identities","status":"completed","conclusion":"success","url":"https://example.test/run/8"}]' \
@@ -454,7 +498,7 @@ assert "expected the fallback named" contains "$out" "ci-project.sh --fine-grain
 assert "expected the stop rule" contains "$out" "Bring the alternatives back to the admin"
 assert "expected repo only as a never" contains "$out" "Never widen a classic token to the repo scope"
 
-pr101='{"number":42,"headRefName":"throwaway/101-factory-pr"}' # #101's PR, open in the cleanup tests
+pr101='{"number":42,"headRefName":"throwaway/101-factory-pr","isCrossRepository":false}' # #101's PR, open in the cleanup tests
 
 # --- cleanup 101: closes the PR unmerged, deletes the three branches ---------------------------
 reset
@@ -480,13 +524,16 @@ all_branches() {
     throwaway/102-project throwaway/103-base throwaway/103-claude >"$work/fx/refs"
 }
 reset
-echo "[$pr101, {\"number\":77,\"headRefName\":\"throwaway/103-claude\"}]" >"$work/fx/prs.json"
+# A fork's PR with the same head name, newer: never ours to close.
+echo "[$pr101, {\"number\":78,\"headRefName\":\"throwaway/103-claude\",\"isCrossRepository\":true},
+  {\"number\":77,\"headRefName\":\"throwaway/103-claude\",\"isCrossRepository\":false}]" >"$work/fx/prs.json"
 all_branches
 run cleanup 103
 expect_code 0
 assert "expected 103's PR looked up by its head" contains "$calls" "pr list --repo sssoto17/sunny-pastures --head throwaway/103-claude --state open"
 assert "expected 103's PR closed with a comment" contains "$calls" "pr close 77 --repo sssoto17/sunny-pastures --comment"
 assert "expected #101's PR left open" lacks "$calls" "pr close 42"
+assert "expected a fork's PR with the same head name left alone" lacks "$calls" "pr close 78"
 assert "expected #101's PR not even looked up" lacks "$calls" "--head throwaway/101-factory-pr"
 assert "expected no merge" lacks "$calls" "pr merge"
 assert "expected the check branch deleted" contains "$calls" "api -X DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/103-claude"
