@@ -7,9 +7,10 @@ import { describe, expect, inject, it, vi } from "vitest";
 import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Content, FarmState, Sim } from "../../index.js";
 import { delay, farmId, play, timedActions } from "../../state/tests/farms.js";
+import { requireProvided } from "../../state/tests/provided.js";
 import { richContent } from "./richContent.js";
 
-const params = inject("fastCheck");
+const params = requireProvided("fastCheck", inject("fastCheck"));
 // #200: the timeout scales with the run count; Vitest resets it after this file.
 vi.setConfig({ testTimeout: inject("propertyTimeout") });
 

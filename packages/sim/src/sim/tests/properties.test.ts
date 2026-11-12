@@ -10,11 +10,12 @@ import type { Action, Content, FarmState, Order, Sim } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
 import type { Transition } from "../../state/tests/farms.js";
+import { requireProvided } from "../../state/tests/provided.js";
 import { listDrawFaults } from "./orderTerms.js";
 import { ownedFacility } from "./ownedFacility.js";
 import { richContent, richFeedSeconds, richJobXp } from "./richContent.js";
 
-const params = inject("fastCheck");
+const params = requireProvided("fastCheck", inject("fastCheck"));
 // #200: the timeout scales with the run count; Vitest resets it after this file.
 vi.setConfig({ testTimeout: inject("propertyTimeout") });
 const { wheat } = sliceContent.crops;
