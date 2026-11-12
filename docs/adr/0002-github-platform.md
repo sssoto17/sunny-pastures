@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # How the project uses GitHub
@@ -10,8 +10,8 @@ deploy hooks. Until now each piece was set up when it was first needed, and noth
 agents work `factory:ready` issues without the admin. Before that, this ADR settles how the repo,
 the board and the platform are used, and in which order the admin turns things on.
 
-This began as a proposal on 7 Nov. The admin applies only what they approve, using the checklist
-at the end. Files under `.github/` are a protected path, so their drafts sit in the appendix and
+This began as a proposal on 7 Nov. **Accepted 12 Nov 2026, after checklist steps 1–10 and #40
+were applied.** The admin applies only what they approve, using the checklist at the end. Files under `.github/` are a protected path, so their drafts sit in the appendix and
 land in the admin's PRs.
 
 **Applied so far:** checklist steps 1–8 on 8 Nov (#66), step 9 with the templates PR (#91),
