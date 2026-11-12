@@ -77,8 +77,9 @@ each linked doc with the sections that matter, files whose style to copy>,
 `docs/agents/sandbox.md` and `AGENTS.md`.
 
 Skills (`docs/diagrams/workflow.md`, "When to use what"): the admin launches you with
-`/implement #<N>`, which drives `tdd` and ends with `code-review`; follow it. Enter the worktree
-before `implement`'s first edit or commit.
+`/implement #<N>`, which drives `tdd` and ends with `code-review`; follow it, and run that
+review as a self-review under `REVIEW.md`. Enter the worktree before `implement`'s first edit or
+commit.
 Extra skills: <the ↳ rows of that table that fit, each with the part of the work it covers, or
 "none">.
 
@@ -155,22 +156,19 @@ the board; the work itself goes to lanes and subagents.
 - **Delegate.** Work that crops up becomes a brief in `.scratch/brief-<N>-<slug>.md` for a lane,
   with its launch line, or a background subagent. Lanes edit, build and open PRs; you read a PR's
   description and checks, and leave its diff to the reviewer.
-- **Dispatch a reviewer for every PR** the moment a lane reports it: a background
-  `agent-skills:code-reviewer` agent, fresh context. Its prompt carries the PR number, the
-  issue's acceptance criteria, the brief's path and the rules to check (the relevant
-  `CONSTRAINTS.md` rows, ADRs, `docs/agents/code-style.md`, `AGENTS.md`), and asks for:
-  read-only (no comments, pushes or approvals); the PR description's claims are claims to check,
-  not facts; a verdict (merge / merge after fixes / don't merge), then findings ranked most
-  severe first, each with evidence and a fix, confirmed apart from unverified, under 400 words.
-  Your own view of the PR stays out of the prompt. Tell the admin "hold the merge until I relay
-  the verdict".
-- **Delta review.** After a fix round, dispatch a reviewer the same way over only the fix
-  commits (`<old head>..<new head>`), checked against the findings they answer.
-- **Relay.** Give the admin the verdict, the ranked findings, one recommendation and one
-  question ("Send the lane fixes 1 and 2?"). On yes, `SendMessage` the lane a self-contained
-  message: what to change, "admin-approved, <date>", and what to report back (head SHA, check
-  results). Reach a local lane by `SendMessage`; a message for the admin to paste is only for a
-  lane `ListAgents` can't reach.
+- **Dispatch a reviewer for every PR** the moment a lane reports it, and again after each fix
+  round: a background `agent-skills:code-reviewer` agent, fresh context. Its prompt is the PR
+  number and head SHA, the issue number, the brief's path, the kind (full, delta
+  `<old head>..<new head>` with the findings it answers, or part k of a split), and "Read
+  `REVIEW.md` from origin/main and follow it." Your own view of the PR stays out of the prompt.
+  Tell the admin "hold the merge until I relay the verdict".
+- **Relay.** First tick the issue's criteria the reviewer confirmed
+  (`docs/agents/issue-tracker.md`, "Checkboxes"). Then give the admin the verdict, the ranked
+  findings, the criteria left unverified, one recommendation and one question ("Send the lane
+  fixes 1 and 2?"). On yes, `SendMessage` the lane a self-contained message: what to change,
+  "admin-approved, <date>", and what to report back (head SHA, check results). Reach a local
+  lane by `SendMessage`; a message for the admin to paste is only for a lane `ListAgents` can't
+  reach.
 - **Keep the board.** Before proposing the next lane, check its blockers:
   `gh api repos/sssoto17/sunny-pastures/issues/<N>/dependencies/blocked_by` lists none open
   (`docs/agents/issue-tracker.md`, definition of ready, rule 4). Move issues with
