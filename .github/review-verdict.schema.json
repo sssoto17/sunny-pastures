@@ -1,0 +1,39 @@
+{
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["summary", "findings", "escalation_rows", "escalation_path", "resolve_threads"],
+	"properties": {
+		"summary": {
+			"type": "string",
+			"description": "The review body: the report REVIEW.md sets out, with Optional and Nit findings"
+		},
+		"findings": {
+			"type": "array",
+			"description": "Required findings only. line 0 means no line (for example a split request)",
+			"items": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": ["path", "line", "body"],
+				"properties": {
+					"path": { "type": "string" },
+					"line": { "type": "integer", "minimum": 0 },
+					"body": { "type": "string" }
+				}
+			}
+		},
+		"escalation_rows": {
+			"type": "array",
+			"description": "Names of the CONSTRAINTS.md escalation rows the PR meets; empty when none",
+			"items": { "type": "string", "minLength": 1, "pattern": "\\S" }
+		},
+		"escalation_path": {
+			"type": "string",
+			"description": "A changed file that triggered the first row; empty when no row applies"
+		},
+		"resolve_threads": {
+			"type": "array",
+			"description": "Node ids of your earlier finding threads that this head fixes",
+			"items": { "type": "string" }
+		}
+	}
+}

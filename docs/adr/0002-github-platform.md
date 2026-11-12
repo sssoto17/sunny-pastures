@@ -483,6 +483,32 @@ opens. Claude is billed through the admin's employer seat (#37; "The factory's i
   workflow can approve. Only `@sssoto17` is a code owner. This supersedes the Marketplace
   research's catch-all `* @sssoto17`, which would have sent every PR to the admin.
 
+**The review workflow (#68 step 2, 12 Nov): `.github/workflows/review.yml`.** On
+`pull_request_target` from `main`, in the `review` environment, for non-draft PRs from this
+repo's branches. The pattern is *propose, then apply*: Claude proposes and plain code applies.
+- **Propose.** Claude reads the PR as files of data (diff, reviews, threads, linked issues) next
+  to `main`'s checkout. It has Read, Grep and Glob only, and the read-only `GITHUB_TOKEN`. It
+  follows `.github/review-prompt.md`, which points to `REVIEW.md`, and answers with a JSON
+  verdict (`--json-schema`, `.github/review-verdict.schema.json`).
+- **Apply.** Only after Claude has finished does the job mint the App's token, scoped to
+  contents and pull requests. `.github/scripts/post-review.sh` (tested by
+  `.github/scripts/tests/post-review.test.mjs`) then posts the review and applies the rules
+  above in code. It approves only when none of these holds: a Required finding, an escalation
+  row, `review:admin`, an escalation thread of its own, or an earlier finding of its own still
+  open. It also reopens escalation threads someone other
+  than the admin resolved, resolves only the App's own fixed finding threads, adds the label and
+  the escalation thread, requests the admin's review on factory PRs, and dismisses its own
+  Request changes once an escalated PR is fixed.
+- **`labeled`:** adding `review:admin` re-runs the review, which dismisses the App's earlier
+  approval and posts a COMMENT (test (e)); a later COMMENT alone wouldn't replace an APPROVE. The job skips every other label, and the label the App adds itself
+  (`sender` is `sunny-reviewer[bot]`), so it can't loop. Its concurrency group is on the job, so
+  a skipped event doesn't cancel a running review.
+- **Not yet:** the bot doesn't turn on auto-merge (step 3 of the flow) until Q16 allows it.
+- **Alternatives considered.** Claude writing to GitHub itself with the App's token, through
+  `gh` or the action's comment tools: rejected, because the model that reads the PR's text would
+  then hold a token that can approve. A Bash allow-list (`gh pr view:*` and the like): rejected,
+  because Bash rules match command text (`docs/agents/sandbox.md`).
+
 **A weakened bar is blocked, or goes to the admin (decided 7 Nov).** The ways a bar gets lowered
 are listed once, in `CONSTRAINTS.md`, "Guarding the bar". `guard / floor` fails a PR that weakens
 the bar, unless the same PR adds an Exceptions row to `CONSTRAINTS.md`. That file is code-owned,
