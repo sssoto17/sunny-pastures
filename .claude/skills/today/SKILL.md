@@ -176,7 +176,9 @@ the board; the work itself goes to lanes and subagents.
   progress when someone starts it, In review when its PR is open with `Closes #N` and its checks
   are green. Remove a
   `blocked:*` label once its cause is gone. File follow-ups with `scripts/new-issue.sh` (Backlog,
-  under their parent); log incidents on the Retro inbox. When the admin has archived a merged
+  under their parent, with the type, Priority, Size and Week you propose:
+  `docs/agents/issue-tracker.md`, "Issue fields"); log incidents on the Retro inbox. When the
+  admin has archived a merged
   lane, run `scripts/after-merge.sh <name>` (a worktree still locked by the archived session gets
   `git worktree unlock` first). Ask "close #N?" once the closing PR has merged, and check a split
   PR's `closingIssuesReferences` so only the last part closes the issue.

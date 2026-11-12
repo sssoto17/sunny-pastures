@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Tests for issue-fields.sh through its command line, with `gh` replaced by a fake on PATH.
 # The fake logs every call and never reaches GitHub. It holds the issue's Project item as the
-# tab-separated rows the script's --jq filter produces, applies each item-add / item-edit to
-# them, and serves them to the next lookup, so the read-back sees what was written.
+# tab-separated rows the script's --jq filter produces, applies each item-add / item-edit, type
+# mutation and label removal to them, and serves them to the next lookup, so the read-back sees
+# what was written.
 # The --jq filter itself runs only against the real API (see the PR's dry run): gh evaluates it,
 # and these tests don't depend on jq.
 # Run: bash scripts/issue-fields.test.sh
@@ -23,12 +24,42 @@ mkdir -p "$work/bin"
 # item-add adds an item row. item-edit replaces the field's value row with the option's name,
 # unless $work/drop-edit exists (the edit "succeeds" but GitHub doesn't show it yet). If
 # $work/fail-edit exists, edit number N (its content, default 1) and later ones exit 1.
+# The updateIssue mutation replaces the Type value row (exit 1 if $work/fail-type exists).
+# issue edit --remove-label drops the label row (exit 1 if $work/fail-remove exists; kept, with
+# exit 0, if $work/drop-remove exists).
 cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
 state=$dir/state
+T=$'\t'
 for a in "$@"; do printf '%s\n' "$a"; done >>"$dir/calls"
 printf -- '--\n' >>"$dir/calls"
+if [[ $1 == api && $2 == graphql && $* == *"query=mutation"* ]]; then
+  [[ -f $dir/fail-type ]] && { echo "fake: updateIssue failed" >&2; exit 1; }
+  for a in "$@"; do
+    case $a in
+      type=*) type_id=${a#type=} ;;
+      issue=*) issue_id=${a#issue=} ;;
+    esac
+  done
+  grep -qxF "issue${T}https://github.com/sssoto17/sunny-pastures/issues/47${T}$issue_id" "$state" ||
+    { echo "fake: no issue $issue_id" >&2; exit 1; }
+  name=$(awk -F'\t' -v o="$type_id" '$1 == "option" && $2 == "Type" && $5 == o { print $6 }' "$state")
+  [[ -n $name ]] || { echo "fake: no issue type $type_id" >&2; exit 1; }
+  awk -F'\t' '!($1 == "value" && $2 == "Type")' "$state" >"$state.new"
+  printf 'value\tType\t%s\n' "$name" >>"$state.new"
+  mv "$state.new" "$state"
+  echo '{"data":{}}'
+  exit
+fi
+if [[ $1 == issue && $2 == edit ]]; then
+  [[ -f $dir/fail-remove ]] && { echo "fake: issue edit failed" >&2; exit 1; }
+  [[ -f $dir/drop-remove ]] && exit
+  [[ $* == *"--remove-label triage"* ]] || { echo "fake: unexpected issue edit: $*" >&2; exit 99; }
+  awk -F'\t' '!($1 == "label" && $2 == "triage")' "$state" >"$state.new"
+  mv "$state.new" "$state"
+  exit
+fi
 if [[ $1 == api && $2 == graphql ]]; then
   n=$(($(cat "$dir/lookups" 2>/dev/null || echo 0) + 1))
   echo "$n" >"$dir/lookups"
@@ -97,10 +128,17 @@ Track PVTSSF_track select 60e95dc9=Build,df832856=Design,d064f0c0=Report,3200c1d
 Size PVTSSF_size select 7a7f9f73=S,e0e2efb6=M,c7dede81=L
 Week PVTIF_week iteration 7f9c9b7a=Wk 2 · 9–15 Nov,b40f9349=Wk 3 · 16–22 Nov,f9409a73=Wk 1 · 2–8 Nov
 Priority PVTSSF_priority select 598fd74b=P0,ad39d061=P1,a38a49d8=P2,cad16246=P3
+Type - type IT_task=Task,IT_bug=Bug,IT_feature=Feature
 ROWS
 }
-issue_row() { printf 'issue%shttps://github.com/sssoto17/sunny-pastures/issues/47\n' "$T"; }
-# The issue's item on the Project, with "Field=Value" pairs; "null" means not on the Project.
+issue_row() { printf 'issue%shttps://github.com/sssoto17/sunny-pastures/issues/47%sI_kw47\n' "$T" "$T"; }
+# Label rows on the issue, one per name.
+label_rows() {
+  local name
+  for name in "$@"; do printf 'label%s%s\n' "$T" "$name"; done
+}
+# The issue's item on the Project, with "Field=Value" pairs (Type=... is the issue's native
+# type, which the filter emits as a value row too); "null" means not on the Project.
 item() {
   local pair
   printf 'item%sPVTI_existing\n' "$T"
@@ -110,7 +148,7 @@ item() {
 }
 
 reset() { # item rows, or "null" -> a fresh state: the Project, the issue and its item
-  rm -f "$work"/calls "$work"/lookups "$work"/edits "$work"/state "$work"/fail-* "$work"/drop-edit
+  rm -f "$work"/calls "$work"/lookups "$work"/edits "$work"/state "$work"/fail-* "$work"/drop-*
   { project_rows; issue_row; [[ $1 == null ]] || printf '%s\n' "$1"; } >"$work/state"
 }
 
@@ -138,7 +176,11 @@ expect_out() { assert "expected stdout to contain: $1" contains "$out" "$1"; }
 expect_no_gh() { assert "expected no gh calls at all" test -z "$calls"; }
 # A write is any gh call other than the read-only GraphQL lookup.
 expect_no_writes() {
-  if grep -qx 'item-add\|item-edit' <<<"$calls"; then bad "expected no writes"; else ok; fi
+  if grep -qx 'item-add\|item-edit\|edit' <<<"$calls" || grep -q '^query=mutation' <<<"$calls"; then
+    bad "expected no writes"
+  else
+    ok
+  fi
 }
 # The gh calls joined into one line each: "project item-edit --project-id ... --id ...".
 call_lines() { awk '$0 == "--" { print line; line = ""; next } { line = line (line == "" ? "" : " ") $0 }' <<<"$calls"; }
@@ -271,7 +313,7 @@ expect_out "Mode:     -"
 expect_out "Size:     S"
 expect_out "Priority: P1"
 expect_out "Week:     Wk 2 · 9–15 Nov"
-assert "expected a second lookup after the writes" test "$(count '^api$')" -eq 2
+assert "expected a second lookup after the writes" test "$(count '^query=query')" -eq 2
 
 # --- lookup failures stop before any write -----------------------------------------------------
 # A lookup with no issue row (the filter emits none when the issue is null).
@@ -374,6 +416,92 @@ case_ 47 --track ""
 expect_code 2
 expect_err 'unknown Track ""'
 expect_no_writes
+
+# --- the native issue type ---------------------------------------------------------------------
+# Set on the issue with updateIssue's issueTypeId, by the id the lookup found for the name.
+reset "$(item Status=Backlog)"
+case_ 47 --type Task
+expect_code 0
+expect_call "-f issue=I_kw47 -f type=IT_task"
+expect_no_call "item-edit"
+expect_out "Type:     Task"
+
+# Names ignore case, like the Project fields.
+reset "$(item Status=Backlog Type=Task)"
+case_ 47 --type bug
+expect_code 0
+expect_call "-f issue=I_kw47 -f type=IT_bug"
+expect_out "Type:     Bug"
+
+# An unknown type fails with the valid names and writes nothing.
+reset "$(item Status=Backlog)"
+case_ 47 --type Epic --size S
+expect_code 2
+expect_err 'unknown Type "Epic". Valid names: Task, Bug, Feature.'
+expect_no_writes
+
+reset "$(item Status=Backlog)"
+touch "$work/fail-type"
+case_ 47 --type Task --size S
+expect_code 1
+expect_err "could not set Type"
+expect_err "not set: Type, Size"
+
+# --- triage comes off once type, Priority, Size and Week are all set ----------------------------
+four=(Type=Task Priority=P2 Size=S "Week=Wk 2 · 9–15 Nov")
+
+# Set by this run.
+reset "$(item Status=Backlog; label_rows triage chore)"
+case_ 47 --type Task --size S --priority P2 --week "Wk 2"
+expect_code 0
+expect_call "issue edit 47 --repo sssoto17/sunny-pastures --remove-label triage"
+expect_out "Triage:   removed (type, Priority, Size and Week are set)"
+assert "expected a third lookup after removing triage" test "$(count '^query=query')" -eq 3
+
+# Already set (the admin set them in the UI): a run with no flags removes it.
+reset "$(item Status=Backlog "${four[@]}"; label_rows triage)"
+case_ 47
+expect_code 0
+expect_call "--remove-label triage"
+expect_out "Triage:   removed"
+
+# Each one missing keeps triage, and the line names it.
+for drop in Type Priority Size Week; do
+  pairs=()
+  for pair in "${four[@]}"; do [[ ${pair%%=*} == "$drop" ]] || pairs+=("$pair"); done
+  reset "$(item Status=Backlog "${pairs[@]}"; label_rows triage)"
+  case_ 47 --track Build
+  expect_code 0
+  expect_no_call "--remove-label"
+  expect_out "Triage:   yes (missing: $drop)"
+done
+
+# No triage label: nothing to remove; a missing field is still named.
+reset "$(item Status=Backlog "${four[@]}")"
+case_ 47
+expect_code 0
+expect_no_call "issue edit"
+expect_out "Triage:   -"
+reset "$(item Status=Backlog Size=S)"
+case_ 47
+expect_code 0
+expect_out "Triage:   - (missing: Type, Priority, Week)"
+
+# The removal fails: say the fields are set and print the command that finishes it.
+reset "$(item Status=Backlog "${four[@]}"; label_rows triage)"
+touch "$work/fail-remove"
+case_ 47
+expect_code 1
+expect_err "the fields are set, but \`triage\` couldn't be removed"
+expect_err "gh issue edit 47 --repo sssoto17/sunny-pastures --remove-label triage"
+
+# The removal "succeeds" but the read-back still shows triage.
+reset "$(item Status=Backlog "${four[@]}"; label_rows triage)"
+touch "$work/drop-remove"
+case_ 47
+expect_code 1
+expect_out "Triage:   yes"
+expect_err "triage is still on, though all four are set"
 
 # --- called from zsh ---------------------------------------------------------------------------
 # zsh doesn't split unquoted $var, which silently dropped 5 of #47's fields on 7 Nov. The script
