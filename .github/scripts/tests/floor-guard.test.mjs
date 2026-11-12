@@ -530,81 +530,153 @@ describe("floor guard, end to end", () => {
 		expect(guard().out).toContain("[silenced-checker]");
 	});
 
+	// #135: a new tsconfig's strictness is read through the TypeScript API now (tsconfigs.test.mjs),
+	// and the code patterns of unfinished work are ESLint rules (floor-lint.test.mjs). The guard
+	// keeps a TODO in any file, and keeps those rules from being switched off.
 	it.each([
-		["without extends or strict", '{\n  "compilerOptions": {\n    "target": "ES2022"\n  }\n}\n', 1],
-		["with extends", '{\n  "extends": "../../tsconfig.base.json"\n}\n', 0],
-		["with strict on", '{\n  "compilerOptions": {\n    "strict": true\n  }\n}\n', 0],
-		// Review of #133: an `extends` must point at a file that exists.
-		["extending a file that does not exist", '{\n  "extends": "./nope.json"\n}\n', 1],
-		["extending nothing", '{\n  "extends": []\n}\n', 1],
-		["extending an empty string", '{\n  "extends": ""\n}\n', 1],
-		["with strict only in a comment", '{\n  // "strict": true\n  "compilerOptions": {}\n}\n', 1],
-	])("judges a new package tsconfig %s", (_, content, code) => {
+		["a TODO in code", "packages/sim/src/s.ts", "// TODO\n"],
+		["a TODO in a file ESLint never reads", "supabase/seed.sql", "-- TODO\n"],
+	])("always blocks %s", (_, file, code) => {
 		setup();
-		repo.write({ "packages/new/tsconfig.json": content });
-		const r = guard();
-		expect(r.code).toBe(code);
-		if (code) expect(r.out).toContain("[config-loosened] packages/new/tsconfig.json");
+		repo.write({
+			[file]: code,
+			"CONSTRAINTS.md": withException(row("E1", "packages/sim/**", "2026-11-20")),
+		});
+		expect(guard().out).toContain("[unfinished-work]");
 	});
 
+	// A directive that switches off a rule holding unfinished work can't be waived, as the work it
+	// hides can't be: a blanket disable, one naming such a rule, or an inline config for one.
 	it.each([
-		["a TODO", "// TODO\n"],
-		["a not-implemented stub", "throw new Error('Not implemented');\n"],
-		["an empty catch", "try { f(); } catch {}\n"],
-		["an empty multi-line catch", "try {\n  f();\n} catch (e) {\n}\n"],
-		// #99: patterns the #40 review found passing.
-		["an empty .catch callback", "p.catch(() => {});\n"],
-		["an empty .catch callback with a parameter", "p.catch((e) => { });\n"],
-		["an empty .catch function", "p.catch(function () {});\n"],
-		["a catch holding only a comment", "try { f(); } catch { /* fine */ }\n"],
+		["a disable of the stub selectors", "// eslint-disable-next-line no-restricted-syntax\n"],
+		["a disable among other rules", "/* eslint-disable eqeqeq, no-empty -- why */\n"],
 		[
-			"a multi-line catch holding only comments",
-			"try {\n  f();\n} catch (e) {\n  // ignore\n  /* really */\n}\n",
+			"a disable of empty functions",
+			"// eslint-disable-line @typescript-eslint/no-empty-function\n",
 		],
-		['a "not yet implemented" stub', "throw new Error('Not yet implemented');\n"],
-		['an "unimplemented" stub', "throw new TypeError(`unimplemented: ${x}`);\n"],
-		// Review of #133: the variants that still passed.
-		["a stub without new", "throw Error('Not implemented');\n"],
-		["an upper-case stub", "throw new Error('NOT IMPLEMENTED');\n"],
-		["a hyphenated stub", "throw new Error('not-implemented');\n"],
-		["a multi-line empty .catch", "p.catch(() => {\n});\n"],
-		["a multi-line .catch holding only a comment", "p.catch(() => {\n  // ignore\n});\n"],
-		["a .catch holding only a comment", "p.catch(() => { /* x */ });\n"],
-		["a .catch returning undefined", "p.catch(() => undefined);\n"],
-		["an async empty .catch", "p.catch(async () => {});\n"],
-		["an empty rejection handler in .then", "p.then(f, () => {});\n"],
-		["a catch with a line comment, then its close", "try {\n  f();\n} catch (e) { // ignore\n}\n"],
+		["a blanket disable", "/* eslint-disable */\n"],
+		["a blanket disable for one line", "f(); // eslint-disable-line\n"],
+		["an inline config turning the selectors off", "/* eslint no-restricted-syntax: off */\n"],
 		[
-			"a catch holding only a multi-line block comment",
-			"try {\n  f();\n} catch (e) {\n  /* ignored,\n     on purpose */\n}\n",
+			"an inline config replacing the selectors",
+			'/*eslint no-restricted-syntax: ["error", "X"]*/\n',
 		],
-		["a NotImplementedError", "throw new NotImplementedError();\n"],
-		["a .catch returning null", "p.catch(() => null);\n"],
+		["an inline config turning no-empty off", "/* eslint no-empty: 0 */\n"],
 	])("always blocks %s", (_, code) => {
 		setup();
 		repo.write({
 			"packages/sim/src/s.ts": code,
 			"CONSTRAINTS.md": withException(row("E1", "packages/sim/**", "2026-11-20")),
 		});
-		expect(guard().out).toContain("[unfinished-work]");
+		const r = guard();
+		expect(r.out).toContain("[unfinished-work] packages/sim/src/s.ts:1");
+		expect(r.code).toBe(1);
 	});
 
-	// Review of #133: unfinished work can't be waived, so a false positive blocks for good.
+	// Review of the #135 stack: a comment that only mentions ESLint is no inline config.
 	it.each([
-		[
-			"a catch with a comment and a call",
-			"try { f(); } catch (e) {\n  /* log it */ report(e);\n}\n",
-		],
-		["a catch with code between comments", "try { f(); } catch { /* a */ g(); /* b */ }\n"],
-		[
-			"a message that mentions unimplemented",
-			"throw new Error('Feature flag unimplemented-x is off');\n",
-		],
-		["a .catch that handles the error", "p.catch((e) => { report(e); });\n"],
-	])("does not count %s as unfinished work", (_, code) => {
+		["/* eslint reads this file with the root config */\n", 0],
+		["/* eslint no-empty: 0 -- a real one */\n", 1],
+		['/* eslint "no-empty": "off" */\n', 1],
+		["/* eslint 'no-empty': 'off' */\n", 1],
+		['/* eslint {"no-restricted-syntax": "off"} */\n', 1],
+	])("tells prose from an inline config: %s", (code, exit) => {
 		setup();
 		repo.write({ "packages/sim/src/s.ts": code });
+		expect(guard().code).toBe(exit);
+	});
+
+	it("waives a disable of another rule, and counts an inline config as a suppression", () => {
+		setup();
+		repo.write({ "packages/sim/src/s.ts": "// eslint-disable-next-line eqeqeq\n" });
+		expect(guard().out).toContain("[silenced-checker]");
+		repo.write({
+			"CONSTRAINTS.md": withException(row("E1", "packages/sim/**", "2026-11-20")),
+		});
 		expect(guard().code).toBe(0);
+		repo.write({ "packages/sim/src/s.ts": "/* eslint eqeqeq: off */\n" });
+		const r = guard({ ...TODAY });
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("waived by E1");
+	});
+
+	// Second comment on #135 (review of #141): lines added around unchanged ones switch them off.
+	describe("block comments in a guarded config", () => {
+		const CONFIG = [
+			"export default [",
+			"\t{ files: ['packages/**/*.ts'] },",
+			"\t{ rules: { eqeqeq: 'error' } },",
+			"];",
+			"",
+		].join("\n");
+		const wrapSetup = () => {
+			repo = makeRepo({ ...BASE, "eslint.config.mjs": CONFIG });
+		};
+
+		it.each([
+			["around a rule", [0, 1, "\t/*", 2, "\t*/", 3], 3],
+			[
+				"opened on a changed line above",
+				[0, "\t{ files: ['packages/**/*.ts'] }, /*", 2, "*/ ];"],
+				2,
+			],
+		])("reports one %s", (_, edit, line) => {
+			wrapSetup();
+			const lines = CONFIG.split("\n");
+			const edited = edit.map((l) => (typeof l === "number" ? lines[l] : l));
+			repo.write({ "eslint.config.mjs": `${edited.join("\n")}\n` });
+			expect(guard().out).toContain(`[config-loosened] eslint.config.mjs:${line}`);
+		});
+
+		// Review of #135: a selector deleted from the floor's lists turns its rule off with no
+		// "error" on the line, so any line of the ESLint config removed and not added back counts.
+		it("reports a line removed from the ESLint config, and passes one moved", () => {
+			wrapSetup();
+			const lines = CONFIG.split("\n");
+			repo.write({ "eslint.config.mjs": [lines[0], lines[2], lines[3], ""].join("\n") });
+			expect(guard().out).toContain("[config-loosened] eslint.config.mjs:2 (old)");
+			repo.write({ "eslint.config.mjs": [lines[0], lines[2], lines[1], lines[3], ""].join("\n") });
+			expect(guard().code).toBe(0);
+		});
+
+		it("reports one around a tsconfig's include entry", () => {
+			setup();
+			const config = '{\n  "include": [\n    "src"\n  ]\n}\n';
+			repo.write({ "packages/sim/tsconfig.json": config });
+			repo.commit();
+			repo.git("switch", "-q", "-C", "main");
+			repo.git("switch", "-q", "-c", "wrap");
+			repo.write({
+				"packages/sim/tsconfig.json": '{\n  "include": [\n    /*\n    "src"\n    */\n  ]\n}\n',
+			});
+			expect(guard().out).toContain("[config-loosened] packages/sim/tsconfig.json:3");
+		});
+
+		// A `/*` inside a regex literal after `return` is no comment (review of #135).
+		it("passes a regex after return that holds what looks like a comment", () => {
+			repo = makeRepo({
+				...BASE,
+				"eslint.config.mjs": `const re = () => {\n\treturn /a\\/*/;\n};\n${CONFIG}`,
+			});
+			repo.write({
+				"eslint.config.mjs": `const re = () => {\n\treturn /b\\/*/;\n};\n${CONFIG}`,
+			});
+			// The old line is reported as removed; a comment from line 2 would be reported as `:2`.
+			const out = guard().out;
+			expect(out).toContain("eslint.config.mjs:2 (old)");
+			expect(out).not.toMatch(/eslint\.config\.mjs:2$/m);
+		});
+
+		it("passes a new comment of its own, and globs that look like comments", () => {
+			wrapSetup();
+			repo.write({
+				"eslint.config.mjs": CONFIG.replace(
+					"\t{ rules",
+					"\t/**\n\t * Why the rule below is on.\n\t */\n\t{ files: ['**/*.ts', 'a/**/b'] },\n\t{ rules",
+				),
+			});
+			expect(guard().code).toBe(0);
+		});
 	});
 
 	it.each([

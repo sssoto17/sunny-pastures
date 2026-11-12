@@ -220,9 +220,9 @@ run; a 2 never reads as clean.
 
 **Alternatives considered.**
 - *An AST-based checker (the TypeScript compiler API, or custom ESLint rules).* It would see
-  through spelling tricks that line patterns miss. It's not adopted: the floor job runs with Node
-  only and no install, and ESLint already holds the rules that need a parse. The gap is the
-  pattern list's known limit.
+  through spelling tricks that line patterns miss. It's not adopted inside the guard: the floor job
+  runs with Node only and no install. #135 moved the code patterns to ESLint and the tsconfig check
+  to a test instead (next section).
 - *Running the PR's own guard.* Rejected in #96: a PR could switch it off.
 - *A review bot instead of a script.* It's not deterministic, and it's the reviewer most open to
   manipulation (ADR-0002, area 2). The bot reviews as well, but it doesn't replace the guard.
@@ -241,6 +241,58 @@ The guard's hint for `check-removed` names all three (#99 part 2).
 **Package scripts count as checks (#99).** CI runs the PR's own `package.json` scripts. So a script
 line that loses a check command (`tsc -b`, `eslint`, `vitest run`, one of the guard scripts), or a
 script other than `check:task` that gains `--skip-ratchet`, is `check-removed` too.
+
+### Code patterns move to ESLint and tests (#135, 12 Nov)
+
+The guard's line patterns for code kept missing spellings (#133's reviews: a stub message on the
+next line, `.catch(noop)`, a run count set another way, a tsconfig extending a loose file). The
+admin froze them on 9 Nov. #135 moves each check to a tool that reads the real structure, and the
+guard keeps only the job a diff reader does well: seeing that those checks stay on.
+
+| Was in the guard | Now | Guard |
+|---|---|---|
+| Stub `throw`s, `NotImplementedError`, empty or comment-only `catch`, empty `.catch`/`.then` handlers | `no-restricted-syntax` selectors (`FLOOR_SYNTAX` in `eslint.config.mjs`) plus `no-empty` and `@typescript-eslint/no-empty-function`, in every file ESLint reads; `floor-lint.test.mjs` | Removed `STUBS` (but TODO), `STUB_THROW`, `OPEN_CATCH`, `emptyBlockAfter` |
+| A TODO | `no-warning-comments` in `apps/` and `packages/` (ADR-0005) | **Kept**: a TODO stands in for work in any file, SQL or YAML too, and only the guard reads those |
+| A run count lowered in a test (`numRuns`) | Selectors: settings only from `inject('fastCheck')`, no run-shaping key written outside `vitest.config.mts`, no `configureGlobal`, fast-check only as `fc`; `property-settings.test.mjs` pins what the config provides | **Kept** `RUN_COUNT`: it watches the literals where `SIM_PROPERTY_RUNS` is read (`vitest.config.mts`, `package.json`, workflows) |
+| A new tsconfig with neither `extends` nor `strict` | `tsconfigs.test.mjs`: every tsconfig and jsconfig, read with the TypeScript API, is as strict as `tsconfig.base.json` | Removed the new-file check. **Kept** `STRICT_KEYS`: a strict option relaxed in the diff, the base's own included |
+
+**What the guard adds, so the rules stay on.**
+- A directive that switches off a rule holding unfinished work is unwaivable `unfinished-work`,
+  like the stub it hides: a blanket `eslint-disable`, or a disable or inline config naming
+  `no-empty`, `no-empty-function`, `no-restricted-syntax` (which also holds the sim's purity and
+  property rules) or `no-warning-comments`.
+- An inline `/* eslint rule: … */` config is `silenced-checker`; a comment naming ESLint isn't.
+- A line of `eslint.config.*` removed and not added back anywhere in the file is
+  `config-loosened`. A selector deleted from the floor's lists carries no `"error"`, which was all
+  the guard read before (review of #135). Moving a line passes; rewording one needs a row.
+- `/*` and `*/` added around unchanged lines of a guarded JS, TS or JSON config are
+  `config-loosened` (second comment on #135). The guard finds block comments skipping strings,
+  templates and regex literals; a file it can't scan fails closed on every added `/*` or `*/`.
+
+**ESLint's own config loader (stack review).** A later block replacing a folder's selectors, or
+`UNFINISHED_SYNTAX.length = 0`, removes no line and passed the guard. `floor-config.test.mjs`
+checks every tracked file ESLint lints: `calculateConfigForFile` has the three rules at "error",
+and a probe linted as the file is reported once per floor selector. Probes test behaviour, so
+emptying a list can't empty the expectation. Limits: one probe per selector (the snippet tests
+cover other spellings); sim-only selectors aren't probed (`sim-purity.test.mjs` is).
+
+**Patterns.** *Parse, don't pattern-match*: ESLint's AST and the TypeScript API read code and
+configs as the tools that run them do. *Guard the guards*: the diff reader keeps the parsers on,
+and the snippet tests show each rule still catches its variants. *Fail closed* for the comment
+scan. **Alternatives considered.** A custom ESLint plugin (the admin prefers maintained rules;
+selectors suffice); `linterOptions.noInlineConfig` (it would also refuse every `eslint-disable`,
+the Exceptions route); extending the frozen regexes (#133's lesson).
+
+**One carve-out.** `packages/sim/src/state/tests/provided.test.ts` passes settings through as
+data and runs no property, so it alone may write `numRuns` (rewriting it reads as a cut count).
+
+**Known limits.** A stub message built from parts (`'Not ' + 'implemented'`) passes, and so do
+settings whose keys aren't written out (`{ [key]: 1 }`, `JSON.parse`); `property-settings.test.mjs`
+and review cover the config side. A rule deleted with its snippet-test rows passes the guard's
+test check (rows hold no `expect`), not the removed-line check. A no-op handler from outside the
+linted code (`.catch(console.debug)`, a dependency's export) isn't seen; one written in the repo
+is reported where it's defined. Files ESLint ignores (`.claude/`, `.agents/`, build output) lose
+the code-pattern check; adding to `ignores` is `config-loosened`.
 
 ### The coverage gate
 
