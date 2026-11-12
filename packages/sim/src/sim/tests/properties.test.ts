@@ -274,17 +274,38 @@ function expectRestarts(
 	});
 }
 
+/** The test content's cookies XP: from Level 4 (60 to 99 XP), one collect crosses Level 5. */
+const cookieXp = 40;
+
 /**
- * Test content where farms bake cookies (#85): 31 XP a harvest reaches the bakery's tier 2 at
- * Level 4 in one tending, and a 12-good barn holds chicken feed, eggs and cookies together.
+ * Test content where farms bake cookies (#85): 12 XP a harvest reaches the bakery's tier 2 at
+ * Level 4 in the start's six harvests (72 XP), and stays below Level 5 with the feed and eggs, so
+ * collecting cookies crosses a Level (#197); a 12-good barn holds chicken feed, eggs and cookies
+ * together.
  */
 const cookieContent: Content = {
 	...sliceContent,
 	start: { ...sliceContent.start, coins: 2_000 },
 	silo: { capacity: 100_000 },
 	barn: { capacity: 12 },
-	crops: { wheat: { ...wheat, xp: 31 } },
+	crops: { wheat: { ...wheat, xp: 12 } },
+	facilities: sliceContent.facilities.map((facility) => ({
+		...facility,
+		recipes: Object.fromEntries(
+			Object.entries(facility.recipes).map(([id, recipe]) => [
+				id,
+				id === "cookies" ? { ...recipe, xp: cookieXp } : recipe,
+			]),
+		),
+	})),
 };
+
+const cookieRecipes = new Map(
+	[...sliceRecipes].map(([id, recipe]) => [
+		id,
+		id === "cookies" ? { ...recipe, xp: cookieXp } : recipe,
+	]),
+);
 
 /**
  * Whether the farm can make `good` now (`GLOSSARY.md`, "Producible"): wheat from Level 1, chicken
@@ -584,19 +605,34 @@ describe("the generated farms", () => {
 		}
 	});
 
-	it("bake cookies with eggs at bakery tier 2 and collect them, so the cookie branches aren't vacuous (#85)", () => {
+	it("bake cookies with eggs at bakery tier 2, are refused at tier 1, and collect them across a Level, so the cookie branches aren't vacuous (#85, #197)", () => {
+		const cookieSim = createSim(cookieContent);
 		const counts = countReached(
 			cookieContent,
-			({ action, before, after }) => [
+			({ action, at, before, after }) => [
 				...(action.type === "startJob" && action.recipe === "cookies" ? ["cookies started"] : []),
 				...((after.barn["cookies"] ?? 0) > (before.barn["cookies"] ?? 0)
 					? ["cookies collected"]
 					: []),
+				// The collected job is the oldest when the action runs, after the steps up to its time.
+				...(action.type === "collect" &&
+				cookieSim.advance(before, at).facilities[action.facility]?.jobs[0]?.recipe === "cookies" &&
+				levelAt(after.xp) > levelAt(before.xp)
+					? ["cookie collect crosses a Level"]
+					: []),
 			],
-			() => [],
+			(reason) =>
+				reason === "The bakery makes cookies from tier 2, and it is at tier 1."
+					? ["cookies refused at tier 1"]
+					: [],
 		);
 
-		for (const key of ["cookies started", "cookies collected"]) {
+		for (const key of [
+			"cookies started",
+			"cookies collected",
+			"cookie collect crosses a Level",
+			"cookies refused at tier 1",
+		]) {
 			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
 		}
 	});
@@ -710,7 +746,7 @@ describe("the generated farms on the order board", () => {
 describe.each([
 	...contents,
 	["a farm whose eggs cross Levels and fill the barn", eggContent, sliceRecipes, richEggXp],
-	["a farm that bakes cookies", cookieContent, sliceRecipes, 1],
+	["a farm that bakes cookies", cookieContent, cookieRecipes, 1],
 ] as const)("the Level, plot and pen properties, over %s", (_name, content, recipes, eggXp) => {
 	const levelSim = createSim(content);
 	const crop = content.crops.wheat;
