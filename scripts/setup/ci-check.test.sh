@@ -649,8 +649,8 @@ echo '[]' >"$work/fx/prs.json"
 echo '[]' >"$work/fx/runs.json"
 run results 68
 expect_code 0
-for id in a b c d e1 e2 e3 f; do assert "expected ($id) not yet run" grep -q "^| ($id) .* | not yet run |" <<<"$out"; done
-assert "expected eight test rows" test "$(grep -c '^| (' <<<"$out")" -eq 8
+for id in a b c d e1 e2 e3 e4 f; do assert "expected ($id) not yet run" grep -q "^| ($id) .* | not yet run |" <<<"$out"; done
+assert "expected nine test rows" test "$(grep -c '^| (' <<<"$out")" -eq 9
 
 # Everything passed: (a) approved after (d)'s push, auto-merge by the App, (c) blocked, (e)'s
 # thread resolved by the admin after the factory's run, (f) blocked.
@@ -678,7 +678,10 @@ printf '%s\n' $'factory-resolve\tRun\t2026-11-13T10:00:02.2Z RESULT thread_after
 : >"$work/calls"
 run results 68
 expect_code 0
-assert "expected all eight rows to pass" test "$(grep -c '^| ([a-f][0-9]*) .* | pass |' <<<"$out")" -eq 8
+assert "expected the seven tested rows to pass" test "$(grep -c '^| ([a-f][0-9]*) .* | pass |' <<<"$out")" -eq 7
+assert "expected (f) not exercised" row f "AGENTS.md waits for the code owner" "not exercised"
+assert "expected what (f) observed" contains "$out" "App withheld approval (Code-owned path row): \`REVIEW_REQUIRED\`, \`BLOCKED\`"
+assert "expected (e4) not exercised" row e4 "merges only on admin approval" "not exercised"
 assert "expected (b)'s reading" contains "$out" 'autoMergeRequest by `sunny-reviewer`'
 assert "expected every review listed" contains "$out" '- reviews, oldest first: `sunny-reviewer[bot]` DISMISSED, `sunny-reviewer[bot]` APPROVED'
 assert "expected the auto-merge detail" contains "$out" 'autoMergeRequest: enabled by `sunny-reviewer`, SQUASH'
@@ -700,6 +703,13 @@ assert "expected (b) to fail" row b "App turns on auto-merge" fail
 assert "expected (c) to fail" row c "Request changes blocks" fail
 assert "expected (d) to fail" row d "a push dismisses the approval" fail
 assert "expected (f) to fail" row f "AGENTS.md waits for the code owner" fail
+fx_view 74 REVIEW_REQUIRED BLOCKED null 1
+fx_reviews 74 APPROVED:h74
+run results 68
+assert "expected (f) to pass once the App approved it" row f "AGENTS.md waits for the code owner" pass
+fx_view 74 APPROVED CLEAN null 1
+run results 68
+assert "expected (f) to fail when the App's approval is enough" row f "AGENTS.md waits for the code owner" fail
 # Request changes that doesn't block is a failure too: the merge state is half of (c).
 fx_view 72 CHANGES_REQUESTED CLEAN null 1
 fx_reviews 72 CHANGES_REQUESTED:h72
@@ -719,6 +729,9 @@ fx_view 73 REVIEW_REQUIRED BLOCKED null 5 '{"name":"review:admin"}'
 fx_reviews 73 COMMENTED:h73
 run results 68
 assert "expected (e3) to fail when reopened" row e3 "admin resolves, it stays resolved" fail
+fx_view 73 REVIEW_REQUIRED CLEAN null 5 '{"name":"review:admin"}'
+run results 68
+assert "expected (e4) to fail when (e) could merge without you" row e4 "merges only on admin approval" fail
 fx_reviews 73 APPROVED:h73
 run results 68
 assert "expected (e1) to fail on an approval" row e1 "escalation thread, no approval" fail

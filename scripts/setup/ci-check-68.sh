@@ -215,10 +215,15 @@ T68_VERDICTS='
    elif ($d.e | bot | last | .commit) != $d.e.headRefOid or ($d.e.head_author | startswith("sunny-factory"))
    then t("e3"; "admin resolves, it stays resolved"; "not yet run"; "resolved; waiting for push 68 e and its review")
    else t("e3"; "admin resolves, it stays resolved"; "pass"; "resolved by @\($admin) after the App reviewed the head") end),
+  # What was not tested never reads pass: "not exercised" says what was observed instead.
+  (if seen($d.e) | not then t("e4"; "merges only on admin approval"; "not yet run"; "no review on (e)")
+   elif $d.e.mergeStateStatus != "BLOCKED" then t("e4"; "merges only on admin approval"; "fail"; "`\($d.e.mergeStateStatus)` without your approval")
+   else t("e4"; "merges only on admin approval"; "not exercised"; "observed `\($d.e.reviewDecision)`, `BLOCKED`, no App approval; your `gh` authored (e), so you cannot approve it") end),
   (if seen($d.f) | not then t("f"; "AGENTS.md waits for the code owner"; "not yet run"; "no review on (f)")
-   elif $d.f.mergeStateStatus == "BLOCKED" and $d.f.reviewDecision != "APPROVED"
-   then t("f"; "AGENTS.md waits for the code owner"; "pass"; "`\($d.f.reviewDecision)`, `BLOCKED`, App: `\($d.f | latest)`")
-   else t("f"; "AGENTS.md waits for the code owner"; "fail"; "`\($d.f.reviewDecision)`, `\($d.f.mergeStateStatus)`") end)
+   elif $d.f.mergeStateStatus != "BLOCKED" or $d.f.reviewDecision == "APPROVED"
+   then t("f"; "AGENTS.md waits for the code owner"; "fail"; "`\($d.f.reviewDecision)`, `\($d.f.mergeStateStatus)`")
+   elif ($d.f | latest) == "APPROVED" then t("f"; "AGENTS.md waits for the code owner"; "pass"; "App approved; `\($d.f.reviewDecision)`, `BLOCKED`")
+   else t("f"; "AGENTS.md waits for the code owner"; "not exercised"; "App withheld approval (Code-owned path row): `\($d.f.reviewDecision)`, `BLOCKED`; the code-owner hold behind an App approval is not reachable with the path rows in code") end)
   ]'
 
 results_68() {
@@ -273,7 +278,8 @@ cleanup_68() {
     printf '\n(a)-(f) all passed. allow_auto_merge stays on only if the required checks report and\n'
     printf "#47's escalation criteria are merged (Q16); otherwise turn it off:\n"
   else
-    printf '\nNot all of (a)-(f) passed, and allow_auto_merge is still on. Turn it off now (Q16):\n'
+    printf '\nNot all of (a)-(f) passed ("not exercised" counts as not passed), and allow_auto_merge\n'
+    printf 'is still on. Turn it off now (Q16):\n'
   fi
   printf '  gh api -X PATCH repos/%s --silent -F allow_auto_merge=false\n' "$REPO"
 }
