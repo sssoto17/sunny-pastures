@@ -9,7 +9,9 @@
 import { checkUniqueIds, checkUnlocks } from "./levelTable.js";
 import { checkNumbers, checkTimers } from "./numbers.js";
 import { checkOrderGoods, checkOrderSlots, checkOrderXp, checkRefillDelays } from "./orders.js";
+import { checkPens } from "./pens.js";
 import { checkCrops, checkGoodsUsed, checkRoutes, checkSliceRecipes } from "./production.js";
+import { checkOrderFits, checkStartBarn } from "./storage.js";
 import { checkTiers, checkTierTimes } from "./tiers.js";
 import { checkUnlockOrder } from "./unlockOrder.js";
 
@@ -211,7 +213,12 @@ export type ContentRule =
 	| "cropYield"
 	| "inputProduced"
 	| "goodUsed"
-	| "sliceRecipes";
+	| "sliceRecipes"
+	| "penSize"
+	| "penGoods"
+	| "animals"
+	| "startBarn"
+	| "orderFits";
 
 /** One broken rule: `path` names the value (`crops.wheat.growSeconds`), `message` says why. */
 export interface ContentFailure {
@@ -247,6 +254,9 @@ const contentChecks: readonly ((content: Content) => readonly ContentFailure[])[
 	checkRoutes,
 	checkGoodsUsed,
 	checkSliceRecipes,
+	checkPens,
+	checkStartBarn,
+	checkOrderFits,
 ];
 
 /** The M4 slice's content, wheat only for now (#72, D1). */
