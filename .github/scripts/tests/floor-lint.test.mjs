@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { lintSnippet } from "./lint-snippet.mjs";
 
-const FLOOR_RULES = new Set([
+const LINT_RULES = new Set([
 	"no-empty",
 	"@typescript-eslint/no-empty-function",
 	"no-restricted-syntax",
@@ -19,7 +19,7 @@ const FLOOR_RULES = new Set([
 const snippet = (lines) => lines.join("\n").replaceAll("<>", "");
 
 /** The floor findings for `lines`, linted as the file at `filePath`, as "line rule". */
-const floorFindings = (lines, filePath) => lintSnippet(snippet(lines), filePath, FLOOR_RULES);
+const floorFindings = (lines, filePath) => lintSnippet(snippet(lines), filePath, LINT_RULES);
 
 // One file of each kind ESLint reads: sim source, sim test, app source, CI script.
 const FILES = [
@@ -100,6 +100,12 @@ describe("swallowed errors", () => {
 		["a computed .catch", ["p['catch'](() => <>undefined);"]],
 		["an empty rejection handler in .then", ["p.then(f, () => {<>});"]],
 		["a .then rejection handler returning null", ["p.then(f, () => <>null);"]],
+		// Review of #135: an empty statement, `void` on a name, a cast of undefined.
+		["a .catch holding only an empty statement", ["p.catch(() => {;});"]],
+		["a catch holding only an empty statement", ["try { f(); } catch { ; }"]],
+		["a .catch returning void of its error", ["p.catch((e) => void e);"]],
+		["a .catch returning undefined cast", ["p.catch(() => <>undefined as never);"]],
+		["a .catch returning undefined asserted", ["p.catch(() => <>undefined!);"]],
 		// #133's known limit: a named no-op. ESLint can't follow the name to its definition, so the
 		// no-op is reported where it's defined.
 		["a no-op function passed by name", ["const noop = () => <>undefined;", "p.catch(noop);"]],
@@ -148,6 +154,11 @@ describe("property run counts", () => {
 		["a computed count", ["const quick = { ...params, numRuns: params.numRuns * 0 };"]],
 		["a count assigned", ["params.numRuns = 1;"]],
 		["a count assigned by computed key", ["params['numRuns'] = 1;"]],
+		[
+			"a count by template key",
+			["const quick = { ...params, [`numRuns`]: 1 };", "fc.assert(p, quick);"],
+		],
+		["a count assigned by template key", ["params[`numRuns`] = 1;"]],
 		["a count counted down", ["params.numRuns--;"]],
 		["a count deleted", ["delete params.numRuns;"]],
 		["a count merged in", ["Object.assign(params, { numRuns: 1 });"]],
