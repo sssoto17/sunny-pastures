@@ -2,10 +2,12 @@
 # Runs the throwaway checks for #101 (the two Apps), #102 (reading the Project) and #103 (Claude
 # in Actions), collects their results and cleans up. `start` pushes a branch from origin/main plus
 # one draft workflow from scripts/setup/workflows/, built in a temporary worktree, so your checkout
-# and main are never touched. For 101 and 102 the push runs the workflow. For 103 it first pushes
-# throwaway/103-base (main plus two marker hooks in .claude/settings.json), puts the check branch
-# on it, and opens a PR from the check branch onto that base with your gh; the PR runs the workflow
-# (claude-code-action has no push event, and restores .claude/ from a PR's base). `results` prints
+# and main are never touched. For 101 and 102 the push runs the workflow. For 103 it pushes
+# throwaway/103-base (main plus the workflow and two marker hooks in .claude/settings.json) and
+# throwaway/103-claude (the base plus one throwaway file), and opens a PR from the second onto the
+# first with your gh; the PR runs the workflow on pull_request_target, from the base (the action
+# has no push event, and the factory environment refuses a pull_request run's refs/pull/N/merge;
+# the action restores .claude/ from the PR's base). `results` prints
 # a Markdown summary of non-secret fields for the issue comment. `cleanup` closes the throwaway PR
 # unmerged and deletes the branches.
 # Run ci-apps.sh, ci-project.sh and ci-claude.sh first. Tests: scripts/setup/ci-check.test.sh.
@@ -28,9 +30,10 @@ usage: scripts/setup/ci-check.sh start|results|cleanup 101|102|103
 
   start 101    push throwaway/101-identities with check-101-identities.yml; the push runs it
   start 102    push throwaway/102-project with check-102-project.yml (needs 101's App)
-  start 103    push throwaway/103-base (main plus marker hooks) and throwaway/103-claude (that
-               plus check-103-claude.yml), then open a PR from 103-claude onto 103-base with
-               your gh; the PR runs three short Claude runs. Needs jq
+  start 103    push throwaway/103-base (main plus check-103-claude.yml and marker hooks) and
+               throwaway/103-claude (that plus one throwaway file), then open a PR from
+               103-claude onto 103-base with your gh; the PR runs three short Claude runs
+               (pull_request_target). Needs jq
   results N    print the latest run of N's workflow as Markdown, for a comment on issue N:
                  scripts/setup/ci-check.sh results 101 > .scratch/101-results.md
                then read it and post it: gh issue comment 101 --body-file .scratch/101-results.md
@@ -120,19 +123,26 @@ start() {
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-check.XXXXXX")
   trap 'git -C "$repo" worktree remove --force "$tmp/wt" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
   git -C "$repo" worktree add -q --detach "$tmp/wt" origin/main || die 1 "git worktree add failed"
-  local refspecs=()
-  if [[ -n $base ]]; then
-    add_marker_hooks "$tmp/wt/.claude/settings.json"
-    git -C "$tmp/wt" add .claude/settings.json || die 1 "git add failed"
-    git -C "$tmp/wt" commit -q -m "chore: throwaway marker hooks for #$issue (never merge)" ||
-      die 1 "git commit failed"
-    refspecs+=("$(git -C "$tmp/wt" rev-parse HEAD):refs/heads/$base")
-  fi
   mkdir -p "$tmp/wt/.github/workflows"
   cp "$here/workflows/$workflow" "$tmp/wt/.github/workflows/$workflow"
   git -C "$tmp/wt" add ".github/workflows/$workflow"
-  git -C "$tmp/wt" commit -q -m "chore: throwaway check workflow for #$issue (never merge)" ||
-    die 1 "git commit failed"
+  local refspecs=()
+  if [[ -z $base ]]; then
+    git -C "$tmp/wt" commit -q -m "chore: throwaway check workflow for #$issue (never merge)" ||
+      die 1 "git commit failed"
+  else
+    # pull_request_target runs the workflow from the PR's base, and the action restores .claude/
+    # from there: both go on the base. The head only adds a file, so the PR has a diff.
+    add_marker_hooks "$tmp/wt/.claude/settings.json"
+    git -C "$tmp/wt" add .claude/settings.json || die 1 "git add failed"
+    git -C "$tmp/wt" commit -q -m "chore: throwaway check workflow and marker hooks for #$issue (never merge)" ||
+      die 1 "git commit failed"
+    refspecs+=("$(git -C "$tmp/wt" rev-parse HEAD):refs/heads/$base")
+    printf 'Throwaway for #%s. Never merge; close unmerged.\n' "$issue" >"$tmp/wt/throwaway-$issue.md"
+    git -C "$tmp/wt" add "throwaway-$issue.md" || die 1 "git add failed"
+    git -C "$tmp/wt" commit -q -m "chore: throwaway PR head for #$issue (never merge)" ||
+      die 1 "git commit failed"
+  fi
   refspecs+=("HEAD:refs/heads/$branch")
   # Config can differ inside a linked worktree (an includeIf on its gitdir), so check the URLs
   # again where the push runs, right before it (#198).
@@ -171,10 +181,13 @@ add_marker_hooks() { # settings-file
 
 results() {
   local run id status url
-  # The check's own run: on a PR, ci and Labeler run on the same branch too. Filtered here by
+  # 103's run is a pull_request_target run, listed by its event: it isn't a push to a branch.
+  local runs_of=(--branch "$branch")
+  [[ -n $base ]] && runs_of=(--event pull_request_target)
+  # The check's own run: on a PR, ci and Labeler run too. Filtered here by
   # the workflow's name (its file name without .yml), not with --workflow, which has GitHub
   # resolve a file that exists only on a throwaway branch.
-  run=$(gh run list --repo "$REPO" --branch "$branch" --limit 50 \
+  run=$(gh run list --repo "$REPO" "${runs_of[@]}" --limit 50 \
     --json databaseId,status,conclusion,url,workflowName --jq 'map(select(.workflowName == "'"${workflow%.yml}"'"))
       | .[0] // empty | "\(.databaseId)\t\(.status)\t\(.url)"') ||
     die 1 "gh run list failed"
@@ -243,7 +256,9 @@ cleanup() {
   [[ $reply =~ ^[Yy] ]] || die 2 "nothing changed"
   # The PR first: deleting its base branch would close it without the comment.
   if [[ -n $pr_head ]]; then
-    pr=$(gh pr list --repo "$REPO" --head "$pr_head" --state open --json number --jq '.[0].number // empty')
+    # --head matches the branch name only, so a fork's PR could match it too: only ours.
+    pr=$(gh pr list --repo "$REPO" --head "$pr_head" --state open --json number,isCrossRepository \
+      --jq 'map(select(.isCrossRepository | not)) | .[0].number // empty')
     if [[ -n $pr ]]; then
       gh pr close "$pr" --repo "$REPO" --comment "Throwaway for #$issue's checks: closed unmerged." >/dev/null ||
         die 1 "closing PR #$pr failed"
