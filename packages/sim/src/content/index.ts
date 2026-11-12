@@ -6,6 +6,7 @@
 // #87's, and the add-ons' prices and Levels by #88's (11 Nov, their PRs' "Decided by the lane").
 // All to be tuned after playtest 1. `checkContent` holds any content to the rules it must keep
 // (#89); its rule groups are private siblings.
+import { checkUniqueIds, checkUnlocks } from "./levelTable.js";
 import { checkNumbers, checkTimers } from "./numbers.js";
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
@@ -183,7 +184,8 @@ export interface Crop {
  * A rule of the content check (MUST-10.4; ADR-0003, section 17). #89's PR body maps each to its
  * source and to the test that breaks it alone.
  */
-export type ContentRule = "safeInteger" | "timer";
+export type ContentRule =
+	"safeInteger" | "timer" | "uniqueIds" | "unlockExists" | "listedOnce" | "listedSomewhere";
 
 /** One broken rule: `path` names the value (`crops.wheat.growSeconds`), `message` says why. */
 export interface ContentFailure {
@@ -206,6 +208,8 @@ export function checkContent(content: Content): readonly ContentFailure[] {
 const contentChecks: readonly ((content: Content) => readonly ContentFailure[])[] = [
 	checkNumbers,
 	checkTimers,
+	checkUniqueIds,
+	checkUnlocks,
 ];
 
 /** The M4 slice's content, wheat only for now (#72, D1). */
