@@ -8,6 +8,7 @@
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
 # App's slug), ADMIN, FACTORY_APP (the factory App's slug), CTX (holds files.json), VERDICT,
 # THREADS_QUERY, RUNNER_TEMP.
+# shellcheck disable=SC2016 # single-quoted jq programs, by design
 set -euo pipefail
 
 r="repos/$GITHUB_REPOSITORY" v="$RUNNER_TEMP/verdict.json" t="$RUNNER_TEMP/threads.json"
@@ -100,7 +101,7 @@ if [[ -n $rows ]]; then
     [[ $posted == true ]] || note=$'\n\n'"Escalation thread not posted (no file took it): $rows"
   fi
   [[ $labelled == true ]] || gh api -X POST "$r/issues/$PR/labels" --silent -f 'labels[]=review:admin'
-  if [[ $author == "$FACTORY_APP[bot]" ]]; then
+  if [[ $author == "${FACTORY_APP}[bot]" ]]; then
     gh api -X POST "$r/pulls/$PR/requested_reviewers" --silent -f "reviewers[]=$ADMIN"
   fi
 fi
@@ -109,7 +110,7 @@ fi
 # own Request changes, which would otherwise block for good.
 if [[ $escalated == true ]] && ((nfind == 0 && still_open == 0)); then
   reviews=$(gh api --paginate "$r/pulls/$PR/reviews?per_page=100")
-  ids=$(jq -r --arg u "$BOT[bot]" '.[] | select(.user.login == $u and .state == "CHANGES_REQUESTED") | .id' <<<"$reviews")
+  ids=$(jq -r --arg u "${BOT}[bot]" '.[] | select(.user.login == $u and .state == "CHANGES_REQUESTED") | .id' <<<"$reviews")
   for id in $ids; do
     gh api -X PUT "$r/pulls/$PR/reviews/$id/dismissals" --silent -f event=DISMISS \
       -f message="Its findings are fixed. The PR is escalated and waits for the admin."
