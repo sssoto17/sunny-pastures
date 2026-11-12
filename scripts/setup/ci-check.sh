@@ -36,8 +36,9 @@ clone's origin is sssoto17/sunny-pastures. Nothing it prints is secret: logins, 
 costs and minutes. Pushing a workflow file over HTTPS with gh's credentials needs the `workflow`
 scope: gh auth refresh -h github.com -s workflow (it prints a one-time code, not a token).
 
-Exit codes: 0 done; 1 a git or gh command failed; 2 refused (usage, gh signed out, the branch
-already exists); 3 no finished run yet: wait and run results again.
+Exit codes: 0 done; 1 a git or gh command failed; 2 refused (usage, gh signed out twice in a row,
+the branch already exists, an origin URL that isn't sunny-pastures, here or in the worktree
+start pushes from); 3 no finished run yet: wait and run results again.
 EOF
 }
 
@@ -56,7 +57,10 @@ case $issue in
   *) usage; exit 2 ;;
 esac
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-gh auth status >/dev/null 2>&1 || die 2 "gh is signed out: run gh auth login"
+# Only the account gh uses on github.com counts (a broken inactive account doesn't), and one
+# failure can be a passing network error: try twice before calling it signed out (#198).
+signed_in() { gh auth status -h github.com --active >/dev/null 2>&1; }
+signed_in || { sleep "${CI_CHECK_RETRY_SECONDS:-3}"; signed_in; } || die 2 "gh is signed out: run gh auth login"
 
 official_url() { # url: is it exactly sssoto17/sunny-pastures on GitHub, with no userinfo?
   case $1 in
@@ -66,29 +70,32 @@ official_url() { # url: is it exactly sssoto17/sunny-pastures on GitHub, with no
   esac
 }
 
+# Both the fetch and the push URLs of origin, as git resolves them in that directory (insteadOf,
+# pushInsteadOf, pushurl and conditional includes applied), must be exactly sunny-pastures on
+# GitHub, with no userinfo. Every URL counts: git fetches from the first but pushes to each push
+# URL (--all lists them). Neither is ever printed: a URL can carry a credential.
+check_urls() { # dir where
+  local kind urls url
+  for kind in fetch push; do
+    if [[ $kind == push ]]; then
+      urls=$(git -C "$1" remote get-url --push --all origin 2>/dev/null) || urls=""
+    else
+      urls=$(git -C "$1" remote get-url --all origin 2>/dev/null) || urls=""
+    fi
+    [[ -n $urls ]] || die 2 "origin $2 has no $kind URL: nothing pushed"
+    while IFS= read -r url; do
+      official_url "$url" || die 2 "a $kind URL of origin $2 isn't $REPO on GitHub: nothing pushed"
+    done <<<"$urls"
+  done
+}
+
 # start works on the clone this script lives in, never on the current directory's repo, and only
 # when that clone's origin is $REPO: run from another clone, it must not push anything there.
 start() {
   # repo is global: the EXIT trap below reads it after start returns.
   repo=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null) ||
     die 2 "$here isn't inside a git clone of $REPO"
-  # Both the fetch and the push URL, as git resolves them (insteadOf, pushInsteadOf and pushurl
-  # applied), must be exactly sunny-pastures on GitHub, with no userinfo. Neither is ever printed:
-  # a URL can carry a credential.
-  # Every URL counts: git fetches from the first but pushes to each push URL (--all lists them).
-  local kind urls url
-  for kind in fetch push; do
-    if [[ $kind == push ]]; then
-      urls=$(git -C "$repo" remote get-url --push --all origin 2>/dev/null) || urls=""
-    else
-      urls=$(git -C "$repo" remote get-url --all origin 2>/dev/null) || urls=""
-    fi
-    [[ -n $urls ]] || die 2 "origin in $repo has no $kind URL: nothing pushed"
-    while IFS= read -r url; do
-      official_url "$url" ||
-        die 2 "a $kind URL of origin in $repo isn't $REPO on GitHub: nothing pushed"
-    done <<<"$urls"
-  done
+  check_urls "$repo" "in $repo"
   git -C "$repo" fetch -q origin main || die 1 "git fetch origin main failed"
   if git -C "$repo" ls-remote --exit-code -q origin "refs/heads/$branch" >/dev/null 2>&1; then
     die 2 "$branch already exists on origin: run cleanup $issue first"
@@ -106,6 +113,9 @@ start() {
   git -C "$tmp/wt" add ".github/workflows/$workflow"
   git -C "$tmp/wt" commit -q -m "chore: throwaway check workflow for #$issue (never merge)" ||
     die 1 "git commit failed"
+  # Config can differ inside a linked worktree (an includeIf on its gitdir), so check the URLs
+  # again where the push runs, right before it (#198).
+  check_urls "$tmp/wt" "in the worktree"
   git -C "$tmp/wt" push -q origin "HEAD:refs/heads/$branch" ||
     die 1 "git push failed. Missing workflow scope? gh auth refresh -h github.com -s workflow"
   printf 'Pushed %s; the push starts %s. Follow it with:\n' "$branch" "$workflow"
