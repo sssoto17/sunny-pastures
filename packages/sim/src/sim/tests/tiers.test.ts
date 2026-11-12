@@ -6,8 +6,11 @@ import { applyAll } from "./applyAll.js";
 import { expectAccepted } from "./expectAccepted.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
 import { ownedFacility } from "./ownedFacility.js";
+import { richContent, richFeedSeconds } from "./richContent.js";
 
 const sim = createSim(sliceContent);
+/** Chicken feed takes 61 s here, which the tiers' per mille don't divide (D16). */
+const richSim = createSim(richContent);
 const feedMill = 0;
 const bakery = 1;
 // The slice's tiers (#85's "Decided by the lane"), written out: the feed mill's tier 2 at Level 3
@@ -15,6 +18,7 @@ const bakery = 1;
 // Chicken feed takes 60 s at tier 1, 48 s at tier 2 and 36 s at tier 3; slots are 2, 3 and 3.
 const feedMs = [60_000, 48_000, 36_000];
 const startFeed = { type: "startJob", facility: feedMill, recipe: "chickenFeed" } as const;
+const startBread = { type: "startJob", facility: bakery, recipe: "bread" } as const;
 const buyTier = (facility: number, tier: number): Action => ({ type: "buyTier", facility, tier });
 
 /** A farm at `level` with `coins`, both facilities bought at `tier`, and wheat in the silo. */
@@ -88,6 +92,13 @@ describe("buying a tier", () => {
 			"The feedMill has no tier 4: its highest is 3.",
 		],
 		[
+			// Buying reads only the tier bought, never the stored one, so a broken farm's is refused.
+			"past content's highest, from a stored tier content doesn't have",
+			farmWithFacilities(5, 999, 4),
+			buyTier(feedMill, 5),
+			"The feedMill has no tier 5: its highest is 3.",
+		],
+		[
 			"before its Level",
 			farmWithFacilities(3, 999),
 			buyTier(bakery, 2),
@@ -125,19 +136,37 @@ describe("a facility's tier and its jobs", () => {
 		]);
 	});
 
+	// D16: 61 s doesn't divide by 800 or 600 per mille (48.8 s, 36.6 s), so a job time rounded to
+	// the nearest second (49 s, 37 s) or not rounded at all fails here, as the slice's 60 s can't.
 	it.each([
-		[1, 2],
-		[2, 3],
-		[3, 3],
-	])("has the slots of tier %i: %i (MUST-03.5, 06.2)", (tier, slots) => {
+		[1, richFeedSeconds * 1000],
+		[2, 48_000],
+		[3, 36_000],
+	])("rounds a job's time at tier %i down to whole seconds: %i ms (D16)", (tier, ms) => {
+		const farm = expectAccepted(richSim.apply(farmWithFacilities(5, 0, tier), startFeed, 1_000));
+
+		expect(farm.facilities[feedMill]?.jobs).toEqual([
+			{ status: "running", recipe: "chickenFeed", readyAt: 1_000 + ms },
+		]);
+	});
+
+	// The slice's slots are 2, 3 and 3 at each facility (admin, 11 Nov).
+	it.each([
+		["feedMill", startFeed, 1, 2],
+		["feedMill", startFeed, 2, 3],
+		["feedMill", startFeed, 3, 3],
+		["bakery", startBread, 1, 2],
+		["bakery", startBread, 2, 3],
+		["bakery", startBread, 3, 3],
+	])("has the %s's slots at tier %i: %i (MUST-03.5, 06.2)", (id, start, tier, slots) => {
 		const full = applyAll(
 			farmWithFacilities(5, 0, tier),
-			Array.from({ length: slots }, (): [Action, number] => [startFeed, 0]),
+			Array.from({ length: slots }, (): [Action, number] => [start, 0]),
 		);
 
-		expect(sim.apply(full, startFeed, 0)).toEqual({
+		expect(sim.apply(full, start, 0)).toEqual({
 			ok: false,
-			reason: `The feedMill's queue is full: ${String(slots)} of ${String(slots)} slots.`,
+			reason: `The ${id}'s queue is full: ${String(slots)} of ${String(slots)} slots.`,
 		});
 	});
 
@@ -156,13 +185,7 @@ describe("a facility's tier and its jobs", () => {
 		]);
 	});
 
-	it.each([
-		["starting a job", startFeed],
-		["buying a tier", buyTier(feedMill, 5)],
-	])(
-		"throws on %s in a farm whose tier isn't in content: a broken farm, not a refusal",
-		(_name, action) => {
-			expect(() => sim.apply(farmWithFacilities(5, 0, 4), action, 0)).toThrow(RangeError);
-		},
-	);
+	it("throws on starting a job in a farm whose tier isn't in content: a broken farm, not a refusal", () => {
+		expect(() => sim.apply(farmWithFacilities(5, 0, 4), startFeed, 0)).toThrow(RangeError);
+	});
 });

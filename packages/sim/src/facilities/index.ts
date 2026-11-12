@@ -148,9 +148,8 @@ export function buyTier(
 	if (typeof found === "string") return refuse(found);
 
 	const { facility, owned } = found;
-	// A stored tier not in content is a broken farm, and throws here as in startJob (D15).
-	findTier(facility, owned.tier);
 	if (!Number.isSafeInteger(tier)) return refuse("A tier is a whole number.");
+
 	if (tier <= owned.tier) {
 		return refuse(`The ${facility.id} is already at tier ${String(owned.tier)}.`);
 	}
@@ -167,7 +166,7 @@ export function buyTier(
 		);
 	}
 
-	const row = findTier(facility, tier);
+	const row = findTier(facility, facility.tiers, tier);
 	const offer = {
 		what: `The ${facility.id}'s tier ${String(tier)}`,
 		level: row.level,
@@ -204,7 +203,7 @@ export function startJob(
 			`The ${facility.id} makes ${recipe.id} from tier ${String(recipe.tier)}, and it is at tier ${String(owned.tier)}.`,
 		);
 	}
-	const { slots } = findTier(facility, owned.tier);
+	const { slots } = findTier(facility, facility.tiers, owned.tier);
 	if (owned.jobs.length >= slots) {
 		return refuse(
 			`The ${facility.id}'s queue is full: ${String(owned.jobs.length)} of ${String(slots)} slots.`,
@@ -218,7 +217,7 @@ export function startJob(
 	// so a job still running ends after the farm's time and a done one ended at or before it.
 	const last = owned.jobs[owned.jobs.length - 1];
 	const from = last?.status === "running" ? last.readyAt : farm.time;
-	const readyAt = from + (recipe.ms[owned.tier - 1] ?? NaN);
+	const readyAt = from + findTier(facility, recipe.ms, owned.tier);
 	assertTime(readyAt);
 	const job: Job = { status: "running", recipe: recipe.id, readyAt };
 	const queued = { ...owned, jobs: [...owned.jobs, job], lastRecipe: recipe.id };
@@ -468,12 +467,13 @@ function findRule(index: number, rules: FacilityRules): FacilityRule | null {
 }
 
 /**
- * The facility's `tier`. A bought facility's tier is in content: a version that drops a tier
- * settles its farms in its `upgrade` (ADR-0006, section 6), so a missing one is a broken farm, a
- * programmer error, and throws a RangeError rather than refuse (D15).
+ * Row `tier` of one of the facility's per-tier lists, tier 1 first: its tiers, or a recipe's job
+ * times. A bought facility's tier is in content: a version that drops a tier settles its farms in
+ * its `upgrade` (ADR-0006, section 6), so a missing one is a broken farm, a programmer error, and
+ * throws a RangeError rather than refuse (D15).
  */
-function findTier(facility: FacilityRule, tier: number): TierRule {
-	const row = facility.tiers[tier - 1];
+function findTier<Row>(facility: FacilityRule, rows: readonly Row[], tier: number): Row {
+	const row = rows[tier - 1];
 	if (row === undefined) {
 		throw new RangeError(`The ${facility.id} has no tier ${String(tier)} in content.`);
 	}
