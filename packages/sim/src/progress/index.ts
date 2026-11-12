@@ -16,6 +16,8 @@ export interface ProgressRules {
 	readonly penLevels: ReadonlyMap<string, number>;
 	/** The Level that unlocks each facility tier, by `formatTierKey` (#85); read it with `findTierLevel`. */
 	readonly tierLevels: ReadonlyMap<string, number>;
+	/** The Level that unlocks each add-on, for every facility (#88). */
+	readonly addOnLevels: ReadonlyMap<string, number>;
 	/** The Level that unlocks each good for orders (#87). */
 	readonly orderGoodLevels: ReadonlyMap<string, number>;
 }
@@ -31,6 +33,7 @@ export function prepareProgressRules(content: Content): ProgressRules {
 		tierLevels: mapUnlockLevels(content, (level) =>
 			level.tiers.map(({ facility, tier }) => formatTierKey(facility, tier)),
 		),
+		addOnLevels: mapUnlockLevels(content, (level) => level.addOns),
 		orderGoodLevels: mapUnlockLevels(content, (level) => level.orderGoods),
 	};
 }

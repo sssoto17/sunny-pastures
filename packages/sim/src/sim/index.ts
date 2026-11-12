@@ -4,6 +4,7 @@ import { advanceFarm, assertTime } from "../advance/index.js";
 import type { StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
 import {
+	buyAddOn,
 	buyFacility,
 	buyTier,
 	collect,
@@ -123,6 +124,8 @@ export function createSim(content: Content): Sim {
 				return collectProducts(farm, action.pen, penRules);
 			case "collect":
 				return collect(farm, action.facility, facilityRules);
+			case "buyAddOn":
+				return buyAddOn(farm, action.facility, action.addOn, facilityRules);
 			case "buyTier":
 				return buyTier(farm, action.facility, action.tier, facilityRules);
 			case "deliver":

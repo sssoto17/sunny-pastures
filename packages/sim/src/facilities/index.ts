@@ -2,7 +2,7 @@
 // section 12).
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
-import type { Content, GoodCount } from "../content/index.js";
+import type { AddOn, Content, GoodCount } from "../content/index.js";
 import { findTierLevel, gainXp, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { refuse } from "../state/index.js";
@@ -10,12 +10,19 @@ import type { ApplyResult, FarmState } from "../state/index.js";
 import { put, take } from "../storage/index.js";
 import type { StorageRules } from "../storage/index.js";
 
-/** A bought facility (ADR-0003, section 5: owned facilities with their tier and queue). */
+/** A bought facility (ADR-0003, section 5: owned facilities with their tier, add-ons and queue). */
 export interface OwnedFacility {
 	/** From 1 (`GLOSSARY.md`, "Tier"), raised one at a time by `buyTier` (MUST-06.2). */
 	readonly tier: number;
 	/** The queue, in the order the jobs started; a job's slot is its position (MUST-03.3, 03.5). */
 	readonly jobs: readonly Job[];
+	/**
+	 * The recipe of the job started last, by hand or by the Loop, which the Loop starts again
+	 * (MUST-06.5); null until a job starts. Stored, since the queue forgets it once collected.
+	 */
+	readonly lastRecipe: string | null;
+	/** Whether the farm has bought each add-on for this facility; none when bought, since an add-on exists on the farm only once bought (MUST-05.6). */
+	readonly addOns: Readonly<Record<AddOn, boolean>>;
 }
 
 /** One run of a recipe in a facility's queue (`GLOSSARY.md`, "Job"). */
@@ -34,6 +41,7 @@ export type FacilityAction =
 	| { readonly type: "startJob"; readonly facility: number; readonly recipe: string }
 	/** Collects the oldest job, in the first slot, once it is done. */
 	| { readonly type: "collect"; readonly facility: number }
+	| { readonly type: "buyAddOn"; readonly facility: number; readonly addOn: AddOn }
 	/** Buys `tier`, which must be the facility's next, so an action sent twice buys it once. */
 	| { readonly type: "buyTier"; readonly facility: number; readonly tier: number };
 
@@ -43,6 +51,8 @@ export interface FacilityRules {
 	readonly facilities: readonly FacilityRule[];
 	readonly progress: ProgressRules;
 	readonly storage: StorageRules;
+	/** Each add-on's price and unlock Level, by add-on. */
+	readonly addOns: ReadonlyMap<string, AddOnRule>;
 }
 
 /**
@@ -82,7 +92,14 @@ export function prepareFacilityRules(
 			]),
 		),
 	}));
-	return { facilities, progress, storage };
+	// A lookup by name, so the order of content's keys decides nothing (MUST-10.6).
+	const addOns = new Map(
+		Object.entries(content.addOns).map(([id, { price }]): [string, AddOnRule] => [
+			id,
+			{ name: addOnNames[id as AddOn], price, level: progress.addOnLevels.get(id) ?? null },
+		]),
+	);
+	return { facilities, progress, storage, addOns };
 }
 
 /** A new farm's facilities: none bought, one entry per content facility (MUST-05.6). */
@@ -107,7 +124,13 @@ export function buyFacility(farm: FarmState, index: number, rules: FacilityRules
 	const bought = purchase(farm, offer, rules.progress);
 	if (!bought.ok) return bought;
 
-	return { ok: true, state: replaceFacility(bought.state, index, { tier: 1, jobs: [] }) };
+	const facilityBought: OwnedFacility = {
+		tier: 1,
+		jobs: [],
+		lastRecipe: null,
+		addOns: { loop: false, collector: false },
+	};
+	return { ok: true, state: replaceFacility(bought.state, index, facilityBought) };
 }
 
 /**
@@ -160,7 +183,8 @@ export function buyTier(
  * Starts a job: needs the recipe at the facility's tier, a free queue slot at that tier and every
  * input in storage, which leaves storage now (MUST-03.2, 03.5). It finishes at the later of now
  * and the previous job's finish, plus the recipe's time at the facility's tier now, stored now
- * (MUST-03.3; ADR-0006, section 7), so a tier bought later never moves it (MUST-06.7).
+ * (MUST-03.3; ADR-0006, section 7), so a tier bought later never moves it (MUST-06.7). The recipe
+ * becomes the facility's last, which its Loop starts again (MUST-06.5).
  */
 export function startJob(
 	farm: FarmState,
@@ -197,7 +221,7 @@ export function startJob(
 	const readyAt = from + (recipe.ms[owned.tier - 1] ?? NaN);
 	assertTime(readyAt);
 	const job: Job = { status: "running", recipe: recipe.id, readyAt };
-	const queued = { ...owned, jobs: [...owned.jobs, job] };
+	const queued = { ...owned, jobs: [...owned.jobs, job], lastRecipe: recipe.id };
 	return { ok: true, state: replaceFacility(taken.state, index, queued) };
 }
 
@@ -230,6 +254,34 @@ export function collect(farm: FarmState, index: number, rules: FacilityRules): A
 	return { ok: true, state: gainXp(collected, recipe.xp, rules.progress) };
 }
 
+/**
+ * Buys an add-on for a bought facility, once the farm's Level unlocks it, through the purchase rule
+ * (spec decision 1, MUST-05.6). Refused if the facility has it, so an action sent twice buys it
+ * once. It works from the next automated step on: work already running keeps its finish time
+ * (MUST-06.7).
+ */
+export function buyAddOn(
+	farm: FarmState,
+	index: number,
+	addOn: AddOn,
+	rules: FacilityRules,
+): ApplyResult {
+	const found = findOwned(farm, index, rules);
+	if (typeof found === "string") return refuse(found);
+
+	const { facility, owned } = found;
+	const rule = rules.addOns.get(addOn);
+	if (rule === undefined) return refuse(`There is no add-on ${addOn}.`);
+	if (owned.addOns[addOn]) return refuse(`The ${facility.id} already has a ${rule.name}.`);
+
+	const offer = { what: `The ${facility.id}'s ${rule.name}`, level: rule.level, price: rule.price };
+	const bought = purchase(farm, offer, rules.progress);
+	if (!bought.ok) return bought;
+
+	const equipped = { ...owned, addOns: { ...owned.addOns, [addOn]: true } };
+	return { ok: true, state: replaceFacility(bought.state, index, equipped) };
+}
+
 /** A running job becomes done at its `readyAt`, keyed by facility index and queue slot (MUST-03.3). */
 export const jobFinishing: StepSource<FarmState> = {
 	steps: (farm) =>
@@ -258,6 +310,20 @@ interface FacilityRule {
 	readonly tiers: readonly TierRule[];
 	readonly recipes: ReadonlyMap<string, RecipeRule>;
 }
+
+interface AddOnRule {
+	/** As players read it (`GLOSSARY.md`). */
+	readonly name: string;
+	readonly price: number;
+	/** The Level that unlocks it, or null if none does. */
+	readonly level: number | null;
+}
+
+/** A fixed table, so a name never comes from content (`code-style.md`). */
+const addOnNames = { loop: "Loop", collector: "Collector" } as const satisfies Record<
+	AddOn,
+	string
+>;
 
 interface TierRule {
 	readonly price: number;

@@ -2,9 +2,9 @@
 // values are the admin's (spec, "How to read this spec"; CONSTRAINTS.md, "Content change" row):
 // approved for the wheat slice on 11 Nov (#82), and the Level table and plot prices on 11 Nov (#83);
 // the barn, the facilities and their recipes chosen by #84's lane (11 Nov, its PRs' "Decided by the
-// lane"); the chicken pen chosen by #86's lane (11 Nov, its PRs' "Decided by the lane"); the tiers
-// and cookies chosen by #85's lane (11 Nov, its PRs' "Decided by the lane"); the order board chosen
-// by #87's lane (11 Nov, its PRs' "Decided by the lane"). All to be tuned after playtest 1.
+// lane"); the chicken pen chosen by #86's lane, the tiers and cookies by #85's, the order board by
+// #87's, and the add-ons' prices and Levels by #88's (11 Nov, their PRs' "Decided by the lane").
+// All to be tuned after playtest 1.
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
@@ -30,12 +30,20 @@ export interface Content {
 	readonly facilities: readonly Facility[];
 	/** The animal pens, in content order: a pen's index here is its index in the state (D12). */
 	readonly pens: readonly Pen[];
+	/** Each add-on's price in coins, the same for every facility (MUST-06.5, 06.6; #88). */
+	readonly addOns: Readonly<Record<AddOn, { readonly price: number }>>;
 	/**
 	 * What orders may ask for and pay (MUST-04.2), in content order: draws pick from this order,
 	 * never from object keys (MUST-10.6).
 	 */
 	readonly orderGoods: readonly OrderGood[];
 }
+
+/**
+ * The add-ons a facility can have (`GLOSSARY.md`, "Add-on"): the Loop starts its last recipe again
+ * (MUST-06.5), and the Collector moves its finished goods into storage (MUST-06.6).
+ */
+export type AddOn = "loop" | "collector";
 
 /** One Level of the Level table: what reaching it takes, pays and unlocks. */
 export interface LevelRow {
@@ -51,6 +59,8 @@ export interface LevelRow {
 	readonly facilities: readonly string[];
 	/** Pen ids it unlocks for buying (spec decision 1, MUST-05.6). */
 	readonly pens: readonly string[];
+	/** Add-ons it unlocks for buying, for every facility (MUST-05.5, 05.6; #88). */
+	readonly addOns: readonly AddOn[];
 	/** Facility tiers it unlocks for buying (MUST-05.5, 06.2; #85). */
 	readonly tiers: readonly FacilityTier[];
 	/** How many more order slots it gives the board (MUST-04.1): Level 1's are the board's first. */
@@ -185,6 +195,7 @@ export const sliceContent = {
 			facilities: [],
 			pens: [],
 			tiers: [],
+			addOns: [],
 			orderSlots: 3,
 			orderGoods: ["wheat"],
 			refillSeconds: { delivered: 120, discarded: 300 },
@@ -197,6 +208,7 @@ export const sliceContent = {
 			facilities: ["feedMill"],
 			pens: ["chickenPen"],
 			tiers: [],
+			addOns: [],
 			orderSlots: 1,
 			orderGoods: ["chickenFeed", "egg"],
 			refillSeconds: { delivered: 120, discarded: 300 },
@@ -209,6 +221,7 @@ export const sliceContent = {
 			facilities: ["bakery"],
 			pens: [],
 			tiers: [{ facility: "feedMill", tier: 2 }],
+			addOns: [],
 			orderSlots: 1,
 			orderGoods: ["bread"],
 			refillSeconds: { delivered: 90, discarded: 240 },
@@ -221,6 +234,7 @@ export const sliceContent = {
 			facilities: [],
 			pens: [],
 			tiers: [{ facility: "bakery", tier: 2 }],
+			addOns: ["collector"],
 			orderSlots: 1,
 			orderGoods: [],
 			refillSeconds: { delivered: 90, discarded: 240 },
@@ -236,6 +250,7 @@ export const sliceContent = {
 				{ facility: "feedMill", tier: 3 },
 				{ facility: "bakery", tier: 3 },
 			],
+			addOns: ["loop"],
 			orderSlots: 1,
 			orderGoods: [],
 			refillSeconds: { delivered: 60, discarded: 180 },
@@ -302,6 +317,7 @@ export const sliceContent = {
 			xp: 1,
 		},
 	],
+	addOns: { loop: { price: 80 }, collector: { price: 60 } },
 	orderGoods: [
 		{ good: "wheat", min: 2, max: 6, coins: 3, xp: 1 },
 		{ good: "chickenFeed", min: 2, max: 4, coins: 4, xp: 1 },

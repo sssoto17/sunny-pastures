@@ -4,6 +4,7 @@ import { createSim, sliceContent } from "../../index.js";
 import type { Content, FarmState, Order, OrderSlot } from "../../index.js";
 import { expectAccepted } from "./expectAccepted.js";
 import { orderTerms as terms } from "./orderTerms.js";
+import { ownedFacility } from "./ownedFacility.js";
 import { plantWheat } from "./plantWheat.js";
 
 const sim = createSim(sliceContent);
@@ -139,7 +140,7 @@ describe("refilling an order", () => {
 		const counts = Array.from({ length: 40 }, (_farm, i) => {
 			const farm = refillingAtLevel2(`farm-${String(i)}`, 1_000);
 			const pen = { trough: 0, animals: [idle, idle, idle], products: 0 };
-			const owned = { ...farm, facilities: [{ tier: 1, jobs: [] }, null], pens: [pen] };
+			const owned = { ...farm, facilities: [ownedFacility(), null], pens: [pen] };
 			return countStretched(sim.advance(owned, 1_000));
 		});
 

@@ -5,6 +5,7 @@ import type { Action, Content, FarmState } from "../../index.js";
 import { applyAll } from "./applyAll.js";
 import { expectAccepted } from "./expectAccepted.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
+import { ownedFacility } from "./ownedFacility.js";
 
 const sim = createSim(sliceContent);
 const feedMill = 0;
@@ -20,10 +21,7 @@ const buyTier = (facility: number, tier: number): Action => ({ type: "buyTier", 
 const farmWithFacilities = (level: number, coins: number, tier = 1): FarmState => ({
 	...farmAt(level, coins),
 	silo: { wheat: 40 },
-	facilities: [
-		{ tier, jobs: [] },
-		{ tier, jobs: [] },
-	],
+	facilities: [ownedFacility([], { tier }), ownedFacility([], { tier })],
 });
 
 describe("buying a tier", () => {
@@ -31,8 +29,8 @@ describe("buying a tier", () => {
 		const farm = expectAccepted(sim.apply(farmWithFacilities(3, 70), buyTier(feedMill, 2), 0));
 
 		expect(farm.facilities).toEqual([
-			{ tier: 2, jobs: [] },
-			{ tier: 1, jobs: [] },
+			ownedFacility([], { tier: 2 }),
+			ownedFacility([], { tier: 1 }),
 		]);
 		expect(farm.coins).toBe(10);
 		expect(farm.xp).toBe(xpOfLevel(3));

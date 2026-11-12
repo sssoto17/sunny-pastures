@@ -2,6 +2,7 @@
 // #72 build them; each new export meets CONSTRAINTS.md's "Interface change" row.
 export { sliceContent } from "./content/index.js";
 export type {
+	AddOn,
 	Content,
 	Crop,
 	Facility,

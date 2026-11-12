@@ -4,6 +4,7 @@ import { createSim, sliceContent } from "../../index.js";
 import type { Content, FarmState } from "../../index.js";
 import { applyAll } from "./applyAll.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
+import { ownedFacility } from "./ownedFacility.js";
 
 const sim = createSim(sliceContent);
 // The slice's recipes (#84): chicken feed takes 2 wheat and 60 s, bread 3 wheat and 300 s.
@@ -21,21 +22,19 @@ const collectFeed = { type: "collect", facility: feedMill } as const;
 const workshop = (wheat: number): FarmState => ({
 	...farmAt(3, 0),
 	silo: { wheat },
-	facilities: [
-		{ tier: 1, jobs: [] },
-		{ tier: 1, jobs: [] },
-	],
+	facilities: [ownedFacility(), ownedFacility()],
 });
 
 describe("starting a job", () => {
-	it("takes the inputs from storage and stores when the job finishes (MUST-03.2, ADR-0006 §7)", () => {
+	it("takes the inputs from storage and stores when the job finishes and its recipe, for the Loop (MUST-03.2, 06.5, ADR-0006 §7)", () => {
 		const farm = applyAll(workshop(5), [[startFeed, 1_000]]);
 
 		expect(farm.silo).toEqual({ wheat: 3 });
-		expect(farm.facilities[feedMill]).toEqual({
-			tier: 1,
-			jobs: [{ status: "running", recipe: "chickenFeed", readyAt: 1_000 + feedMs }],
-		});
+		expect(farm.facilities[feedMill]).toEqual(
+			ownedFacility([{ status: "running", recipe: "chickenFeed", readyAt: 1_000 + feedMs }], {
+				lastRecipe: "chickenFeed",
+			}),
+		);
 		expect(farm.coins).toBe(0);
 		expect(farm.xp).toBe(xpOfLevel(3));
 	});
@@ -107,7 +106,7 @@ describe("starting a job", () => {
 			"once the queue is full, done jobs included (MUST-03.5)",
 			{
 				...workshop(5),
-				facilities: [{ tier: 1, jobs: [doneFeed, doneFeed] }, null],
+				facilities: [ownedFacility([doneFeed, doneFeed]), null],
 			},
 			startFeed,
 			"The feedMill's queue is full: 2 of 2 slots.",
@@ -207,7 +206,7 @@ describe("collecting", () => {
 	it("throws on a done job whose recipe isn't in content, a programmer error (ADR-0006 §6)", () => {
 		const stale = {
 			...workshop(0),
-			facilities: [{ tier: 1, jobs: [{ status: "done", recipe: "cake" } as const] }, null],
+			facilities: [ownedFacility([{ status: "done", recipe: "cake" }]), null],
 		};
 
 		expect(() => sim.apply(stale, collectFeed, 0)).toThrow(RangeError);

@@ -4,6 +4,7 @@ import { createSim, sliceContent } from "../../index.js";
 import type { FarmState } from "../../index.js";
 import { expectAccepted } from "./expectAccepted.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
+import { ownedFacility } from "./ownedFacility.js";
 
 const sim = createSim(sliceContent);
 const bakery = 1;
@@ -16,7 +17,7 @@ const farmWithBakery = (tier: number, eggs: number): FarmState => ({
 	...farmAt(4, 0),
 	silo: { wheat: 10 },
 	barn: { egg: eggs },
-	facilities: [null, { tier, jobs: [] }],
+	facilities: [null, ownedFacility([], { tier })],
 });
 
 describe("baking cookies", () => {
