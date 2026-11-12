@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -259,15 +268,22 @@ describe("floor guard, end to end", () => {
 				.map((l) => l.slice(10))
 				.join("\n");
 		};
+		// The step checks the guard's ref out as a worktree in RUNNER_TEMP, outside the checkout, so
+		// the checkout the guard diffs stays clean (#132).
 		const runTakeGuard = () => {
-			const temp = join(repo.dir, ".runner-temp");
-			const r = spawnSync("bash", ["-e", "-o", "pipefail", "-c", takeGuardStep()], {
-				cwd: repo.dir,
-				env: { ...process.env, BASE_REF: "main", RUNNER_TEMP: temp },
-				encoding: "utf8",
-			});
-			expect(r.status).toBe(0);
-			return readFileSync(join(temp, "floor-guard", "floor-guard.mjs"), "utf8");
+			const temp = mkdtempSync(join(tmpdir(), "runner-temp-"));
+			try {
+				const r = spawnSync("bash", ["-e", "-o", "pipefail", "-c", takeGuardStep()], {
+					cwd: repo.dir,
+					env: { ...process.env, BASE_REF: "main", RUNNER_TEMP: temp },
+					encoding: "utf8",
+				});
+				expect(r.status).toBe(0);
+				expect(repo.git("status", "--porcelain")).toBe("");
+				return readFileSync(join(temp, "floor-guard", ".github/scripts/floor-guard.mjs"), "utf8");
+			} finally {
+				rmSync(temp, { recursive: true, force: true });
+			}
 		};
 
 		it("make guard / floor run the base branch's guard, not the PR's", () => {
