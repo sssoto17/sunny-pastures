@@ -114,3 +114,113 @@ describe("swallowed errors", () => {
 		}
 	});
 });
+
+// Property-run counts (#135, ADR-0003 section 9): a property gets its settings from
+// inject('fastCheck') and nothing else, so no test file can lower the run count the root config
+// reads from SIM_PROPERTY_RUNS. #133's known limits: counts set another way, under other names.
+describe("property run counts", () => {
+	const SIM_TEST = "packages/sim/src/sim/tests/x.test.ts";
+	const HEAD = [
+		"import fc from 'fast-check';",
+		"import { inject, vi } from 'vitest';",
+		"import { requireProvided } from '../../state/tests/provided.js';",
+		"vi.setConfig({ testTimeout: inject('propertyTimeout') });",
+		"const params = requireProvided('fastCheck', inject('fastCheck'));",
+		"const p = fc.property(fc.nat(), () => true);",
+	];
+	// The finding lines count from the case's own first line.
+	const findings = async (lines, file = SIM_TEST) =>
+		(await floorFindings([...HEAD, ...lines], file)).map((f) => {
+			const [line, rule] = f.split(" ");
+			return `${Number(line) - HEAD.length} ${rule}`;
+		});
+
+	it.each([
+		["settings written inline", ["fc.assert(p, { seed: 1, numRuns: 1 });"]],
+		[
+			"the shared settings with a count spread over them",
+			["fc.assert(p, { ...params, numRuns: 1 });"],
+		],
+		[
+			"settings built in a variable",
+			["const quick = { ...params, numRuns: 1 };", "fc.assert(p, quick);"],
+		],
+		["a computed count", ["const quick = { ...params, numRuns: params.numRuns * 0 };"]],
+		["a count assigned", ["params.numRuns = 1;"]],
+		["a count assigned by computed key", ["params['numRuns'] = 1;"]],
+		["a count counted down", ["params.numRuns--;"]],
+		["a count deleted", ["delete params.numRuns;"]],
+		["a count merged in", ["Object.assign(params, { numRuns: 1 });"]],
+		["a count defined by name", ["Object.defineProperty(params, 'numRuns', { value: 1 });"]],
+		["fc.configureGlobal", ["fc.configureGlobal({ numRuns: 1 });"]],
+		["a run cut short by time", ["fc.assert(p, { ...params, interruptAfterTimeLimit: 1 });"]],
+		["a run that stops early", ["const quick = { ...params, skipAllAfterTimeLimit: 1 };"]],
+		["a run replaying one path", ["const quick = { ...params, path: '0' };"]],
+		["a reporter that hides failures", ["const quick = { ...params, reporter: () => 0 };"]],
+		["fc.assert taken as a value", ["const check = fc.assert;", "check(p, params);"]],
+		["fc.assert reached by computed key", ["fc['assert'](p, params);"]],
+		["fc passed on", ["run(fc);"]],
+	])("reports %s", async (_case, lines) => {
+		expect((await findings(lines)).length).toBeGreaterThan(0);
+	});
+
+	it.each([
+		["imported under another name", "import * as F from 'fast-check';"],
+		["imported by name", "import { assert } from 'fast-check';"],
+		["configured by name", "import { configureGlobal } from 'fast-check';"],
+	])("reports fast-check %s", async (_case, line) => {
+		expect(await floorFindings([line], SIM_TEST)).toContain("1 no-restricted-syntax");
+	});
+
+	// A settings object in a helper that doesn't import fast-check still can't hold a count.
+	it("reports a count in a test helper", async () => {
+		const file = "packages/sim/src/state/tests/quick.ts";
+		expect(await floorFindings(["export const quick = { numRuns: 1 };"], file)).toEqual([
+			"1 no-restricted-syntax",
+		]);
+	});
+
+	// Outside the sim the property rules apply too; there is no requireProvided there yet.
+	it.each([
+		["without settings", ["import fc from 'fast-check';", "fc.assert(p);"]],
+		[
+			"without reading inject('fastCheck')",
+			["import fc from 'fast-check';", "fc.assert(p, settings);"],
+		],
+	])("reports an app property test %s", async (_case, lines) => {
+		expect(await floorFindings(lines, "apps/web/src/x.test.ts")).not.toEqual([]);
+	});
+
+	it.each([
+		["the shared settings", ["fc.assert(p, params);"]],
+		[
+			"the shared settings, checked inline",
+			["fc.check(p, requireProvided('fastCheck', inject('fastCheck')));"],
+		],
+		["the run count read", ["expect(counts.size).toBeLessThan(params.numRuns);"]],
+		[
+			"an async property",
+			["await fc.assert(fc.asyncProperty(fc.nat(), async () => true), params);"],
+		],
+	])("does not report %s", async (_case, lines) => {
+		expect(await findings(lines)).toEqual([]);
+	});
+
+	it.each([
+		[
+			"the root config, where the count is read",
+			"vitest.config.mts",
+			[
+				"const runs = 100;",
+				"export default { test: { provide: { fastCheck: { seed: 1, numRuns: runs } } } };",
+			],
+		],
+		[
+			"a path key in a file without fast-check",
+			".github/scripts/tests/x.test.mjs",
+			["const f = { path: 'a.ts', seed: 1 };"],
+		],
+	])("does not report %s", async (_case, file, lines) => {
+		expect(await floorFindings(lines, file)).toEqual([]);
+	});
+});

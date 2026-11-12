@@ -127,7 +127,7 @@ const HANDLER = [
 	"CallExpression:matches([callee.property.name='catch'], [callee.property.value='catch']) > .arguments:first-child",
 	"CallExpression[callee.property.name='then'] > .arguments:nth-child(2)",
 ].join(", ");
-const FLOOR_SYNTAX = [
+const UNFINISHED_SYNTAX = [
 	{
 		selector: `:matches(Literal[value=${STUB_MESSAGE}], TemplateLiteral > TemplateElement.quasis:first-child[value.raw=${STUB_MESSAGE}], Identifier[name=/^(not_?(yet_?)?implemented|unimplemented)/i])`,
 		message:
@@ -149,6 +149,73 @@ const FLOOR_SYNTAX = [
 		selector: `:matches(${NOOP({ isNullNothing: false })}):not(${HANDLER})`,
 		message:
 			"A function that does nothing is a stub; a handler that ignores an error swallows it (CONSTRAINTS.md, Floor; #135).",
+	},
+];
+
+// Property runs (#135, ADR-0003 section 9): a property gets its settings from inject('fastCheck')
+// only, so no file can lower the run count the root config reads from SIM_PROPERTY_RUNS (#133's
+// known limits: counts set another way, under other names). Reading `params.numRuns` stays fine.
+const FC_RUN = "CallExpression[callee.object.name='fc'][callee.property.name=/^(assert|check)$/]";
+// A settings key written, assigned, counted or deleted, by name or by quoted key.
+const settingsKey = (keys) =>
+	`:matches(ObjectExpression > Property > Identifier.key[name=${keys}], Property > Literal.key[value=${keys}], MemberExpression > Literal.property[value=${keys}], CallExpression[callee.property.name=/^(defineProperty|set)$/] > Literal.arguments[value=${keys}], :matches(AssignmentExpression > .left, UpdateExpression > .argument, UnaryExpression[operator='delete'] > .argument) > Identifier.property[name=${keys}])`;
+// fast-check's settings that cut, stop or replace runs. The plain words count only in a file that
+// imports fast-check, so a `path` elsewhere is fine.
+const RUN_KEYS =
+	"/^(numRuns|endOnFailure|interruptAfterTimeLimit|skipAllAfterTimeLimit|markInterruptAsFailure|maxSkipsPerRun|skipEqualValues|ignoreEqualValues|asyncReporter|randomType)$/";
+const FC_KEYS = "/^(path|seed|examples|reporter|unbiased)$/";
+const RUN_MESSAGE =
+	"Property runs take their settings from inject('fastCheck') only, so no file can lower the run count (#135, ADR-0003 section 9).";
+const RUN_SETTINGS = { selector: settingsKey(RUN_KEYS), message: RUN_MESSAGE };
+const PROPERTY_SYNTAX = [
+	{
+		// Without the settings, fast-check picks a random seed and its own run count (D10).
+		selector: `${FC_RUN}[arguments.length<2]`,
+		message:
+			"Pass the shared settings: fc.assert(property, inject('fastCheck')) (D10, ADR-0003 section 9).",
+	},
+	{
+		selector: `${FC_RUN} > .arguments:nth-child(2):not(Identifier, CallExpression[callee.name=/^(requireProvided|inject)$/])`,
+		message: RUN_MESSAGE,
+	},
+	{
+		selector: `Program:has(ImportDeclaration[source.value='fast-check']) ${settingsKey(FC_KEYS)}`,
+		message: RUN_MESSAGE,
+	},
+	{
+		selector: `Program:has(${FC_RUN}):not(:has(${injectCall("fastCheck")}))`,
+		message: RUN_MESSAGE,
+	},
+	{
+		// fast-check is `fc`, called as fc.assert or fc.check, so the rules above see every run.
+		selector: [
+			"Identifier[name='configureGlobal']",
+			"Literal[value='configureGlobal']",
+			"ImportDeclaration[source.value='fast-check'] > :matches(ImportDefaultSpecifier, ImportNamespaceSpecifier)[local.name!='fc']",
+			"ImportDeclaration[source.value='fast-check'] > ImportSpecifier[imported.name=/^(assert|check|default)$/]",
+			"Identifier[name='fc']:not(MemberExpression[computed=false] > .object, TSQualifiedName > .left, ImportDefaultSpecifier > .local, ImportNamespaceSpecifier > .local)",
+			"MemberExpression[object.name='fc'][property.name=/^(assert|check)$/]:not(CallExpression > .callee)",
+		].join(", "),
+		message: RUN_MESSAGE,
+	},
+];
+const FLOOR_SYNTAX = [...UNFINISHED_SYNTAX, ...PROPERTY_SYNTAX, RUN_SETTINGS];
+
+// The sim's property files read the settings through requireProvided, with the scaled timeout.
+const SIM_PROPERTY_SYNTAX = [
+	{
+		// Without the timeout, a property file gets Vitest's 5 s default, which fails only at
+		// CI's 1,000 runs (#200, #208). Reported on the file, since the file applies it.
+		selector: `Program:has(${injectCall("fastCheck")}):not(:has(${PROPERTY_TIMEOUT}))`,
+		message:
+			"A file that uses inject('fastCheck') applies the property timeout too: vi.setConfig({ testTimeout: inject('propertyTimeout') }) (#208, ADR-0003 section 9).",
+	},
+	{
+		// Without the root config (Vitest run from packages/sim), inject gives undefined and
+		// fast-check picks a random seed; requireProvided throws instead (#213).
+		selector: `${injectCall("fastCheck")}:not(CallExpression[callee.name='requireProvided'] > .arguments)`,
+		message:
+			"Read the fast-check settings through the guard: requireProvided('fastCheck', inject('fastCheck')) (#213, ADR-0003 section 9).",
 	},
 ];
 
@@ -219,6 +286,11 @@ export default defineConfig(
 			"@typescript-eslint/no-empty-function": "error",
 			"no-restricted-syntax": ["error", ...FLOOR_SYNTAX],
 		},
+	},
+	{
+		// The root config is where the run count is read and set (D10); the guard watches it there.
+		files: ["vitest.config.mts"],
+		rules: { "no-restricted-syntax": ["error", ...UNFINISHED_SYNTAX, ...PROPERTY_SYNTAX] },
 	},
 	{
 		// The code conventions (ADR-0005, section 6) for apps/ and packages/; .github/scripts is CI
@@ -390,30 +462,18 @@ export default defineConfig(
 				},
 			],
 			// A later block's options replace an earlier block's, so the sim selectors are repeated here.
+			"no-restricted-syntax": ["error", ...SIM_SYNTAX, ...SIM_PROPERTY_SYNTAX],
+		},
+	},
+	{
+		// requireProvided's own test passes a settings object through as data and runs no property,
+		// so it alone may write a run count (#135). Every other sim test rule still applies.
+		files: ["packages/sim/src/state/tests/provided.test.ts"],
+		rules: {
 			"no-restricted-syntax": [
 				"error",
-				...SIM_SYNTAX,
-				{
-					// Without the settings, fast-check picks a random seed and its own run count (D10).
-					selector:
-						"CallExpression[callee.object.name='fc'][callee.property.name=/^(assert|check)$/][arguments.length<2]",
-					message:
-						"Pass the shared settings: fc.assert(property, inject('fastCheck')) (D10, ADR-0003 section 9).",
-				},
-				{
-					// Without the timeout, a property file gets Vitest's 5 s default, which fails only at
-					// CI's 1,000 runs (#200, #208). Reported on the file, since the file applies it.
-					selector: `Program:has(${injectCall("fastCheck")}):not(:has(${PROPERTY_TIMEOUT}))`,
-					message:
-						"A file that uses inject('fastCheck') applies the property timeout too: vi.setConfig({ testTimeout: inject('propertyTimeout') }) (#208, ADR-0003 section 9).",
-				},
-				{
-					// Without the root config (Vitest run from packages/sim), inject gives undefined and
-					// fast-check picks a random seed; requireProvided throws instead (#213).
-					selector: `${injectCall("fastCheck")}:not(CallExpression[callee.name='requireProvided'] > .arguments)`,
-					message:
-						"Read the fast-check settings through the guard: requireProvided('fastCheck', inject('fastCheck')) (#213, ADR-0003 section 9).",
-				},
+				...SIM_SYNTAX.filter((rule) => rule !== RUN_SETTINGS),
+				...SIM_PROPERTY_SYNTAX,
 			],
 		},
 	},
