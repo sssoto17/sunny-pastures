@@ -10,9 +10,15 @@ deploy hooks. Until now each piece was set up when it was first needed, and noth
 agents work `factory:ready` issues without the admin. Before that, this ADR settles how the repo,
 the board and the platform are used, and in which order the admin turns things on.
 
-This is a proposal. Nothing in it has been applied. The admin applies only what they approve, using
-the checklist at the end. Files under `.github/` are a protected path, so their drafts sit in the
-appendix and land in a later PR.
+This began as a proposal on 7 Nov. The admin applies only what they approve, using the checklist
+at the end. Files under `.github/` are a protected path, so their drafts sit in the appendix and
+land in the admin's PRs.
+
+**Applied so far:** checklist steps 1–8 on 8 Nov (#66), step 9 with the templates PR (#91),
+step 10 with the Dependabot PR (#92), and the first required checks (#40), which the admin put in a
+ruleset of their own, `main checks` (area 2). Where what was applied differs from the text, a dated
+note ("Applied 8 Nov, #66: …") sits next to what it amends; the decision above it stays as it was
+written. The rest of the checklist is not applied yet.
 
 ## How this was checked
 
@@ -245,6 +251,23 @@ Target: the default branch. Enforcement: active.
 | Require signed commits | off | Cloud-session commits are signed, but local commits aren't. Checked 7 Nov (`verification.verified` on every commit of `main`, `prototype/persistence` and this PR's branch): all 54 cloud-session commits (author Claude, `Claude-Session:` trailer) and all 14 merges made on github.com are verified. All 43 local commits, the admin's and local sessions', are unsigned. The rule would block every local push until the admin sets up signing, for little gain in a solo repo. |
 | Require deployments to succeed | off; revisit at M4 | Could require the Vercel preview to deploy before merge. Decided together with the `preview / …` checks, which need a preview to measure (below). |
 | Bypass list | Repository admin, mode **"For pull requests only"** | The admin can merge a PR past a rule (an admin-review PR the factory opened as the admin, or a red check during an outage) but can't push straight to `main`. **Until the reviewer App exists (checklist step 12), nobody can give the required approval, so every merge is a bypass merge, and any session can make one.** Decided (Q15): the ruleset starts with 0 required approvals and goes to 1 at step 12; code-owner review stays on throughout (Consequences). Rulesets accept "Repository admins" as bypass actors with no organization condition; the "organization only" limit in the docs is for classic branch protection ([creating rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository#granting-bypass-permissions-for-your-branch-or-tag-ruleset), checked 7 Nov). |
+
+**Applied 8 Nov, #66:** ruleset `main` (id 26810726) as in the table, with 0 required approvals
+(Q15). The bypass list shows "Repository admin, For pull requests only" in the UI, so `actor_id: 5`
+is the Repository admin role. GitHub added two parameters this table doesn't set; A8 says what they
+do.
+
+**Applied 8 Nov, #40: the required checks live in their own ruleset, `main checks`** (id
+26816327, the admin's decision, 23:17 CET), not in `main`. It holds only the
+`required_status_checks` rule, with **no bypass actors**; `main` keeps deletion, force pushes and
+the pull request rule, with the admin's "For pull requests only" bypass. Why: a bypass lifts every
+rule in its ruleset. With the checks in `main`, a bypass merge, which every code-owned PR needs
+while sessions open PRs as the admin, skipped the checks too. Split, the bypass lifts only the
+approvals, and the checks hold for everyone. GitHub aggregates the rules of every ruleset that
+targets a branch ([rule layering](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets#about-rule-layering),
+read 12 Nov). **The cost:** "a red check during an outage" (bypass row above) can no longer be
+bypassed. A broken check blocks every merge until it's fixed, or until the admin edits
+`main checks`. The four checks and the JSON are in A8.
 
 **Placeholder required checks.** The names are a superset of the "Required check" column of
 `CONSTRAINTS.md`'s "Enforced with numbers" table (on `main` since #45), which owns every
@@ -856,6 +879,12 @@ page doesn't name the workflows. Two rows (Item reopened, Code changes requested
 approved) are names the API didn't return. If the Workflows page doesn't offer them, skip those
 rows *(not re-checked in the UI)*.
 
+**Applied 8 Nov, #66 (checklist step 5):** as the table below. The UI offers all three rows the
+API doesn't list. "Item reopened" is on and sets Backlog; "Code changes requested" and "Code review
+approved" are off. The filters and the Status each workflow sets aren't API-readable, so the admin
+confirmed them from screenshots. Auto-add's filter was first saved as `is:issue is:open`, then
+corrected to `is:issue`.
+
 | Workflow | Recommendation | Why |
 |---|---|---|
 | Auto-add to project | **On**, filter `is:issue` | On today, and it adds PRs too (above), so the filter changes. Every issue belongs on the Project (`issue-tracker.md`). Issues only: the issue is the work item, and a PR card would duplicate it. Free allows 1 auto-add workflow, Pro 5 ([adding items automatically](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/adding-items-automatically)). Agents still add the item explicitly, and #32's script should treat "already on the Project" as success. |
@@ -907,6 +936,19 @@ in `triage-labels.md` reaches 3 repetitions.
 | Bugs 🐛 | Table | `label:bug is:open`, grouped by Priority, sorted by Size | — |
 
 Week, Factory and Blocked don't exist yet.
+
+**Applied 8 Nov, #66 (checklist step 6):** the admin added Week, Factory and Blocked in the UI.
+Two filters differ from the table above, and one view is unchanged:
+
+- **Factory** filters on `label:factory:ready -status:Done` only. A Project filter ORs only between
+  values of the same field, so it can't OR `mode:` with `label:`. The label is the authoritative
+  signal, and Mode follows it by hand.
+- **Blocked** lists the three labels, `label:blocked:decision,blocked:external,blocked:admin`,
+  because a `blocked:*` wildcard wasn't confirmed to work. A new `blocked:*` label has to be added
+  to this view by hand (`triage-labels.md`, "Blocked").
+- **This week** is unchanged (`week:@current`). A board filter can't apply to the Done column
+  alone, and Week iterations are 7 days (Mon–Sun), so Done already shows only the current week's
+  items.
 
 ### Milestones and Project fields
 
@@ -1107,6 +1149,14 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
   - `pull_request_target` only for jobs that never run PR code: the labeler and the reviewer
     App's review job. The review job holds the App's key and feeds text the PR wrote to a model,
     so its guard against prompt injection is designed with it (area 2).
+    **Applied 12 Nov, #226, a temporary third user:** `.github/workflows/check-103-claude.yml`,
+    #103's check of Claude in Actions. The admin accepted it (comment on #103, 12 Nov) because it
+    runs no PR code: it runs only for a PR from `throwaway/103-claude` onto `throwaway/103-base`,
+    and its checkout has no `ref`, so it gets the default branch. It uses the `factory`
+    environment, and on this event the run's ref is `main`, so a job like it would get that
+    environment's secrets for any PR; #68's reviewer gets its own environment. #103's results
+    were recorded and #103 closed on 12 Nov, so **#227 deletes the file**, or rewrites it as
+    #68's reviewer, before `CONSTRAINTS.md` Exceptions row E1 expires on 12 Dec.
 
 **Alternatives considered.**
 - **Go public now**, for free scanning from M2. Rejected by the admin (Q1): the repo stays
@@ -1358,15 +1408,19 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
    ```sh
    gh api -X POST repos/sssoto17/sunny-pastures/rulesets --input ruleset-main.json --jq '.id'
    ```
+   *Applied 8 Nov, #66:* id 26810726. The UI shows "Repository admin, For pull requests only",
+   so `actor_id: 5` is confirmed; A8 has the two defaults GitHub added.
 4. **Ruleset `prototype/*`** and **ruleset `v*` tags** (appendix A8), same call with their files.
    From here until #37, every session holds the bypass the `main` ruleset gives the admin
    (area 2).
 5. **Project workflows** (area 5). UI only: the Project → ⋯ → Workflows. All 8 are on today
    (7 Nov). Turn off Auto-archive items, Auto-close issue and Pull request linked to issue; set
    auto-add's filter to `is:issue` (it adds PRs today); check that Item added to project sets
-   Backlog. Turn on Item reopened only if the page offers it.
+   Backlog. Turn on Item reopened only if the page offers it. *Applied 8 Nov, #66;* the
+   differences are in area 5, "Built-in workflows".
 6. **Project views** (area 5). UI only: the Project → New view. This week, Roadmap and Triage
-   exist; add Week, Factory and Blocked, and the 7-day limit on Done in This week.
+   exist; add Week, Factory and Blocked, and the 7-day limit on Done in This week. *Applied
+   8 Nov, #66,* with different Factory and Blocked filters and no 7-day limit (area 5, "Views").
 7. **Dependabot alerts** now (area 8); off today. They won't cover npm dependencies while the
    lockfile uses pnpm 12's two-document format (area 8). UI: Settings → Code security →
    Dependabot alerts.
@@ -1424,8 +1478,11 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
 
     Close the throwaway PRs unmerged. If any test fails, fix the App or the workflow and run
     that test again; auto-merge stays off until all six pass. Add the required checks to the `main` ruleset as they start reporting, each with GitHub Actions as
-    its source (Settings → Rules → the ruleset → Require status checks; A8). At M4, the preview
-    checks need Vercel's automation bypass secret as an Actions secret (area 2), set with
+    its source (Settings → Rules → the ruleset → Require status checks; A8). *Applied 8 Nov, #40:*
+    the first four checks went into their own ruleset, `main checks`, with no bypass, so the
+    `main` ruleset no longer carries them. Add later checks to `main checks` (area 2, A8). A broken
+    check then blocks every merge until it's fixed or the admin edits `main checks`. At M4, the
+    preview checks need Vercel's automation bypass secret as an Actions secret (area 2), set with
     `gh secret set` so it's never shown. Turn on auto-merge **only once** the required checks
     report, (a)–(f) pass and #47's escalation criteria are merged (Q16):
     ```sh
@@ -1845,12 +1902,25 @@ updates:
       all-dev:
         dependency-type: development
     open-pull-requests-limit: 3
+    labels: ["area:ci-cd", "review:admin"]          # code-owned paths (triage-labels.md)
+    commit-message: { prefix: chore, include: scope } # chore(deps): / chore(deps-dev):
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
     cooldown:
       default-days: 7
+    labels: ["area:ci-cd", "review:admin"]
+    commit-message: { prefix: chore, include: scope }
 ```
+
+**Applied 8 Nov, #92 (with #69):** the file above, which is the 7 Nov draft plus two keys on both
+entries, deviations the admin decided on 8 Nov:
+
+- `labels: ["area:ci-cd", "review:admin"]`: Dependabot's PRs touch `package.json`, the lockfile or
+  `.github/`, which are `area:ci-cd` and code-owned. Without it, Dependabot would add its own
+  `dependencies`, `javascript` and `github_actions` labels outside the taxonomy.
+- `commit-message: { prefix: chore, include: scope }`: PR titles read `chore(deps): …` or
+  `chore(deps-dev): …`, so they pass the planned `guard / pr-title`.
 
 ## A8. Rulesets (JSON for `gh api --input`)
 
@@ -1935,6 +2005,34 @@ Code-owner review is on throughout. Neither App is in any bypass list (#37). Git
 say how `require_last_push_approval` behaves with 0 required approvals, so it changes at step 12
 with the count.
 
+**Applied 8 Nov, #66; read back 12 Nov** (`gh api repos/sssoto17/sunny-pastures/rulesets/26810726`).
+The rules match `ruleset-main.json` above: 0 required approvals and code-owner review on, until #68
+raises the count. The differences:
+
+- **The bypass actor.** `actor_id: 5`, `RepositoryRole`, `bypass_mode: pull_request` is the
+  Repository admin role: the UI lists "Repository admin, For pull requests only", and the API
+  returns `current_user_can_bypass: "pull_requests_only"` for the admin's account. This settles
+  step 3's *not re-checked*.
+- **`required_reviewers: []`**, a default GitHub added. The Required reviewers rule names teams,
+  and it "is not available on user-owned repositories as they do not contain teams"
+  ([available rules, "Required reviewers"](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#required-reviewers),
+  read 12 Nov). So it stays empty here.
+- **`require_extra_approval_for_unattributed_changes: true`**, a default GitHub added. *Documented*
+  (public preview): "When Copilot opens a pull request that isn't attributed to a person, the
+  ruleset requires one more approval than the number you configured", and "This setting has no
+  effect if the ruleset requires zero approvals"
+  ([available rules, "Additional approval for unattributed Copilot pull requests"](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#additional-approval-for-unattributed-copilot-pull-requests),
+  read 12 Nov). What it means here:
+  - *Documented:* no effect today, at 0 required approvals.
+  - *Inference:* no effect on `sunny-factory`'s PRs at 1 approval either. The docs name only
+    Copilot opening a PR under its own App identity; they don't say whether another App's PR
+    counts as unattributed. If it did, a factory PR would need two approvals from step 12, the
+    reviewer App's alone wouldn't merge it, and every factory PR would wait for the admin.
+    Dependabot's PRs are code-owned, so the admin approves them anyway. #68 settles it with
+    test (a) on a PR the factory App opened (as #101's run did with PR #199).
+  - *Inference:* none on the reviewer App, which approves PRs and never opens them, or on PRs
+    that sessions open as `sssoto17`, a person.
+
 When the CI/CD step's checks report, it adds this rule to `ruleset-main.json`, with the names
 the step settles. Each check is pinned to GitHub Actions (`integration_id` 15368), so a commit
 status made by hand can't satisfy it:
@@ -1954,3 +2052,37 @@ status made by hand can't satisfy it:
 ```
 
 (Three of the placeholders in area 2 are shown; the step lists all of them.)
+
+**Applied 8 Nov, #40: the rule went into a ruleset of its own, not into `ruleset-main.json`**
+(the admin's decision, 23:17 CET; why and the cost are in area 2). Read back on 12 Nov
+(`gh api repos/sssoto17/sunny-pastures/rulesets/26816327`), as `ruleset-main-checks.json`:
+
+```json
+{
+  "name": "main checks",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "bypass_actors": [],
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "ci / typecheck", "integration_id": 15368 },
+          { "context": "ci / lint", "integration_id": 15368 },
+          { "context": "ci / test", "integration_id": 15368 },
+          { "context": "guard / floor", "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}
+```
+
+No bypass actors: the API returns `current_user_can_bypass: "never"` for the admin's account, and
+`GET …/rules/branches/main` lists `required_status_checks` from ruleset 26816327 and the other three
+rules from 26810726. `do_not_enforce_on_create: false` is GitHub's default. Later required checks
+are added to this ruleset, not to `main`.
