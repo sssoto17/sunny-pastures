@@ -103,6 +103,11 @@ Remove it when the reason clears. An issue may carry more than one.
 An issue blocked by another issue uses GitHub's native issue dependencies (see `issue-tracker.md`,
 **Blocking**), not a label.
 
+**A new `blocked:*` label must be added to the Project's Blocked view by hand.** The view lists
+the labels by name (`label:blocked:decision,blocked:external,blocked:admin`), because a
+`blocked:*` wildcard wasn't confirmed to work (ADR-0002, area 5, "Views"). Add the label to this
+table and to the view's filter together.
+
 ## Factory and reserved prefixes
 
 - **`factory:ready`** is the only label that says an issue can be worked without the admin in the
