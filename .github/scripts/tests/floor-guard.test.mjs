@@ -2281,6 +2281,56 @@ describe("floor guard, end to end", () => {
 			expect(r.out).toContain("[exception-expired] CONSTRAINTS.md");
 		});
 	});
+
+	// #132: the known misses of the line reader (#131's body, #132's 9 Nov comment), each read the
+	// way GitHub renders it. Expected to fail until the guard reads the file with a Markdown parser
+	// (#132, part 3), which drops `.fails`.
+	describe("Markdown read as GitHub renders it (#132)", () => {
+		const OK_ROW = row("E1", "packages/sim/src/a.ts", "2026-11-30", "silenced-checker");
+		const run = (edit) => {
+			setup();
+			repo.write({
+				"packages/sim/src/a.ts": "// @ts-ignore\n",
+				"CONSTRAINTS.md": edit(withException(OK_ROW)),
+			});
+			return guard().out;
+		};
+
+		it.fails.each([
+			[
+				"a code fence holding a <div> line",
+				(t) => t.replace("## Exceptions\n", "```html\n<div>\n```\n## Exceptions\n"),
+			],
+			[
+				"a list item and a lone tag",
+				(t) => t.replace("## Exceptions\n", "- item\n<span>\n## Exceptions\n"),
+			],
+		])("waives with the Exceptions heading right after %s", (_, edit) => {
+			expect(run(edit)).toContain("waived by E1");
+		});
+
+		it.fails.each([
+			[
+				"a delimiter row one cell short",
+				(t) => t.replace("|---|---|---|---|---|---|\n", "|---|---|---|---|---|\n"),
+			],
+			[
+				"a <details> block with blank lines",
+				(t) =>
+					t.replace("| ID |", "<details>\n\n| ID |").replace(OK_ROW, `${OK_ROW}\n\n</details>`),
+			],
+		])("does not waive with %s", (_, edit) => {
+			const out = run(edit);
+			expect(out).toContain("[silenced-checker] packages/sim/src/a.ts");
+			expect(out).not.toContain("waived by");
+		});
+
+		it.fails("counts a heading in a block quote as a second Exceptions heading", () => {
+			const out = run((t) => `${t}\n> ## Exceptions\n`);
+			expect(out).toContain("[exceptions-heading-repeated] CONSTRAINTS.md");
+			expect(out).not.toContain("waived by");
+		});
+	});
 });
 
 describe("floor guard helpers", () => {
