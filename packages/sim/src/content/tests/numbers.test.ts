@@ -83,6 +83,17 @@ describe("R2 timer", () => {
 		]);
 	});
 
+	// A fraction is both an unsafe number (R1) and not a whole number of seconds (MUST-10.4).
+	it("rejects a fractional timer, 30.5 s", () => {
+		const content = draftSlice();
+		findCrop(content, "wheat").growSeconds = 30.5;
+
+		expect(listFailures(content)).toEqual([
+			["safeInteger", "crops.wheat.growSeconds"],
+			["timer", "crops.wheat.growSeconds"],
+		]);
+	});
+
 	it("accepts the bounds, 10 s and 86400 s", () => {
 		const content = draftSlice();
 		findCrop(content, "wheat").growSeconds = 10;
