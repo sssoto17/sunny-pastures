@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # #68 step 4: the reviewer App's tests (a)-(f) (ADR-0002, admin checklist step 12), on throwaway
 # PRs onto main that the real review workflow reviews. Sourced by ci-check.sh, which owns the
-# arguments, die, check_urls, start and REPO.
+# arguments, die, check_urls, start and REPO. Runbook: scripts/setup/README.md.
 # shellcheck disable=SC2016 # single-quoted jq programs and Markdown backticks, by design
 
 T68_ADMIN=sssoto17
@@ -62,11 +62,17 @@ t68_pr() { # letter [state]: the number of our PR from throwaway/68-<letter>, or
 }
 
 start_68() {
-  local auto l b url pr label=()
+  local auto rules l b url pr label=()
   auto=$(gh api "repos/$REPO" --jq .allow_auto_merge) || die 1 "gh api repos/$REPO failed"
   [[ $auto == true ]] || die 2 "allow_auto_merge is off, so test (b) can't run: nothing opened.
 Turn it on for the test window only (runbook, scripts/setup/README.md), then start 68 again:
   gh api -X PATCH repos/$REPO --silent -F allow_auto_merge=true"
+  # The hold threads and tests (a), (c) and (d) rest on main's rules: check them, don't assume them.
+  rules=$(gh api "repos/$REPO/rules/branches/main" --jq '[.[] | select(.type == "pull_request") | .parameters]
+    | any(.required_review_thread_resolution) and any(.required_approving_review_count >= 1)
+      and any(.dismiss_stale_reviews_on_push)') || die 1 "gh api rules of main failed"
+  [[ $rules == true ]] || die 2 "main's rules lack thread resolution, 1 required approval or stale-review
+dismissal: a hold thread wouldn't hold, and (a)-(d) would read nothing. Nothing opened."
   t68_repo
   git -C "$repo" fetch -q origin main || die 1 "git fetch origin main failed"
   for l in a c e f "factory-resolve"; do
@@ -115,11 +121,12 @@ push_68() {
   git -C "$tmp/w" add -A
   git -C "$tmp/w" commit -q -m "chore: one more throwaway commit for #68 ($letter) (never merge)" || die 1 "git commit failed"
   git -C "$tmp/w" push -q origin "HEAD:refs/heads/$b" || die 1 "git push of $b failed"
-  pr=$(t68_pr "$letter" open)
+  pr=$(t68_pr "$letter" open) || die 1 "gh pr list failed"
   printf 'Pushed one commit to %s (PR #%s).\n' "$b" "${pr:-?}"
   [[ -n $pr && $letter == a ]] || return 0
   sleep "${CI_CHECK_WAIT_SECONDS:-10}"
-  decision=$(gh pr view "$pr" --repo "$REPO" --json reviewDecision --jq '.reviewDecision // ""')
+  decision=$(gh pr view "$pr" --repo "$REPO" --json reviewDecision --jq '.reviewDecision // ""') ||
+    die 1 "gh pr view $pr failed"
   printf 'reviewDecision right after the push: `%s` (test (d) expects REVIEW_REQUIRED here, then\n' "${decision:-(empty)}"
   printf 'APPROVED again after the fresh review, in 1-3 minutes).\n'
 }

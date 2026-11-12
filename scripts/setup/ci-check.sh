@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the throwaway checks for #101 (the two Apps), #102 (reading the Project) and #68 (the
-# reviewer App's tests (a)-(f), in ci-check-68.sh), collects their
+# reviewer App's tests (a)-(f), in ci-check-68.sh; runbook in README.md), collects their
 # results and cleans up. `start` builds its branch from origin/main in a temporary worktree, so
 # your checkout and main are never touched: it pushes a branch plus one draft workflow from
 # scripts/setup/workflows/, and the push runs it. `results` prints a Markdown summary of non-secret

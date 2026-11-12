@@ -57,6 +57,7 @@ case "$*" in
   "api repos/sssoto17/sunny-pastures/labels/throwaway --silent") [[ -f $dir/fx/label ]]; exit ;;
   "api -X POST repos/"*"/comments "* | "pr ready "*) exit 0 ;;
   "pr view "*" --json "*) key=view-$3 ;;
+  "api repos/sssoto17/sunny-pastures/rules/branches/main --jq "*) key=rules ;;
   "api graphql "*) key=threads-$pr ;;
   "pr list "*"--state all"*) key=prs ;;
   "pr list "*"--state open"*) key=prs ;;
@@ -92,6 +93,8 @@ reset() {
   mkdir -p "$work/fx"
   printf 'X-Oauth-Scopes: gist, read:org, repo, workflow\r\n' >"$work/fx/scopes"
   echo '[]' >"$work/fx/reviews.json"
+  echo '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,
+    "required_approving_review_count":1,"dismiss_stale_reviews_on_push":true}}]' >"$work/fx/rules.json"
   git init -q --bare "$work/origin.git"
   git clone -q "$work/origin.git" "$work/seed" 2>/dev/null
   echo hello >"$work/seed/README.md"
@@ -490,6 +493,16 @@ run start 68
 expect_code 2
 assert "expected the setting named" contains "$err" "allow_auto_merge is off, so test (b) can't run"
 assert "expected the command to turn it on" contains "$err" "-F allow_auto_merge=true"
+assert "expected nothing pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+assert "expected no PR opened" lacks "$calls" "pr create"
+
+# Without thread resolution on main, a hold thread wouldn't hold: refused, nothing opened.
+echo true >"$work/fx/auto"
+echo '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,
+  "required_approving_review_count":1,"dismiss_stale_reviews_on_push":true}}]' >"$work/fx/rules.json"
+run start 68
+expect_code 2
+assert "expected main's rules named" contains "$err" "main's rules lack thread resolution"
 assert "expected nothing pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
 assert "expected no PR opened" lacks "$calls" "pr create"
 
