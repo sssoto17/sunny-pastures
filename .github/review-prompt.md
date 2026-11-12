@@ -53,6 +53,8 @@ Return the structured output, nothing else:
 - `escalation_path`: one changed file that triggered the first row; empty when none applies.
 - `resolve_threads`: as in step 4.
 
-The workflow, not you, turns this into GitHub writes. It approves only when `findings` and
+The workflow, not you, turns this into GitHub writes. It also works out the Code-owned path and
+Content change rows from the changed paths and adds them to yours, so name them when they apply
+but don't rely on leaving them out. It approves only when `findings` and
 `escalation_rows` are empty and the PR doesn't carry `review:admin`. Your approval never stands in
 for the code owner's: GitHub still requires the admin's review on code-owned paths.

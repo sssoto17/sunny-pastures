@@ -499,6 +499,13 @@ repo's branches. The pattern is *propose, then apply*: Claude proposes and plain
   than the admin resolved, resolves only the App's own fixed finding threads, adds the label and
   the escalation thread, requests the admin's review on factory PRs, and dismisses its own
   Request changes once an escalated PR is fixed.
+- **Rows from paths (12 Nov, #240's review).** The script also works out the rows that depend
+  only on paths, and merges them with the verdict's, so a prompt-injected verdict can't drop them:
+  Code-owned path (`.github/CODEOWNERS`, gitignore rules, a rename's old path too) and Content
+  change (any file under `packages/sim/src/content/` but its tests). The second errs towards the
+  admin: a path can't show whether a value changed, so a check-only edit there escalates again.
+  Feature slice, Interface change, Security-sensitive code (no globs until M3), the issue rows and
+  Not converging need reading, so they stay the verdict's.
 - **`labeled`:** adding `review:admin` re-runs the review, which dismisses the App's earlier
   approval and posts a COMMENT (test (e)); a later COMMENT alone wouldn't replace an APPROVE. The job skips every other label, and the label the App adds itself
   (`sender` is `sunny-reviewer[bot]`), so it can't loop. Its concurrency group is on the job, so
