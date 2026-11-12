@@ -242,8 +242,8 @@ random seed: the tie reach test failed in about 1 run in 5 that way, while the s
 deterministic. Each property file reads the settings as `requireProvided('fastCheck',
 inject('fastCheck'))` (`state/tests/provided.ts`), which throws, naming the root config, when
 nothing was provided; lint reports any other read of `inject('fastCheck')`. A reach test asserts
-each case in at least 1 run in 20, not just once, so a generator change that thins a case fails
-before the case reaches 0.
+each case once for every 20 runs (counted over its contents), not just once, so a generator
+change that thins a case fails before the case reaches 0.
 
 **Pattern:** property-based testing (fast-check, fixed seed), with a timeout scaled by the run
 count.

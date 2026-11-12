@@ -166,6 +166,20 @@ const expand: TimedAction[] = [
 const growMs = 120_000;
 
 /**
+ * Tend the field for wheat and Levels, buy both facilities and `addOns`, start bread, then chicken
+ * feed `offset` later: the start that `automate` and `automateNewFarm` share.
+ */
+function startAutomation(addOns: readonly TimedAction[], offset: number): TimedAction[] {
+	return [
+		...tendFor(growMs),
+		...buyFacilities,
+		...addOns,
+		{ action: { type: "startJob", facility: 1, recipe: "bread" }, delay: 0 },
+		{ action: { type: "startJob", facility: 0, recipe: "chickenFeed" }, delay: offset },
+	];
+}
+
+/**
  * Automating the facilities, so automated steps tie (MUST-14.8): tend the field for wheat and
  * Levels, buy both facilities and their add-ons (mostly all four), start bread, then chicken feed
  * `offset` later, wait, and collect by hand. The offset is a whole number of feed jobs (60 s), so
@@ -184,11 +198,7 @@ const automate = fc
 		wait: delay,
 	})
 	.map(({ addOns, offset, wait }): TimedAction[] => [
-		...tendFor(growMs),
-		...buyFacilities,
-		...addOns,
-		{ action: { type: "startJob", facility: 1, recipe: "bread" }, delay: 0 },
-		{ action: { type: "startJob", facility: 0, recipe: "chickenFeed" }, delay: offset },
+		...startAutomation(addOns, offset),
 		{ action: { type: "collect", facility: 0 }, delay: Math.abs(wait) },
 		{ action: { type: "collect", facility: 1 }, delay: 0 },
 	]);
@@ -355,13 +365,7 @@ const chunk = fc.oneof(
  */
 const automateNewFarm = fc
 	.constantFrom(180_000, 240_000)
-	.map((offset): TimedAction[] => [
-		...tendFor(growMs),
-		...buyFacilities,
-		...buyAddOns,
-		{ action: { type: "startJob", facility: 1, recipe: "bread" }, delay: 0 },
-		{ action: { type: "startJob", facility: 0, recipe: "chickenFeed" }, delay: offset },
-	]);
+	.map((offset) => startAutomation(buyAddOns, offset));
 
 /** Chunks played from a new farm, sometimes starting with the add-ons' ties, which need it new. */
 export const timedActions = fc
