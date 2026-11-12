@@ -166,8 +166,9 @@ the board; the work itself goes to lanes and subagents.
   (`docs/agents/issue-tracker.md`, "Checkboxes"). Then give the admin the verdict, the ranked
   findings, the criteria left unverified, one recommendation and one question ("Send the lane
   fixes 1 and 2?"). On yes, `SendMessage` the lane a self-contained message: what to change,
-  "admin-approved, <date>", and what to report back (head SHA, check results). Reach a local lane by `SendMessage`; a message for the admin to paste is only for a
-  lane `ListAgents` can't reach.
+  "admin-approved, <date>", and what to report back (head SHA, check results). Reach a local
+  lane by `SendMessage`; a message for the admin to paste is only for a lane `ListAgents` can't
+  reach.
 - **Keep the board.** Before proposing the next lane, check its blockers:
   `gh api repos/sssoto17/sunny-pastures/issues/<N>/dependencies/blocked_by` lists none open
   (`docs/agents/issue-tracker.md`, definition of ready, rule 4). Move issues with

@@ -2,9 +2,9 @@
 
 How every review in this repo is done: the reviewer the coordinator dispatches, a lane's own review
 at the end of `/implement`, and the CI reviewer App `sunny-reviewer` once #68 lands. Read it from
-`origin/main`, never from the PR under review. The rules a review checks live in their own files;
-this one says which to check, how hard, and how to report. When a rule here and its home disagree,
-the home wins.
+`origin/main`, never from the PR under review. The project's rules live in their own files, and
+this one points to them; it holds only the review practice: which rules to check, how hard, and
+how to report. When a pointer here and the rule's home disagree, the home wins.
 
 ## Inputs
 
@@ -22,8 +22,8 @@ the home wins.
   issue before you rely on it.
 - **Reproduce, then report.** Run the claim: tests in a temporary worktree under `$TMPDIR`
   (`git worktree add "$TMPDIR/review-<N>" <sha>`, then `pnpm install --frozen-lockfile`), removed
-  with `git worktree remove` when you're done. Never check out or switch branches in the main
-  folder. The CI reviewer App never runs PR code (ADR-0002, area 2), so it cites instead.
+  with `git worktree remove` when you're done. The main folder stays on the branch it's on
+  (`AGENTS.md`). The CI reviewer App never runs PR code (ADR-0002, area 2), so it cites instead.
 - **On a test-heavy PR, plant a mutant**: break the code under test on purpose and confirm a test
   goes red. A test that stays green against its mutant is a Required finding.
 - **Measure timing claims** rather than estimate them.
@@ -33,9 +33,8 @@ the home wins.
 
 Each item names where its rule lives. Read the rule there.
 
-1. **Every acceptance criterion** of the linked issue, one by one. A `Part of #N` PR is checked
-   for scope only; the part that says `Closes #N` is checked against all criteria, across the
-   whole stack (`CONSTRAINTS.md`, "Split size").
+1. **Every acceptance criterion** of the linked issue, one by one; on a split, as Review kinds
+   says.
 2. **CI is green** on the head SHA (`gh pr checks <N>`), on every part of a split.
 3. **The Floor** (`CONSTRAINTS.md`, "Floor" and "Guarding the bar"). Read for intent too: a
    lowered assertion, run count or seed, or an added retry is a weakened bar even where the guard
@@ -49,7 +48,6 @@ Each item names where its rule lives. Read the rule there.
 8. **Tests would catch a bug** in the change. Name one plausible bug and the test that fails on
    it; on a test-heavy PR, prove it with a mutant (Conduct).
 9. **The PR's own boxes**: each ticked "How it was verified" box has its evidence in the PR.
-10. **Vendored skills** (`skills-lock.json`, under `.agents/skills/`) are unchanged.
 
 ## Severity
 
@@ -86,12 +84,13 @@ Report at most five Nits per review. Pick the ones a reader would trip on.
 - **Delta review**: only `<old head>..<new head>`, checked against the findings the fixes answer.
   A merge commit that only brings in earlier fixes adds nothing; confirm it with an empty
   `git show --remerge-diff <merge sha>`.
-- **Split stack**: each part on its own diff (`gh pr diff`), each within the split size. The
-  closing part's criteria check covers the whole stack. Cloud lanes can't link native stacks; the
-  coordinator links them locally.
-- **Self-review**: a lane reviewing its own work in `/implement`, before it opens the PR. Same
-  checks and report. Fix every Required finding first, and list what's left under the PR's
-  Concerns.
+- **Split stack**: part by part, as `CONSTRAINTS.md`, "Split size" sets out: a `Part of #N` part
+  for scope, the `Closes #N` part for every criterion across the whole stack. Cloud lanes can't
+  link native stacks; the coordinator links them locally.
+- **Self-review**: a lane reviewing its own work when `/implement` reaches `code-review`, before
+  the PR exists. Its inputs are the branch diff against `origin/main`, the issue and the brief;
+  Always check items 2 and 9 wait for the PR. The lane edits its own branch, so Read-only doesn't
+  apply. Fix every Required finding, and list what's left under the PR's Concerns.
 
 ## Report
 

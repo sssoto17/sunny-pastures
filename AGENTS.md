@@ -70,8 +70,8 @@ Folders appear at the milestone that needs them; don't create them ahead of time
 - Every review follows `REVIEW.md`, read from `origin/main`: a reviewer the coordinator
   dispatches, a lane's own review when `/implement` reaches `code-review` (a self-review), and
   the CI reviewer App. Its mechanism (approvals, `review:admin`, merges) is ADR-0002 (area 2).
-  Agents never merge a PR, never turn on auto-merge by hand,
-  never bypass a ruleset and never remove `review:admin`. When a PR meets a row of
+  Agents never merge a PR, never turn on auto-merge by hand, never bypass a ruleset and never
+  remove `review:admin`. When a PR meets a row of
   `CONSTRAINTS.md`, "Admin review (escalation and split size)", add the label as you open it:
   `gh pr create --label review:admin`. The admin merges admin-review PRs in the UI. The permission
   rules in `.claude/settings.json` (PR #52) ask before `gh pr merge`, `gh ruleset` and removing
