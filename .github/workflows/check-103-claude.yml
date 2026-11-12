@@ -1,21 +1,39 @@
-# THROWAWAY: #103's checks of Claude in Actions. Never merge into main. scripts/setup/ci-check.sh
-# start 103 pushes throwaway/103-base (main plus two marker hooks in .claude/settings.json) and
-# throwaway/103-claude (the base plus this file), then opens a PR from the second onto the first
-# with the admin's own gh; opening it runs this workflow. The action supports no `push` event, and
-# on a PR it restores .claude/ from the PR's base branch before Claude starts, so the markers live
-# on the base (#103). The PR is opened by a person: the action refuses bot actors in agent mode.
+# #103's check of Claude in Actions, from the employer seat's setup-token. It lives on main and
+# does nothing unless a PR from throwaway/103-claude targets throwaway/103-base: every other PR
+# is filtered out by `branches:` and the job's `if:`. `scripts/setup/ci-check.sh start 103` pushes
+# those two branches (the base is main plus two marker hooks in .claude/settings.json; the head
+# adds one text file) and opens the PR with the admin's own gh, which runs this workflow. The PR
+# is opened by a person: the action refuses bot actors in agent mode.
+#
+# Why pull_request_target, from main: the action supports no `push` event, and a `pull_request`
+# run's GITHUB_REF is refs/pull/N/merge, which the factory environment refuses (#202). On
+# github.com a pull_request_target run takes this file, GITHUB_SHA and GITHUB_REF from the default
+# branch, and environment rules are matched against it, so the factory environment admits the run
+# through its `main` rule. The action reads the event as a PR and restores .claude/ from the PR's
+# base branch (`pull_request.base.ref`) before Claude starts, which is where the markers are.
+# It is also the event #68's reviewer will use (ADR-0002, area 2).
+#
+# pull_request_target hands secrets to a run on a PR, so nothing from the PR head is checked out:
+# the checkout has no `ref`, which on this event is the default branch. The head carries one text
+# file and the job never reads it. What does run with the secret besides main's code: the hooks in
+# .claude/ on throwaway/103-base, which only a writer can push. Any writer can already run a
+# workflow of their own on a throwaway/* push with this environment, so this adds no new reach.
+#
 # Each job prints `RESULT ...` lines with non-secret fields only; `ci-check.sh results 103` collects
 # them with the minutes. Low caps: at most 3 turns a run, 10 minutes a job. Actions pinned to full
 # SHAs (ADR-0002, area 8).
+#
+# REMOVAL: once #103's results are recorded, this file is either deleted or rewritten as #68's
+# reviewer workflow. Either is a follow-up PR the admin approves; until then it stays inert.
 name: check-103-claude
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
     branches: [throwaway/103-base] # the PR's base
 
 permissions:
-  contents: read
+  contents: read # the action's git fetch of the PR's base, in a private repo
 
 concurrency:
   group: check-103
@@ -24,7 +42,11 @@ concurrency:
 jobs:
   claude:
     name: claude (${{ matrix.check }})
-    if: github.head_ref == 'throwaway/103-claude'
+    # The PR's base, its head, and the head in this repo (never a fork's branch of the same name).
+    if: >-
+      github.event.pull_request.base.ref == 'throwaway/103-base' &&
+      github.event.pull_request.head.ref == 'throwaway/103-claude' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     environment: factory
     timeout-minutes: ${{ matrix.timeout }}
@@ -59,11 +81,14 @@ jobs:
       BASH_DEFAULT_TIMEOUT_MS: '600000' # so the timeout case waits on sleep, not on the Bash tool
       BASH_MAX_TIMEOUT_MS: '600000'
     steps:
+      # No `ref`: on pull_request_target that is the default branch, never the PR head. The action
+      # wants a git repo at the workspace root (its docs/security.md, "Preferred" pattern).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The marker hooks come from the base branch (ci-check.sh start 103); the action restores
-      # .claude/ from there, so editing the checkout here would be undone.
+      # The marker hooks are on the PR's base only, not in this checkout of main: the action
+      # restores .claude/ from the base before Claude starts, so `hooks_fired=` below shows that
+      # restore and the hooks loading together.
       # Whether an API key secret exists anywhere this job could read one (repo or environment):
       # it should say no, so the setup-token is the only credential the run can have used.
       # The expressions yield true or false only, so no secret value enters the step.

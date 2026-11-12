@@ -381,7 +381,7 @@ the guard sees only the PR's own diff.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| _none_ | | | | | |
+| E1 | check-removed | .github/workflows/check-103-claude.yml | #103's check moves from the draft `scripts/setup/workflows/` (never run by GitHub) to `.github/workflows/`; git pairs the two as a rename, so the job's new `if:` reads as a loosened check. The job is new and required nowhere. Remove this row in the follow-up that deletes the workflow or turns it into #68's reviewer | Soto | 2026-12-12 |
 
 ## Interview record
 
