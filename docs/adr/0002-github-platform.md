@@ -510,7 +510,13 @@ repo's branches. The pattern is *propose, then apply*: Claude proposes and plain
   approval and posts a COMMENT (test (e)); a later COMMENT alone wouldn't replace an APPROVE. The job skips every other label, and the label the App adds itself
   (`sender` is `sunny-reviewer[bot]`), so it can't loop. Its concurrency group is on the job, so
   a skipped event doesn't cancel a running review.
-- **Not yet:** the bot doesn't turn on auto-merge (step 3 of the flow) until Q16 allows it.
+- **Auto-merge (step 3 of the flow; #68 step 4, 12 Nov).** After an Approve, the script turns on
+  auto-merge, squash, for the head it reviewed (`enablePullRequestAutoMerge` with
+  `expectedHeadOid`). When a run doesn't approve, it turns off auto-merge that is on. It never
+  merges: `gh pr merge --auto` was rejected because it merges at once when the PR is already
+  mergeable, whatever `allow_auto_merge` says. So Q16 still holds at the repo setting: while
+  `allow_auto_merge` is off, GitHub refuses, the approval stands and the log reads
+  `auto_merge=refused`. Squash only for now; the PR template's merge-commit choice isn't read.
 - **Alternatives considered.** Claude writing to GitHub itself with the App's token, through
   `gh` or the action's comment tools: rejected, because the model that reads the PR's text would
   then hold a token that can approve. A Bash allow-list (`gh pr view:*` and the like): rejected,

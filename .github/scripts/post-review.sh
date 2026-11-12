@@ -3,7 +3,10 @@
 # The verdict is data: this script, not the model, decides the review's event. It approves only
 # when the verdict has no Required finding and no escalation row, the PR doesn't carry
 # review:admin, this App has no escalation thread on it, and none of its earlier finding threads
-# is still open. Tests: .github/scripts/tests/post-review.test.mjs.
+# is still open. After an approval it turns on auto-merge (squash) for the reviewed head, and when
+# it doesn't approve it turns off auto-merge that is on (ADR-0002 area 2, flow step 3). It never
+# merges: with the repo's allow_auto_merge off, GitHub refuses, and the review still stands (Q16).
+# Tests: .github/scripts/tests/post-review.test.mjs.
 #
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
 # App's slug), ADMIN, FACTORY_APP (the factory App's slug), CTX (holds files.json), VERDICT,
@@ -28,8 +31,8 @@ if grep -qE 'sk-ant-|gh[opsu]_[A-Za-z0-9]{20}|github_pat_|-----BEGIN' "$v"; then
   echo "::error::the verdict looks like it holds a credential: nothing posted"
   exit 1
 fi
-now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login] | @tsv')
-IFS=$'\t' read -r head_now author <<<"$now"
+now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null)] | @tsv')
+IFS=$'\t' read -r head_now author node auto_on <<<"$now"
 if [[ $head_now != "$HEAD" ]]; then
   echo "the head moved to $head_now: the newer run reviews it"
   exit 0
@@ -45,6 +48,16 @@ comment() { # path body [line]: one review comment on the head, on a line or the
 threads() {
   gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
     -F pr="$PR" -f query="$THREADS_QUERY" --jq '.data.repository.pullRequest.reviewThreads.nodes' >"$t"
+}
+set_auto() { # enable|disable: auto-merge, never a merge. Only GraphQL has it; `gh pr merge
+  # --auto` merges at once when the PR is already mergeable, whatever allow_auto_merge says.
+  if [[ $1 == enable ]]; then
+    gh api graphql --silent -f id="$node" -f head="$HEAD" -f query='mutation($id: ID!, $head: GitObjectID!) {
+      enablePullRequestAutoMerge(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH}) { clientMutationId } }'
+  else
+    gh api graphql --silent -f id="$node" -f query='mutation($id: ID!) {
+      disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }'
+  fi
 }
 set_thread() { # mutation id
   gh api graphql --silent -F id="$2" \
@@ -146,10 +159,21 @@ elif [[ $escalated == true || $labelled_now == true ]] || ((still_open > 0)); th
 fi
 # A later COMMENT doesn't replace an APPROVE, so an earlier approval that no longer holds (say
 # review:admin was added after it) is dismissed (ADR-0002, test (e)).
-[[ $event == APPROVE ]] || dismiss APPROVED "This review no longer approves the PR: $event."
+if [[ $event != APPROVE ]]; then
+  dismiss APPROVED "This review no longer approves the PR: $event."
+  # Auto-merge must not outlive the approval it came with (ADR-0002, test (e)).
+  if [[ $auto_on == true ]] && ! set_auto disable; then
+    echo "::warning::auto-merge is still on: turn it off by hand (gh pr merge $PR --disable-auto)"
+  fi
+fi
 body=$(jq -r .summary "$v")
 [[ -z $unplaced ]] || body+=$'\n\nRequired findings without a place in the diff:\n'"$unplaced"
 ((still_open == 0)) || body+=$'\n\n'"$still_open earlier finding thread(s) still open."
 body+=$note
 gh api -X POST "$r/pulls/$PR/reviews" --silent -f commit_id="$HEAD" -f event="$event" -f body="$body"
-echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated"
+auto=off
+if [[ $event == APPROVE ]]; then
+  # Refused while allow_auto_merge is off (or the PR merges as it is): the approval stands.
+  if [[ $auto_on == true ]] || set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi
+fi
+echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated auto_merge=$auto"
