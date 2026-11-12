@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# File one issue the way docs/agents/issue-tracker.md asks: one type and one area label, a
-# milestone, a body file, under its workstream parent, on the Project in Backlog. The coordinator
+# File one issue the way docs/agents/issue-tracker.md asks: one type and one area label, the
+# native issue type, a milestone, a body file, under its workstream parent, on the Project in
+# Backlog, with `triage` while the type, Priority, Size or Week is missing. The coordinator
 # files issues only through this script (#153). Names are checked against GitHub before the
 # first write, so a typo creates nothing. Tests: scripts/new-issue.test.sh.
 # Needs bash 4.4+ and an authenticated gh with the `project` scope (for issue-fields.sh).
@@ -14,6 +15,15 @@ fi
 OWNER=sssoto17
 REPO=sunny-pastures
 TYPES=(feature bug spike design chore idea)
+
+# The native issue type each type label maps to (docs/agents/triage-labels.md, Types).
+native_type() { # type label -> native type name
+  case $1 in
+    feature) echo Feature ;;
+    bug) echo Bug ;;
+    spike | design | chore | idea) echo Task ;;
+  esac
+}
 here="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
@@ -24,11 +34,14 @@ usage: scripts/new-issue.sh --title TEXT --type TYPE --area AREA --milestone TIT
                             [--week NAME]
 
 Creates an issue in sssoto17/sunny-pastures with the type label and the area label, in the
-milestone, as a sub-issue of the parent, then adds it to the Project in Backlog and sets the
-fields given, through scripts/issue-fields.sh. Prints the Project fields, then the labels,
-milestone and parent as GitHub stored them. Each flag also takes the form --size=M.
+milestone, as a sub-issue of the parent, then adds it to the Project in Backlog and sets its
+native issue type and the fields given, through scripts/issue-fields.sh. Prints the type and
+the Project fields, then the labels, milestone and parent as GitHub stored them. Each flag also
+takes the form --size=M.
 
-  --type      one of feature, bug, spike, design, chore, idea (docs/agents/triage-labels.md)
+  --type      one of feature, bug, spike, design, chore, idea (docs/agents/triage-labels.md).
+              It also sets GitHub's native issue type: feature -> Feature, bug -> Bug, the
+              rest -> Task. The script stops if the repo doesn't offer that type.
   --area      "tools" or "area:tools"; must be an existing area:* label
   --milestone the exact title of an open milestone
   --parent    the workstream parent's number ("73" or "#73"), an open issue. Required, except
@@ -38,9 +51,14 @@ milestone and parent as GitHub stored them. Each flag also takes the form --size
 A new issue always starts in Backlog: --status is refused, and so is --mode Factory. Only the
 admin moves an issue to Ready or sets Factory.
 
-Before the first write it reads the labels, the open milestones and the parent, and stops on an
-unknown name. issue-fields.sh checks the field names after the issue exists: a bad one there
-leaves the issue created without fields, and the error prints the command to finish it.
+Set --priority, --size and --week: with the type, they're your proposal, which the admin
+confirms at Ready (docs/agents/issue-tracker.md, "Issue fields"). If one is left out, the issue
+gets the `triage` label and a warning names what's missing.
+
+Before the first write it reads the labels, the repo's issue types, the open milestones and
+the parent, and stops on an unknown name. issue-fields.sh checks the field names after the issue
+exists: a bad one there leaves the issue created without fields, and the error prints the
+command to finish it.
 
 Exit codes: 0 done, 1 a write failed or the read-back differs (stderr says what exists),
 2 bad arguments or an unknown name (nothing created), 3 GitHub couldn't be read before the first
@@ -48,7 +66,7 @@ write (nothing created).
 
 example: scripts/new-issue.sh --title "Bench advance in CI" --type chore --area ci-cd \
            --milestone "M3 Actions persist end to end" --body-file .scratch/issue-bench.md --parent 58 \
-           --track Infra --size S --priority P2
+           --track Infra --size S --priority P2 --week "Wk 2"
 EOF
 }
 
@@ -132,6 +150,14 @@ fi
 [[ -f $body_file && -r $body_file ]] || die 2 "body file not found: $body_file"
 [[ -s $body_file ]] || die 2 "body file is empty: $body_file"
 
+issue_type=$(native_type "$type")
+# The four fields every issue carries (issue-tracker.md, "Issue fields"): the type is required
+# above, so `triage` goes on when Priority, Size or Week isn't given.
+missing=()
+for pair in --priority=Priority --size=Size --week=Week; do
+  [[ $seen == *" ${pair%%=*} "* ]] || missing+=("${pair#*=}")
+done
+
 # --- reads: every name checked before the first write -------------------------------------------
 labels=$(gh label list --repo "$OWNER/$REPO" --limit 500 --json name --jq '.[].name') ||
   die 3 "could not read the repo's labels; nothing was created"
@@ -140,6 +166,18 @@ grep -qxF -- "$type" <<<"$labels" ||
 if ! grep -qxF -- "$area" <<<"$labels"; then
   mapfile -t areas < <(grep '^area:' <<<"$labels")
   die 2 "unknown area \"$area\". Valid areas: $(join "${areas[@]}"). Nothing was created."
+fi
+
+# The repo's issue types are read with GraphQL (repository.issueTypes); REST lists them only for
+# an organisation, and this repo is user-owned.
+types=$(gh api graphql -F owner="$OWNER" -F repo="$REPO" -f query='
+  query($owner: String!, $repo: String!) {
+    repository(owner: $owner, name: $repo) { issueTypes(first: 25) { nodes { name isEnabled } } }
+  }' --jq '.data.repository.issueTypes.nodes[] | select(.isEnabled) | .name') ||
+  die 3 "could not read the repo's issue types; nothing was created"
+if ! grep -qxF -- "$issue_type" <<<"$types"; then
+  mapfile -t type_names <<<"$types"
+  die 2 "the repo offers no \"$issue_type\" issue type for --type $type (it offers: $(join "${type_names[@]}")). Nothing was created."
 fi
 
 milestones=$(gh api "repos/$OWNER/$REPO/milestones?state=open&per_page=100" --jq '.[].title') ||
@@ -161,6 +199,7 @@ fi
 # --- writes -------------------------------------------------------------------------------------
 create=(gh issue create --repo "$OWNER/$REPO" --title "$title" --body-file "$body_file"
   --label "$type" --label "$area" --milestone "$milestone")
+((${#missing[@]})) && create+=(--label triage)
 [[ -n $parent ]] && create+=(--parent "$parent")
 url=$("${create[@]}") ||
   die 1 "gh issue create failed. It may have created the issue without its parent link: check \`gh issue list --search \"$title in:title\"\` before re-running."
@@ -168,6 +207,7 @@ url=$(tail -n1 <<<"$url")
 number=${url##*/}
 [[ $number =~ ^[1-9][0-9]*$ ]] || die 1 "gh issue create printed no issue URL (got \"$url\"); check the repo before re-running"
 
+fields=(--type "$issue_type" "${fields[@]}")
 if ! fields_out=$("$here/issue-fields.sh" "$number" "${fields[@]}"); then
   rerun=$(printf ' %q' "${fields[@]}")
   die 1 "#$number was created ($url), but its Project fields weren't set. Fix the error above, then run: scripts/issue-fields.sh $number${rerun}"
@@ -175,9 +215,9 @@ fi
 
 # --- read-back ----------------------------------------------------------------------------------
 row=$(gh api "repos/$OWNER/$REPO/issues/$number" \
-  --jq '[([.labels[].name] | join(",")), (.milestone.title // "-"), (.parent_issue_url // "-" | split("/") | last)] | @tsv') ||
+  --jq '[([.labels[].name] | join(",")), (.milestone.title // "-"), (.parent_issue_url // "-" | split("/") | last), (.type.name // "-")] | @tsv') ||
   die 1 "#$number was created and its fields set, but it couldn't be read back; check $url"
-IFS=$'\t' read -r got_labels got_milestone got_parent <<<"$row"
+IFS=$'\t' read -r got_labels got_milestone got_parent got_type <<<"$row"
 
 printf '%s\n' "$fields_out"
 printf '%-9s %s\n' "Labels:" "${got_labels//,/, }" "Milestone:" "$got_milestone" \
@@ -187,6 +227,12 @@ mismatches=()
 for want in "$type" "$area"; do
   [[ ",$got_labels," == *",$want,"* ]] || mismatches+=("missing label $want")
 done
+[[ $got_type == "$issue_type" ]] || mismatches+=("issue type is $got_type, expected $issue_type")
+if ((${#missing[@]})); then
+  [[ ",$got_labels," == *",triage,"* ]] || mismatches+=("missing label triage")
+else
+  [[ ",$got_labels," != *",triage,"* ]] || mismatches+=("triage is on, though all four are set")
+fi
 [[ $got_milestone == "$milestone" ]] || mismatches+=("milestone is $got_milestone, expected $milestone")
 if [[ -n $parent ]]; then
   [[ $got_parent == "$parent" ]] || mismatches+=("parent is $got_parent, expected #$parent")
@@ -195,4 +241,13 @@ else
 fi
 if ((${#mismatches[@]})); then
   die 1 "#$number was created, but the read-back differs: $(join "${mismatches[@]}"). Fix it by hand on $url."
+fi
+
+# Agents set all four when filing, so a missing one is worth a warning (issue-tracker.md, "Issue
+# fields"). The issue is filed and labelled triage; the exit code stays 0.
+if ((${#missing[@]})); then
+  printf 'new-issue: warning: #%s has no %s, so it carries `triage`. Finish with: scripts/issue-fields.sh %s' \
+    "$number" "$(join "${missing[@]}")" "$number" >&2
+  for f in "${missing[@]}"; do printf ' --%s <%s>' "${f,,}" "$f" >&2; done
+  printf '\n' >&2
 fi
