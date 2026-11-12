@@ -189,7 +189,7 @@ describe("sim purity rules", () => {
 	it("make sim property tests pass the shared fast-check settings (D10)", async () => {
 		const code = [
 			"import fc from 'fast-check';",
-			"import { inject } from 'vitest';",
+			"import { inject, vi } from 'vitest';",
 			"const params = inject('fastCheck');",
 			"const p = fc.property(fc.nat(), () => true);",
 			"fc.assert(p);",
@@ -198,6 +198,7 @@ describe("sim purity rules", () => {
 			"fc.check(p, inject('fastCheck'));",
 			"export const a = Date.now();",
 			"export const b = new Date();",
+			"vi.setConfig({ testTimeout: inject('propertyTimeout') });",
 		].join("\n");
 		expect(await purityFindings(code, "packages/sim/src/hash.test.ts")).toEqual([
 			"5 no-restricted-syntax",
@@ -205,6 +206,23 @@ describe("sim purity rules", () => {
 			"9 no-restricted-properties",
 			"10 no-restricted-syntax",
 		]);
+	});
+
+	// #208: a property file that leaves out the timeout gets Vitest's 5 s default, which only
+	// fails at CI's 1,000 runs. Lint reports the file instead, on its first line.
+	it.each([
+		["the fast-check settings without the property timeout", ["inject('fastCheck');"], ["1"]],
+		[
+			"both, in either quote style",
+			['inject("fastCheck");', 'vi.setConfig({ testTimeout: inject("propertyTimeout") });'],
+			[],
+		],
+		["neither", ["inject('other');"], []],
+	])("report a sim test file that uses %s", async (_case, lines, findingLines) => {
+		const code = ["import { inject, vi } from 'vitest';", ...lines].join("\n");
+		expect(await purityFindings(code, "packages/sim/src/sim/tests/x.test.ts")).toEqual(
+			findingLines.map((line) => `${line} no-restricted-syntax`),
+		);
 	});
 });
 

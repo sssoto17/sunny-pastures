@@ -333,6 +333,14 @@ export default defineConfig(
 					message:
 						"Pass the shared settings: fc.assert(property, inject('fastCheck')) (D10, ADR-0003 section 9).",
 				},
+				{
+					// Without the timeout, a property file gets Vitest's 5 s default, which fails only at
+					// CI's 1,000 runs (#200, #208). Reported on the file, since the file applies it.
+					selector:
+						"Program:has(CallExpression[callee.name='inject'][arguments.0.value='fastCheck']):not(:has(CallExpression[callee.name='inject'][arguments.0.value='propertyTimeout']))",
+					message:
+						"A file that uses inject('fastCheck') applies the property timeout too: vi.setConfig({ testTimeout: inject('propertyTimeout') }) (#208, ADR-0003 section 9).",
+				},
 			],
 		},
 	},

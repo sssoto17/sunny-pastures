@@ -225,7 +225,9 @@ fixed seed (`fc.assert(property, inject('fastCheck'))`), so no sim test reads th
 A property's time grows with its run count, so its timeout does too (#200): the config also
 provides `propertyTimeout`, 15 ms per run and never below Vitest's 5 s default, and each property
 test file applies it with `vi.setConfig({ testTimeout: inject('propertyTimeout') })`, which Vitest
-resets after the file. At 1,000 runs that is 15 s: 4× the slowest property measured in CI on
+resets after the file. Lint enforces the opt-in (#208): a sim test file that calls
+`inject('fastCheck')` without `inject('propertyTimeout')` is reported, so a new property file
+can't fall back to the 5 s default and fail only at CI's 1,000 runs. At 1,000 runs that is 15 s: 4× the slowest property measured in CI on
 main (3.7 s) and 2.6× the slowest on #88's stack (5.7 s), enough for a slow runner and tight
 enough that a property several times slower still fails.
 
@@ -238,6 +240,10 @@ count.
   MUST-14.8 needs.
 - **A fresh random seed per run.** A failure couldn't be reproduced, and CI would flake.
 - **A global `testTimeout`.** It would loosen every unit test, not only the properties (#200).
+- **A Vitest `projects` entry for property files (#208).** A project selects files by glob, not
+  by what they call, so a new property file would still need a name or list entry by hand and,
+  without one, would get 5 s as silently as before. Its timeout is per file too, so the unit tests
+  in the mixed files (`hash`, `random`) would get 15 s either way.
 - **50 ms per run.** 50 s at 1,000 runs would hide a property getting ten times slower (#200).
 - **Fewer runs.** A lowered run count is a weakened bar (`CONSTRAINTS.md`, Floor).
 
