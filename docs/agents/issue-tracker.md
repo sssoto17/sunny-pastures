@@ -117,8 +117,14 @@ Every issue carries four values: GitHub's native **issue type**, and the Project
   removes it once all four are set.
 - **The native type follows the type label**, and the label stays: `feature` → Feature, `bug` →
   Bug, and `spike`, `design`, `chore`, `idea` → Task (the repo offers Task, Bug and Feature). The
-  mapping is the Types table in `triage-labels.md`.
+  mapping is the Types table in `triage-labels.md`. `scripts/backfill-issue-types.sh` sets it on
+  open issues that have none, from their label: a dry run by default, `--apply` to write
+  (`--help`; tests: `bash scripts/backfill-issue-types.test.sh`). The admin runs it.
 - **No exceptions**: a workstream parent carries all four too (**Grouping**).
+- **`scripts/missing-fields.sh`** lists the open issues that break this rule: a field missing
+  (and whether `triage` is on), or `triage` on an issue whose fields are set. It exits 0 when
+  there are none, 1 when it lists some, 2 on bad arguments and 3 when GitHub can't be read, and
+  is read-only (`--help`; tests: `bash scripts/missing-fields.test.sh`).
 
 ## Workstreams
 
