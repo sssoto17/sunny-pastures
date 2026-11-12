@@ -48,6 +48,7 @@ Each item names where its rule lives. Read the rule there.
 8. **Tests would catch a bug** in the change. Name one plausible bug and the test that fails on
    it; on a test-heavy PR, prove it with a mutant (Conduct).
 9. **The PR's own boxes**: each ticked "How it was verified" box has its evidence in the PR.
+10. **Repo rules**: `AGENTS.md`, "Rules", for whatever the diff touches.
 
 ## Severity
 
@@ -60,7 +61,9 @@ Every finding gets one severity and one status.
   criteria don't name, a follow-up issue.
 - **Nit**: wording, naming or layout no tool checks.
 
-The smell baseline in the `code-review` skill yields Optional at most.
+The smell baseline in the `code-review` skill yields Optional at most. For the CI reviewer App,
+Required findings are the blocking ones (line comments plus Request changes); Optional and Nit go
+in the review's summary (ADR-0002, area 2).
 
 - **Confirmed**: you reproduced it, or cite `file:line` and the command output that shows it.
 - **Unverified**: inferred, not shown. Say what would confirm it. An unverified finding alone
