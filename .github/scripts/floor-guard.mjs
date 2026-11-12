@@ -22,8 +22,8 @@
 // whose Path, one file or one folder, covers the file. Unfinished work and invalid, too broad or
 // expired exceptions always fail, and so does a second `## Exceptions` heading.
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { appendFileSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { baseArg, CannotRun, enterRepo, git, oldContent, readChange } from "./diff.mjs";
@@ -91,47 +91,30 @@ const MAX_EXCEPTION_DAYS = 30;
 const SUPPRESSIONS =
 	/@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|istanbul ignore|c8 ignore|v8 ignore|Stryker disable|nosemgrep|gitleaks:allow|fallow-ignore[\w-]*|#\s*noqa|#\s*type:\s*ignore/;
 const SKIPS = /\.(skip|only|todo|skipIf|runIf)\b|\b(xit|xtest|xdescribe|fit|fdescribe)\s*\(/;
-// Unfinished work (#99 added the last four): a not-implemented stub, "not yet implemented" and
-// "unimplemented" included; an empty `catch`, or one holding only a comment; an empty `.catch`
-// callback; a TODO.
-// A block comment that doesn't run past its own `*/`, so it can't swallow code between two
-// comments (review of #133).
-const BLOCK_COMMENT = String.raw`\/\*(?:(?!\*\/).)*\*\/`;
-// An arrow or function callback whose body is empty, holds only comments, or returns nothing.
-const EMPTY_CALLBACK = String.raw`(?:async\s+)?(?:\([^)]*\)|\w+)\s*=>\s*(?:\{\s*(?:${BLOCK_COMMENT}\s*)*\}|undefined|void 0|null)|(?:async\s+)?function\s*\w*\s*\([^)]*\)\s*\{\s*\}`;
-const STUBS = new RegExp(
-	[
-		String.raw`catch\s*(\([^)]*\))?\s*\{\s*(?:${BLOCK_COMMENT}\s*)*\}`,
-		String.raw`\.catch\(\s*(?:${EMPTY_CALLBACK})\s*\)`,
-		String.raw`\.then\([^,()]+(?:\([^)]*\))?,\s*(?:${EMPTY_CALLBACK})\s*\)`,
-		String.raw`\bTODO\b`,
-	].join("|"),
-);
-// A stub that throws instead of doing the work: the message starts with "not implemented", "not
-// yet implemented" (spaces or hyphens) or "unimplemented", in any case, with or without `new`.
-// A `NotImplementedError` is the same stub by name (independent review of #133).
-const STUB_THROW =
-	/throw\s+(?:new\s+)?(?:NotImplemented\w*|\w*Error\(\s*['"`]\s*(?:not[\s-]+(?:yet[\s-]+)?implemented|unimplemented)\b)/i;
-// Whether the block opened on line `n` (1-based) holds nothing but blanks and comments before its
-// closing `}`. The lines are read together, so a block comment may span several of them, and a
-// line that opens a comment and then has code (`/* log */ report(e);`) isn't empty (reviews of
-// #133).
-const emptyBlockAfter = (lines, n) => {
-	let text = "";
-	for (let i = n; i < lines.length; i++) {
-		text += `${lines[i] ?? ""}\n`;
-		if (text.lastIndexOf("/*") > text.lastIndexOf("*/")) continue; // inside a block comment
-		const code = text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/.*$/gm, "");
-		if (code.trim()) return /^\s*\}/.test(code);
-	}
-	return false;
+// Unfinished work. Since #135 its code patterns (a not-implemented stub, an empty or comment-only
+// `catch`, a rejection handler that does nothing) are ESLint rules on the syntax tree
+// (eslint.config.mjs, FLOOR_SYNTAX), and the guard keeps them on: a directive that switches one off
+// is unfinished work too, so it can't be waived any more than the stub it hides. A TODO stays here,
+// since it can stand in for the work in any file, ESLint's or not (ADR-0004).
+const TODO = /\bTODO\b/;
+// The rules that hold unfinished work and property runs, by the names a directive uses.
+const FLOOR_RULES =
+	/(?:^|[\s,])(?:no-empty|no-empty-function|@typescript-eslint\/no-empty-function|no-restricted-syntax|no-warning-comments)(?=[\s,:"'*]|$)/;
+// `eslint-disable`, `-line` or `-next-line`, and the rule list after it (empty: every rule).
+const ESLINT_DISABLE = /eslint-disable(?:-next-line|-line)?(?![\w-])([^\n]*)/;
+// An inline config, `/* eslint rule: value */`, which turns a rule off or replaces its options.
+const INLINE_CONFIG = /\/\*\s*eslint\s+(?:[^*]|\*(?!\/))*/;
+const switchesOffFloor = (text) => {
+	const disable = ESLINT_DISABLE.exec(text);
+	const rules = disable?.[1].split(/\*\/|\s--\s/)[0].trim();
+	const inline = INLINE_CONFIG.exec(text)?.[0];
+	return Boolean(
+		(disable && (rules === "" || FLOOR_RULES.test(rules))) || (inline && FLOOR_RULES.test(inline)),
+	);
 };
 // An ESLint rule turned off or down to a warning: `'rule': 'off'`, `'rule': 0`, `'rule': ['warn', …]`.
 const RULE_OFF =
 	/(["'][\w@/-]+["']|\w+)\s*:\s*\[?\s*["'](off|warn)["']|["'][\w@/-]+["']\s*:\s*\[?\s*[01]\b/;
-// A `catch` block, or a `.catch` callback, opened at the end of a line (review of #133).
-const OPEN_CATCH =
-	/catch\s*(\([^)]*\))?\s*\{\s*$|\.catch\(\s*(?:async\s+)?(?:\([^)]*\)|\w+)\s*=>\s*\{\s*$/;
 const ASSERTION = /\b(expect|assert)\b/;
 const ASSERTIONS = /\b(expect|assert)\b/g;
 const RUN_COUNT = /\b(numRuns|SIM_PROPERTY_RUNS)\b(?:\D{0,20}?(\d+))?/;
@@ -372,9 +355,65 @@ const withoutFormatting = (f, mergeBase) => {
 	const after = normalizeCode(readFileSync(f.path, "utf8"));
 	return before !== null && before === after ? { ...f, removed: [], added: [] } : f;
 };
+// The block comments in a file's code, as [first line, last line], skipping strings, templates,
+// regex literals and line comments; null when it can't tell where one starts or ends.
+const blockComments = (text) => {
+	const spans = [];
+	const lines = (from, to) => text.slice(from, to).split("\n").length - 1;
+	let line = 1;
+	let prev = ""; // the last character of code, to tell a regex literal from a division
+	for (let i = 0; i < text.length;) {
+		const c = text[i];
+		if (/\s/.test(c)) {
+			if (c === "\n") line++;
+			i++;
+		} else if (c === "/" && text[i + 1] === "/") {
+			const end = text.indexOf("\n", i);
+			i = end === -1 ? text.length : end;
+		} else if (c === "/" && text[i + 1] === "*") {
+			const end = text.indexOf("*/", i + 2);
+			if (end === -1) return null;
+			spans.push([line, line + lines(i, end)]);
+			line += lines(i, end);
+			i = end + 2;
+		} else if (c === "'" || c === '"' || c === "`") {
+			const end = stringEnd(text, i);
+			if (end === -1) return null;
+			line += lines(i, end);
+			prev = c;
+			i = end;
+		} else if (c === "/" && /^$|[(,=:[!&|?{};]/.test(prev)) {
+			const regex = /^\/(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n[])+\/[a-z]*/.exec(text.slice(i));
+			if (!regex) return null;
+			prev = "/";
+			i += regex[0].length;
+		} else {
+			prev = c;
+			i++;
+		}
+	}
+	return spans;
+};
+// Second comment on #135 (review of #141): `/*` and `*/` added around lines the PR didn't touch
+// switch a guarded config's rules or entries off without removing a line. A block comment that
+// covers an unchanged line counts at its added delimiter. A file it can't scan fails closed: every
+// added line with a `/*` or `*/` counts.
+const commentedOut = (f) => {
+	const added = new Set(f.added.map((a) => a.line));
+	const spans = blockComments(readFileSync(f.path, "utf8"));
+	if (spans === null) return f.added.filter((a) => /\/\*|\*\//.test(a.text)).map((a) => a.line);
+	return spans
+		.filter(([first, last]) => added.has(first) || added.has(last))
+		.filter(([first, last]) => {
+			for (let n = first; n <= last; n++) if (!added.has(n)) return true;
+			return false;
+		})
+		.map(([first, last]) => (added.has(first) ? first : last));
+};
 const configLoosening = (f, mergeBase) => {
 	const name = basename(f.path);
 	const hits = [];
+	if (FORMATTED_CONFIG.test(name) && f.status !== "added") hits.push(...commentedOut(f));
 	const newLines = () => readFileSync(f.path, "utf8").split("\n");
 	if (name === ".gitleaksignore" || name === ".semgrepignore" || name === ".prettierignore") {
 		// A `!` line in .prettierignore re-includes a path, which widens the check (#125).
@@ -425,24 +464,8 @@ const configLoosening = (f, mergeBase) => {
 				if (/configs\.|["']error["']/.test(r.text)) hits.push(`${r.line} (old)`);
 		}
 	} else if (/^tsconfig.*\.json$/.test(name)) {
-		// A new tsconfig that neither extends a shared one nor turns `strict` on compiles a package
-		// with TypeScript's loose defaults (#99).
-		// Its `extends` must name a file that exists (review of #133): `"./nope.json"` or `[]` extends
-		// nothing. A package name (`@tsconfig/node20`) isn't resolved here and counts as an extends.
-		if (f.status === "added") {
-			// Read without comments, so `// "strict": true` doesn't count (independent review of #133).
-			const text = readFileSync(f.path, "utf8")
-				.replace(/\/\*[\s\S]*?\*\//g, " ")
-				.replace(/(^|[^:"])\/\/.*$/gm, "$1");
-			const value = /"extends"\s*:\s*("(?:[^"\\]|\\.)*"|\[[^\]]*\])/.exec(text)?.[1];
-			const targets = value ? [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]) : [];
-			const resolves = (t) =>
-				t.trim() !== "" &&
-				(!/^\.{1,2}\//.test(t) ||
-					[t, `${t}.json`].some((p) => existsSync(join(dirname(f.path), p))));
-			const extendsReal = targets.length > 0 && targets.every(resolves);
-			if (!extendsReal && !/"strict"\s*:\s*true/.test(text)) hits.push(1);
-		}
+		// A new tsconfig's strictness, through `extends`, is read with the TypeScript API since #135
+		// (tests/tsconfigs.test.mjs); the lines below report a strict option relaxed in the diff.
 		const addedTrue = new Set(
 			f.added
 				.map((a) => STRICT_KEYS.exec(a.text))
@@ -1392,10 +1415,9 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 		for (const { line, text } of f.added) {
 			// Only the suppression and stub scans skip the guard's own files (see SELF).
 			if (!SELF.has(f.path)) {
-				if (SUPPRESSIONS.test(text)) weak("silenced-checker", f.path, line);
-				if (STUBS.test(text) || STUB_THROW.test(text)) always("unfinished-work", f.path, line);
-				else if (OPEN_CATCH.test(stripComments(text)) && emptyBlockAfter(fileLines(), line))
-					always("unfinished-work", f.path, line);
+				if (SUPPRESSIONS.test(text) || INLINE_CONFIG.test(text))
+					weak("silenced-checker", f.path, line);
+				if (TODO.test(text) || switchesOffFloor(text)) always("unfinished-work", f.path, line);
 			}
 			if (isTest(f.path) && SKIPS.test(text)) weak("test-made-easier", f.path, line);
 		}
