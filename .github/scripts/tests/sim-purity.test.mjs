@@ -217,6 +217,11 @@ describe("sim purity rules", () => {
 			['inject("fastCheck");', 'vi.setConfig({ testTimeout: inject("propertyTimeout") });'],
 			[],
 		],
+		[
+			"the property timeout outside vi.setConfig",
+			["inject('fastCheck');", "inject('propertyTimeout');"],
+			["1"],
+		],
 		["neither", ["inject('other');"], []],
 	])("report a sim test file that uses %s", async (_case, lines, findingLines) => {
 		const code = ["import { inject, vi } from 'vitest';", ...lines].join("\n");

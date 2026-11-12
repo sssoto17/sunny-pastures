@@ -96,6 +96,12 @@ const DATE_ALLOWED = [
 	"Property[computed=false] > Identifier.key",
 ].join(", ");
 
+// #208: a file that reads the fast-check settings must apply the scaled property timeout, as
+// `vi.setConfig({ testTimeout: inject('propertyTimeout') })`. The check spots a property file by
+// its `inject('fastCheck')` call, written with the name `inject` and a quoted key.
+const injectCall = (key) => `CallExpression[callee.name='inject'][arguments.0.value='${key}']`;
+const PROPERTY_TIMEOUT = `CallExpression[callee.object.name='vi'][callee.property.name='setConfig'] > ObjectExpression > Property[key.name='testTimeout'] > ${injectCall("propertyTimeout")}`;
+
 const SIM_SYNTAX = [
 	{
 		selector: `Identifier[name='Date']:not(${DATE_ALLOWED})`,
@@ -336,8 +342,7 @@ export default defineConfig(
 				{
 					// Without the timeout, a property file gets Vitest's 5 s default, which fails only at
 					// CI's 1,000 runs (#200, #208). Reported on the file, since the file applies it.
-					selector:
-						"Program:has(CallExpression[callee.name='inject'][arguments.0.value='fastCheck']):not(:has(CallExpression[callee.name='inject'][arguments.0.value='propertyTimeout']))",
+					selector: `Program:has(${injectCall("fastCheck")}):not(:has(${PROPERTY_TIMEOUT}))`,
 					message:
 						"A file that uses inject('fastCheck') applies the property timeout too: vi.setConfig({ testTimeout: inject('propertyTimeout') }) (#208, ADR-0003 section 9).",
 				},
