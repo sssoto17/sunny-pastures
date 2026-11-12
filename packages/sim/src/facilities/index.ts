@@ -353,6 +353,36 @@ function finishDue(farm: FarmState, index: number): FarmState {
 }
 
 /**
+ * The Loop (MUST-06.5): while its facility has a free slot and the inputs are in storage, it
+ * starts the facility's last recipe again, through `startJob`, so the job stores its finish when it
+ * starts (ADR-0006, section 7). A `restartRecipe` step falls at the farm's time, keyed by the slot
+ * it fills, one job a step. Its limit is the queue (the admin, 11 Nov): a done job keeps its slot
+ * until collected, by hand or by the Collector, so it stops when every slot is taken, barn room or
+ * not, and resumes as soon as one frees; it also stops when the inputs run out (MUST-06.5, 07.2;
+ * ADR-0003, section 16).
+ */
+export function createLooping(rules: FacilityRules): StepSource<FarmState> {
+	return {
+		steps: (farm) =>
+			farm.facilities.flatMap((owned, index): AutomatedStep[] =>
+				restart(farm, index, rules) === null
+					? []
+					: [{ at: farm.time, kind: "restartRecipe", index, slot: owned?.jobs.length ?? 0 }],
+			),
+		run: (farm, step) => restart(farm, step.index, rules) ?? farm,
+	};
+}
+
+/** The farm with the facility's Loop restarted, or null if it has no Loop or can't restart. */
+function restart(farm: FarmState, index: number, rules: FacilityRules): FarmState | null {
+	const owned = farm.facilities[index] ?? null;
+	if (owned?.addOns.loop !== true || owned.lastRecipe === null) return null;
+
+	const started = startJob(farm, index, owned.lastRecipe, rules);
+	return started.ok ? started.state : null;
+}
+
+/**
  * Collects the job in slot 0, which must be done: its goods go to the barn, refused if they don't
  * fit, and it gives XP through gainXp (MUST-03.4, 05.2). The jobs behind it move up a slot.
  * Collecting by hand and the Collector share it.

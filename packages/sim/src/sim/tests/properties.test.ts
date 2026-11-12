@@ -269,6 +269,41 @@ function actAlone(sim: Sim, farm: FarmState, action: Action, at: number): FarmSt
 }
 
 /**
+ * The Loop's restarts that apply ran after an action, at its time: in each facility with a Loop,
+ * the jobs added behind those the Collector moved are running jobs of the last recipe, each ending
+ * the recipe's time at the facility's tier after the later of now and the job before it
+ * (MUST-06.5, ADR-0006 §7; #85).
+ */
+function expectRestarts(
+	acted: FarmState,
+	after: FarmState,
+	recipes: ReadonlyMap<string, TestRecipe>,
+): void {
+	after.facilities.forEach((owned, i) => {
+		const moves = [...recipes].reduce(
+			(total, [id, made]) =>
+				recipeFacilities.get(id) === i
+					? total + ((after.barn[made.good] ?? 0) - (acted.barn[made.good] ?? 0)) / made.amount
+					: total,
+			0,
+		);
+		const queue = owned?.jobs ?? [];
+		const first = (acted.facilities[i]?.jobs.length ?? 0) - moves;
+		const made = recipes.get(owned?.lastRecipe ?? "");
+		queue.slice(first).forEach((job, k) => {
+			const previous = queue[first + k - 1];
+			const from =
+				previous?.status === "running" ? Math.max(after.time, previous.readyAt) : after.time;
+			expect(job).toEqual({
+				status: "running",
+				recipe: owned?.lastRecipe,
+				readyAt: from + (made?.ms[(owned?.tier ?? NaN) - 1] ?? NaN),
+			});
+		});
+	});
+}
+
+/**
  * Test content where farms bake cookies (#85): 31 XP a harvest reaches the bakery's tier 2 at
  * Level 4 in one tending, and a 12-good barn holds chicken feed, eggs and cookies together.
  */
@@ -775,6 +810,7 @@ describe.each([
 					expectAutomated(transition.before, before, recipes);
 					const after = actAlone(levelSim, before, action, at);
 					expectAutomated(after, transition.after, recipes);
+					expectRestarts(after, transition.after, recipes);
 					const gained = wheatIn(after) - wheatIn(before);
 					// Feeding, collecting eggs, starting a job that takes eggs and delivering change the
 					// barn too; their branches below check it exactly.
@@ -876,7 +912,9 @@ describe.each([
 						expect(jobs[0]?.status).toBe("done");
 						const made = recipes.get(jobs[0]?.recipe ?? "");
 						const good = made?.good ?? "";
-						expect(after.facilities[action.facility]?.jobs).toHaveLength(jobs.length - 1);
+						expect(after.facilities[action.facility]?.jobs.slice(0, jobs.length - 1)).toEqual(
+							jobs.slice(1),
+						);
 						expect((after.barn[good] ?? 0) - (before.barn[good] ?? 0)).toBe(made?.amount);
 						expect(after.xp).toBe(before.xp + (made?.xp ?? NaN));
 						expect(after.coins).toBe(before.coins + paidAt(after.xp) - paidAt(before.xp));
@@ -915,7 +953,7 @@ describe.each([
 						expect(levelAt(after.xp)).toBeGreaterThanOrEqual(addOnLevels[action.addOn]);
 						expect(owned?.addOns[action.addOn]).toBe(false);
 						// The real farm after it has the add-on on and the facility otherwise as it was, but
-						// for the moves the add-on made due at once, checked above.
+						// for the moves and restarts the add-on made due at once, checked above.
 						const bought = transition.after.facilities[action.facility];
 						expect(bought?.addOns).toEqual({ ...owned?.addOns, [action.addOn]: true });
 						expect([bought?.tier, bought?.lastRecipe]).toEqual([owned?.tier, owned?.lastRecipe]);

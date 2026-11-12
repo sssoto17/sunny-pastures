@@ -21,8 +21,19 @@
  *   and the orders stream, which no other kind reads, so it never makes an earlier-ranked step due
  *   at its own time. The admin decided on 11 Nov that #88's `restartRecipe` (the Loop) ranks last,
  *   after `refillSlot`, and its `moveGoods` (the Collector) before it (ADR-0003, section 15).
+ * - `restartRecipe` (#88), the Loop, last of all kinds (the admin, 11 Nov): the Collector's move
+ *   frees the queue slot a Loop restarts into at the same time, and goods that don't fit keep it
+ *   (MUST-06.5, 06.6). A restart adds only a running job that ends later, and room it frees by
+ *   taking barn goods (cookies' eggs) the Collector uses a ms later.
  */
-const stepKinds = ["ripen", "finishJob", "produce", "moveGoods", "refillSlot"] as const;
+const stepKinds = [
+	"ripen",
+	"finishJob",
+	"produce",
+	"moveGoods",
+	"refillSlot",
+	"restartRecipe",
+] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 

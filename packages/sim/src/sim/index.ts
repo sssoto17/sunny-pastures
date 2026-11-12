@@ -9,6 +9,7 @@ import {
 	buyTier,
 	collect,
 	createCollecting,
+	createLooping,
 	jobFinishing,
 	newFacilities,
 	prepareFacilityRules,
@@ -70,6 +71,7 @@ export function createSim(content: Content): Sim {
 		createProducing(penRules),
 		createCollecting(facilityRules),
 		createRefilling(orderRules),
+		createLooping(facilityRules),
 	];
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
 
@@ -99,8 +101,9 @@ export function createSim(content: Content): Sim {
 			}
 
 			// An action can make automated steps due at its own time, such as the order slots a Level it
-			// crosses adds, so the farm is advanced to `at` again after it: every farm the rules return
-			// has run its steps up to its time (D6; MUST-04.1; ADR-0003, sections 15 and 16).
+			// crosses adds, or a Loop restarting into the slot a collect freed or a tier added, so the
+			// farm is advanced to `at` again after it: every farm the rules return has run its steps up
+			// to its time (D6; MUST-04.1; ADR-0003, sections 15 and 16).
 			const result = applyAction(advance(state, at), action);
 			return result.ok ? { ok: true, state: advance(result.state, at) } : result;
 		},
