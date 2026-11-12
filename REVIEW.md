@@ -48,7 +48,7 @@ Each item names where its rule lives. Read the rule there.
 8. **Tests would catch a bug** in the change. Name one plausible bug and the test that fails on
    it; on a test-heavy PR, prove it with a mutant (Conduct).
 9. **The PR's own boxes**: each ticked "How it was verified" box has its evidence in the PR.
-10. **Repo rules**: `AGENTS.md`, "Rules", for whatever the diff touches.
+10. **Repo rules**: `AGENTS.md`, "Layout" and "Rules", for whatever the diff touches.
 
 ## Severity
 
