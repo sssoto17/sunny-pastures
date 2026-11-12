@@ -11,10 +11,8 @@ const simPropertyRuns = Number(process.env["SIM_PROPERTY_RUNS"] ?? 100);
 if (!Number.isSafeInteger(simPropertyRuns) || simPropertyRuns < 1) {
 	throw new Error("SIM_PROPERTY_RUNS must be a positive integer");
 }
-// #200: a property's time grows with its run count, so its timeout does too: 15 ms per run, never
-// below Vitest's 5 s default (15 s at CI's 1,000 runs). The slowest property took 3.7 s in CI on
-// main and 5.7 s on #88's stack, so the limit sits about 3x above it: room for runner noise, while
-// a property that gets several times slower still fails. Only the property test files apply it.
+// #200 (ADR-0003, section 9): a property's time grows with its run count, so its timeout does
+// too: 15 ms per run, never below Vitest's 5 s default. Only the property test files apply it.
 const propertyTimeout = Math.max(5_000, 15 * simPropertyRuns);
 
 export default defineConfig({

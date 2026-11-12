@@ -224,18 +224,21 @@ fixed seed (`fc.assert(property, inject('fastCheck'))`), so no sim test reads th
 A property's time grows with its run count, so its timeout does too (#200): the config also
 provides `propertyTimeout`, 15 ms per run and never below Vitest's 5 s default, and each property
 test file applies it with `vi.setConfig({ testTimeout: inject('propertyTimeout') })`, which Vitest
-resets after the file. At 1,000 runs that is 15 s, about 3× the slowest property measured in CI
-(3.7 s on main, 5.7 s on #88's stack): enough for a slow runner, tight enough that a property
-several times slower still fails. Rejected: a global `testTimeout` (it would loosen every unit
-test), 50 ms per run (50 s at 1,000 runs hides a tenfold slowdown), and fewer runs (the Floor).
+resets after the file. At 1,000 runs that is 15 s: 4× the slowest property measured in CI on
+main (3.7 s) and 2.6× the slowest on #88's stack (5.7 s), enough for a slow runner and tight
+enough that a property several times slower still fails.
 
-**Pattern:** property-based testing (fast-check, fixed seed).
+**Pattern:** property-based testing (fast-check, fixed seed), with a timeout scaled by the run
+count.
 
 **Rejected:**
 
 - **Example-based tests only.** They can't reach the generated tie and storage cases that
   MUST-14.8 needs.
 - **A fresh random seed per run.** A failure couldn't be reproduced, and CI would flake.
+- **A global `testTimeout`.** It would loosen every unit test, not only the properties (#200).
+- **50 ms per run.** 50 s at 1,000 runs would hide a property getting ten times slower (#200).
+- **Fewer runs.** A lowered run count is a weakened bar (`CONSTRAINTS.md`, Floor).
 
 ## 10. Numbers are safe integers, and the maths is integer-only (D16)
 
