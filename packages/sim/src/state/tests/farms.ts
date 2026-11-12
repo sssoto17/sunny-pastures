@@ -341,7 +341,32 @@ const chunk = fc.oneof(
 	{ weight: 1, arbitrary: trade },
 );
 
-export const timedActions = fc.array(chunk, { maxLength: 16 }).map((chunks) => chunks.flat());
+/**
+ * Automating a new farm so its add-ons tie for storage (MUST-14.8, #213): the one farm whose silo
+ * and barn a chunk knows is a new one, with both empty. Wheat leaves a silo only through jobs, whose
+ * goods the barn soon stops, and wheat orders of random size, so no chunk can drain a played silo
+ * to a known amount. Tending the start's 6 plots gives 2 wheat a plot, 3 with the bonus; each Loop
+ * fills its facility's 2 slots at once, so bread takes 6, then chicken feed `offset` later takes 4,
+ * and its first job finishes at 240 s or with the bread at 300 s:
+ * - 180 s: the Collector has moved one feed job, so a barn of 4 has room for the bread but not
+ *   both, and the bread's goods keep its slot: the Collectors tie for the last barn space.
+ * - 240 s: a farm whose tending gave 13 or 14 wheat (about half) has 3 or 4 left, the feed mill
+ *   restarts first and the bakery is short: the Loops tie for the last wheat.
+ */
+const automateNewFarm = fc
+	.constantFrom(180_000, 240_000)
+	.map((offset): TimedAction[] => [
+		...tendFor(growMs),
+		...buyFacilities,
+		...buyAddOns,
+		{ action: { type: "startJob", facility: 1, recipe: "bread" }, delay: 0 },
+		{ action: { type: "startJob", facility: 0, recipe: "chickenFeed" }, delay: offset },
+	]);
+
+/** Chunks played from a new farm, sometimes starting with the add-ons' ties, which need it new. */
+export const timedActions = fc
+	.tuple(fc.oneof(fc.constant([]), automateNewFarm), fc.array(chunk, { maxLength: 16 }))
+	.map(([first, chunks]) => [...first, ...chunks.flat()]);
 
 export const farmId = fc.string({ unit: "binary", maxLength: 24 });
 

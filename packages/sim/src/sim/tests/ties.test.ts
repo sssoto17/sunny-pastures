@@ -198,8 +198,14 @@ describe.each(contents)(
 	},
 );
 
+/**
+ * How often each tie must be reached, in run × content pairs: one run in 20, so a generator change
+ * that thins a case fails here before the case reaches 0 (the wheat tie sat at 2 in 100, #213).
+ */
+const reachMargin = Math.ceil(params.numRuns / 20);
+
 describe("the generated ties", () => {
-	it("are reached by the generated farms over both contents, so MUST-14.8 isn't vacuous", () => {
+	it("are reached by the generated farms over both contents, at least once in 20 runs, so MUST-14.8 isn't vacuous", () => {
 		const counts = new Map<string, number>();
 		const worlds = contents.map(([, content]) => makeWorld(content));
 		for (const [id, played, wait] of fc.sample(fc.tuple(farmId, timedActions, delay), params)) {
@@ -217,7 +223,7 @@ describe("the generated ties", () => {
 			"Loops tie for the last wheat",
 			"a Collector's waiting goods stop a Loop at the tie",
 		]) {
-			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin);
 		}
 	});
 });

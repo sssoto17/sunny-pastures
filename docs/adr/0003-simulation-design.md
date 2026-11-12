@@ -236,6 +236,15 @@ property test lives, and spots a property file by that call, so aliasing `inject
 key from a variable would get past it. The unit tests in the mixed files (`hash`, `random`) share
 the file's 15 s limit at 1,000 runs. They take milliseconds, and 15 s still fails one that hangs.
 
+The settings exist only under the root config (#213). Vitest run inside `packages/sim` finds no
+config, so `inject('fastCheck')` gives `undefined`, and fast-check given no settings picks a
+random seed: the tie reach test failed in about 1 run in 5 that way, while the sim stayed
+deterministic. Each property file reads the settings as `requireProvided('fastCheck',
+inject('fastCheck'))` (`state/tests/provided.ts`), which throws, naming the root config, when
+nothing was provided; lint reports any other read of `inject('fastCheck')`. A reach test asserts
+each case in at least 1 run in 20, not just once, so a generator change that thins a case fails
+before the case reaches 0.
+
 **Pattern:** property-based testing (fast-check, fixed seed), with a timeout scaled by the run
 count.
 
@@ -244,6 +253,9 @@ count.
 - **Example-based tests only.** They can't reach the generated tie and storage cases that
   MUST-14.8 needs.
 - **A fresh random seed per run.** A failure couldn't be reproduced, and CI would flake.
+- **A Vitest config in `packages/sim` as well (#213).** A second config to keep in step with the
+  root's seed, run count and timeout, and other folders would still run without one; the guard
+  fails wherever the settings are missing.
 - **A global `testTimeout`.** It would loosen every unit test, not only the properties (#200).
 - **A Vitest `projects` entry for property files (#208).** A project selects files by glob, not
   by what they call, so a new property file would still need a name or list entry by hand and,
