@@ -28,6 +28,7 @@ EOF
 # repo here, and the git shim below maps it back in `remote get-url`, which the script checks.
 printf '[url "%s"]\n  insteadOf = %s\n' "$work/origin.git" "$GH_URL" >>"$work/gitconfig"
 export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
+export CI_CHECK_RETRY_SECONDS=0 # the pause before gh auth status is retried
 
 cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
@@ -37,7 +38,11 @@ jqp="" key=""
 args=("$@")
 for ((i = 0; i < $#; i++)); do [[ ${args[i]} == --jq ]] && jqp=${args[i + 1]}; done
 case "$*" in
-  "auth status") exit 0 ;;
+  # Exit codes to answer with, one a call, from fx/auth (then 0): a passing failure, or a real one.
+  "auth status -h github.com --active")
+    rc=$(head -n1 "$dir/fx/auth" 2>/dev/null)
+    tail -n +2 "$dir/fx/auth" >"$dir/fx/auth.rest" 2>/dev/null && mv "$dir/fx/auth.rest" "$dir/fx/auth"
+    exit "${rc:-0}" ;;
   "api -i user") cat "$dir/fx/scopes"; exit 0 ;;
   "run list --repo "*" --branch "*) key=runs ;;
   "run view "*" --json jobs"*) key=jobs ;;
@@ -113,6 +118,26 @@ run start
 expect_code 2
 run start 104
 expect_code 2
+
+# --- gh auth status: only the active github.com account, retried once (#198) ------------------
+reset
+echo '[]' >"$work/fx/runs.json"
+run results 103
+assert "expected only the active github.com account checked" \
+  contains "$calls" "auth status -h github.com --active"
+printf '1\n' >"$work/fx/auth"
+: >"$work/calls"
+run results 103
+expect_code 3
+assert "expected a passing failure retried, then on" test "$(grep -c '^auth status' <<<"$calls")" -eq 2
+assert "expected no signed-out message after a passing failure" lacks "$err" "signed out"
+: >"$work/calls"
+printf '1\n1\n' >"$work/fx/auth"
+run results 103
+expect_code 2
+assert "expected the signed-out message after two failures" contains "$err" "gh is signed out"
+assert "expected exactly two tries" test "$(grep -c '^auth status' <<<"$calls")" -eq 2
+assert "expected nothing else asked of gh" test "$(grep -vc '^auth status' <<<"$calls")" -eq 0
 
 # --- start 101: a branch of origin/main plus the draft workflow, the clone untouched -----------
 reset
@@ -211,6 +236,30 @@ run start 101
 expect_code 2
 assert "expected the rewritten push URL refused" contains "$err" "push URL of origin"
 assert "expected nothing pushed to the rewrite" test -z "$(git -C "$work/other.git" for-each-ref)"
+
+# Config that applies only in linked worktrees (#198): a pushurl that the clone itself doesn't
+# show. The push runs in a worktree, so the check runs there too: refused, nothing pushed, and
+# no URL printed. A linked worktree's gitdir is <clone>/.git/worktrees/<name>; the clone's isn't.
+for issue in 101 103; do
+  reset
+  git init -q --bare "$work/other.git"
+  printf '[remote "origin"]\n  pushurl = %s\n' "$work/other.git" >"$work/wt-only.gitconfig"
+  cp "$work/gitconfig" "$work/gitconfig.saved"
+  printf '[includeIf "gitdir:**/worktrees/**"]\n  path = %s\n' "$work/wt-only.gitconfig" >>"$work/gitconfig"
+  assert "expected the clone itself to show only the official push URL" \
+    test "$(PATH="$work/bin:$PATH" git -C "$work/clone" remote get-url --push --all origin)" == "$GH_URL"
+  run start "$issue"
+  mv "$work/gitconfig.saved" "$work/gitconfig"
+  expect_code 2
+  assert "expected the worktree's push URL refused ($issue)" contains "$err" "push URL of origin in the worktree"
+  assert "expected nothing pushed to the foreign pushurl ($issue)" test -z "$(git -C "$work/other.git" for-each-ref)"
+  assert "expected no throwaway branch on origin ($issue)" \
+    test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+  assert "expected no foreign URL printed ($issue)" lacks "$out$err" "$work/other.git"
+  assert "expected no GitHub URL printed ($issue)" lacks "$out$err" "github.com/sssoto17"
+  assert "expected no PR opened ($issue)" lacks "$calls" "pr create"
+  assert "expected no leftover worktree ($issue)" test "$(git -C "$work/clone" worktree list | grep -c .)" -eq 1
+done
 
 # The branch is there now: refused, nothing pushed.
 reset
