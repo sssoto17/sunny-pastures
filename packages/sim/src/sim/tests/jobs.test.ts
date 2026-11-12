@@ -5,16 +5,9 @@ import type { Content, FarmState } from "../../index.js";
 import { applyAll } from "./applyAll.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
 import { ownedFacility } from "./ownedFacility.js";
+import { bakery, breadMs, feedMill, feedMs, startBread, startFeed } from "./sliceJobs.js";
 
 const sim = createSim(sliceContent);
-// The slice's recipes (#84): chicken feed takes 2 wheat and 60 s, bread 3 wheat and 300 s.
-const feedMs = 60_000;
-const breadMs = 300_000;
-
-const feedMill = 0;
-const bakery = 1;
-const startFeed = { type: "startJob", facility: feedMill, recipe: "chickenFeed" } as const;
-const startBread = { type: "startJob", facility: bakery, recipe: "bread" } as const;
 const doneFeed = { status: "done", recipe: "chickenFeed" } as const;
 const collectFeed = { type: "collect", facility: feedMill } as const;
 

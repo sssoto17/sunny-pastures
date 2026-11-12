@@ -8,6 +8,7 @@ import {
 	buyFacility,
 	buyTier,
 	collect,
+	createCollecting,
 	jobFinishing,
 	newFacilities,
 	prepareFacilityRules,
@@ -40,8 +41,8 @@ export interface Sim {
 	/** A new farm (spec decision 5) at time 0, its streams seeded from `farmId` (D9). */
 	newFarm(farmId: string): FarmState;
 	/**
-	 * Advances the farm to `at`, applies `action`, then runs the steps it made due at `at` (the
-	 * order slots a Level it crosses adds, MUST-04.1). A refusal is returned, never thrown, and
+	 * Advances the farm to `at`, applies `action`, then runs the steps it made due at `at` (such as
+	 * the order slots a Level it crosses adds, MUST-04.1). A refusal is returned, never thrown, and
 	 * carries no state (D15); an `at` before the farm's time is refused (D7, MUST-14.7). Throws a
 	 * RangeError if `at` isn't a safe integer.
 	 */
@@ -67,6 +68,7 @@ export function createSim(content: Content): Sim {
 		ripening,
 		jobFinishing,
 		createProducing(penRules),
+		createCollecting(facilityRules),
 		createRefilling(orderRules),
 	];
 	const advance = (state: FarmState, to: number): FarmState => advanceFarm(state, to, sources);
@@ -96,8 +98,9 @@ export function createSim(content: Content): Sim {
 				);
 			}
 
-			// An action that crosses a Level adds order slots, drawn as automated steps at `at`, so the
-			// farm is advanced to `at` again after it (MUST-04.1; ADR-0003, section 15).
+			// An action can make automated steps due at its own time, such as the order slots a Level it
+			// crosses adds, so the farm is advanced to `at` again after it: every farm the rules return
+			// has run its steps up to its time (D6; MUST-04.1; ADR-0003, sections 15 and 16).
 			const result = applyAction(advance(state, at), action);
 			return result.ok ? { ok: true, state: advance(result.state, at) } : result;
 		},

@@ -6,11 +6,13 @@
  * (MUST-10.6). A kind's rank is its position here; each new kind is placed deliberately.
  *
  * - `finishJob` (#84) after `ripen`: neither touches storage, so their rank changes no outcome
- *   today. Kinds that produce goods rank before the kinds that will move or use them (the
- *   Collector and the Loop, #88), so a step sees what was produced at the same time (ADR-0003,
- *   section 12).
+ *   today. Kinds that produce goods rank before the kinds that move or use them, so a step sees
+ *   what was produced at the same time (ADR-0003, section 12).
  * - `produce` (#86) after `finishJob`, for the same reason: it touches neither storage nor coins
  *   and changes only its own pen (ADR-0003, section 13).
+ * - `moveGoods` (#88), the Collector, after every producer, so goods made at a time move at it: one
+ *   step per facility and time, as a job finishes or a ms after waiting goods fit (ADR-0003,
+ *   section 16), so room a later-ranked step frees never makes a move due behind it.
  * - `refillSlot` (#87) after the producers. A refill reads the Level (how many slots, which goods
  *   are unlocked) and what is producible (MUST-04.3), and a step at the same time can change the
  *   Level (#88's Collector gains XP), so a refill sees what the steps before it did. A slot that a
@@ -20,7 +22,7 @@
  *   at its own time. The admin decided on 11 Nov that #88's `restartRecipe` (the Loop) ranks last,
  *   after `refillSlot`, and its `moveGoods` (the Collector) before it (ADR-0003, section 15).
  */
-const stepKinds = ["ripen", "finishJob", "produce", "refillSlot"] as const;
+const stepKinds = ["ripen", "finishJob", "produce", "moveGoods", "refillSlot"] as const;
 
 export type StepKind = (typeof stepKinds)[number];
 
