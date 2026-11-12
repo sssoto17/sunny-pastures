@@ -4,7 +4,16 @@ Claude Code runs each Bash command in its own sandbox (bubblewrap on WSL2). Each
 hit in this repo, and each comes with the way around it. Commands that need the host go outside
 the sandbox: say which restriction blocks them, then retry with the sandbox disabled.
 
-Last checked: 2026-11-09.
+Last checked: 2026-11-12.
+
+## Command shape
+
+Write each Bash call so a rule in `.claude/settings.json` can match it, or it prompts (#205):
+
+- No `cd … &&` prefix: use `git -C <path>`, absolute paths or the session's working directory.
+- Run checks with `pnpm check:fast`, `pnpm check:task`, `pnpm test`, `pnpm lint` or
+  `pnpm typecheck`, not `pnpm vitest`, `pnpm exec` or `pnpm -s eslint`/`tsc` directly.
+- Prefer a script under `scripts/` over a one-off loop or heredoc; one you'll repeat becomes one.
 
 ## Must run outside the sandbox
 
@@ -39,7 +48,9 @@ host" below. These habits keep `.git/config` out of it:
 
 Each case below was hit on 7 or 8 Nov. After a merge, `scripts/after-merge.sh <worktree>` (#77)
 handles all three: it checks before changing anything, and when a step needs the host it
-stops and prints the command to run outside the sandbox.
+stops and prints the command to run outside the sandbox. No sandbox setting fixes these (checked
+12 Nov, #205): `sandbox.filesystem.allowWrite` can't lift the built-in protection on `.git/config`,
+`.git/hooks` or `.claude/` (Claude Code's sandboxing docs), and a mount point can't be deleted.
 
 - **Updating the main folder when the change touches `.claude/settings.json`, hooks or skills**
   (`git merge --ff-only`, `git pull`). Those paths are write-denied in the main folder, so git
