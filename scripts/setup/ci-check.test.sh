@@ -34,11 +34,12 @@ cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
 printf '%s\n' "$*" >>"$dir/calls"
-jqp="" key="" head=""
+jqp="" key="" head="" pr=""
 args=("$@")
 for ((i = 0; i < $#; i++)); do
   [[ ${args[i]} == --jq ]] && jqp=${args[i + 1]}
   [[ ${args[i]} == --head ]] && head=${args[i + 1]}
+  [[ ${args[i]} == pr=* ]] && pr=${args[i]#pr=}
 done
 case "$*" in
   # Exit codes to answer with, one a call, from fx/auth (then 0): a passing failure, or a real one.
@@ -50,13 +51,20 @@ case "$*" in
   "run list --repo "*" --branch "* | "run list --repo "*" --workflow "*) key=runs ;;
   "run view "*" --json jobs"*) key=jobs ;;
   "run view "*" --log") cat "$dir/fx/log"; exit 0 ;;
-  "api repos/"*"/pulls/"*"/reviews"*) key=reviews ;;
+  "api repos/"*"/pulls/"*"/reviews"*)
+    n=${2#repos/*/pulls/}; n=${n%%/*}; key=reviews; [[ -f $dir/fx/reviews-$n.json ]] && key=reviews-$n ;;
+  "api repos/sssoto17/sunny-pastures --jq .allow_auto_merge") cat "$dir/fx/auto" 2>/dev/null || echo false; exit 0 ;;
+  "api repos/sssoto17/sunny-pastures/labels/throwaway --silent") [[ -f $dir/fx/label ]]; exit ;;
+  "api -X POST repos/"*"/comments "* | "pr ready "*) exit 0 ;;
+  "pr view "*" --json "*) key=view-$3 ;;
+  "api repos/sssoto17/sunny-pastures/rules/branches/main --jq "*) key=rules ;;
+  "api graphql "*) key=threads-$pr ;;
   "pr list "*"--state all"*) key=prs ;;
   "pr list "*"--state open"*) key=prs ;;
   "run list --repo "*" --commit "*) key=commit-runs ;;
   "api repos/"*"/git/ref/"*)
     ref=${2#repos/*/git/ref/}; grep -qxF "$ref" "$dir/fx/refs" 2>/dev/null; exit ;;
-  "pr create "*) echo "https://github.com/sssoto17/sunny-pastures/pull/77"; exit 0 ;;
+  "pr create "*) n=$(($(grep -c '^pr create' "$dir/calls") + 70)); echo "https://github.com/sssoto17/sunny-pastures/pull/$n"; exit 0 ;;
   "pr close "* | "api -X DELETE "*) exit 0 ;;
   *) echo "fake: unexpected gh call: $*" >&2; exit 99 ;;
 esac
@@ -85,10 +93,15 @@ reset() {
   mkdir -p "$work/fx"
   printf 'X-Oauth-Scopes: gist, read:org, repo, workflow\r\n' >"$work/fx/scopes"
   echo '[]' >"$work/fx/reviews.json"
+  echo '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,
+    "required_approving_review_count":1,"dismiss_stale_reviews_on_push":true}}]' >"$work/fx/rules.json"
   git init -q --bare "$work/origin.git"
   git clone -q "$work/origin.git" "$work/seed" 2>/dev/null
   echo hello >"$work/seed/README.md"
-  git -C "$work/seed" add README.md
+  mkdir -p "$work/seed/packages/sim/src/content"
+  printf '# Sunny Pastures\n\nRules.\n' >"$work/seed/AGENTS.md"
+  printf 'export const content = {};\n' >"$work/seed/packages/sim/src/content/index.ts"
+  git -C "$work/seed" add README.md AGENTS.md packages
   git -C "$work/seed" commit -qm init
   git -C "$work/seed" push -q origin main
   git clone -q "$GH_URL" "$work/clone"
@@ -97,7 +110,7 @@ reset() {
 }
 install() { # repo: copy the script and its drafts into scripts/setup/ there, untracked
   mkdir -p "$1/scripts/setup"
-  cp "$src/ci-check.sh" "$1/scripts/setup/"
+  cp "$src/ci-check.sh" "$src/ci-check-68.sh" "$1/scripts/setup/"
   cp -r "$src/workflows" "$1/scripts/setup/"
 }
 run() { # args... -> runs the script in the clone; sets code, out, err, calls
@@ -464,6 +477,132 @@ assert "expected 102's branch deleted" contains "$calls" "git/refs/heads/throwaw
 assert "expected one deletion only" test "$(grep -c 'api -X DELETE' <<<"$calls")" -eq 1
 assert "expected #101's PR left open" lacks "$calls" "pr close"
 assert "expected no PR looked up" lacks "$calls" "pr list"
+
+# === #68: the reviewer App's tests (a)-(f) ======================================================
+for args in "push 68" "push 68 b" "push 101 a" "resolve 101" "start 68 a" "results 68 a"; do
+  reset
+  # shellcheck disable=SC2086 # split on purpose
+  run $args
+  expect_code 2
+  assert "expected usage for $args" contains "$err" "usage:"
+done
+
+# --- start 68 runs with allow_auto_merge off: (a) is approved first, (b) waits for push 68 a ---
+reset
+run start 68
+expect_code 0
+assert "expected the PRs opened with the setting off" test "$(grep -c '^pr create' <<<"$calls")" -eq 4
+assert "expected the next step named" contains "$out" "once (a) reads APPROVED"
+assert "expected the setting never changed" lacks "$calls" "PATCH"
+
+# Without thread resolution on main, a hold thread wouldn't hold: refused, nothing opened.
+reset
+echo '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,
+  "required_approving_review_count":1,"dismiss_stale_reviews_on_push":true}}]' >"$work/fx/rules.json"
+run start 68
+expect_code 2
+assert "expected main's rules named" contains "$err" "main's rules lack thread resolution"
+assert "expected nothing pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+assert "expected no PR opened" lacks "$calls" "pr create"
+
+# --- start 68: one branch and one draft PR per test, held, then marked ready -------------------
+reset
+head_before=$(git -C "$work/clone" rev-parse HEAD)
+run start 68
+expect_code 0
+want_a=docs/spikes/reviewer-app/throwaway-a.md want_c=docs/spikes/reviewer-app/throwaway-c.md
+want_e=packages/sim/src/content/index.ts want_f=AGENTS.md
+for l in a c e f; do
+  b=throwaway/68-$l
+  want=want_$l
+  assert "expected $b pushed" git -C "$work/origin.git" show-ref -q --verify "refs/heads/$b"
+  assert "expected only ${!want} changed on $b" \
+    test "$(git -C "$work/origin.git" diff --name-only main "$b")" == "${!want}"
+  assert "expected a PR from $b onto main, as a draft" contains "$calls" "--base main --head $b --draft"
+  assert "expected the title of ($l)" contains "$calls" "--title THROWAWAY #68 ($l):"
+done
+assert "expected never merge in the body" contains "$calls" "**Never merge**"
+assert "expected the PR linked to #68" contains "$calls" "Part of #68"
+assert "expected the body to say it's a throwaway test PR" contains "$calls" "a throwaway test PR for #68 step 4"
+assert "expected no label when throwaway doesn't exist" lacks "$calls" "--label"
+assert "expected a one-line change in AGENTS.md" \
+  test "$(git -C "$work/origin.git" diff --numstat main throwaway/68-f | cut -f1,2)" == $'1\t1'
+assert "expected one added comment line in the content" \
+  test "$(git -C "$work/origin.git" diff --numstat main throwaway/68-e | cut -f1,2)" == $'1\t0'
+assert "expected (c)'s defect: a bare supabase status" \
+  contains "$(git -C "$work/origin.git" show "throwaway/68-c:$want_c")" '`supabase status`'
+for l in a c e f; do
+  added=$(git -C "$work/origin.git" diff main "throwaway/68-$l" | grep '^+[^+]')
+  assert "expected no words aimed at the reviewer in ($l)" lacks "${added,,}" "review"
+  assert "expected no approval asked for in ($l)" lacks "${added,,}" "approv"
+done
+# Hold threads on (a) and (c), each before its PR is marked ready; none on (e) or (f).
+assert "expected two hold threads" test "$(grep -c '/comments ' <<<"$calls")" -eq 2
+assert "expected (a)'s hold thread on its file" contains "$calls" "pulls/71/comments --silent"
+assert "expected (a) held before it is ready" \
+  test "$(grep -n 'pulls/71/comments' <<<"$calls" | cut -d: -f1)" -lt "$(grep -n 'pr ready 71' <<<"$calls" | cut -d: -f1)"
+assert "expected (c) held before it is ready" \
+  test "$(grep -n 'pulls/72/comments' <<<"$calls" | cut -d: -f1)" -lt "$(grep -n 'pr ready 72' <<<"$calls" | cut -d: -f1)"
+assert "expected no hold on (e) or (f)" lacks "$calls" "pulls/73/comments"
+assert "expected all four marked ready" test "$(grep -c '^pr ready' <<<"$calls")" -eq 4
+assert "expected the PRs reported" contains "$out" "test (f): opened PR #74"
+assert "expected the clone's HEAD untouched" test "$(git -C "$work/clone" rev-parse HEAD)" == "$head_before"
+assert "expected no leftover worktree" test "$(git -C "$work/clone" worktree list | grep -c .)" -eq 1
+assert "expected no merge" lacks "$calls" "pr merge"
+
+# Again, with the branches there: refused before anything is pushed or opened.
+: >"$work/calls"
+run start 68
+expect_code 2
+assert "expected the cleanup hint" contains "$err" "cleanup 68 first"
+assert "expected no PR opened" lacks "$calls" "pr create"
+
+# An existing throwaway label is added; a wrong origin is refused.
+reset
+: >"$work/fx/label"
+run start 68
+assert "expected the existing label added" contains "$calls" "--draft --label throwaway --title"
+reset
+git -C "$work/clone" remote set-url origin "https://x-access-token:FAKE_SECRET_68@github.com/sssoto17/sunny-pastures.git"
+run start 68
+expect_code 2
+assert "expected the token URL refused" contains "$err" "fetch URL of origin"
+assert "token printed" lacks "$out$err" "FAKE_SECRET_68"
+assert "expected nothing pushed" test -z "$(git -C "$work/origin.git" for-each-ref refs/heads/throwaway)"
+
+# --- push 68 a (test d) and push 68 e: one more commit each ------------------------------------
+reset
+run start 68
+echo '[{"number":71,"headRefName":"throwaway/68-a","isCrossRepository":false}]' >"$work/fx/prs.json"
+echo '{"reviewDecision":"REVIEW_REQUIRED"}' >"$work/fx/view-71.json"
+export CI_CHECK_WAIT_SECONDS=0
+# (b) runs on the fresh approval after this push: refused while allow_auto_merge is off.
+echo false >"$work/fx/auto"
+run push 68 a
+expect_code 2
+assert "expected the setting named" contains "$err" "allow_auto_merge is off"
+assert "expected the command to turn it on" contains "$err" "-F allow_auto_merge=true"
+assert "expected nothing pushed" test "$(git -C "$work/origin.git" rev-list --count main..throwaway/68-a)" -eq 1
+# (d) needs an approval to dismiss: refused until the App's latest review of (a) is APPROVED.
+echo true >"$work/fx/auto"
+echo '[{"user":{"login":"sunny-reviewer[bot]"},"state":"COMMENTED"}]' >"$work/fx/reviews-71.json"
+run push 68 a
+expect_code 2
+assert "expected (a)'s approval asked for" contains "$err" "(a) isn't approved by sunny-reviewer yet"
+assert "expected nothing pushed" test "$(git -C "$work/origin.git" rev-list --count main..throwaway/68-a)" -eq 1
+echo '[{"user":{"login":"sunny-reviewer[bot]"},"state":"APPROVED"}]' >"$work/fx/reviews-71.json"
+run push 68 a
+expect_code 0
+assert "expected one more commit on (a)" test "$(git -C "$work/origin.git" rev-list --count main..throwaway/68-a)" -eq 2
+assert "expected the note appended" \
+  contains "$(git -C "$work/origin.git" show "throwaway/68-a:$want_a")" "pushed by ci-check.sh push 68 a"
+assert "expected the decision after the push" contains "$out" 'reviewDecision right after the push: `REVIEW_REQUIRED`'
+run push 68 e
+expect_code 0
+assert "expected (e) to gain a note file" \
+  test "$(git -C "$work/origin.git" diff --name-only main throwaway/68-e | sort | tr '\n' ' ')" == \
+  "docs/spikes/reviewer-app/throwaway-e.md packages/sim/src/content/index.ts "
+assert "expected no decision read for (e)" lacks "$out" "reviewDecision"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))
