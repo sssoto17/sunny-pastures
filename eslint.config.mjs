@@ -170,7 +170,8 @@ const RUN_SETTINGS = { selector: settingsKey(RUN_KEYS), message: RUN_MESSAGE };
 const PROPERTY_SYNTAX = [
 	{
 		// Without the settings, fast-check picks a random seed and its own run count (D10).
-		selector: `${FC_RUN}[arguments.length<2]`,
+		selector:
+			"CallExpression[callee.object.name='fc'][callee.property.name=/^(assert|check)$/][arguments.length<2]",
 		message:
 			"Pass the shared settings: fc.assert(property, inject('fastCheck')) (D10, ADR-0003 section 9).",
 	},
@@ -462,7 +463,12 @@ export default defineConfig(
 				},
 			],
 			// A later block's options replace an earlier block's, so the sim selectors are repeated here.
-			"no-restricted-syntax": ["error", ...SIM_SYNTAX, ...SIM_PROPERTY_SYNTAX],
+			"no-restricted-syntax": [
+				"error",
+				...SIM_SYNTAX,
+				// The settings guard and the scaled timeout, which only sim tests apply (#208, #213).
+				...SIM_PROPERTY_SYNTAX,
+			],
 		},
 	},
 	{
