@@ -12,7 +12,16 @@ set -euo pipefail
 
 r="repos/$GITHUB_REPOSITORY" v="$RUNNER_TEMP/verdict.json" t="$RUNNER_TEMP/threads.json"
 printf '%s' "$VERDICT" >"$v"
-jq -e '(.summary | type == "string") and (.findings | type == "array")' "$v" >/dev/null
+# The whole shape, or nothing is posted: a missing or null field must never read as "none".
+valid='def strings(nonempty): type == "array" and all(.[]; type == "string" and (if nonempty then length > 0 else true end));
+  type == "object" and (.summary | type == "string") and (.escalation_path | type == "string")
+  and (.escalation_rows | strings(true)) and (.resolve_threads | strings(false))
+  and (.findings | type == "array" and all(.[]; type == "object" and (.path | type == "string")
+    and (.line | type == "number") and (.body | type == "string")))'
+if ! jq -e "$valid" "$v" >/dev/null 2>&1; then
+  echo "::error::the verdict doesn't match .github/review-verdict.schema.json: nothing posted"
+  exit 1
+fi
 # A verdict that quotes a credential is never posted.
 if grep -qE 'sk-ant-|gh[opsu]_[A-Za-z0-9]{20}|github_pat_|-----BEGIN' "$v"; then
   echo "::error::the verdict looks like it holds a credential: nothing posted"

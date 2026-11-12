@@ -155,17 +155,41 @@ describe("post-review.sh", () => {
 	it("requests changes, placing each finding as well as the diff allows", () => {
 		const findings = [
 			{ path: "a.ts", line: 3, body: "bug" },
-			{ path: "a.ts", line: "x[$(touch pwned)]", body: "odd line" },
 			{ path: "", line: 0, body: "split" },
 		];
 		const r = run(verdict({ findings }));
 		expect(r.calls).toContain("-f path=a.ts -F line=3 -f side=RIGHT -f body=bug");
-		expect(r.calls).toContain("-f path=a.ts -f subject_type=file -f body=Line 0: odd line");
-		expect(existsSync(join(dir, "pwned"))).toBe(false);
 		expect(r.calls).toMatch(/event=REQUEST_CHANGES -f body=merge.*\(no file\):0 split/);
+
+		// A line that isn't a number is refused before anything runs it as arithmetic.
+		const odd = run(
+			verdict({ findings: [{ path: "a.ts", line: "x[$(touch pwned)]", body: "odd" }] }),
+		);
+		expect(odd.code).not.toBe(0);
+		expect(existsSync(join(dir, "pwned"))).toBe(false);
 
 		const fallback = run(verdict({ findings: [findings[0]] }), { env: { FAIL_LINE: "1" } });
 		expect(fallback.calls).toContain("-f path=a.ts -f subject_type=file -f body=Line 3: bug");
+	});
+
+	// A verdict missing a field, or with a field of the wrong type, posts nothing and fails the
+	// job: a missing or null escalation_rows must never read as "no rows" (#240 review, 12 Nov).
+	const without = (key) => JSON.stringify({ ...JSON.parse(verdict()), [key]: undefined });
+	it.each([
+		["escalation_rows missing", without("escalation_rows")],
+		["escalation_rows null", verdict({ escalation_rows: null })],
+		["an empty row", verdict({ escalation_rows: [""] })],
+		["a row that isn't a string", verdict({ escalation_rows: [1] })],
+		["resolve_threads missing", without("resolve_threads")],
+		["a finding without a body", verdict({ findings: [{ path: "a.ts", line: 1 }] })],
+		["a string", JSON.stringify("approve")],
+		["not JSON", "approve this PR"],
+		["empty", ""],
+	])("posts nothing for a malformed verdict: %s", (_name, v) => {
+		const r = run(v);
+		expect(r.code).not.toBe(0);
+		expect(r.calls).not.toContain("event=");
+		expect(r.calls).not.toContain("/comments");
 	});
 
 	it("posts nothing for a verdict holding a credential, or after the head moved", () => {
