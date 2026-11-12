@@ -192,11 +192,44 @@ reader couldn't see them. Part 1 of #99 (#131) closes those gaps:
 **Alternatives considered.**
 - *A maintained Markdown parser (remark or markdown-it).* It would read the file exactly as it
   renders. It's not adopted: the floor job runs with Node only and no install, so it would need a
-  dependency and a floor-job change. It moved to #132 (admin, 9 Nov).
+  dependency and a floor-job change. It moved to #132 (admin, 9 Nov). Adopted on 12 Nov: see the
+  note below.
 - *Refusing any wildcard in a Path.* Too strict: a folder waiver for one package is a legitimate
   case.
 - *Checking only added rows for a bad date.* That was the old behaviour, and an old row with a bad
   date never expired.
+
+**Note, 12 Nov 2026 (#132): a real Markdown parser replaces the line reader.** The guard reads
+`CONSTRAINTS.md` with `micromark` 4.0.3 and `micromark-extension-gfm` 3.0.0, root devDependencies
+pinned exactly (admin decision, 12 Nov). Its rules didn't change; only how it reads the file did.
+- *What the hand-written reading did.* `parseRules` walked the file line by line with regexes:
+  fences, ATX and setext headings, HTML comments, HTML blocks of types 1, 6 and 7, GFM tables
+  that needed a delimiter row, list items with their indented lines, and paragraphs. It was frozen
+  on 9 Nov with three known misses: an HTML block opened inside a fence, a delimiter row with the
+  wrong cell count, and a lone tag ending a list item.
+- *What replaces it.* micromark's events become a small tree of block nodes. Headings, paragraphs,
+  list items, block quotes and table rows come from that tree, in the shape the rest of the guard
+  already used. On every version of `CONSTRAINTS.md` in `main`'s history (25 on 12 Nov), the new
+  reader gives the same rules and headings as the old one. The three misses are tests now.
+- *Two cases read as GitHub renders them.* A table after an HTML block in the Exceptions section
+  waives nothing, since it can render inside `<details>`. A level-2 Exceptions heading inside a
+  block quote or a list item counts as a second heading, and never as the first.
+- *Unchanged.* The wide expiry reader still reads raw lines, so a parser bug can't hide an expired
+  row (*Two readers*, above). An ID reused after an earlier PR removed its row still needs the
+  history, which a parser doesn't give. It stays a known miss.
+- *The floor job.* It installs the base branch's dependencies in a worktree of the base, outside
+  the checkout, with `--frozen-lockfile --ignore-scripts`. A PR can't swap the parser that judges
+  it, and the guard's diff doesn't see the install.
+- *Pattern.* *Adapter*: `blockTree` and `parseRules` turn the parser's events into the rule list,
+  so the comparison and Exceptions code didn't change.
+- *Alternatives.* `mdast-util-from-markdown` with `mdast-util-gfm` gives a full syntax tree, but
+  it's micromark plus 23 more packages (1.97 MB against 1.26 MB). `markdown-it` 15 rendered every
+  table and HTML-block case tested the same way, in 7 packages, but takes 2.81 MB. The admin's
+  rule was the smallest install footprint, read as bytes on disk. A local parser was rejected
+  again: it was the frozen line reader's problem.
+- *Formatting (#231).* A Prettier pass over Markdown would realign `CONSTRAINTS.md`'s tables. The
+  line reader matched exact spellings of fences and pipes. The parser reads the same table however
+  it's padded, which makes that spike safer.
 
 ## The guard and the gate as a whole (#99, decided 9 Nov)
 
@@ -336,4 +369,5 @@ coverage must not fall more than 0.5 points below the recorded ratchet. The numb
 What the guard still can't judge in `CONSTRAINTS.md` is listed there, under "Guarding the bar". It
 covers a rewording that changes meaning without the listed words, and a carve-out in other words.
 #122 replaced #99's original note that "a rewording that changes meaning without changing tokens
-passes". The Markdown parsing is frozen, and its edge cases are #132's.
+passes". Since #132 the guard reads the file with a Markdown parser (see Exceptions rows, the note
+of 12 Nov).

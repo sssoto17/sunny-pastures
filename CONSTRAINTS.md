@@ -372,11 +372,14 @@ What a row must hold, checked by the floor guard (#99):
 - Expiry, dates and repeated IDs are checked on every line shaped like a row, wherever it sits, with
   or without its outer pipes and inside a blockquote, so no formatting hides an expired row.
 
-The guard reads this file with its own line parser, which follows CommonMark for the cases above.
-From 9 Nov that parser is frozen. Any further Markdown edge case is listed as a known miss and goes
-to the follow-up for a real Markdown parser, #132, not into the line parser (admin, 9 Nov). A
-known miss already: an ID reused after its row was removed in an earlier PR isn't caught, because
-the guard sees only the PR's own diff.
+The guard reads this file with a Markdown parser, micromark with GFM, which follows CommonMark and
+GFM for the cases above. Its own line parser, frozen from 9 Nov, was replaced by the follow-up for
+a real Markdown parser, #132 (admin, 9 Nov). A known miss remains: an ID reused after its row was
+removed in an earlier PR isn't caught, because the guard sees only the PR's own diff.
+
+Since #132, a table after an HTML block in this section waives nothing, as it can render inside
+`<details>`, and a level-2 Exceptions heading inside a block quote or a list item counts as a
+second one.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|

@@ -25,6 +25,8 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
+import { parse, postprocess, preprocess } from "micromark";
+import { gfm } from "micromark-extension-gfm";
 
 import { baseArg, CannotRun, enterRepo, git, oldContent, readChange } from "./diff.mjs";
 
@@ -513,168 +515,136 @@ const configLoosening = (f, mergeBase) => {
 // item (with its continuation lines) and paragraph is a rule. Rows and list items pair by section
 // and key (first cell, or the text before the first colon); paragraphs pair with the most similar
 // paragraph in the same section. Numbers carry a direction read from the words around them.
-// CommonMark 0.31, HTML blocks: type 6 opens with one of these block tags; type 7 is any other
-// complete open or closing tag alone on its line. Both end at a blank line.
-const BLOCK_TAGS =
-	"address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul";
-const HTML_BLOCK_6 = new RegExp(`^ {0,3}</?(?:${BLOCK_TAGS})(?=[\\s/>]|$)`, "i");
-const HTML_BLOCK_7 =
-	/^ {0,3}(?:<[A-Za-z][\w-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>|<\/[A-Za-z][\w-]*\s*>)\s*$/;
+// The file is read with micromark and its GFM extension (#132), so the guard sees the blocks GitHub
+// renders: fences, HTML blocks, block quotes, list items, headings and GFM tables are the parser's,
+// not a line reader's. The guard turns the parser's events into a small tree of block nodes.
+const blockTree = (text) => {
+	const root = { type: "root", children: [] };
+	const stack = [root];
+	const events = postprocess(
+		parse({ extensions: [gfm()] })
+			.document()
+			.write(preprocess()(text, undefined, true)),
+	);
+	for (const [kind, token] of events) {
+		if (kind === "exit") {
+			stack.pop();
+			continue;
+		}
+		const node = { type: token.type, start: token.start, end: token.end, children: [] };
+		stack.at(-1).children.push(node);
+		stack.push(node);
+	}
+	return root;
+};
+const HEADINGS = new Set(["atxHeading", "setextHeading"]);
+const LISTS = new Set(["listOrdered", "listUnordered"]);
+// The tokens between a container's blocks: line ends and the indent or marker before a line.
+const BETWEEN = new Set(["lineEnding", "lineEndingBlank", "linePrefix", "listItemIndent"]);
 export const parseRules = (lines) => {
+	const source = lines.map((l = "") => l).join("\n");
+	// Where each line ends in the source, so a list item's text runs to the end of its last line.
+	let offset = -1;
+	const lineEnds = lines.map((l = "") => (offset += l.length + 1));
 	const rules = [];
-	// Every heading in order, so a caller can tell the first `## Exceptions` from a later one.
+	// Every heading in order, so a caller can tell the first `## Exceptions` from a later one. A
+	// heading inside a list item or a block quote is `nested`: it starts no section.
 	const headings = [];
+	// Every HTML block but a comment, by section: a table after one may sit inside `<details>`.
+	const html = [];
 	let section = "";
 	let sectionNo = 0;
-	let headers = null;
-	let cur = null;
-	let fence = false;
-	let comment = false;
-	let rawBlock = null;
-	let htmlBlock = false;
-	let table = null; // the header line of the table being read: { line, text }
-	let pending = null; // a possible header row, until the next line shows a delimiter row
-	const flush = () => {
-		if (cur) rules.push(cur);
-		cur = null;
+	const text = (n) => source.slice(n.start.offset, n.end.offset);
+	const child = (n, type) => n?.children.find((c) => c.type === type);
+	const span = (n) => lines.slice(n.start.line - 1, n.end.line).join("\n");
+	const at = (n, kind) => ({
+		kind,
+		section,
+		sectionNo,
+		key: null,
+		line: n.start.line,
+		end: n.end.line,
+		text: span(n),
+	});
+	const heading = (n, nested) => {
+		const atx = n.type === "atxHeading";
+		const words = child(n, atx ? "atxHeadingText" : "setextHeadingText");
+		const title = words
+			? text(words)
+					.split("\n")
+					.map((s) => s.trim())
+					.join(" ")
+			: "";
+		const marks = text(child(n, atx ? "atxHeadingSequence" : "setextHeadingLine"));
+		const level = atx ? marks.length : marks.trim()[0] === "=" ? 1 : 2;
+		const no = headings.push({ no: headings.length + 1, level, title, line: n.start.line, nested });
+		if (!nested) [section, sectionNo] = [title, no];
 	};
-	lines.forEach((line = "", i) => {
-		const n = i + 1;
-		// HTML comments hold no rules (and no exceptions), and neither do the raw HTML blocks that
-		// CommonMark keeps open across blank lines until their closing tag (`<pre>`, `<script>`,
-		// `<style>`, `<textarea>`): a table inside one renders as text.
-		if (comment || /^\s*<!--/.test(line)) {
-			flush();
-			comment = !line.includes("-->");
-			return;
-		}
-		if (rawBlock) {
-			if (new RegExp(`</${rawBlock}>`, "i").test(line)) rawBlock = null;
-			return;
-		}
-		const raw = /^ {0,3}<(pre|script|style|textarea)(?=[\s>]|$)/i.exec(line)?.[1];
-		if (raw) {
-			flush();
-			if (!new RegExp(`</${raw}>`, "i").test(line)) rawBlock = raw;
-			return;
-		}
-		// CommonMark HTML blocks of types 6 and 7 run until a blank line: one that opens with a block
-		// tag (`<details>`, `<div hidden>`), or a complete tag alone on its line, which can't interrupt
-		// a paragraph. A table inside one renders as raw text (review of #131).
-		if (htmlBlock) {
-			if (!line.trim()) htmlBlock = false;
-			return;
-		}
-		if (HTML_BLOCK_6.test(line) || (cur?.kind !== "para" && HTML_BLOCK_7.test(line))) {
-			flush();
-			headers = null;
-			htmlBlock = true;
-			return;
-		}
-		// Fences and headings follow CommonMark, so the guard reads the file the way it renders (#99:
-		// `~~~` fences and look-alike lines hid Exceptions rows). A fence opens with three or more
-		// backticks or tildes, indented at most 3 spaces; a backtick opener's info string has no
-		// backtick. It closes only on a line of the same character, at least as long, with nothing
-		// after it but spaces.
-		const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-		if (fence) {
-			const closer = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
-			if (closer && closer[0] === fence[0] && closer.length >= fence.length) fence = false;
-			return;
-		}
-		if (opener && !(opener[1][0] === "`" && opener[2].includes("`"))) {
-			flush();
-			fence = opener[1];
-			return;
-		}
-		const heading = (level, title) => {
-			flush();
-			headers = null;
-			section = title;
-			sectionNo = headings.push({ no: headings.length + 1, level, title: section, line: n });
-		};
-		// An ATX heading: up to 3 spaces, 1–6 `#`, then a space or the line's end; a closing run of
-		// `#` isn't part of the title.
-		const atx = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(line);
-		if (atx) {
-			heading(atx[1].length, (atx[2] ?? "").replace(/^#+$/, "").trim());
-			return;
-		}
-		// A setext heading: one line of paragraph text underlined with `=` (level 1) or `-` (level 2).
-		const setext = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
-		if (setext && cur?.kind === "para" && !cur.text.includes("\n")) {
-			const title = cur.text.trim();
-			cur = null;
-			heading(setext[1][0] === "=" ? 1 : 2, title);
-			return;
-		}
-		if (!line.trim()) {
-			flush();
-			headers = null;
-			return;
-		}
-		if (line.trim().startsWith("|")) {
-			flush();
-			const cells = line
-				.trim()
-				.replace(/^\|/, "")
-				.replace(/\|$/, "")
-				.split("|")
-				.map((c) => c.trim());
-			const delimiter = cells.every((c) => /^:?-+:?$/.test(c));
-			// A table starts only where a header row is followed at once by a delimiter row (GFM);
-			// without one, the lines are a paragraph and hold no rows (review of #131).
-			if (!headers) {
-				if (delimiter && pending) {
-					headers = pending.cells;
-					table = pending.table;
-					pending = null;
-				} else {
-					pending = delimiter ? null : { cells, table: { line: n, text: line } };
-				}
-				return;
-			}
-			if (!delimiter)
-				rules.push({
-					kind: "row",
-					section,
-					sectionNo,
-					key: cells[0],
-					line: n,
-					end: n,
-					text: line,
-					cells,
-					headers,
-					table,
-				});
-			return;
-		}
-		pending = null;
-		const item = /^(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
-		if (item) {
-			flush();
+	// A GFM table: its header cells, then one row rule per body row. `topLevel` is false for a table
+	// in a list item. A row's text is its whole source line, as the Exceptions reader expects.
+	const table = (n, topLevel) => {
+		const cells = (row) =>
+			row.children
+				.filter((c) => c.type === "tableHeader" || c.type === "tableData")
+				.map((c) => (child(c, "tableContent") ? text(child(c, "tableContent")).trim() : ""));
+		const headers = cells(child(child(n, "tableHead"), "tableRow"));
+		const header = { line: n.start.line, text: lines[n.start.line - 1], topLevel };
+		const body = child(n, "tableBody")?.children.filter((c) => c.type === "tableRow") ?? [];
+		return body.map((row) => {
+			const c = cells(row);
+			const r = at(row, "row");
+			return { ...r, key: c[0], text: lines[row.start.line - 1], cells: c, headers, table: header };
+		});
+	};
+	// A block inside a list item or a block quote, and the blocks inside it: a heading there is
+	// nested, and a table's rows go to `found`.
+	const nestedBlock = (n, found) => {
+		if (HEADINGS.has(n.type)) heading(n, true);
+		else if (n.type === "table") found.push(...table(n, false));
+		else for (const c of n.children) nestedBlock(c, found);
+	};
+	// A list: one item rule per item, from its marker to its last line that isn't blank. Rows of a
+	// table inside an item follow the item.
+	const list = (n) => {
+		let item = null;
+		let nested = [];
+		const close = () => {
+			if (!item) return;
+			const { from, ...rule } = item;
+			rule.text = source.slice(from, lineEnds[rule.end - 1]);
 			// A label before a colon ("**Split size:** …") keys the item; without one it pairs by
 			// similarity, like a paragraph, so a comma edit isn't a removed rule.
-			const label = /^([^:\n]{1,60}):/.exec(item[1].replace(/\*\*/g, ""));
-			cur = {
-				kind: "item",
-				section,
-				sectionNo,
-				key: label ? label[1].trim() : null,
-				line: n,
-				end: n,
-				text: item[1],
-			};
-		} else if (cur && (cur.kind === "para" || /^\s+\S/.test(line))) {
-			cur.text += `\n${line}`;
-			cur.end = n;
-		} else {
-			flush();
-			cur = { kind: "para", section, sectionNo, key: null, line: n, end: n, text: line };
+			const label = /^([^:\n]{1,60}):/.exec(rule.text.replace(/\*\*/g, ""));
+			rules.push({ ...rule, key: label ? label[1].trim() : null });
+			rules.push(...nested);
+			[item, nested] = [null, []];
+		};
+		for (const c of n.children) {
+			if (c.type === "listItemPrefix") {
+				close();
+				item = { ...at(c, "item"), from: c.end.offset };
+			} else if (item && !BETWEEN.has(c.type)) {
+				item.end = Math.max(item.end, c.end.line);
+				nestedBlock(c, nested);
+			}
 		}
-	});
-	flush();
+		close();
+	};
+	for (const n of blockTree(source).children) {
+		if (HEADINGS.has(n.type)) heading(n, false);
+		else if (n.type === "content")
+			rules.push(...n.children.filter((c) => !BETWEEN.has(c.type)).map((c) => at(c, "para")));
+		else if (n.type === "table") rules.push(...table(n, true));
+		else if (LISTS.has(n.type)) list(n);
+		// A block quote or a footnote reads as one paragraph, as the line reader read a quote.
+		else if (n.type === "blockQuote" || n.type === "gfmFootnoteDefinition") {
+			rules.push(at(n, "para"));
+			nestedBlock(n, []);
+		} else if (n.type === "htmlFlow" && !/^\s*<!--/.test(text(n)))
+			html.push({ line: n.start.line, sectionNo });
+	}
 	rules.headings = headings;
+	rules.html = html;
 	return rules;
 };
 // Tokens that contain digits but aren't thresholds: issue refs, dates, versions, IDs such as
@@ -1558,18 +1528,26 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 	// one fails (#99), since an earlier empty one once hid the real table. Titles match without case.
 	const exceptionRows = (lines) => {
 		const rules = parseRules(lines);
+		// A heading in a list item or a block quote counts as a second one, but never as the first.
 		const level2 = rules.headings.filter(
 			(h) => h.level === 2 && h.title.toLowerCase() === "exceptions",
 		);
-		const no = level2.length === 1 ? level2[0].no : null;
+		const no = level2.length === 1 && !level2[0].nested ? level2[0].no : null;
 		// Waivers come from one table only: the section's single table with exactly the Exceptions
-		// header, written at the left margin, rows included. A table indented into a list item, a second
-		// table with that header or a table with another header waives nothing (security review, #131).
+		// header, written at the left margin, rows included. A table in a list item, a second table
+		// with that header or a table with another header waives nothing (security review, #131). Nor
+		// does a table after an HTML block in the section: it may render inside `<details>` (#132).
 		const inSection = rules.filter((r) => r.kind === "row" && r.sectionNo === no);
 		const tables = [
 			...new Set(
 				inSection
-					.filter((r) => r.headers.join("|") === EXCEPTIONS_HEADER && /^\|/.test(r.table.text))
+					.filter(
+						(r) =>
+							r.headers.join("|") === EXCEPTIONS_HEADER &&
+							r.table.topLevel &&
+							/^\|/.test(r.table.text) &&
+							!rules.html.some((h) => h.sectionNo === no && h.line < r.table.line),
+					)
 					.map((r) => r.table),
 			),
 		];

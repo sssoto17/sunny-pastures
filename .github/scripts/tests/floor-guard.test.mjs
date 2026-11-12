@@ -2299,8 +2299,7 @@ describe("floor guard, end to end", () => {
 	});
 
 	// #132: the known misses of the line reader (#131's body, #132's 9 Nov comment), each read the
-	// way GitHub renders it. Expected to fail until the guard reads the file with a Markdown parser
-	// (#132, part 3), which drops `.fails`.
+	// way GitHub renders it.
 	describe("Markdown read as GitHub renders it (#132)", () => {
 		const OK_ROW = row("E1", "packages/sim/src/a.ts", "2026-11-30", "silenced-checker");
 		const run = (edit) => {
@@ -2312,7 +2311,7 @@ describe("floor guard, end to end", () => {
 			return guard().out;
 		};
 
-		it.fails.each([
+		it.each([
 			[
 				"a code fence holding a <div> line",
 				(t) => t.replace("## Exceptions\n", "```html\n<div>\n```\n## Exceptions\n"),
@@ -2325,7 +2324,7 @@ describe("floor guard, end to end", () => {
 			expect(run(edit)).toContain("waived by E1");
 		});
 
-		it.fails.each([
+		it.each([
 			[
 				"a delimiter row one cell short",
 				(t) => t.replace("|---|---|---|---|---|---|\n", "|---|---|---|---|---|\n"),
@@ -2341,8 +2340,11 @@ describe("floor guard, end to end", () => {
 			expect(out).not.toContain("waived by");
 		});
 
-		it.fails("counts a heading in a block quote as a second Exceptions heading", () => {
-			const out = run((t) => `${t}\n> ## Exceptions\n`);
+		it.each([
+			["a block quote", "> ## Exceptions"],
+			["a list item", "- ## Exceptions"],
+		])("counts a heading in %s as a second Exceptions heading", (_, line) => {
+			const out = run((t) => `${t}\n${line}\n`);
 			expect(out).toContain("[exceptions-heading-repeated] CONSTRAINTS.md");
 			expect(out).not.toContain("waived by");
 		});
