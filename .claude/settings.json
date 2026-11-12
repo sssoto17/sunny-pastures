@@ -148,6 +148,14 @@
 						"command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-secret-paste.sh"
 					}
 				]
+			},
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "echo UserPromptSubmit >> \"$RUNNER_TEMP/hook-marker\""
+					}
+				]
 			}
 		],
 		"PreToolUse": [
@@ -180,6 +188,16 @@
 						"type": "command",
 						"command": "root=$(git rev-parse --show-toplevel 2>/dev/null) && cd \"$root\" && [ -d node_modules ] || exit 0; command -v pnpm >/dev/null || { echo \"check:fast skipped: pnpm not on PATH\" >&2; exit 1; }; pnpm --silent check:fast >&2 || exit 2",
 						"timeout": 30
+					}
+				]
+			}
+		],
+		"SessionStart": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "echo SessionStart >> \"$RUNNER_TEMP/hook-marker\""
 					}
 				]
 			}
