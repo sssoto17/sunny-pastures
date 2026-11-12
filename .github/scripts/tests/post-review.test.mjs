@@ -22,7 +22,8 @@ const FAKE_GH = `#!/usr/bin/env bash
 d=$(dirname "$0")
 a="$*"; printf '%s\\n' "\${a//$'\\n'/\\\\n}" >>"$d/calls"
 case "$*" in
-  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\n' "\${FAKE_HEAD:-abc}" "\${FAKE_AUTHOR:-sssoto17}" ;;
+  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-abc}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" ;;
+  *"enablePullRequestAutoMerge"*) [ -z "$FAIL_AUTO" ] ;;
   "api repos/o/r/issues/7/labels --jq"*) head -n1 "$d/labels"; tail -n +2 "$d/labels" >"$d/l2"; [ -s "$d/l2" ] && mv "$d/l2" "$d/labels"; true ;;
   "api graphql -F owner"*) cat "$d/threads.json" ;;
   "api --paginate repos/o/r/pulls/7/reviews"*) cat "$d/reviews.json" ;;
@@ -255,6 +256,34 @@ describe("post-review.sh", () => {
 		expect(r.code).not.toBe(0);
 		expect(r.calls).not.toContain("event=");
 		expect(r.calls).not.toContain("/comments");
+	});
+
+	// ADR-0002 area 2, flow step 3: approve, then turn on auto-merge for the reviewed head. Never
+	// a merge: with the repo's allow_auto_merge off, GitHub refuses and nothing merges (Q16).
+	it("turns on auto-merge after an approval, for the reviewed head only", () => {
+		const r = run(verdict());
+		expect(r.code).toBe(0);
+		expect(r.calls).toMatch(/event=APPROVE[\s\S]*enablePullRequestAutoMerge/);
+		expect(r.calls).toContain("-f id=PR_node -f head=abc");
+		expect(r.calls).toContain("mergeMethod: SQUASH");
+		expect(r.calls).not.toContain("pr merge");
+		expect(r.out).toContain("auto_merge=on");
+
+		const off = run(verdict(), { env: { FAIL_AUTO: "1" } });
+		expect(off.code).toBe(0);
+		expect(off.calls).toContain("-f event=APPROVE");
+		expect(off.out).toContain("auto_merge=refused");
+	});
+
+	it("never turns on auto-merge without an approval, and turns off one that is on", () => {
+		const held = run(verdict(), { labels: ["true"], env: { FAKE_AUTO: "true" } });
+		expect(held.calls).toContain("-f event=COMMENT");
+		expect(held.calls).not.toContain("enablePullRequestAutoMerge");
+		expect(held.calls).toMatch(/disablePullRequestAutoMerge[\s\S]*event=COMMENT/);
+
+		const findings = [{ path: "a.ts", line: 3, body: "bug" }];
+		const changes = run(verdict({ findings }));
+		expect(changes.calls).not.toContain("AutoMerge");
 	});
 
 	it("posts nothing for a verdict holding a credential, or after the head moved", () => {
