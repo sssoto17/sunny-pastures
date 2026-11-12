@@ -8,6 +8,8 @@
 // (#89); its rule groups are private siblings.
 import { checkUniqueIds, checkUnlocks } from "./levelTable.js";
 import { checkNumbers, checkTimers } from "./numbers.js";
+import { checkTiers, checkTierTimes } from "./tiers.js";
+import { checkUnlockOrder } from "./unlockOrder.js";
 
 /** What the rules read: every number is a safe integer, and grow times are whole seconds (MUST-10.4). */
 export interface Content {
@@ -185,7 +187,19 @@ export interface Crop {
  * source and to the test that breaks it alone.
  */
 export type ContentRule =
-	"safeInteger" | "timer" | "uniqueIds" | "unlockExists" | "listedOnce" | "listedSomewhere";
+	| "safeInteger"
+	| "timer"
+	| "uniqueIds"
+	| "unlockExists"
+	| "listedOnce"
+	| "listedSomewhere"
+	| "tierOrder"
+	| "addOnOrder"
+	| "tierTime"
+	| "tierSpeed"
+	| "tierSlots"
+	| "tierCount"
+	| "tierPrice";
 
 /** One broken rule: `path` names the value (`crops.wheat.growSeconds`), `message` says why. */
 export interface ContentFailure {
@@ -210,6 +224,9 @@ const contentChecks: readonly ((content: Content) => readonly ContentFailure[])[
 	checkTimers,
 	checkUniqueIds,
 	checkUnlocks,
+	checkUnlockOrder,
+	checkTierTimes,
+	checkTiers,
 ];
 
 /** The M4 slice's content, wheat only for now (#72, D1). */
