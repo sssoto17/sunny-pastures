@@ -49,6 +49,10 @@
 			"Bash(pnpm test)",
 			"Bash(pnpm lint)",
 			"Bash(pnpm typecheck)",
+			"Bash(pnpm check:fast)",
+			"Bash(pnpm check:task)",
+			"Bash(scripts/today-gather.sh)",
+			"Bash(scripts/today-gather.sh *)",
 			"Bash(bash .claude/hooks/block-branch-switch.test.sh)"
 		],
 		"ask": [
