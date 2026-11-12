@@ -2320,7 +2320,12 @@ describe("floor guard, end to end", () => {
 				"a list item and a lone tag",
 				(t) => t.replace("## Exceptions\n", "- item\n<span>\n## Exceptions\n"),
 			],
-		])("waives with the Exceptions heading right after %s", (_, edit) => {
+			[
+				"a closed <details> block",
+				(t) =>
+					t.replace("| ID |", "<details><summary>Notes</summary>Old rows.</details>\n\n| ID |"),
+			],
+		])("waives with the Exceptions table right after %s", (_, edit) => {
 			expect(run(edit)).toContain("waived by E1");
 		});
 

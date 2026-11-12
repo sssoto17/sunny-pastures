@@ -211,9 +211,11 @@ pinned exactly (admin decision, 12 Nov). Its rules didn't change; only how it re
   list items, block quotes and table rows come from that tree, in the shape the rest of the guard
   already used. On every version of `CONSTRAINTS.md` in `main`'s history (25 on 12 Nov), the new
   reader gives the same rules and headings as the old one. The three misses are tests now.
-- *Two cases read as GitHub renders them.* A table after an HTML block in the Exceptions section
-  waives nothing, since it can render inside `<details>`. A level-2 Exceptions heading inside a
-  block quote or a list item counts as a second heading, and never as the first.
+- *Two cases read as GitHub renders them.* A table inside an element an earlier HTML block in the
+  Exceptions section left open (`<details>`, a blank line, the table) waives nothing: it renders
+  inside the element. The guard counts opening and closing tags, void elements aside. A level-2
+  Exceptions heading inside a block quote or a list item counts as a second heading, and never as
+  the first.
 - *Unchanged.* The wide expiry reader still reads raw lines, so a parser bug can't hide an expired
   row (*Two readers*, above). An ID reused after an earlier PR removed its row still needs the
   history, which a parser doesn't give. It stays a known miss.

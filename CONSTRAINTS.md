@@ -377,9 +377,9 @@ GFM for the cases above. Its own line parser, frozen from 9 Nov, was replaced by
 a real Markdown parser, #132 (admin, 9 Nov). A known miss remains: an ID reused after its row was
 removed in an earlier PR isn't caught, because the guard sees only the PR's own diff.
 
-Since #132, a table after an HTML block in this section waives nothing, as it can render inside
-`<details>`, and a level-2 Exceptions heading inside a block quote or a list item counts as a
-second one.
+Since #132, a table inside an element an HTML block left open, such as `<details>` followed by a
+blank line, waives nothing, and a level-2 Exceptions heading inside a block quote or a list item
+counts as a second one.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
