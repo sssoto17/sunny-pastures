@@ -8,6 +8,7 @@
 // (#89); its rule groups are private siblings.
 import { checkUniqueIds, checkUnlocks } from "./levelTable.js";
 import { checkNumbers, checkTimers } from "./numbers.js";
+import { checkOrderGoods, checkOrderSlots, checkOrderXp, checkRefillDelays } from "./orders.js";
 import { checkTiers, checkTierTimes } from "./tiers.js";
 import { checkUnlockOrder } from "./unlockOrder.js";
 
@@ -199,7 +200,13 @@ export type ContentRule =
 	| "tierSpeed"
 	| "tierSlots"
 	| "tierCount"
-	| "tierPrice";
+	| "tierPrice"
+	| "orderSlots"
+	| "refillDelays"
+	| "orderGoodProduced"
+	| "firstOrderCrop"
+	| "orderAmounts"
+	| "orderXp";
 
 /** One broken rule: `path` names the value (`crops.wheat.growSeconds`), `message` says why. */
 export interface ContentFailure {
@@ -227,6 +234,10 @@ const contentChecks: readonly ((content: Content) => readonly ContentFailure[])[
 	checkUnlockOrder,
 	checkTierTimes,
 	checkTiers,
+	checkOrderSlots,
+	checkRefillDelays,
+	checkOrderGoods,
+	checkOrderXp,
 ];
 
 /** The M4 slice's content, wheat only for now (#72, D1). */
