@@ -3,7 +3,7 @@
 // that reaches every Level, so generated farms run jobs (#84), keep chickens (#86) and trade on the
 // order board (#87), with fast-check's fixed seed from the root config.
 import fc from "fast-check";
-import { describe, expect, inject, it } from "vitest";
+import { describe, expect, inject, it, vi } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Action, Content, FarmState, Order, Sim } from "../../index.js";
@@ -14,6 +14,8 @@ import { listDrawFaults } from "./orderTerms.js";
 import { ownedFacility } from "./ownedFacility.js";
 
 const params = inject("fastCheck");
+// #200: the timeout scales with the run count; Vitest resets it after this file.
+vi.setConfig({ testTimeout: inject("propertyTimeout") });
 const { wheat } = sliceContent.crops;
 
 // The slice's approved Level table and plot prices (admin, 11 Nov, #83), written out rather than

@@ -1,14 +1,18 @@
 # THROWAWAY: #103's checks of Claude in Actions. Never merge into main. scripts/setup/ci-check.sh
-# copies this file to .github/workflows/ on the branch throwaway/103-claude and pushes it; the push
-# runs it. Issue events and workflow_dispatch only run workflows from the default branch, so the
-# trigger is a push to that branch, and no throwaway issue is needed. Each job prints `RESULT ...`
-# lines with non-secret fields only; `ci-check.sh results 103` collects them with the minutes.
-# Low caps: at most 3 turns a run, 10 minutes a job. Actions pinned to full SHAs (ADR-0002, area 8).
+# start 103 pushes throwaway/103-base (main plus two marker hooks in .claude/settings.json) and
+# throwaway/103-claude (the base plus this file), then opens a PR from the second onto the first
+# with the admin's own gh; opening it runs this workflow. The action supports no `push` event, and
+# on a PR it restores .claude/ from the PR's base branch before Claude starts, so the markers live
+# on the base (#103). The PR is opened by a person: the action refuses bot actors in agent mode.
+# Each job prints `RESULT ...` lines with non-secret fields only; `ci-check.sh results 103` collects
+# them with the minutes. Low caps: at most 3 turns a run, 10 minutes a job. Actions pinned to full
+# SHAs (ADR-0002, area 8).
 name: check-103-claude
 
 on:
-  push:
-    branches: [throwaway/103-claude]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [throwaway/103-base] # the PR's base
 
 permissions:
   contents: read
@@ -20,6 +24,7 @@ concurrency:
 jobs:
   claude:
     name: claude (${{ matrix.check }})
+    if: github.head_ref == 'throwaway/103-claude'
     runs-on: ubuntu-24.04
     environment: factory
     timeout-minutes: ${{ matrix.timeout }}
@@ -57,15 +62,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Two harmless hooks in the checkout's .claude/settings.json, beside the repo's own; each
-      # appends its event name to a file outside the repo.
-      - name: Add marker hooks
-        run: |
-          jq --arg m "$RUNNER_TEMP/hook-marker" '
-            def mark(e): {hooks: [{type: "command", command: ("echo " + e + " >> " + $m)}]};
-            .hooks.SessionStart += [mark("SessionStart")]
-            | .hooks.UserPromptSubmit += [mark("UserPromptSubmit")]' .claude/settings.json >"$RUNNER_TEMP/s.json"
-          mv "$RUNNER_TEMP/s.json" .claude/settings.json
+      # The marker hooks come from the base branch (ci-check.sh start 103); the action restores
+      # .claude/ from there, so editing the checkout here would be undone.
       # Whether an API key secret exists anywhere this job could read one (repo or environment):
       # it should say no, so the setup-token is the only credential the run can have used.
       # The expressions yield true or false only, so no secret value enters the step.
@@ -91,10 +89,12 @@ jobs:
         env:
           CHECK: ${{ matrix.check }}
           OUTCOME: ${{ steps.claude.outcome }}
+          EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
         run: |
           echo "RESULT check=$CHECK action=$OUTCOME" \
             "hooks_fired=$(sort -u "$RUNNER_TEMP/hook-marker" 2>/dev/null | paste -sd, - || true)"
-          exec_file="$RUNNER_TEMP/claude-execution-output.json"
+          # The action's output; the same path ($RUNNER_TEMP/claude-execution-output.json) at v1.0.268.
+          exec_file=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
           [ -f "$exec_file" ] || { echo "RESULT execution_file=missing"; exit 0; }
           jq -r '(.[] | select(.type == "system" and .subtype == "init")
               | "RESULT api_key_source=\(.apiKeySource // "unset") model=\(.model)"),
