@@ -6,9 +6,11 @@ import { applyAll } from "./applyAll.js";
 import { expectAccepted } from "./expectAccepted.js";
 import { farmAt, xpOfLevel } from "./farmAt.js";
 import { ownedFacility } from "./ownedFacility.js";
-import { richContent } from "./richContent.js";
+import { richContent, richFeedSeconds } from "./richContent.js";
 
 const sim = createSim(sliceContent);
+/** Chicken feed takes 61 s here, which the tiers' per mille don't divide (D16). */
+const richSim = createSim(richContent);
 const feedMill = 0;
 const bakery = 1;
 // The slice's tiers (#85's "Decided by the lane"), written out: the feed mill's tier 2 at Level 3
@@ -137,12 +139,11 @@ describe("a facility's tier and its jobs", () => {
 	// D16: 61 s doesn't divide by 800 or 600 per mille (48.8 s, 36.6 s), so a job time rounded to
 	// the nearest second (49 s, 37 s) or not rounded at all fails here, as the slice's 60 s can't.
 	it.each([
-		[1, 61_000],
+		[1, richFeedSeconds * 1000],
 		[2, 48_000],
 		[3, 36_000],
 	])("rounds a job's time at tier %i down to whole seconds: %i ms (D16)", (tier, ms) => {
-		const oddSim = createSim(richContent);
-		const farm = expectAccepted(oddSim.apply(farmWithFacilities(5, 0, tier), startFeed, 1_000));
+		const farm = expectAccepted(richSim.apply(farmWithFacilities(5, 0, tier), startFeed, 1_000));
 
 		expect(farm.facilities[feedMill]?.jobs).toEqual([
 			{ status: "running", recipe: "chickenFeed", readyAt: 1_000 + ms },

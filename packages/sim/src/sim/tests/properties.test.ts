@@ -277,6 +277,10 @@ function expectRestarts(
 /** The test content's cookies XP: from Level 4 (60 to 99 XP), one collect crosses Level 5. */
 const cookieXp = 40;
 
+/** `recipe` with the test content's cookies XP if it is the cookies. */
+const setCookieXp = <Recipe extends { readonly xp: number }>(id: string, recipe: Recipe): Recipe =>
+	id === "cookies" ? { ...recipe, xp: cookieXp } : recipe;
+
 /**
  * Test content where farms bake cookies (#85): 12 XP a harvest reaches the bakery's tier 2 at
  * Level 4 in the start's six harvests (72 XP), and stays below Level 5 with the feed and eggs, so
@@ -292,19 +296,13 @@ const cookieContent: Content = {
 	facilities: sliceContent.facilities.map((facility) => ({
 		...facility,
 		recipes: Object.fromEntries(
-			Object.entries(facility.recipes).map(([id, recipe]) => [
-				id,
-				id === "cookies" ? { ...recipe, xp: cookieXp } : recipe,
-			]),
+			Object.entries(facility.recipes).map(([id, recipe]) => [id, setCookieXp(id, recipe)]),
 		),
 	})),
 };
 
 const cookieRecipes = new Map(
-	[...sliceRecipes].map(([id, recipe]) => [
-		id,
-		id === "cookies" ? { ...recipe, xp: cookieXp } : recipe,
-	]),
+	[...sliceRecipes].map(([id, recipe]) => [id, setCookieXp<TestRecipe>(id, recipe)]),
 );
 
 /**
@@ -609,18 +607,23 @@ describe("the generated farms", () => {
 		const cookieSim = createSim(cookieContent);
 		const counts = countReached(
 			cookieContent,
-			({ action, at, before, after }) => [
-				...(action.type === "startJob" && action.recipe === "cookies" ? ["cookies started"] : []),
-				...((after.barn["cookies"] ?? 0) > (before.barn["cookies"] ?? 0)
-					? ["cookies collected"]
-					: []),
-				// The collected job is the oldest when the action runs, after the steps up to its time.
-				...(action.type === "collect" &&
-				cookieSim.advance(before, at).facilities[action.facility]?.jobs[0]?.recipe === "cookies" &&
-				levelAt(after.xp) > levelAt(before.xp)
-					? ["cookie collect crosses a Level"]
-					: []),
-			],
+			({ action, at, before, after }) => {
+				// The farm as the action finds it, after the steps up to its time: a Collector's moves
+				// there gain XP too, so the Level the collect crosses is counted from this farm.
+				const advanced = cookieSim.advance(before, at);
+				const isCookieCollect =
+					action.type === "collect" &&
+					advanced.facilities[action.facility]?.jobs[0]?.recipe === "cookies";
+				return [
+					...(action.type === "startJob" && action.recipe === "cookies" ? ["cookies started"] : []),
+					...((after.barn["cookies"] ?? 0) > (before.barn["cookies"] ?? 0)
+						? ["cookies collected"]
+						: []),
+					...(isCookieCollect && levelAt(after.xp) > levelAt(advanced.xp)
+						? ["cookie collect crosses a Level"]
+						: []),
+				];
+			},
 			(reason) =>
 				reason === "The bakery makes cookies from tier 2, and it is at tier 1."
 					? ["cookies refused at tier 1"]
