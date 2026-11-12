@@ -10,7 +10,8 @@ Last checked: 2026-11-12.
 
 Write each Bash call so a rule in `.claude/settings.json` can match it, or it prompts (#205):
 
-- No `cd … &&` prefix: use `git -C <path>`, absolute paths or the session's working directory.
+- No `cd … &&` prefix, in a subshell or not: use the working directory, absolute paths or
+  `git -C`.
 - Run checks with `pnpm check:fast`, `pnpm check:task`, `pnpm test`, `pnpm lint` or
   `pnpm typecheck`, not `pnpm vitest`, `pnpm exec` or `pnpm -s eslint`/`tsc` directly.
 - Prefer a script under `scripts/` over a one-off loop or heredoc; one you'll repeat becomes one.
@@ -50,7 +51,8 @@ Each case below was hit on 7 or 8 Nov. After a merge, `scripts/after-merge.sh <w
 handles all three: it checks before changing anything, and when a step needs the host it
 stops and prints the command to run outside the sandbox. No sandbox setting fixes these (checked
 12 Nov, #205): `sandbox.filesystem.allowWrite` can't lift the built-in protection on `.git/config`,
-`.git/hooks` or `.claude/` (Claude Code's sandboxing docs), and a mount point can't be deleted.
+`.git/hooks` or `.claude/` (<https://code.claude.com/docs/en/sandboxing>), and a mount point can't
+be deleted.
 
 - **Updating the main folder when the change touches `.claude/settings.json`, hooks or skills**
   (`git merge --ff-only`, `git pull`). Those paths are write-denied in the main folder, so git
@@ -117,7 +119,8 @@ files, not devices. Like placeholders, they can't be deleted from inside the san
 ## Permission rules
 
 `.claude/settings.json` sets the repo's `permissions` (allow, ask, deny) and `sandbox` keys (#50).
-Read-only `gh` and `git` commands and the writes AGENTS.md allows run without a prompt.
+Read-only `gh` and `git` commands, the writes AGENTS.md allows, the `pnpm` checks and
+`scripts/today-gather.sh` run without a prompt.
 Merging, closing issues, moving an issue to Ready or Factory, repo settings and a bare
 `git push` ask first. Reading `.env*`, commands that print secrets, force pushes and pushes to
 `main` are denied. Bash rules match the command text, so they're guidance, not a security
@@ -127,7 +130,7 @@ boundary. The sandbox and the hooks are what enforce.
 
 `cd` in a Bash command carries over to the next command. If a session `cd`s into another
 worktree, it keeps working there. The coordinating session must stay in the main folder, so
-use `git -C <path>`, a subshell `( cd <path> && … )` or absolute paths to look into a worktree.
+use `git -C <path>` or absolute paths to look into a worktree.
 `.claude/hooks/block-branch-switch.sh` blocks a top-level `cd` into `.claude/worktrees/` from the
 main folder. A session that owns a worktree enters it with the worktree tool before its first
 edit. That moves the session's working directory into the worktree, where `cd` is allowed.
