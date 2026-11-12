@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs the throwaway checks for #101 (the two Apps) and #102 (reading the Project), collects their
+# Runs the throwaway checks for #101 (the two Apps), #102 (reading the Project) and #68 (the
+# reviewer App's tests (a)-(f), in ci-check-68.sh), collects their
 # results and cleans up. `start` builds its branch from origin/main in a temporary worktree, so
 # your checkout and main are never touched: it pushes a branch plus one draft workflow from
 # scripts/setup/workflows/, and the push runs it. `results` prints a Markdown summary of non-secret
@@ -23,9 +24,15 @@ TAG=v0.0.0-throwaway-101
 usage() {
   cat >&2 <<'EOF'
 usage: scripts/setup/ci-check.sh start|results|cleanup 101|102
+       scripts/setup/ci-check.sh start 68
+       scripts/setup/ci-check.sh push 68 a|e
 
   start 101    push throwaway/101-identities with check-101-identities.yml; the push runs it
   start 102    push throwaway/102-project with check-102-project.yml (needs 101's App)
+  start 68     open throwaway PRs (a), (c), (e) and (f) onto main for the reviewer to review;
+               refuses while the repo's allow_auto_merge is off (test (b) needs it)
+  push 68 a    one more commit on (a)'s branch: test (d)
+  push 68 e    one more commit on (e)'s branch: the reviewer's next run, for test (e)
   results N    print the latest run of N's workflow as Markdown, for a comment on issue N:
                  scripts/setup/ci-check.sh results 101 > .scratch/101-results.md
                then read it and post it: gh issue comment 101 --body-file .scratch/101-results.md
@@ -50,15 +57,19 @@ die() { # code message
 }
 
 [[ ${1-} == -h || ${1-} == --help ]] && { usage; exit 0; }
-(($# == 2)) || { usage; exit 2; }
-# pr_head: the branch of the throwaway PR that cleanup closes.
-cmd=$1 issue=$2 pr_head=""
-case $issue in
-  101) branch=throwaway/101-identities workflow=check-101-identities.yml pr_head=$FACTORY_PR_BRANCH ;;
-  102) branch=throwaway/102-project workflow=check-102-project.yml ;;
+# pr_head: the branch of the throwaway PR that cleanup closes. letter: push 68's third argument.
+cmd=${1-} issue=${2-} letter=${3-} pr_head=""
+case $cmd:$issue:$# in
+  start:101:2 | results:101:2 | cleanup:101:2)
+    branch=throwaway/101-identities workflow=check-101-identities.yml pr_head=$FACTORY_PR_BRANCH ;;
+  start:102:2 | results:102:2 | cleanup:102:2) branch=throwaway/102-project workflow=check-102-project.yml ;;
+  start:68:2) ;;
+  push:68:3) [[ $letter == a || $letter == e ]] || { usage; exit 2; } ;;
   *) usage; exit 2 ;;
 esac
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/setup/ci-check-68.sh
+. "$here/ci-check-68.sh"
 # Only the account gh uses on github.com counts (a broken inactive account doesn't), and one
 # failure can be a passing network error: try twice before calling it signed out (#198).
 signed_in() { gh auth status -h github.com --active >/dev/null 2>&1; }
@@ -218,9 +229,10 @@ cleanup() {
   done
 }
 
-case $cmd in
-  start) start ;;
-  results) results ;;
-  cleanup) cleanup ;;
-  *) usage; exit 2 ;;
+case $cmd:$issue in
+  start:68) start_68 ;;
+  push:68) push_68 ;;
+  start:*) start ;;
+  results:*) results ;;
+  cleanup:*) cleanup ;;
 esac
