@@ -85,7 +85,7 @@ Issues live in GitHub Issues on `sssoto17/sunny-pastures`, each in a milestone a
 
 ### Triage labels
 
-Every issue carries one type (`feature`, `bug`, `spike`, `design`, `chore`, `idea`) and one `area:*` label, or `triage` until it's evaluated; PRs carry only the areas they touch, plus `review:admin` when they need the admin. Readiness is the Project Status, and manual work carries no label. `factory:ready` is the only label that says an issue can be worked without the admin; `blocked:*` says why an issue can't move yet. See `docs/agents/triage-labels.md`.
+Every issue carries one type (`feature`, `bug`, `spike`, `design`, `chore`, `idea`) and one `area:*` label, plus `triage` while one of the fields in `docs/agents/issue-tracker.md` "Issue fields" is missing; PRs carry only the areas they touch, plus `review:admin` when they need the admin. Readiness is the Project Status, and manual work carries no label. `factory:ready` is the only label that says an issue can be worked without the admin; `blocked:*` says why an issue can't move yet. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

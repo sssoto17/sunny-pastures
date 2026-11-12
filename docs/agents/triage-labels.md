@@ -48,7 +48,7 @@ out, or it's retyped (`feature`, `chore`…) once its body meets definition-of-r
 
 ## Areas
 
-Every issue carries **exactly one area**, set when it's filed, unless it's in `triage`: the
+Every issue carries **exactly one area**, set when it's filed: the
 layer the work lands in. A PR carries **one area per area its changed files touch**, so you can
 see at a glance what it changes. Set them by hand (a labeler is an automation candidate below).
 
