@@ -355,13 +355,16 @@ const withoutFormatting = (f, mergeBase) => {
 	const after = normalizeCode(readFileSync(f.path, "utf8"));
 	return before !== null && before === after ? { ...f, removed: [], added: [] } : f;
 };
+// After these, a `/` opens a regex literal; after anything else it's a division.
+const REGEX_BEFORE =
+	/^$|^[(,=:[!&|?{};]$|^(return|typeof|case|do|else|in|of|void|yield|await|delete|throw|new)$/;
 // The block comments in a file's code, as [first line, last line], skipping strings, templates,
 // regex literals and line comments; null when it can't tell where one starts or ends.
 const blockComments = (text) => {
 	const spans = [];
-	const lines = (from, to) => text.slice(from, to).split("\n").length - 1;
+	const breaks = (from, to) => text.slice(from, to).split("\n").length - 1;
 	let line = 1;
-	let prev = ""; // the last character of code, to tell a regex literal from a division
+	let prev = ""; // the last word or character of code, to tell a regex literal from a division
 	for (let i = 0; i < text.length;) {
 		const c = text[i];
 		if (/\s/.test(c)) {
@@ -373,16 +376,20 @@ const blockComments = (text) => {
 		} else if (c === "/" && text[i + 1] === "*") {
 			const end = text.indexOf("*/", i + 2);
 			if (end === -1) return null;
-			spans.push([line, line + lines(i, end)]);
-			line += lines(i, end);
+			spans.push([line, line + breaks(i, end)]);
+			line += breaks(i, end);
 			i = end + 2;
 		} else if (c === "'" || c === '"' || c === "`") {
 			const end = stringEnd(text, i);
 			if (end === -1) return null;
-			line += lines(i, end);
+			line += breaks(i, end);
 			prev = c;
 			i = end;
-		} else if (c === "/" && /^$|[(,=:[!&|?{};]/.test(prev)) {
+		} else if (/[\w$]/.test(c)) {
+			const word = /^[\w$]+/.exec(text.slice(i))[0];
+			prev = word;
+			i += word.length;
+		} else if (c === "/" && REGEX_BEFORE.test(prev)) {
 			const regex = /^\/(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n[])+\/[a-z]*/.exec(text.slice(i));
 			if (!regex) return null;
 			prev = "/";
@@ -460,8 +467,16 @@ const configLoosening = (f, mergeBase) => {
 		if (f.status !== "added") {
 			const now = newLines();
 			for (const a of f.added) if (enclosingKey(now, a.line) === "ignores") hits.push(a.line);
+			// A line gone from the file turns off what it held, a selector of the floor's lists
+			// included, with no "error" on it (review of #135). Comments and blank lines hold nothing.
+			const kept = new Set(now.map((l) => l.trim()));
+			const holdsCode = (t) => t !== "" && !/^(\/\/|\/\*|\*)/.test(t);
 			for (const r of f.removed)
-				if (/configs\.|["']error["']/.test(r.text)) hits.push(`${r.line} (old)`);
+				if (
+					/configs\.|["']error["']/.test(r.text) ||
+					(holdsCode(r.text.trim()) && !kept.has(r.text.trim()))
+				)
+					hits.push(`${r.line} (old)`);
 		}
 	} else if (/^tsconfig.*\.json$/.test(name)) {
 		// A new tsconfig's strictness, through `extends`, is read with the TypeScript API since #135

@@ -615,6 +615,17 @@ describe("floor guard, end to end", () => {
 			expect(guard().out).toContain(`[config-loosened] eslint.config.mjs:${line}`);
 		});
 
+		// Review of #135: a selector deleted from the floor's lists turns its rule off with no
+		// "error" on the line, so any line of the ESLint config removed and not added back counts.
+		it("reports a line removed from the ESLint config, and passes one moved", () => {
+			wrapSetup();
+			const lines = CONFIG.split("\n");
+			repo.write({ "eslint.config.mjs": [lines[0], lines[2], lines[3], ""].join("\n") });
+			expect(guard().out).toContain("[config-loosened] eslint.config.mjs:2 (old)");
+			repo.write({ "eslint.config.mjs": [lines[0], lines[2], lines[1], lines[3], ""].join("\n") });
+			expect(guard().code).toBe(0);
+		});
+
 		it("reports one around a tsconfig's include entry", () => {
 			setup();
 			const config = '{\n  "include": [\n    "src"\n  ]\n}\n';
@@ -626,6 +637,21 @@ describe("floor guard, end to end", () => {
 				"packages/sim/tsconfig.json": '{\n  "include": [\n    /*\n    "src"\n    */\n  ]\n}\n',
 			});
 			expect(guard().out).toContain("[config-loosened] packages/sim/tsconfig.json:3");
+		});
+
+		// A `/*` inside a regex literal after `return` is no comment (review of #135).
+		it("passes a regex after return that holds what looks like a comment", () => {
+			repo = makeRepo({
+				...BASE,
+				"eslint.config.mjs": `const re = () => {\n\treturn /a\\/*/;\n};\n${CONFIG}`,
+			});
+			repo.write({
+				"eslint.config.mjs": `const re = () => {\n\treturn /b\\/*/;\n};\n${CONFIG}`,
+			});
+			// The old line is reported as removed; a comment from line 2 would be reported as `:2`.
+			const out = guard().out;
+			expect(out).toContain("eslint.config.mjs:2 (old)");
+			expect(out).not.toMatch(/eslint\.config\.mjs:2$/m);
 		});
 
 		it("passes a new comment of its own, and globs that look like comments", () => {
