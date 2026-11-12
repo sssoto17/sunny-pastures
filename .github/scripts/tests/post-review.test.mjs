@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = fileURLToPath(new URL("../post-review.sh", import.meta.url));
+const CODEOWNERS = fileURLToPath(new URL("../../CODEOWNERS", import.meta.url)); // the real file
 
 // A fake gh: logs each call on one line, answers reads from fixtures, and refuses the comments
 // the test asks it to (FAIL_LINE: every line comment; FAIL_FILE: file comments on that path).
@@ -49,7 +50,14 @@ const verdict = (v = {}) =>
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
-function run(v, { threads = [], labels = ["false"], reviews = [], env = {} } = {}) {
+// None of the default files is code-owned or content, so only the verdict decides.
+const FILES = [
+	{ filename: "a.ts", status: "modified" },
+	{ filename: "gone.yml", status: "removed" },
+	{ filename: "notes.md", status: "modified" },
+];
+
+function run(v, { threads = [], labels = ["false"], reviews = [], files = FILES, env = {} } = {}) {
 	dir = mkdtempSync(join(tmpdir(), "post-review-"));
 	mkdirSync(join(dir, "bin"));
 	writeFileSync(join(dir, "bin/gh"), FAKE_GH);
@@ -57,11 +65,6 @@ function run(v, { threads = [], labels = ["false"], reviews = [], env = {} } = {
 	writeFileSync(join(dir, "bin/labels"), `${labels.join("\n")}\n`);
 	writeFileSync(join(dir, "bin/threads.json"), JSON.stringify(threads));
 	writeFileSync(join(dir, "bin/reviews.json"), JSON.stringify(reviews));
-	const files = [
-		{ filename: "a.ts", status: "modified" },
-		{ filename: "gone.yml", status: "removed" },
-		{ filename: "CONSTRAINTS.md", status: "modified" },
-	];
 	writeFileSync(join(dir, "files.json"), JSON.stringify(files));
 	const res = spawnSync("bash", [SCRIPT], {
 		cwd: dir,
@@ -77,6 +80,7 @@ function run(v, { threads = [], labels = ["false"], reviews = [], env = {} } = {
 			CTX: dir,
 			RUNNER_TEMP: dir,
 			THREADS_QUERY: "q",
+			CODEOWNERS,
 			VERDICT: v,
 			...env,
 		},
@@ -145,6 +149,50 @@ describe("post-review.sh", () => {
 			threads: [thread("E1", "escalated: Code-owned path, Interface change")],
 		});
 		expect(again.calls).not.toContain("body=escalated");
+	});
+
+	// A verdict with no rows still escalates on the rows a path decides (#240 review, 12 Nov).
+	it.each([
+		[
+			"a code-owned path",
+			[{ filename: ".github/workflows/x.yml", status: "added" }],
+			"Code-owned path",
+		],
+		[
+			"a nested package.json",
+			[{ filename: "packages/sim/package.json", status: "modified" }],
+			"Code-owned path",
+		],
+		[
+			"a rename out of a code-owned path",
+			[{ filename: "notes/x.md", status: "renamed", previous_filename: "docs/adr/x.md" }],
+			"Code-owned path",
+		],
+		[
+			"a content file",
+			[{ filename: "packages/sim/src/content/numbers.ts", status: "modified" }],
+			"Content change",
+		],
+	])("escalates on %s whatever the verdict says", (_name, files, row) => {
+		const r = run(verdict(), { files });
+		expect(r.calls).toContain(`-f subject_type=file -f body=escalated: ${row}`);
+		expect(r.calls).toContain("labels[]=review:admin");
+		expect(r.calls).toContain("-f event=COMMENT");
+		expect(r.calls).not.toContain("event=APPROVE");
+	});
+
+	it("merges the verdict's rows with the path rows, once each", () => {
+		const files = [{ filename: "AGENTS.md", status: "modified" }];
+		const r = run(verdict({ escalation_rows: ["Interface change", "Code-owned path"] }), { files });
+		expect(r.calls).toContain("body=escalated: Interface change, Code-owned path\\n");
+	});
+
+	it("leaves a content test and an unowned docs file to the verdict", () => {
+		const files = [
+			{ filename: "packages/sim/src/content/tests/a.test.ts", status: "modified" },
+			{ filename: "docs/diagrams/other.md", status: "modified" },
+		];
+		expect(run(verdict(), { files }).calls).toContain("-f event=APPROVE");
 	});
 
 	it("holds the approval when review:admin is added during the run", () => {

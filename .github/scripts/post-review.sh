@@ -7,7 +7,7 @@
 #
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
 # App's slug), ADMIN, FACTORY_APP (the factory App's slug), CTX (holds files.json), VERDICT,
-# THREADS_QUERY, RUNNER_TEMP.
+# THREADS_QUERY, RUNNER_TEMP; CODEOWNERS (default .github/CODEOWNERS, main's copy).
 # shellcheck disable=SC2016 # single-quoted jq programs, by design
 set -euo pipefail
 
@@ -57,7 +57,24 @@ defs='def own: ((.comments.nodes[0].author.login // "") | sub("\\[bot\\]$"; ""))
 pick() { jq -r --arg bot "$BOT" --arg admin "$ADMIN" --slurpfile v "$v" "$defs $1" "$t"; }
 
 labelled=$(has_label)
-rows=$(jq -r '.escalation_rows // [] | join(", ")' "$v")
+# The rows that depend only on paths are computed here as well, so a verdict can't drop them
+# (CONSTRAINTS.md, "Escalation criteria"). Code-owned path: a changed path, or a rename's old path,
+# matches a pattern in CODEOWNERS (gitignore rules). Content change: a file under
+# packages/sim/src/content/ other than its tests; a path can't show whether a value changed, so
+# this errs towards the admin. Every other row needs reading, so it stays the verdict's.
+path_rows=$(jq -rn --rawfile co "${CODEOWNERS:-.github/CODEOWNERS}" --slurpfile f "$CTX/files.json" '
+  def rx: (endswith("/")) as $dir | (ltrimstr("/") | rtrimstr("/")) as $b
+    | (startswith("/") or ($b | contains("/"))) as $anchored
+    | $b | gsub("(?<c>[.+^$(){}|\\[\\]\\\\])"; "\\\(.c)")
+    | gsub("\\*\\*/"; "\u0001") | gsub("\\*\\*"; "\u0002") | gsub("\\*"; "[^/]*") | gsub("\\?"; "[^/]")
+    | gsub("\u0001"; "(.*/)?") | gsub("\u0002"; ".*")
+    | (if $anchored then "^" else "(^|/)" end) + . + (if $dir then "/" else "(/|$)" end);
+  [$co | split("\n")[] | sub("#.*"; "") | [splits("\\s+")] | map(select(length > 0))
+    | select(length > 1) | .[0] | rx] as $owned
+  | [$f[0][] | .filename, (.previous_filename // empty)] as $paths
+  | (if any($paths[]; . as $p | any($owned[]; . as $r | $p | test($r))) then "Code-owned path" else empty end),
+    (if any($paths[]; test("^packages/sim/src/content/") and (test("/tests/") | not)) then "Content change" else empty end)')
+rows=$({ jq -r '.escalation_rows[]' "$v"; printf '%s\n' "$path_rows"; } | awk 'NF && !seen[$0]++' | paste -sd, - | sed 's/,/, /g')
 nfind=$(jq '.findings | length' "$v")
 
 threads
