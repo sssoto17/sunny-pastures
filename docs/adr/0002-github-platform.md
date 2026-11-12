@@ -260,12 +260,24 @@ do.
 **Applied 8 Nov, #40: the required checks live in their own ruleset, `main checks`** (id
 26816327, the admin's decision, 23:17 CET), not in `main`. It holds only the
 `required_status_checks` rule, with **no bypass actors**; `main` keeps deletion, force pushes and
-the pull request rule, with the admin's "For pull requests only" bypass. Why: a bypass lifts every
-rule in its ruleset. With the checks in `main`, a bypass merge, which every code-owned PR needs
+the pull request rule, with the admin's "For pull requests only" bypass. Why, in the admin's
+reasoning (#110, 8 Nov): with the checks in `main`, a bypass merge, which every code-owned PR needs
 while sessions open PRs as the admin, skipped the checks too. Split, the bypass lifts only the
-approvals, and the checks hold for everyone. GitHub aggregates the rules of every ruleset that
-targets a branch ([rule layering](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets#about-rule-layering),
-read 12 Nov). **The cost:** "a red check during an outage" (bypass row above) can no longer be
+approvals, and the checks hold for everyone.
+
+- *Documented:* a ruleset's bypass list lets an actor "bypass the rules in the ruleset"
+  ([about rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets#about-rulesets)),
+  and an actor with "For pull requests only" can "bypass any branch protections and merge that
+  pull request"
+  ([creating rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository#granting-bypass-permissions-for-your-branch-or-tag-ruleset)).
+  GitHub aggregates the rules of every ruleset that targets a branch
+  ([rule layering](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets#about-rule-layering)).
+  All read 12 Nov.
+- *Inference:* a bypass in `main` doesn't lift the rules of `main checks`. The docs don't say so
+  in those words. The API is consistent with it: it returns `current_user_can_bypass: "never"`
+  for `main checks` and `"pull_requests_only"` for `main`.
+
+**The cost:** "a red check during an outage" (bypass row above) can no longer be
 bypassed. A broken check blocks every merge until it's fixed, or until the admin edits
 `main checks`. The four checks and the JSON are in A8.
 
@@ -1151,13 +1163,12 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
     so its guard against prompt injection is designed with it (area 2).
     **Applied 12 Nov, #226, a temporary third user:** `.github/workflows/check-103-claude.yml`,
     #103's check of Claude in Actions. The admin accepted it (comment on #103, 12 Nov) because it
-    runs no PR code: it runs only for a PR from `throwaway/103-claude` onto `throwaway/103-base`,
-    and its checkout has no `ref`, so it gets the default branch. It uses the `factory`
-    environment, and on this event the run's ref is `main`, so a job like it would get that
-    environment's secrets for any PR, so the admin's note for #68 is that the reviewer should
-    use its own environment. #103's results were recorded and #103 closed on 12 Nov, so **#227
-    deletes the file**, or rewrites it as #68's reviewer, before `CONSTRAINTS.md` Exceptions row
-    E1 expires on 12 Dec.
+    runs no PR code. It runs only for a PR from `throwaway/103-claude` onto `throwaway/103-base`.
+    Its checkout has no `ref`, so it gets the default branch. It uses the `factory` environment.
+    On this event the run's ref is `main`, and a job like it would get that environment's
+    secrets for any PR. The admin's note for #68: the reviewer should use its own environment.
+    #103's results were recorded and #103 closed on 12 Nov. **#227 deletes the file**, or
+    rewrites it as #68's reviewer, before `CONSTRAINTS.md` Exceptions row E1 expires on 12 Dec.
 
 **Alternatives considered.**
 - **Go public now**, for free scanning from M2. Rejected by the admin (Q1): the repo stays
