@@ -8,7 +8,7 @@ import { describe, expect, inject, it, vi } from "vitest";
 import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Action, Content, FarmState, Order, Sim } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
-import { delay, farmId, play, replay, timedActions } from "../../state/tests/farms.js";
+import { delay, farmId, play, reachMargin, replay, timedActions } from "../../state/tests/farms.js";
 import type { Transition } from "../../state/tests/farms.js";
 import { requireProvided } from "../../state/tests/provided.js";
 import { listDrawFaults } from "./orderTerms.js";
@@ -570,7 +570,7 @@ describe("the generated farms", () => {
 			"buyAddOn loop",
 			"buyAddOn collector",
 		]) {
-			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin(params.numRuns));
 		}
 	});
 
@@ -600,7 +600,7 @@ describe("the generated farms", () => {
 			"queue past tier 1's slots",
 			"full at tier 2 or 3",
 		]) {
-			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin(params.numRuns));
 		}
 	});
 
@@ -637,7 +637,7 @@ describe("the generated farms", () => {
 			"cookie collect crosses a Level",
 			"cookies refused at tier 1",
 		]) {
-			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin(params.numRuns));
 		}
 	});
 
@@ -661,7 +661,7 @@ describe("the generated farms", () => {
 			"collectProducts reaches a Level",
 			"barn full on collectProducts",
 		]) {
-			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin(params.numRuns));
 		}
 	});
 });
@@ -742,7 +742,7 @@ describe("the generated farms on the order board", () => {
 			"an open order asks for a good the farm can't produce",
 			"refill at the same time as another kind",
 		]) {
-			expect(counts.get(key) ?? 0, key).toBeGreaterThan(0);
+			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin(params.numRuns));
 		}
 	});
 });

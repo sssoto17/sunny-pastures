@@ -241,9 +241,12 @@ config, so `inject('fastCheck')` gives `undefined`, and fast-check given no sett
 random seed: the tie reach test failed in about 1 run in 5 that way, while the sim stayed
 deterministic. Each property file reads the settings as `requireProvided('fastCheck',
 inject('fastCheck'))` (`state/tests/provided.ts`), which throws, naming the root config, when
-nothing was provided; lint reports any other read of `inject('fastCheck')`. A reach test asserts
-each case once for every 20 runs (counted over its contents), not just once, so a generator
-change that thins a case fails before the case reaches 0.
+nothing was provided; lint reports any other read of `inject('fastCheck')`. The reach tests in
+`properties.test.ts` and `ties.test.ts` assert each case once for every 20 runs (counted over
+their contents, `reachMargin`), not just once, so a generator change that thins a case fails
+before the case reaches 0. A generated run starts with an opening chunk, weighted by measured
+reach, for the cases only a new farm reaches surely: the add-ons' ties, a cookie collect that
+crosses a Level, and the order board's discards.
 
 **Pattern:** property-based testing (fast-check, fixed seed), with a timeout scaled by the run
 count.

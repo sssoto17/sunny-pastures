@@ -6,7 +6,7 @@ import { describe, expect, inject, it, vi } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Content, FarmState, Sim } from "../../index.js";
-import { delay, farmId, play, timedActions } from "../../state/tests/farms.js";
+import { delay, farmId, play, reachMargin, timedActions } from "../../state/tests/farms.js";
 import { requireProvided } from "../../state/tests/provided.js";
 import { richContent } from "./richContent.js";
 
@@ -198,13 +198,6 @@ describe.each(contents)(
 	},
 );
 
-/**
- * How many run × content pairs must reach each tie: one for every 20 runs (5 at 100 runs, counted
- * over both contents), so a generator change that thins a case fails here before the case reaches
- * 0 (the wheat tie sat at 2 in 100, #213).
- */
-const reachMargin = Math.ceil(params.numRuns / 20);
-
 describe("the generated ties", () => {
 	it("are reached by the generated farms, once for every 20 runs over both contents, so MUST-14.8 isn't vacuous", () => {
 		const counts = new Map<string, number>();
@@ -224,7 +217,7 @@ describe("the generated ties", () => {
 			"Loops tie for the last wheat",
 			"a Collector's waiting goods stop a Loop at the tie",
 		]) {
-			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin);
+			expect(counts.get(key) ?? 0, key).toBeGreaterThanOrEqual(reachMargin(params.numRuns));
 		}
 	});
 });

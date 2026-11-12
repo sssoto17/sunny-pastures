@@ -281,10 +281,16 @@ const buyTiers = delay.map((wait): TimedAction[] =>
 );
 
 /**
+ * A cookies job's time at bakery tier 2 in the slice (500 s at 800 per mille): `bake` collects
+ * after it, or a collect after the usual 0 to 200 s finds the cookies still baking (#213).
+ */
+const cookieMs = 400_000;
+
+/**
  * Baking cookies (#85, #72 D4), from the field up: tend the start's plots until they ripen, make
  * chicken feed, feed the chickens and collect their eggs once laid, then buy the bakery, try
- * cookies at its tier 1 (refused), buy its tier 2, start two cookies jobs and collect them after a
- * wait (MUST-03.1, 03.2). The waits that
+ * cookies at its tier 1 (refused), buy its tier 2, start two cookies jobs and collect them once the
+ * first is baked, after a wait (MUST-03.1, 03.2). The waits that
  * ripen and lay are fixed, or random runs would rarely hold wheat and eggs at once. Refused and
  * skipped while the barn holds too few eggs or the bakery or its tier 2 is locked.
  */
@@ -308,7 +314,7 @@ const bake = delay.map((wait): TimedAction[] => {
 		{ action: { type: "startJob", facility: 1, recipe: "cookies" }, delay: 0 },
 		{ action: { type: "buyTier", facility: 1, tier: 2 }, delay: 0 },
 		...repeat({ type: "startJob", facility: 1, recipe: "cookies" }, 2),
-		{ action: { type: "collect", facility: 1 }, delay: Math.abs(wait) },
+		{ action: { type: "collect", facility: 1 }, delay: cookieMs + Math.abs(wait) },
 		{ action: { type: "collect", facility: 1 }, delay: 0 },
 	];
 });
@@ -367,12 +373,36 @@ const automateNewFarm = fc
 	.constantFrom(180_000, 240_000)
 	.map((offset) => startAutomation(buyAddOns, offset));
 
-/** Chunks played from a new farm, sometimes starting with the add-ons' ties, which need it new. */
+/**
+ * How a generated run starts on its new farm (#213): mostly with a chunk whose cases need the farm
+ * new, or are one chunk in 16 in the mix, so their reach tests keep a margin.
+ * - `automateNewFarm`: the add-ons' ties, which need the empty silo and barn.
+ * - `bake`: its cookie collect crosses a Level only from a new farm's XP: six harvests reach the
+ *   bakery's tier 2 and the cookies cross the next Level (`cookieContent`, #197).
+ * - `trade`: the order board's discards and their refills (#87).
+ * - nothing, so the first chunk is sometimes any chunk.
+ * Weighted by measured reach: over 30 seeds at 100 runs, no case fell below one in 20 runs.
+ */
+const opening = fc.oneof(
+	{ weight: 1, arbitrary: fc.constant([]) },
+	{ weight: 2, arbitrary: automateNewFarm },
+	{ weight: 2, arbitrary: bake },
+	{ weight: 1, arbitrary: trade },
+);
+
+/** Chunks played from a new farm, after an opening. */
 export const timedActions = fc
-	.tuple(fc.oneof(fc.constant([]), automateNewFarm), fc.array(chunk, { maxLength: 16 }))
+	.tuple(opening, fc.array(chunk, { maxLength: 16 }))
 	.map(([first, chunks]) => [...first, ...chunks.flat()]);
 
 export const farmId = fc.string({ unit: "binary", maxLength: 24 });
+
+/**
+ * How many times a reach test needs each case over `numRuns` generated runs: once for every 20
+ * runs, counted over the test's contents (5 at 100 runs, 50 at 1,000), so a generator change that
+ * thins a case fails before the case reaches 0 (#213).
+ */
+export const reachMargin = (numRuns: number): number => Math.ceil(numRuns / 20);
 
 /** Plays `timedActions` from a new farm, keeping only the accepted actions in the log. */
 export function play(sim: Sim, id: string, played: readonly TimedAction[]): Run {
