@@ -262,13 +262,20 @@ guard keeps only the job a diff reader does well: seeing that those checks stay 
   naming `no-empty`, `no-empty-function`, `no-restricted-syntax` or `no-warning-comments`, or an
   inline `/* eslint … */` config for one. `no-restricted-syntax` also holds the sim's purity and
   property rules, so disabling those is unwaivable too.
-- An inline `/* eslint … */` config is `silenced-checker`: it turns a rule off as a disable does.
+- An inline `/* eslint rule: … */` config is `silenced-checker`; a comment naming ESLint isn't.
 - A line of `eslint.config.*` removed and not added back anywhere in the file is
   `config-loosened`. A selector deleted from the floor's lists carries no `"error"`, which was all
   the guard read before (review of #135). Moving a line passes; rewording one needs a row.
 - `/*` and `*/` added around unchanged lines of a guarded JS, TS or JSON config are
   `config-loosened` (second comment on #135). The guard finds block comments skipping strings,
   templates and regex literals; a file it can't scan fails closed on every added `/*` or `*/`.
+
+**ESLint's own config loader (stack review).** A later block replacing a folder's selectors, or
+`UNFINISHED_SYNTAX.length = 0`, removes no line and passed the guard. `floor-config.test.mjs`
+checks every tracked file ESLint lints: `calculateConfigForFile` has the three rules at "error",
+and a probe linted as the file is reported once per floor selector. Probes test behaviour, so
+emptying a list can't empty the expectation. Limits: one probe per selector (the snippet tests
+cover other spellings); sim-only selectors aren't probed (`sim-purity.test.mjs` is).
 
 **Patterns.** *Parse, don't pattern-match*: ESLint's AST and the TypeScript API read code and
 configs as the tools that run them do. *Guard the guards*: the diff reader keeps the parsers on, and the snippet tests show each rule

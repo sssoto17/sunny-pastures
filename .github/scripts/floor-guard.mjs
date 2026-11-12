@@ -102,8 +102,9 @@ const FLOOR_RULES =
 	/(?:^|[\s,])(?:no-empty|no-empty-function|@typescript-eslint\/no-empty-function|no-restricted-syntax|no-warning-comments)(?=[\s,:"'*]|$)/;
 // `eslint-disable`, `-line` or `-next-line`, and the rule list after it (empty: every rule).
 const ESLINT_DISABLE = /eslint-disable(?:-next-line|-line)?(?![\w-])([^\n]*)/;
-// An inline config, `/* eslint rule: value */`, which turns a rule off or replaces its options.
-const INLINE_CONFIG = /\/\*\s*eslint\s+(?:[^*]|\*(?!\/))*/;
+// An inline config, `/* eslint rule: value */`, which turns a rule off or replaces its options. It
+// starts with a rule name and a colon, so a comment that only mentions ESLint isn't one.
+const INLINE_CONFIG = /\/\*\s*eslint\s+[@\w][\w@/-]*\s*:(?:[^*]|\*(?!\/))*/;
 const switchesOffFloor = (text) => {
 	const disable = ESLINT_DISABLE.exec(text);
 	const rules = disable?.[1].split(/\*\/|\s--\s/)[0].trim();

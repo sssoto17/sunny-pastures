@@ -573,6 +573,16 @@ describe("floor guard, end to end", () => {
 		expect(r.code).toBe(1);
 	});
 
+	// Review of the #135 stack: a comment that only mentions ESLint is no inline config.
+	it.each([
+		["/* eslint reads this file with the root config */\n", 0],
+		["/* eslint no-empty: 0 -- a real one */\n", 1],
+	])("tells prose from an inline config: %s", (code, exit) => {
+		setup();
+		repo.write({ "packages/sim/src/s.ts": code });
+		expect(guard().code).toBe(exit);
+	});
+
 	it("waives a disable of another rule, and counts an inline config as a suppression", () => {
 		setup();
 		repo.write({ "packages/sim/src/s.ts": "// eslint-disable-next-line eqeqeq\n" });
