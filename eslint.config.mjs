@@ -108,16 +108,21 @@ const PROPERTY_TIMEOUT = `CallExpression[callee.object.name='vi'][callee.propert
 // no-empty-function allow. The guard makes a directive that switches these off unwaivable.
 const STUB_MESSAGE = "/^\\s*(not[\\s_-]+(yet[\\s_-]+)?implemented|unimplemented)\\b/i";
 // A function that does nothing: an empty or comment-only body, a bare `return`, or an arrow that
-// gives undefined, null or `void <literal>`.
+// gives undefined (cast or not), null or `void` of a name or literal.
+// A block of nothing but empty statements, bare `return;` and `void e;` (`{}`, `{ ; }`,
+// `{ void e; }`); selectors don't see comments.
+const NOTHING_BLOCK =
+	"BlockStatement.body:not(:has(> :not(EmptyStatement, ReturnStatement:not([argument]), ExpressionStatement[expression.operator='void'][expression.argument.type=/^(Identifier|Literal)$/])))";
 const NOOP = ({ isNullNothing }) => {
 	// esquery reads a path that isn't there as the text "undefined", so each check names the type.
 	const nothing = (path) => [
 		`[${path}.type='Identifier'][${path}.name='undefined']`,
-		`[${path}.type='UnaryExpression'][${path}.operator='void'][${path}.argument.type='Literal']`,
+		`[${path}.type=/^TS(As|NonNull|Satisfies)Expression$/][${path}.expression.type='Identifier'][${path}.expression.name='undefined']`,
+		`[${path}.type='UnaryExpression'][${path}.operator='void'][${path}.argument.type=/^(Literal|Identifier)$/]`,
 		...(isNullNothing ? [`[${path}.type='Literal'][${path}.raw='null']`] : []),
 	];
 	return [
-		":function[body.type='BlockStatement'][body.body.length=0]",
+		`:function:has(> ${NOTHING_BLOCK})`,
 		":function[body.body.length=1][body.body.0.type='ReturnStatement']:not([body.body.0.argument])",
 		...nothing("body.body.0.argument").map((n) => `:function[body.body.length=1]${n}`),
 		...nothing("body").map((n) => `ArrowFunctionExpression${n}`),
@@ -134,7 +139,7 @@ const UNFINISHED_SYNTAX = [
 			"A not-implemented stub is unfinished work, never waivable (CONSTRAINTS.md, Floor; #135).",
 	},
 	{
-		selector: "CatchClause > BlockStatement.body[body.length=0]",
+		selector: `CatchClause > ${NOTHING_BLOCK}`,
 		message:
 			"A catch that is empty or holds only comments swallows the error (CONSTRAINTS.md, Floor; #135).",
 	},
@@ -158,7 +163,7 @@ const UNFINISHED_SYNTAX = [
 const FC_RUN = "CallExpression[callee.object.name='fc'][callee.property.name=/^(assert|check)$/]";
 // A settings key written, assigned, counted or deleted, by name or by quoted key.
 const settingsKey = (keys) =>
-	`:matches(ObjectExpression > Property > Identifier.key[name=${keys}], Property > Literal.key[value=${keys}], MemberExpression > Literal.property[value=${keys}], CallExpression[callee.property.name=/^(defineProperty|set)$/] > Literal.arguments[value=${keys}], :matches(AssignmentExpression > .left, UpdateExpression > .argument, UnaryExpression[operator='delete'] > .argument) > Identifier.property[name=${keys}])`;
+	`:matches(ObjectExpression > Property > Identifier.key[name=${keys}], Property > Literal.key[value=${keys}], :matches(Property, MemberExpression) > TemplateLiteral[expressions.length=0] > TemplateElement[value.raw=${keys}], MemberExpression > Literal.property[value=${keys}], CallExpression[callee.property.name=/^(defineProperty|set)$/] > Literal.arguments[value=${keys}], :matches(AssignmentExpression > .left, UpdateExpression > .argument, UnaryExpression[operator='delete'] > .argument) > Identifier.property[name=${keys}])`;
 // fast-check's settings that cut, stop or replace runs. The plain words count only in a file that
 // imports fast-check, so a `path` elsewhere is fine.
 const RUN_KEYS =
