@@ -21,8 +21,12 @@ box reads as work still waiting, so a box that means "doesn't apply" when left e
 reader. The admin's rule of 12 Nov (#214), for issue and PR bodies alike.
 
 - **Items to tick:** an issue's "Acceptance criteria" (every issue template) and a PR's "How it
-  was verified". The coordinator ticks an issue's criteria when a reviewer confirms them. A lane
-  ticks its own PR's boxes as it meets them.
+  was verified". A lane ticks its own PR's boxes as it meets them.
+- **Who ticks an issue's criteria:** the coordinator, from the reviewer's "Criteria confirmed"
+  list (`REVIEW.md`, "Report"), before giving the admin the verdict. It ticks each criterion the
+  reviewer confirmed, and only those. A criterion the reviewer left unverified stays unticked, and
+  the relay to the admin names it with the reviewer's reason. On a split, only the closing part's
+  review ticks criteria.
 - **Plain lines:** facts such as the PR template's Review section, `Admin review: no` or
   `Admin review: yes (rows: Code-owned path)`, and `Code-owned paths: none` or
   `Code-owned paths: .github/… (admin asked in #N)`.

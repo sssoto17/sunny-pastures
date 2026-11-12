@@ -400,7 +400,10 @@ The flow:
 
 **The reviewer bot is its own GitHub App** (the admin's choice, 7 Nov), for example
 `sunny-reviewer[bot]`, used from Actions. It runs Claude with the repo's review skills
-(`code-review`, the standards and spec axes). It is a separate identity from the PR's author,
+(`code-review`, the standards and spec axes). What it checks, its severities (Required, Optional,
+Nit) and its report follow `REVIEW.md` at the repo root, which #68 has it read from `main`
+(added 12 Nov, #225). This section keeps the mechanism: the App, its writes, and when it
+approves or escalates. It is a separate identity from the PR's author,
 so its approval is not a self-approval, even while the factory still acts as the admin
 (until #37). Its private key is an environment secret, handed only to the review job. It's set up
 alongside the factory's App, `sunny-factory`: two Apps, since one App can't approve the PRs it
@@ -1572,6 +1575,7 @@ an item someone will tick (#214): the Review section's two yes/no checkboxes bec
 /AGENTS.md              @sssoto17
 /CLAUDE.md              @sssoto17
 /CONSTRAINTS.md         @sssoto17
+/REVIEW.md              @sssoto17
 /docs/adr/              @sssoto17
 /docs/requirements/     @sssoto17
 /docs/agents/           @sssoto17

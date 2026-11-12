@@ -5,8 +5,8 @@ skills own the gates (constraints, spec, plan, review, ship). Matt Pocock's skil
 depth and the tracker loop (grilling, domain language, deep modules, tickets, implementation,
 retros). Each job has exactly one owning skill.
 
-Last changed: 2026-11-08 (reviewer-bot model from ADR-0002, area 2; weekly retro as a Sunday cloud
-routine; #53).
+Last changed: 2026-11-12 (`REVIEW.md` as the one review standard, #225). Before that 2026-11-08
+(reviewer-bot model from ADR-0002, area 2; weekly retro as a Sunday cloud routine; #53).
 
 Every name below is a skill in `.claude/skills/`, except `remember:remember`, which comes from the
 `remember` plugin. `/clear` and `/compact` are built-in commands, and `/today` is a planned command
@@ -86,7 +86,9 @@ reviewer bot reviews every PR. It either approves, and the PR auto-merges once t
 are green, or requests changes, and the author fixes them and pushes. You review and merge only
 admin-review PRs: those that touch a code-owned path, and those carrying `review:admin` under the
 escalation criteria in `CONSTRAINTS.md`, "Admin review". Production changes only when you push a
-`v*` tag (ADR-0002, area 4).
+`v*` tag (ADR-0002, area 4). What every reviewer checks, how it rates findings and how it reports
+is `REVIEW.md`, at the repo root, for the bot, the coordinator's reviewer and a lane's own review
+alike.
 
 **Until #68, the reviewer bot isn't live** (it needs #37 and #68), so you review and merge every PR,
 factory PRs included. Until then the coordinating session stands in for the bot: it dispatches a
@@ -105,7 +107,7 @@ fresh-context reviewer agent per PR and relays the verdict before you merge
 | | Addy `spec-driven-development` | `docs/requirements/spec.md` (living, doubles as the requirements chapter) | edit and approve |
 | | Addy `planning-and-task-breakdown` | `docs/plans/NN-<slug>.md`, frozen once published | approve the plan |
 | | `to-tickets` | GitHub issues with native blocking edges, on the Project | nothing: it publishes |
-| Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`) | PR, reviewed by the reviewer bot (until #68, a reviewer agent the coordinator dispatches) | review and merge admin-review PRs (every PR until #68) |
+| Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`, which runs as a self-review under `REVIEW.md`) | PR, reviewed under `REVIEW.md` by the reviewer bot (until #68, a reviewer agent the coordinator dispatches) | review and merge admin-review PRs (every PR until #68) |
 | ↳ high stakes: sim determinism, authority, RLS | Addy `doubt-driven-development` | adversarial review | |
 | ↳ framework APIs: Next, Drizzle, Supabase | Addy `source-driven-development` | docs-verified code | |
 | ↳ module or API shape | Addy `api-and-interface-design` + `codebase-design` | interface sketch | the interface |

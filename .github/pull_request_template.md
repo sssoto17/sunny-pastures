@@ -23,7 +23,7 @@ Closes # <!-- or "Part of #N" for an earlier part of a split; the last part says
 
 ## Review
 
-<!-- ADR-0002, area 2. The reviewer bot reviews every PR. These are facts, not to-dos, so they
+<!-- ADR-0002, area 2; every reviewer follows REVIEW.md. These are facts, not to-dos, so they
      are plain lines (docs/agents/issue-tracker.md, "Checkboxes"). -->
 
 - Admin review: no <!-- or "yes (rows: …)" when the PR meets a row of the escalation criteria

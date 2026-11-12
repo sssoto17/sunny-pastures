@@ -67,7 +67,10 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   rule, Fallow boundary, test, CI step), judgement calls become standards (this file or
   `CONSTRAINTS.md`). The weekly retro looks for them; see `docs/diagrams/workflow.md`,
   "Self-improving loops".
-- Reviews follow ADR-0002 (area 2). Agents never merge a PR, never turn on auto-merge by hand,
+- Every review follows `REVIEW.md`, read from `origin/main`: a reviewer the coordinator
+  dispatches, a lane's own review when `/implement` reaches `code-review` (a self-review), and
+  the CI reviewer App. Its mechanism (approvals, `review:admin`, merges) is ADR-0002 (area 2).
+  Agents never merge a PR, never turn on auto-merge by hand,
   never bypass a ruleset and never remove `review:admin`. When a PR meets a row of
   `CONSTRAINTS.md`, "Admin review (escalation and split size)", add the label as you open it:
   `gh pr create --label review:admin`. The admin merges admin-review PRs in the UI. The permission
