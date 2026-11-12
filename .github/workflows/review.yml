@@ -1,0 +1,143 @@
+# The reviewer App, sunny-reviewer (ADR-0002, area 2; #68). It reviews every non-draft PR to main
+# by REVIEW.md and posts as sunny-reviewer[bot]: Required findings become line comments plus
+# Request changes, Optional and Nit go in the review's summary, and a clean PR gets Approve. A PR
+# that meets a CONSTRAINTS.md escalation row, or carries review:admin, never gets Approve.
+#
+# Why pull_request_target: the run takes this file and its checkout from main, so a PR can't
+# change how it is reviewed. That hands this job secrets on a PR, so (docs/security.md of the
+# action, "Using this action with pull_request_target"):
+# - nothing from the PR is checked out or run: the checkout has no `ref` (main), and the PR's
+#   diff and text reach Claude as files of data in $RUNNER_TEMP/review-context;
+# - Claude gets Read, Grep and Glob only (no Bash, no writes, no MCP servers) and the repo's
+#   GITHUB_TOKEN, read-only. It answers with a JSON verdict (--json-schema);
+# - the App's token is minted only after Claude has finished, and only the last step, plain
+#   bash (.github/scripts/post-review.sh), writes to GitHub with it. That script, not the
+#   model, decides the review's event.
+# Environment `review`, never `factory`: on this event the run's ref is main, so any job here
+# would get its environment's secrets on every PR (#227).
+# Caps: 30 turns and 15 minutes. #103's runs took 26-34 s a job; a review reads about six rule
+# files plus one file per touched area. Actions pinned to full SHAs, each at least 7 days old.
+name: review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: review
+    # No drafts, no forks' branches, and not Dependabot's PRs (code-owned, so the admin's).
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: review
+    permissions:
+      contents: read # main's checkout, and the action's fetch of the PR's base
+      pull-requests: read # the PR, its diff, reviews and threads
+      issues: read # the issues the PR links
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      CTX: ${{ runner.temp }}/review-context
+      ANTHROPIC_API_KEY: '' # never an API key: the setup-token is the only credential
+      FACTORY_APP: sunny-factory # the factory App's slug (ADR-0002, "The factory's identity")
+      THREADS_QUERY: >-
+        query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name)
+        { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { id isResolved isOutdated
+        path line resolvedBy { login } comments(first: 20) { nodes { author { login } body } } } } } } }
+    steps:
+      # No `ref`: on pull_request_target that is main, never the PR head.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Everything Claude reads about the PR, as files. Its text stays in files and jq: nothing
+      # the PR wrote is expanded into a script.
+      - id: gather
+        name: Gather the PR (read-only token)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
+          mkdir -p "$CTX"
+          r="repos/$GITHUB_REPOSITORY"
+          gh api "$r/pulls/$PR" --jq '{number, title, body, author: .user.login, base: .base.ref,
+            head_sha: .head.sha, labels: [.labels[].name], additions, deletions}' >"$CTX/pr.json"
+          gh api --paginate "$r/pulls/$PR/files?per_page=100" --jq '.[] | {filename, status,
+            additions, deletions, previous_filename}' | jq -s . >"$CTX/files.json"
+          gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" >"$CTX/diff.patch"
+          gh api --paginate "$r/pulls/$PR/reviews?per_page=100" --jq '.[] | {id,
+            author: .user.login, state, submitted_at, body}' | jq -s . >"$CTX/reviews.json"
+          gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
+            -F pr="$PR" -f query="$THREADS_QUERY" \
+            --jq '.data.repository.pullRequest.reviewThreads.nodes' >"$CTX/threads.json"
+          jq -r '.body // ""' "$CTX/pr.json" | grep -oiE '(closes|part of) #[0-9]+' |
+            grep -oE '[0-9]+' | sort -u | head -n 5 >"$RUNNER_TEMP/issues" || true
+          while read -r n; do
+            gh api "repos/$GITHUB_REPOSITORY/issues/$n" --jq '{number, title, body, state,
+              labels: [.labels[].name]}' >"$CTX/issue-$n.json" || echo "issue #$n unreadable"
+          done <"$RUNNER_TEMP/issues"
+          echo "schema=$(jq -c . .github/review-verdict.schema.json)" >>"$GITHUB_OUTPUT"
+          echo "head=$(jq -r .head_sha "$CTX/pr.json")" >>"$GITHUB_OUTPUT"
+
+      - id: claude
+        uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }} # read-only; the App's token doesn't exist yet
+          allowed_bots: ${{ env.FACTORY_APP }} # its pushes start this run too (#37)
+          prompt: >-
+            Read .github/review-prompt.md and follow it. Review PR #${{ github.event.pull_request.number }}.
+            The context folder is ${{ runner.temp }}/review-context.
+          claude_args: >-
+            --max-turns 30
+            --setting-sources user
+            --add-dir ${{ runner.temp }}/review-context
+            --allowedTools "Read,Grep,Glob"
+            --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Skill,Read(//proc/**)"
+            --json-schema '${{ steps.gather.outputs.schema }}'
+
+      # Minted after Claude has finished, so the model never shares a step with a write token.
+      - id: app
+        if: steps.claude.outputs.structured_output != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.REVIEWER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          # Only what posting needs; contents: write because an App's approval may count only
+          # with it (ADR-0002, Q14). No issues, workflows or administration.
+          permission-contents: write
+          permission-pull-requests: write
+
+      # The only step that writes. The verdict is data: the script decides the event.
+      - name: Post the review as sunny-reviewer
+        if: steps.app.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERDICT: ${{ steps.claude.outputs.structured_output }}
+          BOT: ${{ steps.app.outputs.app-slug }}
+          ADMIN: ${{ github.repository_owner }}
+          HEAD: ${{ steps.gather.outputs.head }}
+        run: bash .github/scripts/post-review.sh
+
+      # Report data (ADR-0002, "Caps"): cost, turns and the job's seconds. Non-secret fields only.
+      - name: Report
+        if: always()
+        env:
+          EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          echo "RESULT job_seconds=$(($(date +%s) - ${JOB_START:-$(date +%s)}))"
+          f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
+          [ -f "$f" ] || { echo "RESULT execution_file=missing"; exit 0; }
+          jq -r '.[] | select(.type == "result") | "RESULT subtype=\(.subtype) is_error=\(.is_error)"
+            + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f"
