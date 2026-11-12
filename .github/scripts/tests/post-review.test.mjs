@@ -194,6 +194,8 @@ describe("post-review.sh", () => {
 		["escalation_rows missing", without("escalation_rows")],
 		["escalation_rows null", verdict({ escalation_rows: null })],
 		["an empty row", verdict({ escalation_rows: [""] })],
+		["a blank row", verdict({ escalation_rows: [" "] })],
+		["a newline row", verdict({ escalation_rows: ["\n"] })],
 		["a row that isn't a string", verdict({ escalation_rows: [1] })],
 		["resolve_threads missing", without("resolve_threads")],
 		["a finding without a body", verdict({ findings: [{ path: "a.ts", line: 1 }] })],
