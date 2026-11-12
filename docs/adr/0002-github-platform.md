@@ -1172,8 +1172,10 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
     Its checkout has no `ref`, so it gets the default branch. It uses the `factory` environment.
     On this event the run's ref is `main`, and a job like it would get that environment's
     secrets for any PR. The admin's note for #68: the reviewer should use its own environment.
-    #103's results were recorded and #103 closed on 12 Nov. **#227 deletes the file**, or
-    rewrites it as #68's reviewer, before `CONSTRAINTS.md` Exceptions row E1 expires on 12 Dec.
+    #103's results were recorded and #103 closed on 12 Nov. **Removed 12 Nov, #227:** the file
+    is deleted, not rewritten (#68's reviewer is its own `review.yml`), with Exceptions row E1
+    and `ci-check.sh`'s 103 target. The third `pull_request_target` user is gone; the labeler and
+    #68's reviewer are the only two.
 
 **Alternatives considered.**
 - **Go public now**, for free scanning from M2. Rejected by the admin (Q1): the repo stays
