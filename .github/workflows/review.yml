@@ -21,23 +21,29 @@ name: review
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # labeled: adding review:admin after an approval re-runs the review, which then holds it
+    # (ADR-0002, test (e)). Other labels are filtered out by the job's `if:`.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     branches: [main]
 
 permissions: {}
 
-concurrency:
-  group: review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
     name: review
-    # No drafts, no forks' branches, and not Dependabot's PRs (code-owned, so the admin's).
+    # No drafts, no forks' branches, and not Dependabot's PRs (code-owned, so the admin's). Of
+    # the labeled events, only review:admin added by someone other than this App: the label the
+    # review adds itself starts no second run, so it can't loop.
     if: >-
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.user.login != 'dependabot[bot]'
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      (github.event.action != 'labeled' || (github.event.label.name == 'review:admin' &&
+      github.event.sender.login != 'sunny-reviewer[bot]'))
+    # On the job, not the workflow, so a filtered-out labeled event never cancels a review.
+    concurrency:
+      group: review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: review
@@ -47,7 +53,6 @@ jobs:
       issues: read # the issues the PR links
     env:
       PR: ${{ github.event.pull_request.number }}
-      CTX: ${{ runner.temp }}/review-context
       ANTHROPIC_API_KEY: '' # never an API key: the setup-token is the only credential
       FACTORY_APP: sunny-factory # the factory App's slug (ADR-0002, "The factory's identity")
       THREADS_QUERY: >-
@@ -69,6 +74,8 @@ jobs:
         run: |
           set -euo pipefail
           echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
+          CTX=$RUNNER_TEMP/review-context # `runner` isn't allowed in a job's env
+          echo "CTX=$CTX" >>"$GITHUB_ENV"
           mkdir -p "$CTX"
           r="repos/$GITHUB_REPOSITORY"
           gh api "$r/pulls/$PR" --jq '{number, title, body, author: .user.login, base: .base.ref,

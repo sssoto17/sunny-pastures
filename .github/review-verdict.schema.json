@@ -24,7 +24,7 @@
 		"escalation_rows": {
 			"type": "array",
 			"description": "Names of the CONSTRAINTS.md escalation rows the PR meets; empty when none",
-			"items": { "type": "string" }
+			"items": { "type": "string", "minLength": 1 }
 		},
 		"escalation_path": {
 			"type": "string",

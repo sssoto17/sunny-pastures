@@ -499,9 +499,11 @@ repo's branches. The pattern is *propose, then apply*: Claude proposes and plain
   than the admin resolved, resolves only the App's own fixed finding threads, adds the label and
   the escalation thread, requests the admin's review on factory PRs, and dismisses its own
   Request changes once an escalated PR is fixed.
+- **`labeled`:** adding `review:admin` re-runs the review, which dismisses the App's earlier
+  approval and posts a COMMENT (test (e)); a later COMMENT alone wouldn't replace an APPROVE. The job skips every other label, and the label the App adds itself
+  (`sender` is `sunny-reviewer[bot]`), so it can't loop. Its concurrency group is on the job, so
+  a skipped event doesn't cancel a running review.
 - **Not yet:** the bot doesn't turn on auto-merge (step 3 of the flow) until Q16 allows it.
-  It doesn't run on `labeled`, so a `review:admin` added after an approval doesn't dismiss it
-  (test (e)). Both are left to the admin's steps after this PR.
 - **Alternatives considered.** Claude writing to GitHub itself with the App's token, through
   `gh` or the action's comment tools: rejected, because the model that reads the PR's text would
   then hold a token that can approve. A Bash allow-list (`gh pr view:*` and the like): rejected,
