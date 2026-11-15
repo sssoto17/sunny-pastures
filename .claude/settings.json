@@ -184,5 +184,8 @@
 				]
 			}
 		]
+	},
+	"env": {
+		"GH_TELEMETRY": "false"
 	}
 }
