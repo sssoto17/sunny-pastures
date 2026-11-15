@@ -2302,12 +2302,14 @@ describe("floor guard, end to end", () => {
 	// way GitHub renders it.
 	describe("Markdown read as GitHub renders it (#132)", () => {
 		const OK_ROW = row("E1", "packages/sim/src/a.ts", "2026-11-30", "silenced-checker");
+		// Each edit must change the fixture, so a replace() that stops matching fails here instead of
+		// passing on the unedited file.
 		const run = (edit) => {
+			const base = withException(OK_ROW);
+			const edited = edit(base);
+			expect(edited).not.toBe(base);
 			setup();
-			repo.write({
-				"packages/sim/src/a.ts": "// @ts-ignore\n",
-				"CONSTRAINTS.md": edit(withException(OK_ROW)),
-			});
+			repo.write({ "packages/sim/src/a.ts": "// @ts-ignore\n", "CONSTRAINTS.md": edited });
 			return guard().out;
 		};
 
@@ -2325,6 +2327,21 @@ describe("floor guard, end to end", () => {
 				(t) =>
 					t.replace("| ID |", "<details><summary>Notes</summary>Old rows.</details>\n\n| ID |"),
 			],
+			// Void elements never stay open, and the end of a paragraph closes an inline element
+			// (review of #259).
+			["an inline <span> left open", (t) => t.replace("| ID |", "Old rows: <span>none.\n\n| ID |")],
+			["an <hr> and a <br/>", (t) => t.replace("| ID |", "<hr>\n\nOld rows: none.<br/>\n\n| ID |")],
+			// HTML inside a list item, block quote or table cell closes with it (review of #265).
+			["a <details> in a list item", (t) => t.replace("| ID |", "- <details>\n\n| ID |")],
+			["a <details> in a block quote", (t) => t.replace("| ID |", "> <details>\n\n| ID |")],
+			[
+				"a <details> in a table cell",
+				(t) =>
+					t.replace(
+						"## Exceptions\n",
+						"| a | b |\n|---|---|\n| <details> | x |\n\n## Exceptions\n",
+					),
+			],
 		])("waives with the Exceptions table right after %s", (_, edit) => {
 			expect(run(edit)).toContain("waived by E1");
 		});
@@ -2339,9 +2356,42 @@ describe("floor guard, end to end", () => {
 				(t) =>
 					t.replace("| ID |", "<details>\n\n| ID |").replace(OK_ROW, `${OK_ROW}\n\n</details>`),
 			],
+			// Review of #259: HTML ignores the slash on `<details/>`, a `<details>` above the heading
+			// holds the whole section, and inline HTML opens an element as a block does.
+			["a self-closed <details/>", (t) => t.replace("| ID |", "<details/>\n\n| ID |")],
+			[
+				"a <details> above the heading",
+				(t) => t.replace("## Exceptions\n", "<details>\n\n## Exceptions\n"),
+			],
+			["an inline <details>", (t) => t.replace("| ID |", "Old rows: <details>\n\n| ID |")],
+			// A closing tag inside a comment closes nothing (review of #265).
+			[
+				"a </details> only in a comment",
+				(t) => t.replace("| ID |", "<details>\n<!-- </details> -->\n\n| ID |"),
+			],
+			// A `<!--` inside an attribute opens no comment (review of #265).
+			[
+				"a <details> whose attribute holds <!--",
+				(t) => t.replace("| ID |", '<details title="<!--">\n\n| ID |'),
+			],
+			[
+				"an inline <details> whose attribute holds <!--",
+				(t) => t.replace("| ID |", 'Old rows: <details title="<!--">\n\n| ID |'),
+			],
 		])("does not waive with %s", (_, edit) => {
 			const out = run(edit);
 			expect(out).toContain("[silenced-checker] packages/sim/src/a.ts");
+			expect(out).not.toContain("waived by");
+		});
+
+		// Known misses (admin, 15 Nov: the last fix round on the HTML reading). The browser reads
+		// `<![CDATA[` and `<?` outside SVG or MathML as a comment up to the first `>`, so a
+		// `</details>` there closes nothing; the guard counts it and the table waives.
+		it.fails.each([
+			["a </details> in a CDATA section", "<![CDATA[ </details> ]]>"],
+			["a </details> in a processing instruction", "<? </details> ?>"],
+		])("does not waive with %s (known miss)", (_, hidden) => {
+			const out = run((t) => t.replace("| ID |", `<details>\n${hidden}\n\n| ID |`));
 			expect(out).not.toContain("waived by");
 		});
 

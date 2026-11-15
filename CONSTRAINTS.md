@@ -191,7 +191,8 @@ Every tool named here (ESLint, Vitest and its v8 coverage, fast-check, Fallow, S
 gitleaks, Lighthouse CI, axe-core and any browser-test tool) needs the admin's approval and an
 exact pinned version (`AGENTS.md`). So do the tools of the code style (ADR-0005, #125):
 `eslint-plugin-check-file`, `prettier`, `@ianvs/prettier-plugin-sort-imports` and
-`@vitest/eslint-plugin`. `minimumReleaseAge` in `pnpm-workspace.yaml` covers npm
+`@vitest/eslint-plugin`. So does the floor guard's Markdown parser (#132): `micromark` and
+`micromark-extension-gfm`. `minimumReleaseAge` in `pnpm-workspace.yaml` covers npm
 packages only. For binaries, container images and GitHub Actions, the 7-day rule is checked by
 hand, and Actions are pinned by commit SHA. `vitest bench` is built into Vitest, so the benchmark
 adds nothing.
@@ -375,11 +376,14 @@ What a row must hold, checked by the floor guard (#99):
 The guard reads this file with a Markdown parser, micromark with GFM, which follows CommonMark and
 GFM for the cases above. Its own line parser, frozen from 9 Nov, was replaced by the follow-up for
 a real Markdown parser, #132 (admin, 9 Nov). A known miss remains: an ID reused after its row was
-removed in an earlier PR isn't caught, because the guard sees only the PR's own diff.
+removed in an earlier PR isn't caught, because the guard sees only the PR's own diff. Nor is a
+closing tag inside `<![CDATA[ … ]]>` or `<? … ?>`: the browser reads both as a comment, but the
+guard counts the tag, so an element it seems to close still holds the table, which still waives.
 
-Since #132, a table inside an element an HTML block left open, such as `<details>` followed by a
-blank line, waives nothing, and a level-2 Exceptions heading inside a block quote or a list item
-counts as a second one.
+Since #132, a table inside an element that HTML above it left open waives nothing: a `<details>`
+(or `<details/>`) followed by a blank line, anywhere above the table, even above the heading or
+inside a paragraph. A level-2 Exceptions heading inside a block quote or a list item counts as a
+second one.
 
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
