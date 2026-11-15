@@ -1,9 +1,9 @@
 # shellcheck shell=bash
-# The type label -> GitHub native issue type mapping, sourced by new-issue.sh,
-# backfill-issue-types.sh and the tests: the scripts' copy of the Types table in
-# docs/agents/triage-labels.md, so keep the two the same. The admin set it on 15 Nov 2026 (#266).
-# Tests: scripts/new-issue.test.sh and
-# scripts/backfill-issue-types.test.sh.
+# The type label -> GitHub native issue type mapping, sourced by new-issue.sh and
+# backfill-issue-types.sh: the scripts' copy of the Types table in docs/agents/triage-labels.md,
+# so keep the two the same. The admin set it on 15 Nov 2026 (#266). Callers bring bash 4.4+ and
+# set -euo pipefail; nothing here exits.
+# Tests: scripts/new-issue.test.sh, scripts/backfill-issue-types.test.sh.
 
 # The type labels, in the order the docs list them.
 # shellcheck disable=SC2034 # read by new-issue.sh
