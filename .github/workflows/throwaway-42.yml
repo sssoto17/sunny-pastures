@@ -1,0 +1,96 @@
+# Throwaway evidence for #42, on a PR that is closed unmerged. Never merged.
+# 1. osv-scanner on fixture lockfiles: does it see a vulnerable dev dependency in pnpm 12's
+#    two-document lockfile (D3)?
+# 2. Which OWASP Top 10 edition the rules in p/owasp-top-ten are tagged with (spec Open question 3).
+# 3. gitleaks --redact on a fake token generated at run time in a temporary repo: the log shows
+#    the rule and location, not the value. Nothing secret-shaped is committed.
+name: throwaway-42
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  osv:
+    name: throwaway / osv-scanner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      OSV_VERSION: 2.7.0
+      OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install osv-scanner
+        run: |
+          dir="$RUNNER_TEMP/osv"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "$OSV_SHA256  $dir/osv-scanner" | sha256sum --check --strict
+          chmod +x "$dir/osv-scanner"
+          "$dir/osv-scanner" --version
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: Two documents (pnpm 12, as this repo writes it), lodash 4.17.20 in the second
+        run: |
+          grep -c '^---' .throwaway/two-documents/pnpm-lock.yaml
+          osv-scanner scan source --lockfile=.throwaway/two-documents/pnpm-lock.yaml && code=0 || code=$?
+          echo "exit code: $code"
+      - name: One document (control), the same lodash 4.17.20
+        run: |
+          osv-scanner scan source --lockfile=.throwaway/one-document/pnpm-lock.yaml && code=0 || code=$?
+          echo "exit code: $code"
+      - name: The repo's real pnpm-lock.yaml
+        run: |
+          osv-scanner scan source --lockfile=pnpm-lock.yaml && code=0 || code=$?
+          echo "exit code: $code"
+
+  owasp:
+    name: throwaway / owasp-edition
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: OWASP categories tagged in p/owasp-top-ten and p/default
+        run: |
+          for pack in owasp-top-ten default; do
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/$pack.yml" "https://semgrep.dev/c/p/$pack"
+            echo "== p/$pack: $(grep -c -E '^ *- id:|^  id:' "$RUNNER_TEMP/$pack.yml") rule ids"
+            grep -o -E 'A[0-9]{2}:20[0-9]{2}' "$RUNNER_TEMP/$pack.yml" | sort | uniq -c
+            echo "-- by edition"
+            grep -o -E 'A[0-9]{2}:20[0-9]{2}' "$RUNNER_TEMP/$pack.yml" | cut -d: -f2 | sort | uniq -c
+          done
+
+  redact:
+    name: throwaway / gitleaks-redact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - name: Install gitleaks
+        run: |
+          dir="$RUNNER_TEMP/gitleaks"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $dir/$archive" | sha256sum --check --strict
+          tar -xzf "$dir/$archive" -C "$dir" gitleaks
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: A fake token in a temporary repo, scanned with the guard's command
+        run: |
+          repo="$RUNNER_TEMP/leaky"
+          git init -q -b main "$repo"
+          cd "$repo"
+          git -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m base
+          # Random, never a real credential, and never printed: only gitleaks sees it.
+          python3 -c 'import secrets,string;a=string.ascii_letters+string.digits;print("token = \"ghp_"+"".join(secrets.choice(a) for _ in range(36))+"\"")' > config.py
+          git add config.py
+          git -c user.name=t -c user.email=t@example.invalid commit -q -m leak
+          gitleaks git --redact --no-banner --verbose --log-opts="main~1..main" . && code=0 || code=$?
+          echo "exit code: $code (1 means a finding)"
+          test "$code" = 1
