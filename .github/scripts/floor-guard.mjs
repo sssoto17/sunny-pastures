@@ -539,15 +539,21 @@ const blockTree = (text) => {
 };
 // HTML elements that have no closing tag, so they never hold what follows them.
 const VOID = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i;
-// The tags in an HTML block, in order: +1 for an element it opens, -1 for one it closes.
-const tagsOf = (block) =>
-	[...block.matchAll(/<(\/?)([A-Za-z][\w-]*)(?:\s[^>]*?)?(\/?)>/g)]
-		.filter((m) => !VOID.test(m[2]) && !m[3])
+// The tags in a piece of HTML, in order: +1 for an element it opens, -1 for one it closes. HTML
+// ignores a self-closing slash on any other element, so `<details/>` opens one too (review, #259).
+// Inline HTML counts only block elements (CommonMark's HTML block type 6): the end of its
+// paragraph closes an inline one such as `<span>`, but not `<details>` (HTML parsing, "in body").
+const BLOCK =
+	/^(address|article|aside|blockquote|body|caption|center|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frameset|h[1-6]|head|header|html|iframe|legend|li|main|menu|nav|noframes|ol|optgroup|option|p|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|ul)$/i;
+const tagsOf = (block, inline = false) =>
+	[...block.matchAll(/<(\/?)([A-Za-z][\w-]*)(?:\s[^>]*?)?\/?>/g)]
+		.filter((m) => !VOID.test(m[2]) && (!inline || BLOCK.test(m[2])))
 		.map((m) => ({ name: m[2].toLowerCase(), step: m[1] ? -1 : 1 }));
-// Whether an element is still open at `line`, after the HTML blocks of one section before it.
-const insideHtml = (html, sectionNo, line) => {
+// Whether an element is still open at `line`, after all the HTML above it: blocks and inline
+// HTML, in any section, so a `<details>` above the heading or inside a paragraph counts too.
+const insideHtml = (html, line) => {
 	const depth = new Map();
-	for (const h of html.filter((x) => x.sectionNo === sectionNo && x.line < line))
+	for (const h of html.filter((x) => x.line < line))
 		for (const t of h.tags) depth.set(t.name, Math.max(0, (depth.get(t.name) ?? 0) + t.step));
 	return [...depth.values()].some((d) => d > 0);
 };
@@ -564,8 +570,8 @@ export const parseRules = (lines) => {
 	// Every heading in order, so a caller can tell the first `## Exceptions` from a later one. A
 	// heading inside a list item or a block quote is `nested`: it starts no section.
 	const headings = [];
-	// The elements each HTML block opens and closes, by section: a table after an element left open,
-	// such as `<details>` and a blank line, renders inside it.
+	// The elements each piece of HTML opens and closes, block or inline: a table after an element
+	// left open, such as `<details>` and a blank line, renders inside it.
 	const html = [];
 	let section = "";
 	let sectionNo = 0;
@@ -646,7 +652,8 @@ export const parseRules = (lines) => {
 		}
 		close();
 	};
-	for (const n of blockTree(source).children) {
+	const tree = blockTree(source);
+	for (const n of tree.children) {
 		if (HEADINGS.has(n.type)) heading(n, false);
 		else if (n.type === "content")
 			rules.push(...n.children.filter((c) => !BETWEEN.has(c.type)).map((c) => ruleOf(c, "para")));
@@ -656,8 +663,18 @@ export const parseRules = (lines) => {
 		else if (n.type === "blockQuote" || n.type === "gfmFootnoteDefinition") {
 			rules.push(ruleOf(n, "para"));
 			nestedBlock(n, []);
-		} else if (n.type === "htmlFlow" && !/^\s*<!--/.test(text(n)))
-			html.push({ line: n.start.line, sectionNo, tags: tagsOf(text(n)) });
+		}
+	}
+	// Only HTML at the top level can stay open past its block: a list item, block quote, heading
+	// or table cell closes what was opened inside it. So the HTML blocks at the top level count, and
+	// the inline HTML of top-level paragraphs.
+	const inlineHtml = (n) =>
+		n.type === "htmlText" ? [n] : n.children.flatMap((c) => inlineHtml(c));
+	for (const n of tree.children) {
+		const found = n.type === "htmlFlow" ? [n] : n.type === "content" ? inlineHtml(n) : [];
+		for (const h of found)
+			if (!/^\s*<!--/.test(text(h)))
+				html.push({ line: h.start.line, tags: tagsOf(text(h), h.type === "htmlText") });
 	}
 	rules.headings = headings;
 	rules.html = html;
@@ -1552,7 +1569,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 		// Waivers come from one table only: the section's single table with exactly the Exceptions
 		// header, written at the left margin, rows included. A table in a list item, a second table
 		// with that header or a table with another header waives nothing (security review, #131). Nor
-		// does a table inside an element an HTML block left open, such as `<details>` (#132).
+		// does a table inside an element that HTML above it left open, such as `<details>` (#132).
 		const inSection = rules.filter((r) => r.kind === "row" && r.sectionNo === no);
 		const tables = [
 			...new Set(
@@ -1562,7 +1579,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 							r.headers.join("|") === EXCEPTIONS_HEADER &&
 							r.table.topLevel &&
 							/^\|/.test(r.table.text) &&
-							!insideHtml(rules.html, no, r.table.line),
+							!insideHtml(rules.html, r.table.line),
 					)
 					.map((r) => r.table),
 			),
