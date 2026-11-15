@@ -72,25 +72,32 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # the guard diffs against the merge base
-      # Node only, from a pinned action: the guard uses only Node and git. A local action such as
+      # Node from a pinned action, and pnpm through Corepack. A local action such as
       # ./.github/actions/setup is read from the PR's checkout, so a PR could change what runs here
       # before the base branch's guard starts (#99).
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
       # Run the base branch's guard, not the PR's, so a PR can't weaken the guard that judges it.
-      # The PR's own copy is used only while the base has no guard yet (the PR that adds it).
+      # It runs with its own dependencies, from the base branch too (#132: a Markdown parser): a
+      # worktree of the base outside the checkout, installed from the base's lockfile with every
+      # install script off. A PR can't swap what the guard imports, and the guard's diff of the
+      # checkout doesn't see the install. The PR's own copy is used only while the base has no guard
+      # yet (the PR that adds it).
       - name: Take the guard from the base branch
         run: |
-          dir="$RUNNER_TEMP/floor-guard"
-          mkdir -p "$dir"
-          if git cat-file -e "origin/$BASE_REF:.github/scripts/floor-guard.mjs" 2>/dev/null; then
-            for f in floor-guard.mjs diff.mjs; do
-              git show "origin/$BASE_REF:.github/scripts/$f" > "$dir/$f"
-            done
-            echo "Using the floor guard from origin/$BASE_REF"
-          else
-            cp .github/scripts/floor-guard.mjs .github/scripts/diff.mjs "$dir/"
+          ref="origin/$BASE_REF"
+          if ! git cat-file -e "$ref:.github/scripts/floor-guard.mjs" 2>/dev/null; then
+            ref=HEAD
             echo "::warning::origin/$BASE_REF has no floor guard yet; using this PR's copy"
           fi
-      - run: node "$RUNNER_TEMP/floor-guard/floor-guard.mjs" --base "origin/$BASE_REF"
+          git worktree add --detach "$RUNNER_TEMP/floor-guard" "$ref"
+          echo "Using the floor guard from $ref"
+      - name: Install the guard's dependencies from the base branch
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable
+          cd "$RUNNER_TEMP/floor-guard"
+          pnpm install --frozen-lockfile --ignore-scripts
+      - run: node "$RUNNER_TEMP/floor-guard/.github/scripts/floor-guard.mjs" --base "origin/$BASE_REF"
