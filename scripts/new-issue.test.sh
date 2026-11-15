@@ -303,6 +303,7 @@ done
 # repo with the mapping itself.
 mapped=$(bash -c '. "$1"; for l in "${TYPE_LABELS[@]}"; do native_type "$l"; done | sort -u' _ "$here/lib/issue-types.sh")
 listed=$(bash -c '. "$1"; printf "%s\n" "${NATIVE_TYPES[@]}" | sort' _ "$here/lib/issue-types.sh")
+# bad() prints the last run's args, code and output; this check runs nothing, so clear them.
 args=("lib") code="" out="" err="" calls=""
 assert "NATIVE_TYPES ($listed) is the set native_type maps to ($mapped)" test "$mapped" = "$listed"
 

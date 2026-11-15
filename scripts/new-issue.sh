@@ -56,8 +56,8 @@ exists: a bad one there leaves the issue created without fields, and the error p
 command to finish it.
 
 Exit codes: 0 done, 1 a write failed or the read-back differs (stderr says what exists),
-2 bad arguments or an unknown name (nothing created), 3 GitHub couldn't be read before the first
-write (nothing created).
+2 bad arguments, an unknown name, or the repo's issue types and the mapping disagree (nothing
+created), 3 GitHub couldn't be read before the first write (nothing created).
 
 example: scripts/new-issue.sh --title "Bench advance in CI" --type chore --area ci-cd \
            --milestone "M3 Actions persist end to end" --body-file .scratch/issue-bench.md --parent 58 \
