@@ -1,0 +1,2 @@
+# The one direct requirement; requirements.txt pins it and everything it needs.
+semgrep==1.184.0

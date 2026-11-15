@@ -1155,6 +1155,16 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
 - **Semgrep as the required check `guard / code-scan`: adopt with the CI/CD step (#42).** Like
   gitleaks, it needs an "Allowed actions" entry or a checksum-verified download, and so does
   osv-scanner if it's kept.
+  **Applied with #42:** the three scans are jobs in `.github/workflows/security.yml`, each
+  tool downloaded in a `run:` step and checked against a hash written in the repo, with no
+  third-party action. gitleaks is the v8.30.1 release archive, checked against its published
+  SHA-256. Semgrep is installed with `pip install --require-hashes --only-binary=:all:` from
+  `.github/semgrep/requirements.txt`, which pins Semgrep and every package it needs with their
+  hashes (the admin decided pip with hashes, 16 Nov; the version is approved in the PR).
+  **Known limit: the rule packs aren't pinned** (the admin's decision, 16 Nov). `p/default` and
+  `p/owasp-top-ten` download from the Semgrep registry on each run, so a rule-pack update can turn
+  `guard / code-scan` red with no code change. If that happens, read the rule diff, and consider
+  vendoring a snapshot of the packs then.
 - **Dependabot alerts: adopt now.** Free on private repos. No noise until there are dependencies.
   For npm dependencies, see the pnpm 12 limit above.
 - **Dependabot security updates: adopt at M2**, when `packages/sim` brings dev dependencies.
