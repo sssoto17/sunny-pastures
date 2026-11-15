@@ -213,10 +213,12 @@ pinned exactly (admin decision, 12 Nov). Its rules didn't change; only how it re
   reader gives the same rules and headings as the old one. The three misses are tests now.
 - *Two cases read as GitHub renders them.* A table inside an element that HTML above it left open
   (`<details>`, a blank line, the table) waives nothing: it renders inside the element. The guard
-  counts opening and closing tags from the top of the file, as the browser does: void elements
-  never stay open; a slash doesn't close any other (`<details/>` opens one); HTML inside a list
-  item, block quote, heading or table cell closes with it; and in a top-level paragraph only a
-  block element (`<details>`, not `<span>`) outlives the paragraph (review of #259). A level-2
+  counts opening and closing tags from the top of the file, never inside a comment. It follows the
+  browser where that matters and is stricter elsewhere on purpose, so it blocks more waivers, never
+  fewer: void elements never stay open; a slash doesn't close any other (`<details/>` opens one);
+  HTML inside a list item, block quote, heading or table cell closes with it; and in a top-level
+  paragraph a block element (`<details>`, not `<span>`) counts as open, even `<p>`, `<td>` or
+  `<summary>`, which the browser would close (reviews of #259 and #265). A level-2
   Exceptions heading inside a block quote or a list item counts as a second heading, and never as
   the first.
 - *Unchanged.* The wide expiry reader still reads raw lines, so a parser bug can't hide an expired

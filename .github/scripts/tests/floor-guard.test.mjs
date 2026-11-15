@@ -2331,6 +2331,17 @@ describe("floor guard, end to end", () => {
 			// (review of #259).
 			["an inline <span> left open", (t) => t.replace("| ID |", "Old rows: <span>none.\n\n| ID |")],
 			["an <hr> and a <br/>", (t) => t.replace("| ID |", "<hr>\n\nOld rows: none.<br/>\n\n| ID |")],
+			// HTML inside a list item, block quote or table cell closes with it (review of #265).
+			["a <details> in a list item", (t) => t.replace("| ID |", "- <details>\n\n| ID |")],
+			["a <details> in a block quote", (t) => t.replace("| ID |", "> <details>\n\n| ID |")],
+			[
+				"a <details> in a table cell",
+				(t) =>
+					t.replace(
+						"## Exceptions\n",
+						"| a | b |\n|---|---|\n| <details> | x |\n\n## Exceptions\n",
+					),
+			],
 		])("waives with the Exceptions table right after %s", (_, edit) => {
 			expect(run(edit)).toContain("waived by E1");
 		});
@@ -2353,6 +2364,11 @@ describe("floor guard, end to end", () => {
 				(t) => t.replace("## Exceptions\n", "<details>\n\n## Exceptions\n"),
 			],
 			["an inline <details>", (t) => t.replace("| ID |", "Old rows: <details>\n\n| ID |")],
+			// A closing tag inside a comment closes nothing (review of #265).
+			[
+				"a </details> only in a comment",
+				(t) => t.replace("| ID |", "<details>\n<!-- </details> -->\n\n| ID |"),
+			],
 		])("does not waive with %s", (_, edit) => {
 			const out = run(edit);
 			expect(out).toContain("[silenced-checker] packages/sim/src/a.ts");

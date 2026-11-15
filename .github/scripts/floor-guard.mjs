@@ -539,14 +539,21 @@ const blockTree = (text) => {
 };
 // HTML elements that have no closing tag, so they never hold what follows them.
 const VOID = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i;
-// The tags in a piece of HTML, in order: +1 for an element it opens, -1 for one it closes. HTML
-// ignores a self-closing slash on any other element, so `<details/>` opens one too (review, #259).
-// Inline HTML counts only block elements (CommonMark's HTML block type 6): the end of its
-// paragraph closes an inline one such as `<span>`, but not `<details>` (HTML parsing, "in body").
+// The tags in a piece of HTML, in order: +1 for an element it opens, -1 for one it closes. Tags in
+// a comment don't count, so `<!-- </details> -->` closes nothing (review of #265). HTML ignores a
+// self-closing slash on any other element, so `<details/>` opens one too (review, #259). Inline
+// HTML counts only block elements (CommonMark's HTML block type 6): the end of its paragraph
+// closes an inline one such as `<span>`. That's stricter than the browser on purpose: an inline
+// `<p>`, `<td>` or `<summary>` blocks a waiver though the table renders outside it. It blocks more
+// waivers, never fewer.
 const BLOCK =
 	/^(address|article|aside|blockquote|body|caption|center|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frameset|h[1-6]|head|header|html|iframe|legend|li|main|menu|nav|noframes|ol|optgroup|option|p|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|ul)$/i;
 const tagsOf = (block, inline = false) =>
-	[...block.matchAll(/<(\/?)([A-Za-z][\w-]*)(?:\s[^>]*?)?\/?>/g)]
+	[
+		...block
+			.replace(/<!--[\s\S]*?(?:-->|$)/g, " ")
+			.matchAll(/<(\/?)([A-Za-z][\w-]*)(?:\s[^>]*?)?\/?>/g),
+	]
 		.filter((m) => !VOID.test(m[2]) && (!inline || BLOCK.test(m[2])))
 		.map((m) => ({ name: m[2].toLowerCase(), step: m[1] ? -1 : 1 }));
 // Whether an element is still open at `line`, after all the HTML above it: blocks and inline
