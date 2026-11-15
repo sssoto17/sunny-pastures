@@ -2369,9 +2369,29 @@ describe("floor guard, end to end", () => {
 				"a </details> only in a comment",
 				(t) => t.replace("| ID |", "<details>\n<!-- </details> -->\n\n| ID |"),
 			],
+			// A `<!--` inside an attribute opens no comment (review of #265).
+			[
+				"a <details> whose attribute holds <!--",
+				(t) => t.replace("| ID |", '<details title="<!--">\n\n| ID |'),
+			],
+			[
+				"an inline <details> whose attribute holds <!--",
+				(t) => t.replace("| ID |", 'Old rows: <details title="<!--">\n\n| ID |'),
+			],
 		])("does not waive with %s", (_, edit) => {
 			const out = run(edit);
 			expect(out).toContain("[silenced-checker] packages/sim/src/a.ts");
+			expect(out).not.toContain("waived by");
+		});
+
+		// Known misses (admin, 15 Nov: the last fix round on the HTML reading). The browser reads
+		// `<![CDATA[` and `<?` outside SVG or MathML as a comment up to the first `>`, so a
+		// `</details>` there closes nothing; the guard counts it and the table waives.
+		it.fails.each([
+			["a </details> in a CDATA section", "<![CDATA[ </details> ]]>"],
+			["a </details> in a processing instruction", "<? </details> ?>"],
+		])("does not waive with %s (known miss)", (_, hidden) => {
+			const out = run((t) => t.replace("| ID |", `<details>\n${hidden}\n\n| ID |`));
 			expect(out).not.toContain("waived by");
 		});
 

@@ -549,12 +549,10 @@ const VOID = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track
 const BLOCK =
 	/^(address|article|aside|blockquote|body|caption|center|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frameset|h[1-6]|head|header|html|iframe|legend|li|main|menu|nav|noframes|ol|optgroup|option|p|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|ul)$/i;
 const tagsOf = (block, inline = false) =>
-	[
-		...block
-			.replace(/<!--[\s\S]*?(?:-->|$)/g, " ")
-			.matchAll(/<(\/?)([A-Za-z][\w-]*)(?:\s[^>]*?)?\/?>/g),
-	]
-		.filter((m) => !VOID.test(m[2]) && (!inline || BLOCK.test(m[2])))
+	// One scan finds comments and tags together, so a tag that starts before a `<!--` (in an
+	// attribute, `<details title="<!--">`) is still a tag (review of #265).
+	[...block.matchAll(/<!--[\s\S]*?(?:-->|$)|<(\/?)([A-Za-z][\w-]*)(?:\s[^>]*?)?\/?>/g)]
+		.filter((m) => m[2] && !VOID.test(m[2]) && (!inline || BLOCK.test(m[2])))
 		.map((m) => ({ name: m[2].toLowerCase(), step: m[1] ? -1 : 1 }));
 // Whether an element is still open at `line`, after all the HTML above it: blocks and inline
 // HTML, in any section, so a `<details>` above the heading or inside a paragraph counts too.

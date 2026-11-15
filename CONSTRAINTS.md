@@ -376,7 +376,9 @@ What a row must hold, checked by the floor guard (#99):
 The guard reads this file with a Markdown parser, micromark with GFM, which follows CommonMark and
 GFM for the cases above. Its own line parser, frozen from 9 Nov, was replaced by the follow-up for
 a real Markdown parser, #132 (admin, 9 Nov). A known miss remains: an ID reused after its row was
-removed in an earlier PR isn't caught, because the guard sees only the PR's own diff.
+removed in an earlier PR isn't caught, because the guard sees only the PR's own diff. Nor is a
+closing tag inside `<![CDATA[ … ]]>` or `<? … ?>`: the browser reads both as a comment, but the
+guard counts the tag, so an element it seems to close still holds the table, which still waives.
 
 Since #132, a table inside an element that HTML above it left open waives nothing: a `<details>`
 (or `<details/>`) followed by a blank line, anywhere above the table, even above the heading or
