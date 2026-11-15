@@ -61,6 +61,8 @@ jobs:
             grep -o -E 'A[0-9]{2}:20[0-9]{2}' "$RUNNER_TEMP/$pack.yml" | sort | uniq -c
             echo "-- by edition"
             grep -o -E 'A[0-9]{2}:20[0-9]{2}' "$RUNNER_TEMP/$pack.yml" | cut -d: -f2 | sort | uniq -c
+            echo "-- rule severities"
+            grep -o -E '^ *severity: *[A-Z]+' "$RUNNER_TEMP/$pack.yml" | tr -d ' ' | sort | uniq -c
           done
 
   redact:
