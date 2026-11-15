@@ -1152,6 +1152,16 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
   source isn't named in its help text (not verified). **osv-scanner** stays only if #42 proves it
   reads the lockfile's second document, which holds the dependencies. The first holds only pnpm
   itself.
+  **Shown in #42 (throwaway PR #276, closed unmerged, 15 Nov): osv-scanner v2.7.0 reads both
+  documents.** On a fixture in pnpm 12's two-document format, with `lodash@4.17.20` as a dev
+  dependency in the second document, it found 16 packages and failed on lodash's four advisories
+  (2 High, 2 Medium), the same as on a one-document control. On the real `pnpm-lock.yaml` it found
+  264 packages and the one Medium advisory `pnpm audit` also reports (minimatch,
+  GHSA-g3hv-75wg-m249). `pnpm audit` takes its advisories from GitHub's database (its report links
+  to `github.com/advisories`). So osv-scanner qualifies under D3, but it isn't a check yet: it fails
+  on any severity and has no flag to set a threshold, so as a plain step it would turn red on
+  `main` today. Its check name, threshold and `CONSTRAINTS.md` row are a follow-up (the admin's
+  decision, 15 Nov).
 - **Semgrep as the required check `guard / code-scan`: adopt with the CI/CD step (#42).** Like
   gitleaks, it needs an "Allowed actions" entry or a checksum-verified download, and so does
   osv-scanner if it's kept.
