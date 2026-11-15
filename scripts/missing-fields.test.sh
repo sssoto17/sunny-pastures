@@ -46,7 +46,7 @@ row() { # number type labels priority size week title
   local r="$*"
   printf '%s\n' "${r//|/$US}"
 }
-ok_row() { row "$1" Task 'chore|area:tools' P2 S "Wk 2 · 9–15 Nov" "$2"; }
+ok_row() { row "$1" Chore 'chore|area:tools' P2 S "Wk 2 · 9–15 Nov" "$2"; }
 reset() { # rows -> a fresh state serving them
   rm -f "$work"/calls "$work"/rows "$work"/fail-api "$work"/page.json
   printf '%s' "$*" >"$work/rows"
@@ -91,7 +91,7 @@ assert "expected one paginated graphql call" test "$(head -3 <<<"$calls" | tr '\
 
 # --- each missing field is named; triage expected while one is -------------------------------
 reset "$(row 10 - 'chore|triage' P2 S "Wk 2" 'No type')
-$(row 11 Task 'chore|triage' - S "Wk 2" 'No priority')
+$(row 11 Chore 'chore|triage' - S "Wk 2" 'No priority')
 $(row 12 Bug 'bug|triage' P1 - "Wk 2" 'No size')
 $(row 13 Feature 'feature|triage' P1 M - 'No week')
 $(row 14 - 'chore' - - - 'Nothing, no triage')
@@ -107,15 +107,15 @@ expect_err "5 open issues to fix"
 
 # --- triage on an issue with all four set ----------------------------------------------------
 # A label that only contains "triage" doesn't count.
-reset "$(row 20 Task 'chore|triage' P2 S "Wk 2" 'Done but triaged')
-$(row 21 Task 'chore|needs-triage' P2 S "Wk 2" 'Other label')"
+reset "$(row 20 Chore 'chore|triage' P2 S "Wk 2" 'Done but triaged')
+$(row 21 Chore 'chore|needs-triage' P2 S "Wk 2" 'Other label')"
 case_
 expect_code 1
 expect_out_is "#20${T}triage, though its fields are set${T}Done but triaged"
 expect_err "1 open issue to fix"
 
 # --- workstream parents need all four too (Issue fields, "No exceptions") -----------------------
-reset "$(row 73 Task 'chore|area:tools' P1 - - 'Agent workflow')"
+reset "$(row 73 Chore 'chore|area:tools' P1 - - 'Agent workflow')"
 case_
 expect_code 1
 expect_out_is "#73${T}missing: Size, Week; no triage${T}Agent workflow"
@@ -129,7 +129,7 @@ expect_out_is ""
 expect_err "could not read the open issues"
 expect_err "HTTP 502"
 
-reset "x28${T}Task${T}chore${T}P2${T}S${T}W${T}Bad number"
+reset "x28${T}Chore${T}chore${T}P2${T}S${T}W${T}Bad number"
 case_
 expect_code 3
 expect_out_is ""
@@ -148,7 +148,7 @@ else
   reset ""
   cat >"$work/page.json" <<'JSON'
 {"data": {"repository": {"issues": {"pageInfo": {"hasNextPage": false, "endCursor": "x"}, "nodes": [
-  {"number": 40, "title": "All set", "issueType": {"name": "Task"},
+  {"number": 40, "title": "All set", "issueType": {"name": "Chore"},
    "labels": {"nodes": [{"name": "chore"}]},
    "projectItems": {"nodes": [{"project": {"url": "https://github.com/users/sssoto17/projects/3"},
      "fieldValues": {"nodes": [{}, {"name": "P2", "field": {"name": "Priority"}},
