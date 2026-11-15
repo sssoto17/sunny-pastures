@@ -72,7 +72,8 @@ row() { # number kind type labels
 }
 reset() { # rows... -> a fresh state serving those rows
   rm -f "$work"/calls "$work"/rows "$work"/set "$work"/fail-* "$work"/readback.* "$work"/page.json
-  printf 'IT_task%sTask\nIT_bug%sBug\nIT_feature%sFeature\n' "$T" "$T" "$T" >"$work/types"
+  printf 'IT_chore%sChore\nIT_bug%sBug\nIT_feature%sFeature\nIT_design%sDesign\n' "$T" "$T" "$T" "$T" \
+    >"$work/types"
   printf '%s' "$*" >"$work/rows"
 }
 
@@ -125,66 +126,80 @@ for bad_args in "--help:0" "-h:0" "--force:2" "28:2" "--apply --dry-run:2"; do
 done
 
 # --- the dry run is the default and writes nothing ----------------------------------------------
-# Every type label maps (triage-labels.md, Types), and the list is in ascending issue order.
-want="#1${T}idea${T}Task
+# Every type label maps (triage-labels.md, Types; #266), and the list is in ascending issue order.
+want="#1${T}idea${T}Chore
 #28${T}bug${T}Bug
-#33${T}design${T}Task
-#41${T}chore${T}Task
-#102${T}spike${T}Task
+#33${T}design${T}Design
+#41${T}chore${T}Chore
+#102${T}spike${T}Chore
 #154${T}feature${T}Feature"
 for mode in "" --dry-run; do
   reset "$mixed"
   if [[ -n $mode ]]; then case_ "$mode"; else case_; fi
   expect_code 0
   expect_out_is "$want"
-  expect_err "dry run: would set 6, skipped 0, already typed 0. Run with --apply to write."
+  expect_err "dry run: would set 6, skipped 0, already right 0. Run with --apply to write."
   expect_no_writes
 done
 expect_call "api -X GET repos/sssoto17/sunny-pastures/issues -f state=open -f per_page=100 --paginate --jq"
 
-# --- skipped, already typed and PRs -------------------------------------------------------------
+# --- skipped, already right, re-typed and PRs ---------------------------------------------------
+# A type that doesn't follow the label is set again (issue-tracker.md, "Issue fields"): the design
+# issues moved from Chore to Design (#266). A typed issue without one type label is left alone.
 reset "$(row 10 issue - 'area:docs')
 $(row 11 issue - 'bug|chore|area:db')
-$(row 12 issue Task 'chore')
+$(row 12 issue Chore 'chore')
 $(row 13 issue Bug 'feature')
 $(row 14 pr - 'chore')
 $(row 15 issue - '-')
-$(row 16 issue - 'chore|area:ideas')"
+$(row 16 issue - 'chore|area:ideas')
+$(row 17 issue Chore 'design|area:docs')
+$(row 18 issue Feature 'area:docs')
+$(row 19 issue Bug 'bug|chore')"
 case_
 expect_code 0
 expect_out_is "#10${T}skip: no type label
 #11${T}skip: 2 type labels (bug, chore)
+#13${T}feature${T}Bug -> Feature
 #15${T}skip: no type label
-#16${T}chore${T}Task"
-expect_err "would set 1, skipped 3, already typed 2"
-expect_err "scripts/issue-fields.sh <n> --type <Task|Bug|Feature>"
+#16${T}chore${T}Chore
+#17${T}design${T}Chore -> Design"
+expect_err "would set 3, skipped 3, already right 1, typed without one type label 2"
+expect_err "scripts/issue-fields.sh <n> --type <Chore|Bug|Feature|Design>"
+expect_no_writes
+
+reset "$(row 17 issue Chore 'design|area:docs')"
+case_ --apply
+expect_code 0
+expect_out_is "#17${T}design${T}Chore -> Design${T}set"
+expect_call "-f issue=I_17 -f type=IT_design"
 
 # --- apply: writes each by id, reads each back --------------------------------------------------
 reset "$mixed"
 case_ --apply
 expect_code 0
-expect_out_is "#1${T}idea${T}Task${T}set
+expect_out_is "#1${T}idea${T}Chore${T}set
 #28${T}bug${T}Bug${T}set
-#33${T}design${T}Task${T}set
-#41${T}chore${T}Task${T}set
-#102${T}spike${T}Task${T}set
+#33${T}design${T}Design${T}set
+#41${T}chore${T}Chore${T}set
+#102${T}spike${T}Chore${T}set
 #154${T}feature${T}Feature${T}set"
-expect_err "set 6, failed 0, skipped 0, already typed 0"
+expect_err "set 6, failed 0, skipped 0, already right 0"
 expect_call "-f issue=I_154 -f type=IT_feature"
 expect_call "api repos/sssoto17/sunny-pastures/issues/41 --jq .type.name // \"-\""
 
 # A failed write and a read-back that differs are listed; the rest still run.
 reset "$mixed"
 touch "$work/fail-set.I_28"
-echo Task >"$work/readback.154"
+echo Chore >"$work/readback.154"
 case_ --apply
 expect_code 1
-expect_out_is "#1${T}idea${T}Task${T}set
-#33${T}design${T}Task${T}set
-#41${T}chore${T}Task${T}set
-#102${T}spike${T}Task${T}set"
+expect_out_is "#1${T}idea${T}Chore${T}set
+#33${T}design${T}Design${T}set
+#41${T}chore${T}Chore${T}set
+#102${T}spike${T}Chore${T}set"
 expect_err "#28: the write failed"
-expect_err "#154: the read-back shows Task, expected Feature"
+expect_err "#154: the read-back shows Chore, expected Feature"
 expect_err "set 4, failed 2"
 
 # --- reads that fail write nothing ---------------------------------------------------------------
@@ -195,11 +210,14 @@ expect_code 3
 expect_err "could not read the repo's issue types; nothing was written"
 expect_no_writes
 
+# The repo's types and the mapping must agree, so a rename stops the run before it lists (#266).
 reset "$mixed"
-printf 'IT_task%sTask\nIT_bug%sBug\n' "$T" "$T" >"$work/types"
+printf 'IT_task%sTask\nIT_bug%sBug\nIT_feature%sFeature\nIT_design%sDesign\n' "$T" "$T" "$T" "$T" >"$work/types"
 case_ --apply
 expect_code 3
-expect_err 'the repo offers no "Feature" issue type; nothing was written'
+expect_out_is ""
+expect_err "the repo's issue types (Task, Bug, Feature, Design) and the mapping in scripts/lib/issue-types.sh (Feature, Bug, Design, Chore) disagree: the repo offers no Chore; nothing maps to Task;"
+expect_err "nothing was written"
 expect_no_writes
 
 reset "$mixed"
@@ -229,17 +247,17 @@ else
 [
   {"number": 120, "node_id": "PR_1", "pull_request": {"url": "x"}, "labels": [], "type": null},
   {"number": 28, "node_id": "I_28", "type": null, "labels": [{"name": "bug"}, {"name": "area:db"}]},
-  {"number": 33, "node_id": "I_33", "type": {"id": 7, "name": "Task"}, "labels": [{"name": "design"}]},
+  {"number": 33, "node_id": "I_33", "type": {"id": 7, "name": "Design"}, "labels": [{"name": "design"}]},
   {"number": 5, "node_id": "I_5", "labels": [{"name": "x,chore"}, {"name": "idea"}]},
   {"number": 6, "node_id": "I_6", "type": null, "labels": []}
 ]
 JSON
   run
   expect_code 0
-  expect_out_is "#5${T}idea${T}Task
+  expect_out_is "#5${T}idea${T}Chore
 #6${T}skip: no type label
 #28${T}bug${T}Bug"
-  expect_err "would set 2, skipped 1, already typed 1"
+  expect_err "would set 2, skipped 1, already right 1"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"

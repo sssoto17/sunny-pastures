@@ -23,8 +23,9 @@ usage: scripts/issue-fields.sh <issue> [--type NAME] [--track NAME] [--mode NAME
 
 Adds the issue to the Sunny Pastures Project if it's missing, sets the named fields, then prints
 the fields as GitHub stored them. Names ignore case; --week takes "Wk 2" or the full title.
-Each flag also takes the form --size=M. --type sets GitHub's native issue type (Task, Bug,
-Feature), not the type label.
+Each flag also takes the form --size=M. --type sets GitHub's native issue type (Chore, Bug,
+Feature, Design), not the type label. It follows the label: feature -> Feature, bug -> Bug,
+design -> Design, and spike, chore, idea -> Chore (scripts/lib/issue-types.sh).
 
 Triage: once the native type, Priority, Size and Week are all set, a `triage` label is removed
 and the "Triage:" line says so. While one is missing, `triage` is left as it is and the line
@@ -40,7 +41,7 @@ value it set, or if `triage` is still on once all four are set.
 Exit codes: 0 done, 1 a gh call failed or the read-back differs, 2 bad arguments or an unknown
 name (nothing changed).
 
-example: scripts/issue-fields.sh 47 --type Task --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
+example: scripts/issue-fields.sh 47 --type Chore --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
 EOF
 }
 

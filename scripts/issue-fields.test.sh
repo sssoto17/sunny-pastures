@@ -128,7 +128,7 @@ Track PVTSSF_track select 60e95dc9=Build,df832856=Design,d064f0c0=Report,3200c1d
 Size PVTSSF_size select 7a7f9f73=S,e0e2efb6=M,c7dede81=L
 Week PVTIF_week iteration 7f9c9b7a=Wk 2 · 9–15 Nov,b40f9349=Wk 3 · 16–22 Nov,f9409a73=Wk 1 · 2–8 Nov
 Priority PVTSSF_priority select 598fd74b=P0,ad39d061=P1,a38a49d8=P2,cad16246=P3
-Type - type IT_task=Task,IT_bug=Bug,IT_feature=Feature
+Type - type IT_chore=Chore,IT_bug=Bug,IT_feature=Feature,IT_design=Design
 ROWS
 }
 issue_row() { printf 'issue%shttps://github.com/sssoto17/sunny-pastures/issues/47%sI_kw47\n' "$T" "$T"; }
@@ -420,39 +420,46 @@ expect_no_writes
 # --- the native issue type ---------------------------------------------------------------------
 # Set on the issue with updateIssue's issueTypeId, by the id the lookup found for the name.
 reset "$(item Status=Backlog)"
-case_ 47 --type Task
+case_ 47 --type Chore
 expect_code 0
-expect_call "-f issue=I_kw47 -f type=IT_task"
+expect_call "-f issue=I_kw47 -f type=IT_chore"
 expect_no_call "item-edit"
-expect_out "Type:     Task"
+expect_out "Type:     Chore"
 
 # Names ignore case, like the Project fields.
-reset "$(item Status=Backlog Type=Task)"
+reset "$(item Status=Backlog Type=Chore)"
 case_ 47 --type bug
 expect_code 0
 expect_call "-f issue=I_kw47 -f type=IT_bug"
 expect_out "Type:     Bug"
 
+# Design, the type a `design` issue maps to (#266).
+reset "$(item Status=Backlog Type=Chore)"
+case_ 47 --type Design
+expect_code 0
+expect_call "-f issue=I_kw47 -f type=IT_design"
+expect_out "Type:     Design"
+
 # An unknown type fails with the valid names and writes nothing.
 reset "$(item Status=Backlog)"
 case_ 47 --type Epic --size S
 expect_code 2
-expect_err 'unknown Type "Epic". Valid names: Task, Bug, Feature.'
+expect_err 'unknown Type "Epic". Valid names: Chore, Bug, Feature, Design.'
 expect_no_writes
 
 reset "$(item Status=Backlog)"
 touch "$work/fail-type"
-case_ 47 --type Task --size S
+case_ 47 --type Chore --size S
 expect_code 1
 expect_err "could not set Type"
 expect_err "not set: Type, Size"
 
 # --- triage comes off once type, Priority, Size and Week are all set ----------------------------
-four=(Type=Task Priority=P2 Size=S "Week=Wk 2 · 9–15 Nov")
+four=(Type=Chore Priority=P2 Size=S "Week=Wk 2 · 9–15 Nov")
 
 # Set by this run.
 reset "$(item Status=Backlog; label_rows triage chore)"
-case_ 47 --type Task --size S --priority P2 --week "Wk 2"
+case_ 47 --type Chore --size S --priority P2 --week "Wk 2"
 expect_code 0
 expect_call "issue edit 47 --repo sssoto17/sunny-pastures --remove-label triage"
 expect_out "Triage:   removed (type, Priority, Size and Week are set)"

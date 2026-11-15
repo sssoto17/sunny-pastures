@@ -70,7 +70,7 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
 - **Add to the Project and set its fields**: one command, with names, not ids:
 
   ```bash
-  scripts/issue-fields.sh 47 --type Task --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
+  scripts/issue-fields.sh 47 --type Chore --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
   ```
 
   It adds the issue to the Project if it's missing, sets each field you name, then reads the
@@ -87,7 +87,7 @@ Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `
     allows. Decided by the admin on 7 Nov (#56).
   - **Admin-only values are refused**: `--status Ready` (see **Status rules**) and `--mode Factory`
     (it goes with `factory:ready`, see `triage-labels.md`).
-  - **`--type`** sets GitHub's native issue type (Task, Bug, Feature) on the issue itself. Once
+  - **`--type`** sets GitHub's native issue type (Chore, Bug, Feature, Design) on the issue itself. Once
     the type, Priority, Size and Week are all set, the script removes `triage` and its
     `Triage:` line says so (see **Issue fields**).
 
@@ -116,10 +116,14 @@ Every issue carries four values: GitHub's native **issue type**, and the Project
   four are set. `scripts/new-issue.sh` adds it when one isn't given, and `scripts/issue-fields.sh`
   removes it once all four are set.
 - **The native type follows the type label**, and the label stays: `feature` → Feature, `bug` →
-  Bug, and `spike`, `design`, `chore`, `idea` → Task (the repo offers Task, Bug and Feature). The
-  mapping is the Types table in `triage-labels.md`. `scripts/backfill-issue-types.sh` sets it on
-  open issues that have none, from their label: a dry run by default, `--apply` to write
-  (`--help`; tests: `bash scripts/backfill-issue-types.test.sh`). The admin runs it.
+  Bug, `design` → Design, and `spike`, `chore`, `idea` → Chore (the repo offers Chore, Bug,
+  Feature and Design; the admin's mapping of 15 Nov, #266). The mapping is the Types table in
+  `triage-labels.md`, and the scripts share it in `scripts/lib/issue-types.sh`. `new-issue.sh`
+  and `backfill-issue-types.sh` stop with a message naming the difference when the repo's types
+  and that mapping disagree, so a rename is caught on the next run. `scripts/backfill-issue-types.sh`
+  sets the type on open issues whose type doesn't follow their label (none, or another type), from
+  that label: a dry run by default, `--apply` to write (`--help`; tests:
+  `bash scripts/backfill-issue-types.test.sh`). The admin runs it.
 - **No exceptions**: a workstream parent carries all four too (**Grouping**).
 - **`scripts/missing-fields.sh`** lists the open issues that break this rule: a field missing
   (and whether `triage` is on), or `triage` on an issue whose fields are set. It exits 0 when

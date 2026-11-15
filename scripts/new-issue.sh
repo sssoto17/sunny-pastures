@@ -14,17 +14,10 @@ fi
 
 OWNER=sssoto17
 REPO=sunny-pastures
-TYPES=(feature bug spike design chore idea)
-
-# The native issue type each type label maps to (docs/agents/triage-labels.md, Types).
-native_type() { # type label -> native type name
-  case $1 in
-    feature) echo Feature ;;
-    bug) echo Bug ;;
-    spike | design | chore | idea) echo Task ;;
-  esac
-}
 here="$(cd "$(dirname "$0")" && pwd)"
+# TYPE_LABELS, native_type and check_native_types: the type label -> native type mapping.
+# shellcheck source=scripts/lib/issue-types.sh
+. "$here/lib/issue-types.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -40,8 +33,10 @@ the Project fields, then the labels, milestone and parent as GitHub stored them.
 takes the form --size=M.
 
   --type      one of feature, bug, spike, design, chore, idea (docs/agents/triage-labels.md).
-              It also sets GitHub's native issue type: feature -> Feature, bug -> Bug, the
-              rest -> Task. The script stops if the repo doesn't offer that type.
+              It also sets GitHub's native issue type: feature -> Feature, bug -> Bug,
+              design -> Design, and spike, chore, idea -> Chore (scripts/lib/issue-types.sh).
+              The script stops if the repo's types (Chore, Bug, Feature, Design) and that
+              mapping disagree, whatever --type is.
   --area      "tools" or "area:tools"; must be an existing area:* label
   --milestone the exact title of an open milestone
   --parent    the workstream parent's number ("73" or "#73"), an open issue. Required, except
@@ -133,8 +128,8 @@ for req in --title --type --area --milestone --body-file; do
 done
 [[ -n ${title//[[:space:]]/} ]] || die 2 "--title is empty"
 
-[[ " ${TYPES[*]} " == *" $type "* ]] ||
-  die 2 "unknown type \"$type\". Valid types: $(join "${TYPES[@]}")"
+[[ " ${TYPE_LABELS[*]} " == *" $type "* ]] ||
+  die 2 "unknown type \"$type\". Valid types: $(join "${TYPE_LABELS[@]}")"
 
 area=area:${area#area:}
 [[ $area =~ ^area:[a-z0-9-]+$ ]] || die 2 "not an area label: \"$area\""
@@ -175,10 +170,8 @@ types=$(gh api graphql -F owner="$OWNER" -F repo="$REPO" -f query='
     repository(owner: $owner, name: $repo) { issueTypes(first: 25) { nodes { name isEnabled } } }
   }' --jq '.data.repository.issueTypes.nodes[] | select(.isEnabled) | .name') ||
   die 3 "could not read the repo's issue types; nothing was created"
-if ! grep -qxF -- "$issue_type" <<<"$types"; then
-  mapfile -t type_names <<<"$types"
-  die 2 "the repo offers no \"$issue_type\" issue type for --type $type (it offers: $(join "${type_names[@]}")). Nothing was created."
-fi
+# The whole mapping is checked, not only this --type, so a rename is caught on the next filing.
+why=$(check_native_types "$types") || die 2 "$why. Nothing was created."
 
 milestones=$(gh api "repos/$OWNER/$REPO/milestones?state=open&per_page=100" --jq '.[].title') ||
   die 3 "could not read the open milestones; nothing was created"

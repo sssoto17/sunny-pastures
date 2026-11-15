@@ -30,17 +30,19 @@ Project field (Status, Track, Mode, Size, Priority, Week) stays a field and neve
 ## Types
 
 Every issue carries **exactly one type** label, set when it's filed, and the GitHub native issue
-type in the last column (`issue-tracker.md`, **Issue fields**). PRs carry no type label: the
+type in the last column (`issue-tracker.md`, **Issue fields**). The scripts read the mapping from
+`scripts/lib/issue-types.sh`, which must match this table; it was set by the admin on 15 Nov 2026
+(#266). PRs carry no type label: the
 Conventional Commit prefix in the PR title is the type (see **Pull requests**).
 
 | Label | Use for | Native type |
 |---|---|---|
 | `feature` | New behaviour for the player, the admin or the API | Feature |
 | `bug` | Something that worked, or was specified, behaves wrongly | Bug |
-| `spike` | Throwaway work that answers a question with measurements or a prototype; its result lands in an ADR or doc | Task |
-| `design` | Work whose output is decisions: a grill, an ADR, glossary terms, the spec. It blocks the issues that depend on it through a native dependency | Task |
-| `chore` | Upkeep with no new behaviour: tooling, config, hooks, dependencies, and docs-only work | Task |
-| `idea` | Wanted but not shaped enough to build. Parked until picked up | Task |
+| `spike` | Throwaway work that answers a question with measurements or a prototype; its result lands in an ADR or doc | Chore |
+| `design` | Work whose output is decisions: a grill, an ADR, glossary terms, the spec. It blocks the issues that depend on it through a native dependency | Design |
+| `chore` | Upkeep with no new behaviour: tooling, config, hooks, dependencies, and docs-only work | Chore |
+| `idea` | Wanted but not shaped enough to build. Parked until picked up | Chore |
 
 **`idea`** never moves to Ready. To work it, either a `design` issue that blocks it fleshes it
 out, or it's retyped (`feature`, `chore`…) once its body meets definition-of-ready rules 2–5.

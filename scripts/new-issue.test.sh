@@ -14,7 +14,9 @@ fail=0
 work=$(mktemp -d "${TMPDIR:-/tmp}/new-issue-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/scripts"
+mkdir -p "$work/scripts/lib"
 cp "$here/new-issue.sh" "$work/scripts/new-issue.sh"
+cp "$here/lib/issue-types.sh" "$work/scripts/lib/issue-types.sh"
 script="$work/scripts/new-issue.sh"
 
 # --- fakes ------------------------------------------------------------------------------------
@@ -83,13 +85,13 @@ reset() {
   rm -f "$work"/calls "$work"/fields-calls "$work"/fail-* "$work"/issue.*
   printf '%s\n' bug feature chore spike design idea area:sim area:tools area:docs review:admin \
     >"$work/labels"
-  printf '%s\n' Task Bug Feature >"$work/types"
+  printf '%s\n' Chore Bug Feature Design >"$work/types"
   printf '%s\n' "M2 Sim properties + factory" "M3 Game API" >"$work/milestones"
   printf 'open%sissue\n' "$T" >"$work/issue.73"
   printf 'closed%sissue\n' "$T" >"$work/issue.40"
   printf 'open%spr\n' "$T" >"$work/issue.151"
   # The read-back of the new issue: labels, milestone, parent number, native type.
-  readback chore,area:tools "M2 Sim properties + factory" 73 Task
+  readback chore,area:tools "M2 Sim properties + factory" 73 Chore
   printf 'Some body.\n' >"$work/body.md"
   : >"$work/empty.md"
 }
@@ -257,7 +259,7 @@ case_ "${base[@]}" --track Build --size S --priority P1 --week "Wk 2"
 expect_code 0
 expect_call "issue create --repo sssoto17/sunny-pastures --title Add a thing --body-file body.md --label chore --label area:tools --milestone M2 Sim properties + factory --parent 73"
 expect_no_call "--label triage"
-assert "issue-fields gets the new number, the native type and the fields" test "$fields" = "200 --type Task --track Build --size S --priority P1 --week Wk 2"
+assert "issue-fields gets the new number, the native type and the fields" test "$fields" = "200 --type Chore --track Build --size S --priority P1 --week Wk 2"
 assert "no warning when all four are set" test -z "$err"
 expect_out "https://github.com/sssoto17/sunny-pastures/issues/200"
 expect_out "Status:   Backlog"
@@ -272,11 +274,11 @@ case_ --title="Add a thing" --type=chore --area=area:tools \
   --priority=P2 --size=S "--week=Wk 2"
 expect_code 0
 expect_call "--label chore --label area:tools --milestone M2 Sim properties + factory --parent 73"
-assert "issue-fields gets the type and the three fields" test "$fields" = "200 --type Task --priority P2 --size S --week Wk 2"
+assert "issue-fields gets the type and the three fields" test "$fields" = "200 --type Chore --priority P2 --size S --week Wk 2"
 
 # An idea has no parent: no --parent on create, and none expected on read-back.
 reset
-readback idea,area:tools "M3 Game API" - Task
+readback idea,area:tools "M3 Game API" - Chore
 case_ --title x --type idea --area tools --milestone "M3 Game API" --body-file body.md "${three[@]}"
 expect_code 0
 expect_no_call "--parent"
@@ -285,7 +287,7 @@ expect_out "Parent:   -"
 # --- the native issue type ----------------------------------------------------------------------
 # Each type label maps to a native type (triage-labels.md, Types), passed to issue-fields.sh and
 # read back.
-for pair in feature=Feature bug=Bug spike=Task design=Task chore=Task idea=Task; do
+for pair in feature=Feature bug=Bug design=Design spike=Chore chore=Chore idea=Chore; do
   reset
   label=${pair%%=*} native=${pair#*=}
   parent_args=(--parent 73) want_parent=73
@@ -297,12 +299,22 @@ for pair in feature=Feature bug=Bug spike=Task design=Task chore=Task idea=Task;
   assert "$label: issue-fields gets --type $native" test "$fields" = "200 --type $native --priority P2 --size S --week Wk 2"
 done
 
-# The repo must offer the type before anything is created.
+# The repo's types and the mapping must agree before anything is created, whatever --type is,
+# so a rename of the repo's types is caught on the next filing (#266).
 reset
-printf '%s\n' Bug Feature >"$work/types"
+printf '%s\n' Task Bug Feature Design >"$work/types"
+case_ "${base[@]/chore/feature}" "${three[@]}"
+expect_code 2
+expect_err "the repo's issue types (Task, Bug, Feature, Design) and the mapping in scripts/lib/issue-types.sh (Feature, Bug, Design, Chore) disagree: the repo offers no Chore; nothing maps to Task;"
+expect_err "Nothing was created."
+expect_no_writes
+
+# A type the repo adds that nothing maps to is a disagreement too.
+reset
+printf '%s\n' Chore Bug Feature Design Epic >"$work/types"
 case_ "${base[@]}" "${three[@]}"
 expect_code 2
-expect_err 'the repo offers no "Task" issue type for --type chore (it offers: Bug, Feature). Nothing was created.'
+expect_err "disagree: nothing maps to Epic; update the mapping and docs/agents/triage-labels.md (Types)"
 expect_no_writes
 
 reset
@@ -317,12 +329,12 @@ reset
 readback chore,area:tools "M2 Sim properties + factory" 73 -
 case_ "${base[@]}" "${three[@]}"
 expect_code 1
-expect_err "issue type is -, expected Task"
+expect_err "issue type is -, expected Chore"
 reset
 readback chore,area:tools "M2 Sim properties + factory" 73 Bug
 case_ "${base[@]}" "${three[@]}"
 expect_code 1
-expect_err "issue type is Bug, expected Task"
+expect_err "issue type is Bug, expected Chore"
 
 # --- triage while Priority, Size or Week is missing ---------------------------------------------
 # Each one left out adds triage at create, and a warning names it and the command to finish.
@@ -332,7 +344,7 @@ for drop in priority size week; do
   for ((i = 0; i < ${#three[@]}; i += 2)); do
     [[ ${three[i]} == "--$drop" ]] || a+=("${three[i]}" "${three[i + 1]}")
   done
-  readback chore,area:tools,triage "M2 Sim properties + factory" 73 Task
+  readback chore,area:tools,triage "M2 Sim properties + factory" 73 Chore
   case_ "${base[@]}" "${a[@]}"
   expect_code 0
   expect_call "--milestone M2 Sim properties + factory --label triage --parent 73"
@@ -343,7 +355,7 @@ done
 
 # All three missing: one warning names them all.
 reset
-readback chore,area:tools,triage "M2 Sim properties + factory" 73 Task
+readback chore,area:tools,triage "M2 Sim properties + factory" 73 Chore
 case_ "${base[@]}"
 expect_code 0
 expect_err "#200 has no Priority, Size, Week"
@@ -355,7 +367,7 @@ case_ "${base[@]}" --size S
 expect_code 1
 expect_err "missing label triage"
 reset
-readback chore,area:tools,triage "M2 Sim properties + factory" 73 Task
+readback chore,area:tools,triage "M2 Sim properties + factory" 73 Chore
 case_ "${base[@]}" "${three[@]}"
 expect_code 1
 expect_err "triage is on, though all four are set"
@@ -375,29 +387,29 @@ case_ "${base[@]}" --size XL
 expect_code 1
 expect_err 'unknown Size "XL"'
 expect_err "#200 was created"
-expect_err "scripts/issue-fields.sh 200 --type Task --size XL"
+expect_err "scripts/issue-fields.sh 200 --type Chore --size XL"
 
 # The re-run hint quotes each value, so it pastes back as one command.
 reset
 echo 2 >"$work/fail-fields"
 case_ "${base[@]}" --week "Wk 2"
 expect_code 1
-expect_err 'scripts/issue-fields.sh 200 --type Task --week Wk\ 2'
+expect_err 'scripts/issue-fields.sh 200 --type Chore --week Wk\ 2'
 
 reset
-readback chore,area:tools "M2 Sim properties + factory" - Task
+readback chore,area:tools "M2 Sim properties + factory" - Chore
 case_ "${base[@]}" "${three[@]}"
 expect_code 1
 expect_err "parent is -, expected #73"
 
 reset
-readback chore "M2 Sim properties + factory" 73 Task
+readback chore "M2 Sim properties + factory" 73 Chore
 case_ "${base[@]}" "${three[@]}"
 expect_code 1
 expect_err "missing label area:tools"
 
 reset
-readback chore,area:tools "M3 Actions persist end to end" 73 Task
+readback chore,area:tools "M3 Actions persist end to end" 73 Chore
 case_ "${base[@]}" "${three[@]}"
 expect_code 1
 expect_err "milestone is M3 Actions persist end to end, expected M2 Sim properties + factory"
