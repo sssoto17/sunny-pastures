@@ -300,6 +300,7 @@ The CI/CD step builds the checks (#40, #42).
 | `ci / determinism` | the determinism gate (MUST-17.1) |
 | `ci / acceptance` | acceptance tests on a throwaway stack (MUST-15.3, MUST-17.1) |
 | `ci / audit` | `pnpm audit --audit-level=high`, the required dependency check (area 8) |
+| `ci / scripts` | the shell scripts' test suites, every `*.test.sh` under `scripts/` and `.claude/hooks/`, with their fake `gh`; the suites need no secret or network (#255) |
 | `guard / secrets` | the gitleaks CLI over the PR's commits (area 8) |
 | `guard / code-scan` | Semgrep (area 8) |
 | `preview / lighthouse`, `preview / axe`, `preview / bundle`, `preview / latency` | page performance, BASE-03 (axe), the bundle ratchet and BASE-04 (latency smoke), measured on the Vercel preview (below; #43) |
@@ -510,6 +511,14 @@ repo's branches. The pattern is *propose, then apply*: Claude proposes and plain
   approval and posts a COMMENT (test (e)); a later COMMENT alone wouldn't replace an APPROVE. The job skips every other label, and the label the App adds itself
   (`sender` is `sunny-reviewer[bot]`), so it can't loop. Its concurrency group is on the job, so
   a skipped event doesn't cancel a running review.
+- **Once per head (#274, 16 Nov; retro 2026-11-15, item F).** Before Claude runs, the `gather`
+  step asks `.github/scripts/review-gate.sh`, and every later step waits on its answer. It skips a
+  head the App has already reviewed: a review of its own on that commit with a non-empty body,
+  which is the summary every run posts last; the empty-body reviews its line comments make don't
+  count, so a run that died before its summary is retried. The exception keeps test (e) true: the
+  review runs again while the PR carries `review:admin` and an approval of the App's still stands
+  (state `APPROVED`, not yet dismissed), whatever the event, since a `reopened` at the same head
+  can cancel the `labeled` run. Tests: `.github/scripts/tests/review-gate.test.mjs`.
 - **Auto-merge (step 3 of the flow; #68 step 4, 12 Nov).** After an Approve, the script turns on
   auto-merge, squash, for the head it reviewed (`enablePullRequestAutoMerge` with
   `expectedHeadOid`). When a run doesn't approve, it turns off auto-merge that is on. It never
@@ -1081,7 +1090,7 @@ CONTRIBUTING, no issue or PR template, no licence.
 
 | File | Recommendation | Why |
 |---|---|---|
-| Issue forms per type (`.github/ISSUE_TEMPLATE/*.yml`) | **Adopt** at M2 (appendix A4) | Each form asks for a goal and "Acceptance criteria", rule 2 of the definition of ready. It sets the type label and `triage`. Agents file through `gh issue create --body`, which bypasses forms, so the forms help the admin's web filing and show agents the expected body ([issue forms syntax](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms)). |
+| Issue forms per type (`.github/ISSUE_TEMPLATE/*.yml`) | **Adopt** at M2 (appendix A4) | Each form asks for a goal and "Acceptance criteria", rule 2 of the definition of ready. It sets the type label and `triage`, and since #254 the native issue type with the top-level `type:` key, by the mapping in `scripts/lib/issue-types.sh` (#266; `.github/scripts/tests/issue-forms.test.mjs` checks the two agree). Agents file through `gh issue create --body`, which bypasses forms, so the forms help the admin's web filing and show agents the expected body ([issue forms syntax](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms)). |
 | `ISSUE_TEMPLATE/config.yml` | **Adopt**, blank issues **off** | Every issue needs a type. The setting affects only the web UI, not the API or `gh`. |
 | PR template | **Adopt** at M2 (appendix A2) | Matches the skill's change summary (skill, *Change Summaries*: changes made, things not touched, concerns) and adds `Closes #N`, verification, protected paths, screenshots and the Changelog line (area 1). |
 | CODEOWNERS | **Adopt** at M2 (appendix A3) | Defines the code-owned PRs: the `main` ruleset requires the code owner's approval on these paths (area 2, MUST-15.1). Works on a private repo on Pro. |
@@ -1094,7 +1103,7 @@ CONTRIBUTING, no issue or PR template, no licence.
 | LICENSE | **At go-public (#38), Q7** | Chosen when the repo goes public, after checking EK's rules on student work. With none, all rights are reserved. |
 | CODE_OF_CONDUCT.md, FUNDING.yml | Skip | No community and no funding. |
 | `CITATION.cff` | Skip; reconsider at M8 | Only if the report wants the repo cited in a standard form. |
-| Issue types | Skip | An organization feature; labels carry the type here. The docs describe issue types only per organization, set by organization owners ([managing issue types](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/managing-issue-types-in-an-organization)), and GraphQL returns `issueTypes: null` for this repo (checked 7 Nov). |
+| Issue types | **Adopt** (superseded the Skip of 7 Nov) | Was skipped on 7 Nov as an organization feature: the docs describe issue types only per organization ([managing issue types](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/managing-issue-types-in-an-organization)), and GraphQL then returned `issueTypes: null` for this repo. Since then the repo offers its own types (`gh api repos/sssoto17/sunny-pastures/issue-types`: Chore, Bug, Feature, Design), #158 made one required on every issue, #266 set the label → type mapping, and #254 has the issue forms set it. The type label stays (`docs/agents/triage-labels.md`, Types). |
 | Autolinks | Skip | Nothing external to link to (and Pro-only on private repos). |
 
 ## 8. Security and dependencies
@@ -1761,7 +1770,8 @@ GitHub reads CODEOWNERS from the PR's base branch, so a PR can't remove its own 
 blank_issues_enabled: false
 ```
 
-Each form sets its type label plus `triage`; the area is added when the issue is evaluated
+Each form sets its type label plus `triage`, and its native issue type with `type:` (#254, by the
+mapping in `scripts/lib/issue-types.sh`); the area is added when the issue is evaluated
 (`triage-labels.md`). Milestone and Project fields are set on the Project (auto-add puts the issue
 there).
 
@@ -1771,6 +1781,7 @@ there).
 name: Feature
 description: New behaviour for the player, the admin or the API
 labels: [feature, triage]
+type: Feature
 body:
   - type: textarea
     id: goal
@@ -1799,6 +1810,7 @@ body:
 name: Bug
 description: Something that worked, or was specified, behaves wrongly
 labels: [bug, triage]
+type: Bug
 body:
   - type: textarea
     id: goal
@@ -1832,6 +1844,7 @@ body:
 name: Spike
 description: Throwaway work that answers a question with measurements or a prototype
 labels: [spike, triage]
+type: Chore
 body:
   - type: textarea
     id: goal
@@ -1866,6 +1879,7 @@ body:
 name: Design
 description: Work whose output is decisions (a grill, an ADR, glossary terms, the spec)
 labels: [design, triage]
+type: Design
 body:
   - type: textarea
     id: goal
@@ -1893,6 +1907,7 @@ body:
 name: Chore
 description: Upkeep with no new behaviour (tooling, config, hooks, dependencies, docs-only work)
 labels: [chore, triage]
+type: Chore
 body:
   - type: textarea
     id: goal
@@ -1915,6 +1930,7 @@ body:
 name: Idea
 description: Wanted but not shaped enough to build. Never moves to Ready as an idea.
 labels: [idea, triage]
+type: Chore
 body:
   - type: textarea
     id: goal
@@ -2003,6 +2019,10 @@ both entries, deviations the admin decided on 8 Nov:
   `dependencies`, `javascript` and `github_actions` labels outside the taxonomy.
 - `commit-message: { prefix: chore, include: scope }`: PR titles read `chore(deps): …` or
   `chore(deps-dev): …`, so they pass the planned `guard / pr-title`.
+
+**Changed 16 Nov, #268:** the npm entry adds an `ignore` for `typescript` with `update-types:
+["version-update:semver-major"]`. Dependabot no longer proposes TypeScript majors, inside the
+`all-dev` group (#262 bumped TypeScript 6 to 7 there) or alone; a major is upgraded by hand.
 
 ## A8. Rulesets (JSON for `gh api --input`)
 

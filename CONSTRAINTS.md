@@ -95,7 +95,7 @@ the thresholds).
 | Boundaries: sim purity (MUST-10.1) | 0 violations. `packages/sim` imports nothing outside itself and no `node:*`, and calls none of `Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `crypto.randomUUID`, `fetch`, `setTimeout`, `setInterval`, `setImmediate`. `new Date()` with no arguments is banned too; test files in `packages/sim` (`*.test.ts`) may also import `vitest` and `fast-check` and nothing else from outside the sim, and stay banned from `node:*` and from the calls above (admin, 9 Nov, #81); every file in a module's `tests/` folder counts as a test file here, test helpers included | The determinism claim depends on it, and the spec asks for a check, not review | Fallow boundaries with `boundaries.calls.forbidden`; ESLint `no-restricted-syntax` for argument-less `new Date()`, since Fallow checks direct callees, not constructors | edit, CI | `ci / boundaries` | #41 |
 | Boundaries: server-only (`AGENTS.md`) | 0 violations: client code never imports `apps/web/src/server/` | `AGENTS.md` makes `src/server/` server-only | Fallow boundaries | edit, CI | `ci / boundaries` | #41 (once `apps/web` exists, M3) |
 | Sim speed | `advance()` across 30 days on the largest content farm ≤ 50 ms; `apply()` ≤ 1 ms per call | Offline catch-up runs inside a request with a 300 ms p95 budget (BASE-04), so the sim may use at most a sixth of it | `vitest bench` (built in), farm read from content data; see [Timing checks](#timing-checks) | task end, CI | `ci / bench` | #41 |
-| Determinism (MUST-17.1) | The same recorded action script gives the same state hash in two separate runs | The research question's core claim | ADR-0001's step-0 gate, run in CI | CI | `ci / determinism` | #48 |
+| Determinism (MUST-17.1) | The same recorded action script gives the same state hash in two separate runs | The research question's core claim | ADR-0001's step-0 gate, run in CI | task end, CI | `ci / determinism` | #48 |
 | Assertion strength _(warn)_ | Mutation score ≥ 60% on changed `packages/sim` files | Typical for a suite never mutated before (80% is mature). It answers "the agent wrote the tests too" | Stryker `--mutate <changed files>`; the weekly `retro` reads the warnings | CI, when `packages/sim` changes | `ci / mutation` (not required) | #41 |
 | Acceptance (MUST-15.3) | All acceptance tests pass over HTTP against a fresh stack | The black-box contract agents can't change (MUST-15) | `tests/acceptance/**` against a throwaway Supabase stack | CI | `ci / acceptance` | #49 (M3) |
 | Secrets | 0 findings | Any finding is a leak | `gitleaks git --redact --no-banner` over the PR's commit range, with full history fetched (v8.30.1; `detect` is deprecated since v8.19) | CI | `guard / secrets` | #42 |
@@ -146,9 +146,10 @@ in a PR of its own.
 
 | Metric | Today | Direction | Tolerance | Recorded by |
 |---|---|---|---|---|
-| Project coverage | not yet: recorded after the first `packages/sim` PR | must not fall | 0.5 points | #40 |
+| Project coverage | 99.8% | must not fall | 0.5 points | #40 |
 | First-load JS of the game route | not yet: recorded at the first preview deploy | must not grow | 5% per PR | #43 |
-| CI runner time per PR | not yet: measured over #40's first week | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume | n/a: a breach is reviewed, not blocked | #40 |
+| CI runner time per PR | 15.1 minutes per PR over the CI workflow's first week, 8 to 14 Nov 2026 (1,633 minutes for 108 PRs, across every workflow a PR starts; #98). With the 19 minutes of runs outside any PR, 1,652 that week: about 7,100 minutes a month at that pace, 2.4 times the 3,000 minutes that $18 buys at $0.006 a minute | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume | n/a: a breach is reviewed, not blocked | #40 |
+| Reviewer cost per PR | $0.31 of Claude per reviewed PR, 12 Nov 2026 to the morning of 16 Nov ($6.55 over 44 reviews of 21 PRs, 7 of them cancelled before Claude ran; #98). Wk 2 total, 9 to 15 Nov 2026: about $14.25, from 1,749 runner minutes (about $10.49 at $0.006 a minute) and $3.76 of Claude | must not grow past the weekly budget set from this first data (ADR-0002, "Caps") | n/a: a breach is reviewed, not blocked | #98 |
 
 To keep CI cost down, the expensive checks run only when they're relevant. Stryker runs only when
 `packages/sim` changes. Lighthouse, axe and the latency smoke run only on preview deploys. Semgrep
@@ -170,8 +171,8 @@ A check that stalls the agent gets switched off, so the cost of a check decides 
 
 | Stage | Command | Runs | Budget |
 |---|---|---|---|
-| After each edit | `pnpm check:fast` (agent hook, proposed in #40) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, boundaries, formatting check | under 5 s |
-| Task end, before the agent opens a PR | `pnpm check:task` | `check:fast`, plus related unit and property tests (fixed seed, capped runs), coverage of changed lines, sim benchmark, duplication in changed files, and a full lint without the cache (typed rules read other files, and the cache only tracks each file's own content) | ≤ 90 s |
+| After each edit | `pnpm check:fast` (agent hook: `PostToolUse` in `.claude/settings.json`, #113) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, formatting check. Boundaries join this row when #41 adds them to `check:fast` | under 5 s |
+| Task end, before the agent opens a PR | `pnpm check:task` | `check:fast`, plus related unit and property tests (fixed seed, capped runs), coverage of changed lines, sim benchmark, duplication in changed files, the determinism gate, and a full lint without the cache (typed rules read other files, and the cache only tracks each file's own content) | ≤ 90 s |
 | Every PR | CI (`pnpm check:full` + scan jobs) | Everything above, plus larger property runs, the determinism gate, gitleaks, `pnpm audit`, Semgrep, Stryker _(warn)_, acceptance tests | unlimited |
 | Every preview deploy | CI against the Vercel preview | Lighthouse, axe, bundle ratchet, latency smoke | unlimited |
 | Milestone gate | the admin | [Checked by review](#checked-by-review), BASE-04 from the metrics | n/a |
@@ -235,6 +236,8 @@ ask for a split, suggests where to cut, and doesn't review the lines.
 - **How a split links:** each part says `Part of #N`, and the part that completes the issue says
   `Closes #N`. Only that last part is checked against the issue's acceptance criteria, and only it
   meets the feature-slice row (see the rows above).
+  An earlier part describes the later parts without a closing keyword, even in prose about another
+  part, a table or a code span: GitHub links "closes #N" wherever it sits (`guard / pr-body`).
 - **How a split is built:** as a stack, all parts opened together. Part 1 is based on `main`, and
   each later part on the previous part's branch. Each part stays within the split size and is
   reviewed on its own diff (`gh pr diff`); the closing part's criteria check covers the whole

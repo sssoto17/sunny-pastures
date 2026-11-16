@@ -3,7 +3,7 @@
 // the floor-guard reference (.agents/skills/constraint-driven-development/references/floor-guard.md,
 // "Contract").
 import { execFileSync } from "node:child_process";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // Thrown when the change can't be read. Callers exit 2, which must never read as clean.
@@ -19,6 +19,16 @@ export const isMain = (importMetaUrl) => {
 		return realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(importMetaUrl));
 	} catch {
 		return false;
+	}
+};
+
+// The workflow event the run is for, from $GITHUB_EVENT_PATH: the way to read untrusted PR and
+// issue text, never an expression in `run:` (#270). CannotRun when it can't be read.
+export const readEvent = () => {
+	try {
+		return JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8"));
+	} catch {
+		throw new CannotRun("no readable event at $GITHUB_EVENT_PATH");
 	}
 };
 

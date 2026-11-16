@@ -222,6 +222,12 @@ Each property runs 100 times at task end and 1,000 times in CI. The root Vitest 
 count from `SIM_PROPERTY_RUNS`, which `ci / test` sets (#40), and hands it to the tests with the
 fixed seed (`fc.assert(property, inject('fastCheck'))`), so no sim test reads the environment.
 
+**Applied 16 Nov, #272:** task end runs 1,000 too when the branch changes `packages/sim`, so a sim
+change meets CI's count before the PR (retro 2026-11-15, row 4: #175 and #176 passed at 100 and
+failed in CI). `check:task` runs `pnpm test:related` through `.github/scripts/sim-changed.mjs`,
+which adds `SIM_PROPERTY_RUNS=1000` when a file under `packages/sim/` changed, read as
+`vitest --changed origin/main` reads it. Without a sim change, task end stays at 100.
+
 A property's time grows with its run count, so its timeout does too (#200): the config also
 provides `propertyTimeout`, 15 ms per run and never below Vitest's 5 s default, and each property
 test file applies it with `vi.setConfig({ testTimeout: inject('propertyTimeout') })`, which Vitest
