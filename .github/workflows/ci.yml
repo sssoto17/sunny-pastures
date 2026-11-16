@@ -1,4 +1,5 @@
-# The checks every PR runs (CONSTRAINTS.md, "Enforced with numbers" and "Floor"; #40).
+# The checks every PR runs (CONSTRAINTS.md, "Enforced with numbers" and "Floor"; #40). The
+# security scans (gitleaks, pnpm audit, Semgrep) are in security.yml (#42).
 # Required checks are matched by job name, so each `name:` is exactly the check name in
 # ADR-0002, area 2. No path filters: a required check must report on every PR.
 # Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
