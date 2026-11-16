@@ -151,7 +151,15 @@ restack() { # stack-base onto upstream branch...
     else
       below_new=$(git rev-parse "refs/heads/${heads[i - 1]}") below_old=${was_remote[${heads[i - 1]}]}
     fi
-    git merge-base --is-ancestor "$below_new" "$b" && continue # already on top of it
+    if git merge-base --is-ancestor "$below_new" "$b"; then
+      # On top already. A merge commit in its range (the old merge-upward update) would stop
+      # GitHub's restack, so rebuild the part as one commit with the same tree.
+      [[ -n $(git rev-list --merges -n1 "$below_new..$b") ]] || continue
+      git update-ref "refs/heads/$b" "$(git log --reverse --no-merges --format='- %s' "$below_new..$b" |
+        git commit-tree "$b^{tree}" -p "$below_new" -F <(printf '%s (linear)\n\n' "$b"; cat))"
+      echo "rebuilt $b as one commit"
+      continue
+    fi
     git merge-base --is-ancestor "$below_old" "$b" || below_old=$(git merge-base "$below_new" "$b")
     if ! git rebase -q --onto "$below_new" "$below_old" "$b" >/dev/null 2>&1; then
       git rebase --abort 2>/dev/null || true
@@ -285,8 +293,10 @@ cmd_status() {
       | if ($ok | length) == 0 and ($no | length) == 0 then "no approval"
         else ([if ($ok | length) > 0 then "approved by " + ($ok | join(", ")) else empty end,
                if ($no | length) > 0 then "changes requested by " + ($no | join(", ")) else empty end] | join("; ")) end')
+    # One run per check name: two events on one push can leave a cancelled twin beside the real
+    # run, so a cancelled run counts only when no other run of that name exists.
     checks=$(gh api "$P/commits/$sha/check-runs?per_page=100" --jq '
-      .check_runs as $r
+      [.check_runs | group_by(.name)[] | (map(select(.conclusion != "cancelled")) | last) // last] as $r
       | ([$r[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral"))] | length) as $ok
       | ([$r[] | select(.status != "completed")] | length) as $wait
       | [$r[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral") | .name] as $bad
