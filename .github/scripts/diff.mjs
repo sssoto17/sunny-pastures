@@ -1,7 +1,7 @@
 // Reads the change a PR makes: the diff from the merge base to the working tree, plus untracked
-// files. Shared by the scripts in .github/scripts/, along with `isMain`, their entry check. Adapted
-// from the floor-guard reference
-// (.agents/skills/constraint-driven-development/references/floor-guard.md, "Contract").
+// files. Also holds `isMain`, the entry check the scripts in .github/scripts/ share. Adapted from
+// the floor-guard reference (.agents/skills/constraint-driven-development/references/floor-guard.md,
+// "Contract").
 import { execFileSync } from "node:child_process";
 import { lstatSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
