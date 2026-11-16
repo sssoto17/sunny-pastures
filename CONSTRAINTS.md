@@ -148,7 +148,8 @@ in a PR of its own.
 |---|---|---|---|---|
 | Project coverage | not yet: recorded after the first `packages/sim` PR | must not fall | 0.5 points | #40 |
 | First-load JS of the game route | not yet: recorded at the first preview deploy | must not grow | 5% per PR | #43 |
-| CI runner time per PR | not yet: measured over #40's first week | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume | n/a: a breach is reviewed, not blocked | #40 |
+| CI runner time per PR | 15.1 minutes per PR over the CI workflow's first week, 8 to 14 Nov 2026 (1,652 minutes for 108 PRs; ci, Labeler and review; #98). At that pace, about 7,100 minutes a month: 2.4 times the 3,000 minutes that $18 buys at $0.006 a minute | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume | n/a: a breach is reviewed, not blocked | #40 |
+| Reviewer cost per PR | $0.31 of Claude per reviewed PR, 12 to 16 Nov 2026 ($6.55 over 44 reviews of 21 PRs; #98). Wk 2 total, 9 to 15 Nov 2026: 1,749 runner minutes (about $10.49 at $0.006 a minute) and $3.76 of Claude | sets the weekly budget from this first data (ADR-0002, "Caps") | n/a: a breach is reviewed, not blocked | #98 |
 
 To keep CI cost down, the expensive checks run only when they're relevant. Stryker runs only when
 `packages/sim` changes. Lighthouse, axe and the latency smoke run only on preview deploys. Semgrep
