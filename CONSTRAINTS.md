@@ -249,8 +249,11 @@ ask for a split, suggests where to cut, and doesn't review the lines.
   each later part on the previous part's branch. Each part stays within the split size and is
   reviewed on its own diff (`gh pr diff`); the closing part's criteria check covers the whole
   stack. A fix for a part that merged early can ride in a later part's fix commit. After a part
-  merges, the next branch merges `origin/main` in (no rebase or force-push) and its base moves to
-  `main`. GitHub records `Closes #N` only while the base is `main`, so the closing part's
+  merges, `scripts/stack.sh refresh` rebases the open parts onto `main` and force-pushes them with
+  a lease (GitHub retargets the next part but doesn't rebase it), and an edit to a lower part
+  reaches the parts above with `scripts/stack.sh update`, the same way. Only the stack's own part
+  branches are force-pushed, never `main`. GitHub records `Closes #N` only while the base is
+  `main`, so the closing part's
   `closingIssuesReferences` is checked once its base is `main`; if it's empty, the admin re-links
   the issue in the UI.
 - **The one entry point:** every lane and the coordinator opens, extends, updates and reads a

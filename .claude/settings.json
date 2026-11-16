@@ -72,6 +72,8 @@
 			"mcp__github__merge_pull_request",
 			"mcp__github__enable_pr_auto_merge",
 			"mcp__plugin_github_github__merge_pull_request",
+			"Bash(gh api graphql*mergePullRequest*)",
+			"Bash(gh api graphql*enablePullRequestAutoMerge*)",
 			"Bash(gh pr close *)",
 			"Bash(gh issue close *)",
 			"Bash(gh issue reopen *)",

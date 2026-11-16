@@ -96,8 +96,9 @@ For the coordinator (resolve, then delete this section before launch):
 - <judgement calls, as above>
 
 Deliverable: one PR that closes #<N>, or, over the split size, a native stack whose last part
-closes it, opened and kept with `scripts/stack.sh` (`CONSTRAINTS.md`, "Split size"). Run <the checks its criteria call for: the test script,
-`pnpm check:fast` or `pnpm check:task`> and show the output. Report the PR number, head SHA,
+closes it, opened and kept with `scripts/stack.sh` (`CONSTRAINTS.md`, "Split size"). Run <the
+checks its criteria call for: the test script, `pnpm check:fast` or `pnpm check:task`> and show
+the output. Report the PR number, head SHA,
 <the evidence each acceptance criterion asks for>, and "close #<N>?" once it's merged.
 ```
 

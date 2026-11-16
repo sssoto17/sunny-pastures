@@ -407,11 +407,14 @@ The flow:
   - **The escalation is a thread.** The bot posts a file-level review thread on the file that
     triggered the row, "escalated: <rows>", which mentions `@sssoto17` so the admin is notified.
     A review summary or a plain comment wouldn't create a thread. Required conversation
-    resolution holds the merge until the thread is resolved, and **that thread alone is the
-    gate**: the bot still approves an escalated PR it finds clean (decided with the admin, 15 Nov,
-    #264). Withholding the approval made every escalated part of a stack a separate bypass merge,
-    since the admin can't approve PRs the admin's account opened; an approval on every clean part
-    lets a stack merge in one action once its threads are resolved ("Stacks", below). On a factory
+    resolution holds the merge until the thread is resolved, and **that thread is the
+    escalation's gate**: the bot is to approve an escalated PR it finds clean (decided with the
+    admin, 15 Nov, #264). Withholding the approval made every escalated part of a stack a separate
+    bypass merge, since the admin can't approve PRs the admin's account opened; an approval on
+    every clean part lets a stack merge in one action once its threads are resolved ("Stacks",
+    below). **The code waits:** `post-review.sh` keeps withholding until #322, and #68's tests
+    (e) and (f) (`scripts/setup/README.md`, `ci-check-68.sh`) hold as written until then.
+    Code-owner review is separate and stays on (Q15). On a factory
     PR the bot also requests the admin's review, so `review-requested:@me` is the admin's queue.
     The admin's own open PRs show under `author:@me`.
   - **The escalation thread is the bot's memory across runs.** Anyone with write access can
@@ -428,8 +431,8 @@ The flow:
     resolved. When it resolves its own fixed findings, it skips escalation threads.
   - **The admin's go-ahead** is resolving the thread. The bot's approval already meets the
     count, so the PR, or the whole stack, then merges like any other. A code-owned PR still needs
-    the code owner ("Code-owner review on stacks", below). The resolved thread and the merge are
-    the record of who decided.
+    the code owner's approval, so the admin bypass-merges it (code-owner review stays on; "Stacks",
+    below). The resolved thread and the merge are the record of who decided.
   - **The bot's earlier Request changes.** When its re-review finds those findings fixed, the
     bot's Approve replaces its Request changes, on an escalated PR too. Until the reviewer App
     follows #264 (below), it dismisses its own Request changes on an escalated PR instead
@@ -511,9 +514,9 @@ repo's branches. The pattern is *propose, then apply*: Claude proposes and plain
   row, `review:admin`, an escalation thread of its own, or an earlier finding of its own still
   open. **#264 drops the escalation row and the escalation thread from that list**; the script
   follows in its own change (#322), and `review:admin` keeps holding approval until #104. It also
-  reopens escalation threads someone other than the admin resolved, resolves only the App's own fixed finding threads, adds the label and
-  the escalation thread, requests the admin's review on factory PRs, and dismisses its own
-  Request changes once an escalated PR is fixed.
+  reopens escalation threads someone other than the admin resolved, resolves only the App's own
+  fixed finding threads, adds the label and the escalation thread, requests the admin's review on
+  factory PRs, and dismisses its own Request changes once an escalated PR is fixed.
 - **Rows from paths (12 Nov, #240's review).** The script also works out the rows that depend
   only on paths, and merges them with the verdict's, so a prompt-injected verdict can't drop them:
   Code-owned path (`.github/CODEOWNERS`, gitignore rules, a rename's old path too) and Content
@@ -585,18 +588,15 @@ last-push approval off (#68).
   out-of-date with its base branch"): `scripts/stack.sh refresh` does. Whether approvals survive
   that restack can't be seen off `main`, where the reviewer doesn't run (below); it's checked on
   the first stack after #68 sets `main` to 1 approval.
-- **Code-owner review on stacks** (decided from #315 for the admin's approval at this merge). On
-  a PR the admin's account opened, code-owner review showed no gate of its own: #313, code-owned,
-  showed only "At least 1 approving review is required by reviewers with write access", because
-  the admin is both its author and its only code owner. Once #68 sets 1 approval, a code-owned
-  part needs a code owner's approval that nobody can give, the bot not being a code owner, so it
-  merges only by bypass, and a bypass can't merge a stack (above). **Decision: turn code-owner
-  review off in ruleset `main` together with #68's step 12**; every code-owned PR meets the
-  Code-owned path row, so its escalation thread holds it until the admin resolves it, and #107's
-  App identity is the boundary that makes that thread the admin's alone. *Alternatives:* keep it
-  on and bypass-merge code-owned stacks part by part (the cost #264 removes); keep it on until
-  agent PRs come from the factory App (#107), so the admin can approve them (blocks #68 on #107);
-  make the bot a code owner (rejected in "Only this App approves": only `@sssoto17` is one).
+- **Code-owner review on stacks: a finding, not a decision** (the admin took the decision out of
+  #264, 16 Nov 2026). On a PR the admin's account opened, code-owner review showed no gate of its
+  own: #313, code-owned, showed only "At least 1 approving review is required by reviewers with
+  write access", because the admin is both its author and its only code owner. Once #68 sets 1
+  approval, a code-owned part needs a code owner's approval that nobody but the admin can give,
+  and the admin can't approve their own PRs, so it merges only by bypass, and a bypass can't
+  merge a stack (above): a stack with a code-owned part merges part by part. Code-owner review
+  stays on (Q15). This is input for #68, which decides after a deterministic `guard / code-owned`
+  check exists.
 - **One test run per stack.** `ci / typecheck`, `ci / lint` and `ci / test` run on a stack's top
   part only, diffing from the stack's base, so one run covers every part. The other jobs, the
   floor guard among them, and the review run on each part. The `if:` in GitHub's
