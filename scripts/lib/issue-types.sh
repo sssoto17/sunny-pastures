@@ -4,7 +4,8 @@
 # so keep the two the same. The admin set it on 15 Nov 2026 (#266). Callers bring bash 4.4+ and
 # set -euo pipefail; nothing here exits.
 # Tests: scripts/new-issue.test.sh, scripts/backfill-issue-types.test.sh. The issue forms'
-# `type:` keys (.github/ISSUE_TEMPLATE/*.yml) must match too: .github/scripts/tests/issue-forms.test.mjs.
+# `type:` keys (.github/ISSUE_TEMPLATE/*.yml) follow it too:
+# .github/scripts/tests/issue-forms.test.mjs.
 
 # The type labels, in the order the docs list them.
 # shellcheck disable=SC2034 # read by new-issue.sh

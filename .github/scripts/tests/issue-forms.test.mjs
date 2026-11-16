@@ -21,7 +21,7 @@ function mapping() {
 		],
 		{ encoding: "utf8" },
 	);
-	expect(res.status, res.stderr).toBe(0);
+	if (res.status !== 0) throw new Error(`sourcing ${MAPPING} failed: ${res.stderr}`);
 	return new Map(
 		res.stdout
 			.trim()
@@ -30,7 +30,9 @@ function mapping() {
 	);
 }
 
-// A form's top-level `key: value` lines (unindented), enough for name, labels and type.
+// A form's top-level `key: value` lines (unindented), enough for name, labels and type. It reads
+// plain scalars and flow lists only, as the forms use: a quoted value, an inline comment or a block
+// list reads differently and turns the test red, never green.
 function topLevel(file) {
 	const keys = new Map();
 	for (const line of readFileSync(`${FORMS}${file}`, "utf8").split("\n")) {
@@ -40,22 +42,24 @@ function topLevel(file) {
 	return keys;
 }
 
-const forms = readdirSync(FORMS).filter((f) => f.endsWith(".yml") && f !== "config.yml");
+const types = mapping();
+// Each form as [file, the type label it's named after].
+const forms = readdirSync(FORMS)
+	.filter((f) => f.endsWith(".yml") && f !== "config.yml")
+	.map((f) => [f, f.replace(/\.yml$/, "")]);
 
 describe("issue forms", () => {
 	it("has one form per type label, named after the label", () => {
-		expect(forms.map((f) => f.replace(/\.yml$/, "")).sort()).toEqual([...mapping().keys()].sort());
+		expect(forms.map(([, label]) => label).sort()).toEqual([...types.keys()].sort());
 	});
 
-	it.each(forms)("%s sets the native type its label maps to", (file) => {
-		const label = file.replace(/\.yml$/, "");
-		const want = mapping().get(label);
+	it.each(forms)("%s sets the native type its label maps to", (file, label) => {
+		const want = types.get(label);
 		expect(want, `scripts/lib/issue-types.sh maps no native type to ${label}`).toBeTruthy();
 		expect(topLevel(file).get("type")).toBe(want);
 	});
 
-	it.each(forms)("%s still adds its type label and triage", (file) => {
-		const label = file.replace(/\.yml$/, "");
+	it.each(forms)("%s still adds its type label and triage", (file, label) => {
 		expect(topLevel(file).get("labels")).toBe(`[${label}, triage]`);
 	});
 });

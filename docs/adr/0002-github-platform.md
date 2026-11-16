@@ -1094,7 +1094,7 @@ CONTRIBUTING, no issue or PR template, no licence.
 | LICENSE | **At go-public (#38), Q7** | Chosen when the repo goes public, after checking EK's rules on student work. With none, all rights are reserved. |
 | CODE_OF_CONDUCT.md, FUNDING.yml | Skip | No community and no funding. |
 | `CITATION.cff` | Skip; reconsider at M8 | Only if the report wants the repo cited in a standard form. |
-| Issue types | Skip | An organization feature; labels carry the type here. The docs describe issue types only per organization, set by organization owners ([managing issue types](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/managing-issue-types-in-an-organization)), and GraphQL returns `issueTypes: null` for this repo (checked 7 Nov). |
+| Issue types | **Adopt** (superseded the Skip of 7 Nov) | Was skipped on 7 Nov as an organization feature: the docs describe issue types only per organization ([managing issue types](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/managing-issue-types-in-an-organization)), and GraphQL then returned `issueTypes: null` for this repo. Since then the repo offers its own types (`gh api repos/sssoto17/sunny-pastures/issue-types`: Chore, Bug, Feature, Design), #158 made one required on every issue, #266 set the label → type mapping, and #254 has the issue forms set it. The type label stays (`docs/agents/triage-labels.md`, Types). |
 | Autolinks | Skip | Nothing external to link to (and Pro-only on private repos). |
 
 ## 8. Security and dependencies
