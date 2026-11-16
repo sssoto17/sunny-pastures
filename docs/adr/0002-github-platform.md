@@ -2020,6 +2020,10 @@ both entries, deviations the admin decided on 8 Nov:
 - `commit-message: { prefix: chore, include: scope }`: PR titles read `chore(deps): …` or
   `chore(deps-dev): …`, so they pass the planned `guard / pr-title`.
 
+**Changed 16 Nov, #268:** the npm entry adds an `ignore` for `typescript` with `update-types:
+["version-update:semver-major"]`. Dependabot no longer proposes TypeScript majors, inside the
+`all-dev` group (#262 bumped TypeScript 6 to 7 there) or alone; a major is upgraded by hand.
+
 ## A8. Rulesets (JSON for `gh api --input`)
 
 `ruleset-main.json`:
