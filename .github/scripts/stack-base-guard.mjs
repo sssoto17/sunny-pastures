@@ -7,9 +7,14 @@
 // can start before the stack exists. When the event has no stack, it asks GitHub again
 // (GET pulls/<n>, the job's read-only token), every 10 s for up to 6 tries, before it fails.
 //
-// Usage: node .github/scripts/stack-base-guard.mjs   (reads the PR from $GITHUB_EVENT_PATH)
-// Exit codes: 0 pass, 1 a base that isn't the default branch outside a stack, 2 could not run.
-// It logs the event's stack object and base, the evidence #264 asked for on stacked CI runs.
+// With --top it is ci.yml's `ci / stack` job instead: it writes `top=true|false` to $GITHUB_OUTPUT,
+// false only for a lower part of a stack, so typecheck, lint and test run once per stack (#264).
+// The event's stack can't say that on `opened`, for the reason above, so it asks GitHub the same way.
+//
+// Usage: node .github/scripts/stack-base-guard.mjs [--top]   (reads $GITHUB_EVENT_PATH)
+// Exit codes: 0 pass (always, with --top), 1 a base that isn't the default branch outside a
+// stack, 2 could not run. It logs the event's stack object and base: what a stacked run sees.
+import { appendFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { CannotRun, isMain, readEvent } from "./diff.mjs";
@@ -17,22 +22,47 @@ import { CannotRun, isMain, readEvent } from "./diff.mjs";
 const WAIT_MS = 10_000;
 
 /**
+ * The PR's stack, `{ number, position, size, base }`, or null. From the event when it has one;
+ * otherwise from `getPull`: up to `tries` times, 10 s apart, for a PR based on another branch
+ * (it can only be a stacked part, or a hand-chained PR), and once for a PR on the default branch.
+ */
+const findStack = async (event, { getPull, sleep, tries = 6 }) => {
+	const pr = event.pull_request;
+	if (pr.stack) return pr.stack;
+	const attempts = pr.base.ref === event.repository.default_branch ? 1 : tries;
+	for (let i = 0; i < attempts; i++) {
+		if (i > 0) await sleep(WAIT_MS);
+		const stack = (await getPull(pr.number))?.stack;
+		if (stack) return stack;
+	}
+	return null;
+};
+
+const requirePr = (event) => {
+	if (!event?.pull_request?.base?.ref || !event?.repository?.default_branch)
+		throw new CannotRun("the event has no pull_request base or default branch");
+};
+
+/** Whether typecheck, lint and test should run: false only for a stack's lower part. */
+export const isTopPart = async (event, deps) => {
+	if (!event?.pull_request) return true; // a push to main: run on what landed
+	requirePr(event);
+	const stack = await findStack(event, deps);
+	return !stack || stack.position === stack.size;
+};
+
+/**
  * The verdict for a PR event: `{ ok, message }`. `getPull(number)` returns the PR as REST does;
  * it's called only when the base isn't the default branch and the event has no stack.
  */
 export const checkStackBase = async (event, { getPull, sleep, tries = 6 }) => {
-	const pr = event?.pull_request;
-	const main = event?.repository?.default_branch;
-	if (!pr?.base?.ref || !main)
-		throw new CannotRun("the event has no pull_request base or default branch");
+	requirePr(event);
+	const pr = event.pull_request;
+	const main = event.repository.default_branch;
 	const base = pr.base.ref;
 	if (base === main) return { ok: true, message: `base is ${main}` };
 
-	let stack = pr.stack ?? null;
-	for (let i = 0; !stack && i < tries; i++) {
-		if (i > 0) await sleep(WAIT_MS);
-		stack = (await getPull(pr.number))?.stack ?? null;
-	}
+	const stack = await findStack(event, { getPull, sleep, tries });
 	if (stack) {
 		return {
 			ok: true,
@@ -61,16 +91,25 @@ const getPullFromApi = (repo, token) => async (number) => {
 
 const main = async () => {
 	const event = readEvent();
+	const deps = {
+		getPull: getPullFromApi(
+			event?.repository?.full_name ?? process.env.GITHUB_REPOSITORY,
+			process.env.GITHUB_TOKEN,
+		),
+		sleep: (ms) => delay(ms),
+	};
 	const pr = event?.pull_request ?? {};
 	// Evidence for #264: what a stacked part's run sees. Numbers and branch names only.
 	console.log(
 		`stack-base: event base ${JSON.stringify(pr.base?.ref ?? null)}, stack ${JSON.stringify(pr.stack ?? null)}`,
 	);
-	const repo = event?.repository?.full_name ?? process.env.GITHUB_REPOSITORY;
-	const r = await checkStackBase(event, {
-		getPull: getPullFromApi(repo, process.env.GITHUB_TOKEN),
-		sleep: (ms) => delay(ms),
-	});
+	if (process.argv.includes("--top")) {
+		const top = await isTopPart(event, deps);
+		appendFileSync(process.env.GITHUB_OUTPUT ?? "/dev/stdout", `top=${top}\n`);
+		console.log(`stack-base: top=${top}`);
+		return 0;
+	}
+	const r = await checkStackBase(event, deps);
 	if (r.ok) {
 		console.log(`stack-base: pass (${r.message})`);
 		return 0;
