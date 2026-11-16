@@ -1,6 +1,7 @@
 name: Feature
 description: New behaviour for the player, the admin or the API
 labels: [feature, triage]
+type: Feature
 body:
   - type: textarea
     id: goal
