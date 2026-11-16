@@ -20,8 +20,6 @@ usage: scripts/stack.sh <command> ...
       them as one native stack. Each part must be built on the one below and add commits of its
       own. A body file's first line is the PR title; the rest is the body. Run it again after a
       failure: it reuses the PRs and the stack it finds.
-  add <pr> [--label <name>]... <branch>=<body-file>
-      Append a part on top of the stack that holds <pr>.
   update <pr>
       After an edit to a lower part: rebase each open part onto the new head of the one below,
       then push them, each with a lease on the head it fetched. The stack stays linear.
@@ -220,36 +218,6 @@ cmd_open() {
   cmd_status "${nums[0]}"
 }
 
-cmd_add() {
-  (($# >= 1)) || die 2 "add needs a PR number"
-  local pr=$1
-  shift
-  while (($#)); do
-    case $1 in
-      --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
-      *) break ;;
-    esac
-  done
-  parse_parts "$@"
-  ((${#branches[@]} == 1)) || die 2 "add takes one part"
-  local s top
-  s=$(require_stack "$pr")
-  top=$(stack_parts "$s" | awk '$2 == "open" { b = $3 } END { print b }')
-  [[ -n $top ]] || die 2 "stack #$s has no open part to build on"
-  fetch "$top"
-  git merge-base --is-ancestor "origin/$top" "${branches[0]}" ||
-    die 2 "${branches[0]} is not built on $top: rebuild it on top of $top"
-  check_chain "origin/$top" "${branches[0]}"
-  refuse_other_base "${branches[0]}" "$top" "$(open_pr_for "${branches[0]}")"
-  git push -q origin "${branches[0]}"
-  local n
-  n=$(ensure_pr "${branches[0]}" "$top" "${bodies[0]}")
-  add_labels "$n"
-  gh api -X POST "$P/stacks/$s/add" -F "pull_requests[]=$n" --jq .number >/dev/null ||
-    die 1 "#$n is open on $top but not in stack #$s; run the same command again"
-  cmd_status "$n"
-}
-
 open_heads() { # stack -> the open parts' head refs, bottom first
   local num state head sha merged
   while read -r num state head sha merged; do
@@ -335,7 +303,7 @@ cmd_status() {
 
 case ${1:-} in
   -h | --help) usage; exit 0 ;;
-  open | add | update | refresh | status) cmd=$1; shift; "cmd_$cmd" "$@" ;;
+  open | update | refresh | status) cmd=$1; shift; "cmd_$cmd" "$@" ;;
   "") usage; exit 2 ;;
   *) usage; die 2 "unknown command: $1" ;;
 esac

@@ -108,12 +108,6 @@ case "$method $path" in
       '{number: $n, base: $base, open: true, prs: $prs}' >"$st/stacks/$n.json"
     set_stack "$n"
     out=$(stack_json "$n") ;;
-  "POST $P/stacks/"*/add)
-    n=${path#"$P"/stacks/}; n=${n%/add}
-    jq --argjson add "$(jq -c .pull_requests <<<"$input")" '.prs += $add' "$st/stacks/$n.json" >"$st/tmp" &&
-      mv "$st/tmp" "$st/stacks/$n.json"
-    set_stack "$n"
-    out=$(stack_json "$n") ;;
   "GET $P/stacks/"*)
     n=${path#"$P"/stacks/}
     [[ -f $st/stacks/$n.json ]] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
@@ -297,41 +291,6 @@ rm "$work/gh/fail_POST_repos_sssoto17_sunny-pastures_stacks"
 case_ open p1="$work/bodies/p1.md" p2="$work/bodies/p2.md"
 expect_code 0
 expect_eq "retry stacks the same PRs" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401]"
-
-# --- add: appends a part on the top open part ----------------------------------------------------
-reset
-three_parts
-run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
-case_ add 401 p3="$(body p3 'feat: three')"
-expect_code 0
-expect_eq "new part on the top part" "$(pr_field 403 .base.ref)" p2
-expect_eq "appended to the stack" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401,403]"
-reset
-three_parts
-run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
-part p4 p1 d.txt
-case_ add 400 p4="$(body p4 'feat: four')"
-expect_code 2
-expect_err "p4 is not built on p2"
-case_ add 999 p3="$(body p3 'feat: three')"
-expect_code 1
-expect_err "#999"
-# a hand-chained PR for the new part is refused before anything is pushed
-printf '{"number":390,"state":"open","head":{"ref":"p3","sha":"x"},"base":{"ref":"main"},"stack":null}' \
-  >"$work/gh/pulls/390.json"
-case_ add 400 p3="$(body p3 'feat: three')"
-expect_code 2
-expect_err "#390 already has p3 on main"
-expect_eq "p3 not pushed" "$(remote_sha p3)" none
-reset
-part p1 main a.txt
-git -C "$repo" push -q origin p1
-printf '{"number":390,"state":"open","head":{"ref":"p1","sha":"x"},"base":{"ref":"main"},"stack":null}' \
-  >"$work/gh/pulls/390.json"
-part p2 p1 b.txt
-case_ add 390 p2="$(body p2 'feat: two')"
-expect_code 2
-expect_err "#390 is not in a stack"
 
 # --- update: an edit to a lower part restacks the parts above it --------------------------------
 # GitHub's "Rebase stack" fails on a merge commit that replays empty after a squash (throwaway
