@@ -18,13 +18,10 @@ on:
 permissions:
   contents: read
 
-# One group per PR and head (#264): a push to a stacked part fires two pull_request events on
-# the same head, and cancelling one left a cancelled twin of every check there, which GitHub then
-# read as the latest result and blocked the merge (throwaway stack #315). So a second run on the
-# same head waits instead of cancelling; a new head starts its own group.
-concurrency:
-  group: ci-${{ github.event.pull_request.number || 'push' }}-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: false
+# No concurrency group (#264): a push to a stacked part fires two pull_request events on one
+# head, and a group that cancels, or queues and then cancels, left a cancelled twin of a required
+# check there, which GitHub read as the latest result and blocked the merge (throwaway stack
+# #315). The cost: runs for a superseded head finish too.
 
 jobs:
   # Whether this PR is a stack's lower part. The event can't say so on `opened`, since
@@ -44,19 +41,24 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: .github/scripts
-          fetch-depth: 0 # the default branch's copy of the script, below
       # Run the default branch's script, not the PR's, so a PR can't switch off the checks that
-      # judge it (as the floor job does, #99). The PR's copy runs only while main has none.
+      # judge it (as the floor job does, #99). A sparse checkout leaves other refs' blobs off the
+      # runner, so the default branch gets a checkout of its own. The PR's copy runs only while
+      # the default branch has none; if it has one that can't be read, the step fails.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+          path: .stack-base
+          sparse-checkout: .github/scripts
       - name: Take the script from the default branch
-        env:
-          BASE: ${{ github.event.repository.default_branch }}
         run: |
           dir="$RUNNER_TEMP/stack-guard"
           mkdir -p "$dir"
-          if git cat-file -e "origin/$BASE:.github/scripts/stack-base-guard.mjs" 2>/dev/null; then
-            for f in stack-base-guard.mjs diff.mjs; do git show "origin/$BASE:.github/scripts/$f" >"$dir/$f"; done
+          if [[ -n $(git -C .stack-base ls-tree HEAD -- .github/scripts/stack-base-guard.mjs) ]]; then
+            cp .stack-base/.github/scripts/stack-base-guard.mjs .stack-base/.github/scripts/diff.mjs "$dir/"
           else
-            echo "::warning::origin/$BASE has no stack-base-guard.mjs yet; using this PR's copy"
+            echo "::warning::the default branch has no stack-base-guard.mjs yet; using this PR's copy"
             cp .github/scripts/stack-base-guard.mjs .github/scripts/diff.mjs "$dir/"
           fi
       - id: top

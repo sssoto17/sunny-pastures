@@ -242,6 +242,28 @@ describe("floor guard, end to end", () => {
 			expect(guard().out).toContain(`[check-removed] ${CI}`);
 		});
 
+		// #264: `ci / stack` decides whether typecheck, lint and test run, so it's guarded like the
+		// floor job: writing `top=false` by hand would skip them, and a skipped job reports passing.
+		const STACK =
+			'jobs:\n  stack:\n    steps:\n      - id: top\n        run: node "$dir/stack-base-guard.mjs" --top\n  test:\n    steps:\n      - run: pnpm test\n';
+		it.each([
+			[
+				"the decision replaced",
+				STACK.replace(
+					'node "$dir/stack-base-guard.mjs" --top',
+					'echo top=false >> "$GITHUB_OUTPUT"',
+				),
+			],
+			[
+				"a step added to the stack job",
+				STACK.replace("      - id: top\n", "      - run: true\n      - id: top\n"),
+			],
+		])("block %s in the stack job", (_, content) => {
+			repo = makeRepo({ ...BASE, [CI]: STACK });
+			repo.write({ [CI]: content });
+			expect(guard().out).toContain(`[check-removed] ${CI}`);
+		});
+
 		// #125: the duplication and formatting checks run as steps of `ci / lint`.
 		it.each(['pnpm dupes --changed-since "origin/$BASE_REF"', "pnpm format:check"])(
 			"block a removed `%s` step",
