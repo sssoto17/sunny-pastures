@@ -825,8 +825,8 @@ describe("floor guard, end to end", () => {
 			],
 			[
 				"the floor guard dropped from a stage",
-				"lint on changed files, floor guard, boundaries",
-				"lint on changed files, boundaries",
+				"lint on changed files, floor guard, formatting",
+				"lint on changed files, formatting",
 				"rule-narrowed",
 			],
 		])("blocks %s", (_, from, to, rule) => {
