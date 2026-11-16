@@ -21,6 +21,11 @@
 /pnpm-lock.yaml         @sssoto17
 /supabase/config.toml   @sssoto17
 /supabase/migrations/   @sssoto17
+# The determinism gate (#48): its expected state hash (a change to it is a change to what the rules
+# do), the recording it replays (determinismScript.json), and the runner that decides what each
+# process checks. recordScript.ts only makes recordings, which land in the owned JSON.
+/packages/sim/src/sim/tests/determinismScript.* @sssoto17
+/packages/sim/src/sim/tests/playScript.ts @sssoto17
 # Drizzle migrations and RLS: add the folder at M3, when it exists.
 
 # Configs that can weaken a check (CONSTRAINTS.md, "Guarding the bar"), in any directory.
