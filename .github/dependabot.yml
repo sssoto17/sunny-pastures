@@ -9,6 +9,9 @@ updates:
     groups:
       all-dev:
         dependency-type: development
+    ignore:                           # TypeScript majors are their own PR, not a group bump (#268)
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 3
     labels: ["area:ci-cd", "review:admin"]          # code-owned paths (triage-labels.md)
     commit-message: { prefix: chore, include: scope } # chore(deps): / chore(deps-dev):
