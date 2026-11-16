@@ -197,5 +197,8 @@
 	},
 	"env": {
 		"GH_TELEMETRY": "false"
+	},
+	"remote": {
+		"defaultEnvironmentId": "env_01YTuxRXHSsCwERJXfgV5xTK"
 	}
 }
