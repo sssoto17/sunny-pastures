@@ -1,6 +1,6 @@
-# `guard / pr-body` (#270): fails when a body that says `Part of #N` also links #N with a closing
-# keyword, which closes #N when that earlier part merges (retro 2026-11-15, issue B). The script
-# and the grammar it follows are in .github/scripts/pr-body-guard.mjs.
+# `guard / pr-body` (#270) and `guard / stack-base` (#264, below). pr-body fails when a body that
+# says `Part of #N` also links #N with a closing keyword, which closes #N when that earlier part
+# merges (retro 2026-11-15, issue B). The script and its grammar are in pr-body-guard.mjs.
 # Its own workflow, not a job in ci.yml: a body edit (`edited`) re-runs this check only, not all
 # of ci. No path filter, so it reports on every PR and can become a required check (ADR-0002,
 # area 2). The body is untrusted text: the script reads it from $GITHUB_EVENT_PATH, never through
@@ -30,3 +30,23 @@ jobs:
           sparse-checkout: .github/scripts
       # Node's built-in modules only, so nothing is installed: the runner's Node runs it.
       - run: node .github/scripts/pr-body-guard.mjs
+
+  # `guard / stack-base` (#264): a PR based on anything but main fails unless it's part of a native
+  # stack, so related PRs are never hand-chained (CONSTRAINTS.md, "Split size"). `edited` covers a
+  # base change. It may ask GitHub for the PR again while scripts/stack.sh links the stack, hence
+  # the read-only pull-requests scope and the token in env, never in a `run:` expression.
+  stack-base:
+    name: guard / stack-base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - run: node .github/scripts/stack-base-guard.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
