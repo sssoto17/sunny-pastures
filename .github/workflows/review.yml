@@ -15,6 +15,8 @@
 #   model, decides the review's event.
 # Environment `review`, never `factory`: on this event the run's ref is main, so any job here
 # would get its environment's secrets on every PR (#227).
+# Once per head (#274): the gate in `gather` skips a head this App has already reviewed, before
+# Claude runs, except review:admin on the PR while its approval stands (.github/scripts/review-gate.sh).
 # Caps: 30 turns and 15 minutes. #103's runs took 26-34 s a job; a review reads about six rule
 # files plus one file per touched area. Actions pinned to full SHAs, each at least 7 days old.
 name: review
@@ -67,10 +69,16 @@ jobs:
 
       # Everything Claude reads about the PR, as files. Its text stays in files and jq: nothing
       # the PR wrote is expanded into a script.
+      # Once per head (#274): before anything else is fetched, the gate skips a head this App
+      # has already reviewed, unless review:admin is on the PR while its approval stands
+      # (ADR-0002, test (e)). Later steps run only on `run == 'true'`, so a skip never pays for
+      # Claude.
       - id: gather
         name: Gather the PR (read-only token)
         env:
           GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ github.event.action }}
+          BOT: sunny-reviewer # the App's slug, as in the job's `if:`
         run: |
           set -euo pipefail
           echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
@@ -80,11 +88,14 @@ jobs:
           r="repos/$GITHUB_REPOSITORY"
           gh api "$r/pulls/$PR" --jq '{number, title, body, author: .user.login, base: .base.ref,
             head_sha: .head.sha, labels: [.labels[].name], additions, deletions}' >"$CTX/pr.json"
+          gh api --paginate "$r/pulls/$PR/reviews?per_page=100" --jq '.[] | {id,
+            author: .user.login, state, submitted_at, body, commit_id}' | jq -s . >"$CTX/reviews.json"
+          PR_JSON=$CTX/pr.json REVIEWS=$CTX/reviews.json bash .github/scripts/review-gate.sh
+          if grep -qx 'run=false' "$GITHUB_OUTPUT"; then exit 0; fi
+
           gh api --paginate "$r/pulls/$PR/files?per_page=100" --jq '.[] | {filename, status,
             additions, deletions, previous_filename}' | jq -s . >"$CTX/files.json"
           gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" >"$CTX/diff.patch"
-          gh api --paginate "$r/pulls/$PR/reviews?per_page=100" --jq '.[] | {id,
-            author: .user.login, state, submitted_at, body}' | jq -s . >"$CTX/reviews.json"
           gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
             -F pr="$PR" -f query="$THREADS_QUERY" \
             --jq '.data.repository.pullRequest.reviewThreads.nodes' >"$CTX/threads.json"
@@ -98,6 +109,7 @@ jobs:
           echo "head=$(jq -r .head_sha "$CTX/pr.json")" >>"$GITHUB_OUTPUT"
 
       - id: claude
+        if: steps.gather.outputs.run == 'true'
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -142,8 +154,10 @@ jobs:
         if: always()
         env:
           EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
+          GATE: ${{ steps.gather.outputs.run }}
         run: |
-          echo "RESULT job_seconds=$(($(date +%s) - ${JOB_START:-$(date +%s)}))"
+          echo "RESULT job_seconds=$(($(date +%s) - ${JOB_START:-$(date +%s)})) reviewed=${GATE:-unknown}"
+          [ "$GATE" != false ] || { echo "RESULT skipped: this head was already reviewed"; exit 0; }
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
           [ -f "$f" ] || { echo "RESULT execution_file=missing"; exit 0; }
           jq -r '.[] | select(.type == "result") | "RESULT subtype=\(.subtype) is_error=\(.is_error)"

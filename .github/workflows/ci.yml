@@ -62,6 +62,52 @@ jobs:
       - run: pnpm test
       - run: node .github/scripts/coverage-gate.mjs --base "origin/$BASE_REF"
 
+  # CONSTRAINTS.md, Determinism row (#48): the recorded script through packages/sim in two
+  # processes, against the recorded state hash. No path filter: the hash covers every rules change.
+  determinism:
+    name: ci / determinism
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm determinism
+
+  # #255: the shell scripts' test suites, every *.test.sh under scripts/ and .claude/hooks/, found
+  # by the runner so a new suite needs no edit here. Each suite fakes gh on PATH and needs no secret:
+  # the job holds no token, persists no credentials, and the runner puts a gh that refuses every
+  # call ahead of the real one. The setup step fits the runner to the suites' headers.
+  scripts:
+    name: ci / scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # zsh: issue-fields.test.sh calls the script from zsh, and the ubuntu-24.04 image has none.
+      # The identity is a fallback for a suite that forgets its own; today each sets one (git -c,
+      # or GIT_CONFIG_GLOBAL), which wins over this. bash, jq, git 2.36+ and GNU date are on the
+      # image: the versions print below.
+      - name: Set up the runner for the suites
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          command -v zsh >/dev/null || {
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends zsh >/dev/null
+          }
+          git config --global user.name "ci / scripts"
+          git config --global user.email "ci-scripts@example.invalid"
+          bash --version | head -n1; jq --version; git --version; date --version | head -n1
+          zsh --version
+      - name: Run the suites
+        env:
+          TMPDIR: ${{ runner.temp }} # unset on the image; the suites build throwaway repos under it
+        run: bash .github/scripts/shell-suites.sh
+
   floor:
     name: guard / floor
     runs-on: ubuntu-24.04

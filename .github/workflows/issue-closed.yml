@@ -1,0 +1,42 @@
+# The `issues: closed` job (#270): comments a closed issue's unticked boxes, if any, and changes
+# nothing else: no reopen, no label, no edit (retro 2026-11-15, issue B). The script is
+# .github/scripts/unticked-boxes.mjs.
+# An `issues` workflow runs from the default branch only, so it first runs once merged. The issue
+# body is untrusted text: the script reads it from $GITHUB_EVENT_PATH, and the comment is posted
+# from a file, never through an expression in `run:`. Actions are GitHub-owned and pinned to a full
+# SHA (ADR-0002, area 8).
+name: issue-closed
+
+on:
+  issues:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  unticked:
+    name: issue / unticked boxes
+    # Only an issue closed as done: one closed as not planned or a duplicate keeps its open boxes
+    # on purpose. A PR's closing keyword closes an issue as completed, the case this job is for.
+    if: github.event.issue.state_reason == 'completed'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # the checkout of the script: the repository is private
+      issues: write # the one comment
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Find the unticked boxes
+        run: node .github/scripts/unticked-boxes.mjs --out "$RUNNER_TEMP/comment.md"
+      - name: Comment them
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          if [ -s "$RUNNER_TEMP/comment.md" ]; then
+            gh api --silent "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
+              -F "body=@$RUNNER_TEMP/comment.md"
+          fi

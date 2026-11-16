@@ -51,9 +51,14 @@
 			"Bash(pnpm typecheck)",
 			"Bash(pnpm check:fast)",
 			"Bash(pnpm check:task)",
+			"Bash(pnpm exec vitest run *)",
+			"Bash(pnpm exec vitest bench *)",
+			"Bash(pnpm exec prettier --check *)",
 			"Bash(scripts/today-gather.sh)",
 			"Bash(scripts/today-gather.sh *)",
-			"Bash(bash .claude/hooks/block-branch-switch.test.sh)"
+			"Bash(bash .claude/hooks/block-branch-switch.test.sh)",
+			"Bash(bash scripts/new-issue.test.sh)",
+			"mcp__github-ci__get_job_logs"
 		],
 		"ask": [
 			"Bash(gh pr merge *)",
@@ -90,7 +95,12 @@
 			"Edit(**/.claude/skills/**)",
 			"Edit(supabase/**)",
 			"Bash(gh pr edit *--remove-label*review:admin*)",
-			"Bash(gh issue edit *--remove-label*review:admin*)"
+			"Bash(gh issue edit *--remove-label*review:admin*)",
+			"Bash(pnpm exec prettier *--write*)",
+			"Bash(pnpm exec prettier * -w*)",
+			"Bash(pnpm exec vitest *--update*)",
+			"Bash(pnpm exec vitest * -u*)",
+			"Bash(pnpm exec vitest *--outputFile*)"
 		],
 		"deny": [
 			"Read(.env)",
@@ -187,5 +197,8 @@
 	},
 	"env": {
 		"GH_TELEMETRY": "false"
+	},
+	"remote": {
+		"defaultEnvironmentId": "env_01YTuxRXHSsCwERJXfgV5xTK"
 	}
 }
