@@ -262,7 +262,17 @@ const SIM_SYNTAX = [
 
 export default defineConfig(
 	{
-		ignores: ["**/node_modules/", "**/coverage/", "**/dist/", "**/.next/", ".claude/", ".agents/"],
+		// Flat config doesn't read .gitignore. `.remember/` is the remember plugin's git-ignored
+		// scratch folder, not project code; a stray .ts there failed `eslint .` (#256).
+		ignores: [
+			"**/node_modules/",
+			"**/coverage/",
+			"**/dist/",
+			"**/.next/",
+			".claude/",
+			".agents/",
+			".remember/",
+		],
 	},
 	js.configs.recommended,
 	// Typed linting (ADR-0005, section 6): strictTypeChecked includes strict. The project service
