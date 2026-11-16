@@ -108,12 +108,17 @@ esac
 if [[ -n $filter ]]; then jq -r "$filter" <<<"$out"; else printf '%s\n' "$out"; fi
 FAKE
 chmod +x "$work/bin/gh"
+# A git on PATH that records each push's arguments, then runs the real git.
+real_git=$(command -v git)
+printf '#!/usr/bin/env bash\n[[ $1 == push ]] && printf "%%s\\n" "$*" >>"%s/pushes"\nexec "%s" "$@"\n' \
+  "$work" "$real_git" >"$work/bin/git"
+chmod +x "$work/bin/git"
 
 # --- fixtures ---------------------------------------------------------------------------------
 # A bare remote with main, and a clone in $repo where the parts are built. The fake gh resolves a
 # PR's head SHA from the clone, so it runs with the clone as its working directory.
 reset() {
-  rm -rf "$work/gh" "$work/remote.git" "$work/repo" "$work/bodies"
+  rm -rf "$work/pushes" "$work/gh" "$work/remote.git" "$work/repo" "$work/bodies"
   mkdir -p "$work/gh/pulls" "$work/gh/stacks" "$work/bodies"
   echo 400 >"$work/gh/next"
   git init -q --bare "$work/remote.git"
@@ -201,7 +206,8 @@ expect_eq "stack holds the parts in order" "$(jq -c .prs "$work/gh/stacks/403.js
 expect_eq "part 3 knows its position" "$(pr_field 402 .stack.position)" 3
 expect_out "stack #403"
 # the push never forces and never sets an upstream
-expect_no_call "--force"
+assert "pushed" test -s "$work/pushes"
+assert "no forced push" bash -c "! grep -qE -- ' (-f|--force[^ ]*|\+[^ ]+)( |$)' '$work/pushes'"
 assert "no upstream recorded" test -z "$(git -C "$repo" config --get branch.p1.remote)"
 
 # open again: reuses the PRs and the stack, creates nothing
@@ -232,9 +238,10 @@ expect_code 2
 expect_err "p2 has no commits of its own"
 reset
 three_parts
+case_ open --base nosuch p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+expect_code 2
+expect_err "no branch nosuch on origin"
 # an open PR for a part on another base is a hand-chained PR: refuse rather than stack it
-reset
-three_parts
 git -C "$repo" push -q origin p1 p2
 printf '{"number":390,"state":"open","head":{"ref":"p2","sha":"x"},"base":{"ref":"main"},"stack":null}' \
   >"$work/gh/pulls/390.json"
