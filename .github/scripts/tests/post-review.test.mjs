@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = fileURLToPath(new URL("../post-review.sh", import.meta.url));
+const GATE = fileURLToPath(new URL("../review-gate.sh", import.meta.url));
 const CODEOWNERS = fileURLToPath(new URL("../../CODEOWNERS", import.meta.url)); // the real file
 
 // A fake gh: logs each call on one line, answers reads from fixtures, and refuses the comments
@@ -215,6 +216,41 @@ describe("post-review.sh", () => {
 		const clean = run(verdict(), { reviews });
 		expect(clean.calls).not.toContain("dismissals");
 		expect(clean.calls).toContain("-f event=APPROVE");
+	});
+
+	// #274: once per head, except ADR-0002 test (e). review-gate.sh runs first in review.yml.
+	it("on a head it approved, runs again only for review:admin, and then holds the approval", () => {
+		const approval = { id: 60, user: { login: "sunny-reviewer[bot]" }, state: "APPROVED" };
+		const asGathered = [
+			{ author: "sunny-reviewer[bot]", state: "APPROVED", body: "merge", commit_id: "abc" },
+		];
+		const gate = (action) => {
+			const d = mkdtempSync(join(tmpdir(), "gate-"));
+			writeFileSync(join(d, "reviews.json"), JSON.stringify(asGathered));
+			writeFileSync(join(d, "out"), "");
+			spawnSync("bash", [GATE], {
+				env: {
+					PATH: process.env.PATH,
+					ACTION: action,
+					HEAD: "abc",
+					BOT: "sunny-reviewer",
+					REVIEWS: join(d, "reviews.json"),
+					GITHUB_OUTPUT: join(d, "out"),
+				},
+			});
+			const out = readFileSync(join(d, "out"), "utf8");
+			rmSync(d, { recursive: true, force: true });
+			return out.trim();
+		};
+		for (const action of ["synchronize", "reopened", "ready_for_review"])
+			expect(gate(action), action).toBe("run=false");
+		expect(gate("labeled")).toBe("run=true");
+
+		const r = run(verdict(), { labels: ["true"], reviews: [approval], env: { FAKE_AUTO: "true" } });
+		expect(r.calls).toContain("pulls/7/reviews/60/dismissals");
+		expect(r.calls).toContain("disablePullRequestAutoMerge");
+		expect(r.calls).toContain("-f event=COMMENT");
+		expect(r.calls).not.toContain("event=APPROVE");
 	});
 
 	it("requests changes, placing each finding as well as the diff allows", () => {
