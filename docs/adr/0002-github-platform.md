@@ -1160,8 +1160,8 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
   GHSA-g3hv-75wg-m249). `pnpm audit` takes its advisories from GitHub's database (its report links
   to `github.com/advisories`). So osv-scanner qualifies under D3, but it isn't a check yet: it fails
   on any severity and has no flag to set a threshold, so as a plain step it would turn red on
-  `main` today. Its check name, threshold and `CONSTRAINTS.md` row are a follow-up (the admin's
-  decision, 15 Nov).
+  `main` today. Its check name, threshold and `CONSTRAINTS.md` row are #278 (the admin's
+  decision, 16 Nov, recorded on #42).
 - **Semgrep as the required check `guard / code-scan`: adopt with the CI/CD step (#42).** Like
   gitleaks, it needs an "Allowed actions" entry or a checksum-verified download, and so does
   osv-scanner if it's kept.
@@ -1175,6 +1175,9 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
   `p/owasp-top-ten` download from the Semgrep registry on each run, so a rule-pack update can turn
   `guard / code-scan` red with no code change. If that happens, read the rule diff, and consider
   vendoring a snapshot of the packs then.
+  A root `.semgrepignore` with no entries switches off Semgrep's built-in ignore list, which skips
+  `tests/` and `test/` folders, so tests are scanned too. Semgrep v1.184.0 doesn't read
+  `.gitignore`, and a `.gitignore` entry can't hide a tracked file from it.
 - **Dependabot alerts: adopt now.** Free on private repos. No noise until there are dependencies.
   For npm dependencies, see the pnpm 12 limit above.
 - **Dependabot security updates: adopt at M2**, when `packages/sim` brings dev dependencies.
