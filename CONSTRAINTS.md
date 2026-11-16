@@ -235,6 +235,8 @@ ask for a split, suggests where to cut, and doesn't review the lines.
 - **How a split links:** each part says `Part of #N`, and the part that completes the issue says
   `Closes #N`. Only that last part is checked against the issue's acceptance criteria, and only it
   meets the feature-slice row (see the rows above).
+  An earlier part describes the later parts without a closing keyword, even in prose about another
+  part, a table or a code span: GitHub links "closes #N" wherever it sits (`guard / pr-body`).
 - **How a split is built:** as a stack, all parts opened together. Part 1 is based on `main`, and
   each later part on the previous part's branch. Each part stays within the split size and is
   reviewed on its own diff (`gh pr diff`); the closing part's criteria check covers the whole
