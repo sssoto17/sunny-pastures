@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { makeRepo } from "./test-repo.mjs";
@@ -87,6 +89,30 @@ describe("sim-changed", () => {
 		]);
 
 		expect(out).toContain("runs=1000");
+	});
+
+	it("reads the whole work tree when started from a subfolder, and runs the command there", () => {
+		repo = makeRepo(FILES);
+		repo.write({ "packages/sim/src/hash/extra.ts": "export const c = 1;\n" });
+		const cwd = join(repo.dir, "apps/web/src");
+
+		// `git ls-files` lists only the current folder, so the script must read from the top.
+		const r = spawnSync(
+			"node",
+			[SCRIPT, "--base", "main", "SIM_PROPERTY_RUNS=1000", "--", ...PRINT_RUNS],
+			{ cwd, env: { ...process.env, SIM_PROPERTY_RUNS: "" }, encoding: "utf8" },
+		);
+		const where = spawnSync(
+			"node",
+			[SCRIPT, "--base", "main", "--", "node", "-p", "process.cwd()"],
+			{
+				cwd,
+				encoding: "utf8",
+			},
+		);
+
+		expect(r.stdout).toContain("runs=1000");
+		expect(where.stdout.trim()).toBe(cwd);
 	});
 
 	it("exits with the command's own status", () => {
