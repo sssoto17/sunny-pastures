@@ -41,7 +41,7 @@ shopt -u nocasematch
 command=$(json_field command) || exit 0
 flat=${command//[\'\"\\]/}
 [[ ${flat,,} == *resolvereviewthread* ]] && deny "this command names resolveReviewThread"
-[[ ${command,,} == *graphql* ]] || exit 0
+[[ ${flat,,} == *graphql* ]] || exit 0
 
 deny_unreadable() {
   deny "this GraphQL call's query comes from a variable, a command, a file or stdin, so the hook can't read it"
@@ -60,10 +60,14 @@ check_command() {
       ;;
   esac
   ((is_call)) || return 0
-  # Backticks and input redirects leave no trace in the words, so they count in the whole command.
+  # Backticks and input redirects leave no trace in the words, so they count in the whole command;
+  # under xargs the query can arrive as an operand.
   [[ $command == *'`'* || $command == *'<'* ]] && deny_unreadable
+  ((via_xargs)) && deny_unreadable
   for w in "${@:2}"; do
-    [[ $w == *'$'* || $w == --input* || $w == -d@* || $w == *=@* || $w == @* ]] && deny_unreadable
+    # $…; a file (gh -F k=@f, --input; curl -d @f, k@f, -T, -K and their long forms)
+    [[ $w == *'$'* || $w == *@* || $w == --input* ]] && deny_unreadable
+    [[ $name == curl && $w =~ ^(-T|-K|--upload-file|--config)($|=) ]] && deny_unreadable
   done
   return 0
 }

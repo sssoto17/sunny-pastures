@@ -60,6 +60,14 @@ deny 'curl -s -X POST https://api.github.com/graphql -d @q.json'
 deny 'curl https://api.github.com/graphql --data "$BODY"'
 deny 'git fetch && gh api graphql -F query=@q.graphql'
 deny 'bash -c "gh api graphql -F query=@q.graphql"'
+# quoting splits the word `graphql` in the text, not in the command (#319's review)
+deny 'gh api '\''graph'\''ql -F query=@q.graphql'
+deny 'curl https://api.github.com/gra""phql -d @q.json'
+# curl's other ways to read a body from a file, and xargs adding the query as an operand
+deny 'curl https://api.github.com/graphql --data-urlencode query@q.graphql'
+deny 'curl -T q.json https://api.github.com/graphql'
+deny 'curl -K q.cfg https://api.github.com/graphql'
+deny 'xargs -a q.txt gh api graphql -f query'
 
 # --- what stays allowed ------------------------------------------------------------------------
 allow 'gh api graphql -f query='\''query { viewer { login } }'\'''
