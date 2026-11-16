@@ -85,21 +85,34 @@ describe("findEarlyClosings", () => {
 		["owner/repo#N", "Closes sssoto17/sunny-pastures#7"],
 		["owner/repo#N in another case", "closes SSSOTO17/Sunny-Pastures#7"],
 		["an issue URL", "fixes https://github.com/sssoto17/sunny-pastures/issues/7"],
+		["an issue URL with www", "fixes https://www.github.com/sssoto17/sunny-pastures/issues/7"],
 		["a keyword in an HTML comment", "<!-- resolves #7 -->"],
 		["a keyword in a fenced code block", "```\ncloses #7\n```"],
 	])("counts %s as a link to #N", (_, phrase) => {
 		expect(findEarlyClosings(`Part of #7\n\n${phrase}`, REPO)).toHaveLength(1);
 	});
 
-	it.each(["  Part of #7", "**Part of #7**", "> Part of #7", "- part of #7"])(
-		"reads a link line with markdown before it: %j",
-		(link) => {
-			expect(findEarlyClosings(`${link}\ncloses #7`, REPO)).toHaveLength(1);
-		},
-	);
+	it.each([
+		"  Part of #7",
+		"**Part of #7**",
+		"**Part of** #7",
+		"> Part of #7",
+		"- part of #7",
+		"1. Part of #7",
+		"Part of: #7",
+		"| Part of #7 |",
+	])("reads a link line with markdown before it: %j", (link) => {
+		expect(findEarlyClosings(`${link}\ncloses #7`, REPO)).toHaveLength(1);
+	});
 
 	it("counts a Part of written as owner/repo#N", () => {
 		expect(findEarlyClosings(`Part of sssoto17/sunny-pastures#7\ncloses #7`, REPO)).toHaveLength(1);
+	});
+
+	it("stays fast on a body built to make the patterns backtrack", () => {
+		const start = performance.now();
+		findEarlyClosings(`Part of #7\n${" \n".repeat(30_000)}close${" ".repeat(60_000)}x`, REPO);
+		expect(performance.now() - start).toBeLessThan(250);
 	});
 
 	it("reports every early closing, each on its own line", () => {

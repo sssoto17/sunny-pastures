@@ -15,11 +15,13 @@
 // Exit codes: 0 pass, 1 an early closing link, 2 could not run (never reads as a pass).
 // It prints only what the patterns matched (a keyword and an issue reference), never a whole line
 // of the body, so no text the PR wrote can run as a workflow command.
-import { readFileSync } from "node:fs";
-
-import { CannotRun, isMain } from "./diff.mjs";
+import { CannotRun, isMain, readEvent } from "./diff.mjs";
 
 const KEYWORD = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
+// What may come before `Part of` at the start of its line: indent, a quote, a list marker, a table
+// pipe, emphasis. Spaces and tabs only, never a newline: that keeps each line's scan linear on a
+// body of blank lines, and the optional colon is grouped with its spaces for the same reason.
+const LINK_LINE = String.raw`^[ \t>*_|-]*(?:\d+[.)][ \t]*)?(?:\*\*|__)?`;
 
 /**
  * Every closing keyword in `body` that links an issue the same body calls `Part of #N`, in order.
@@ -34,14 +36,16 @@ const KEYWORD = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
 export const findEarlyClosings = (body, repo) => {
 	const ref = issueRef(repo);
 	const parts = new Set(
-		[...body.matchAll(new RegExp(String.raw`^[\s>*_-]*part of\s+${ref}(?!\d)`, "gim"))].map(
-			issueOf,
-		),
+		[
+			...body.matchAll(
+				new RegExp(String.raw`${LINK_LINE}part of(?:\*\*|__)?[ \t]*:?[ \t]*${ref}(?!\d)`, "gim"),
+			),
+		].map(issueOf),
 	);
 	if (parts.size === 0) return [];
 
 	const findings = [];
-	for (const m of body.matchAll(new RegExp(String.raw`${KEYWORD}\s*:?\s*${ref}(?!\d)`, "gi"))) {
+	for (const m of body.matchAll(new RegExp(String.raw`${KEYWORD}(?:\s*:)?\s*${ref}(?!\d)`, "gi"))) {
 		const issue = issueOf(m);
 		if (!parts.has(issue)) continue;
 
@@ -59,7 +63,10 @@ function issueRef(repo) {
 	const forms = [String.raw`#(\d+)`];
 	if (repo) {
 		const name = repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-		forms.push(String.raw`${name}#(\d+)`, String.raw`https?://github\.com/${name}/issues/(\d+)`);
+		forms.push(
+			String.raw`${name}#(\d+)`,
+			String.raw`https?://(?:www\.)?github\.com/${name}/issues/(\d+)`,
+		);
 	}
 	return `(?:${forms.join("|")})`;
 }
@@ -75,12 +82,7 @@ for example "the last part carries the link", or, if this PR completes the issue
 \`Part of #N\` with the closing link (CONSTRAINTS.md, "Split size").`;
 
 const main = () => {
-	let event;
-	try {
-		event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8"));
-	} catch {
-		throw new CannotRun("no readable pull_request event at $GITHUB_EVENT_PATH");
-	}
+	const event = readEvent();
 	const body = event?.pull_request?.body ?? "";
 	const repo = event?.repository?.full_name ?? process.env.GITHUB_REPOSITORY ?? null;
 	const findings = findEarlyClosings(body, repo);
