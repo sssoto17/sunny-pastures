@@ -5,12 +5,13 @@ skills own the gates (constraints, spec, plan, review, ship). Matt Pocock's skil
 depth and the tracker loop (grilling, domain language, deep modules, tickets, implementation,
 retros). Each job has exactly one owning skill.
 
-Last changed: 2026-11-12 (`REVIEW.md` as the one review standard, #225). Before that 2026-11-08
-(reviewer-bot model from ADR-0002, area 2; weekly retro as a Sunday cloud routine; #53).
+Last changed: 2026-11-16 (the Wk 2 workflow audit's stale places, #273). Before that 2026-11-12
+(`REVIEW.md` as the one review standard, #225).
 
 Every name below is a skill in `.claude/skills/`, except `remember:remember`, which comes from the
-`remember` plugin. `/clear` and `/compact` are built-in commands, and `/today` is a planned command
-(see **Automation stages**).
+`remember` plugin. `/clear` and `/compact` are built-in commands. `/today` is a skill too: its
+stage 1 (drafting the agenda and briefs, #117) and its coordinator mode (#157) have landed, and
+stage 2 is #109 (see **Automation stages**).
 
 ## The loops
 
@@ -23,8 +24,8 @@ flowchart TB
     P["prototype<br/>branch prototype/‹name›"]
     R["research<br/>background agent → cited .md"]
     S["spec-driven-development<br/>→ docs/requirements/spec.md"]
-    PL["planning-and-task-breakdown<br/>→ docs/plans/NN-‹slug›.md"]
-    T["to-tickets → GitHub issues<br/>milestone · Week · Track · Mode · Size"]
+    PL["planning-and-task-breakdown<br/>→ the milestone's ADR + tickets"]
+    T["to-tickets → GitHub issues<br/>milestone · type · Priority · Size · Week · Track · Mode"]
     G --> Q
     Q -- "needs a runnable answer" --> P
     P -- "what it taught" --> G
@@ -41,7 +42,7 @@ flowchart TB
     B["Manual items: brief → fresh session"]
     I["implement #N<br/>drives tdd + code-review"]
     PR["Pull request"]
-    RB["Reviewer bot<br/>approve → auto-merge<br/>or request changes"]
+    RB["Reviewer bot<br/>approve → auto-merge (from #68)<br/>or request changes"]
     MR{"You review and merge<br/>admin-review PRs"}
     PM["Evening: update the board<br/>light retro · remember:remember handoff"]
     AM --> F
@@ -55,7 +56,7 @@ flowchart TB
   subgraph W["Weekly"]
     direction TB
     ICA["improve-codebase-architecture<br/>→ deepening candidates"]
-    RT["retro: cloud routine, Sunday 08:00<br/>→ draft PR, docs/retros/YYYY-MM-DD.md"]
+    RT["retro: cloud routine, Sunday 08:00<br/>reads the Retro inbox #55<br/>→ draft PR, docs/retros/YYYY-MM-DD.md"]
   end
 
   subgraph GATE["Milestone gate: slice 29 Nov · freeze 20 Dec · hand-in 5 Jan"]
@@ -90,10 +91,18 @@ escalation criteria in `CONSTRAINTS.md`, "Admin review". Production changes only
 is `REVIEW.md`, at the repo root, for the bot, the coordinator's reviewer and a lane's own review
 alike.
 
-**Until #68, the reviewer bot isn't live** (it needs #37 and #68), so you review and merge every PR,
-factory PRs included. Until then the coordinating session stands in for the bot: it dispatches a
-fresh-context reviewer agent per PR and relays the verdict before you merge
-(`.claude/skills/today/SKILL.md`, "After the agenda: coordinator mode").
+**Escalation comments.** Lanes no longer write a one-line escalation comment when they add
+`review:admin`; the reviewer bot's escalation is the record (retro 2026-11-15, Outcomes 5).
+`CONSTRAINTS.md`, "Escalation criteria" still asks whoever adds the label to post one until #104
+changes it, so briefs carry the rule meanwhile.
+
+**Until #68, the reviewer bot reviews but doesn't approve.** Since 12 Nov it posts a review on
+every PR, but it neither approves nor turns on auto-merge: ruleset `main` stays at 0 required
+approvals with last-push approval off until #264 ("Stacks: one approval pass and one CI run per
+stack") lands, and #68 is blocked by #264 (retro 2026-11-15, Outcomes 1). So you merge every PR,
+factory PRs included. The coordinating session dispatches a fresh-context reviewer agent per PR
+and relays its verdict before you merge (`.claude/skills/today/SKILL.md`, "After the agenda:
+coordinator mode").
 
 ## When to use what
 
@@ -105,16 +114,16 @@ fresh-context reviewer agent per PR and relays the verdict before you merge
 | ↳ needs a runnable answer | `prototype` | `prototype/<name>` branch, never merged | what it taught |
 | ↳ needs facts | `research` (background) | cited `.md` | nothing: it feeds the grill |
 | | Addy `spec-driven-development` | `docs/requirements/spec.md` (living, doubles as the requirements chapter) | edit and approve |
-| | Addy `planning-and-task-breakdown` | `docs/plans/NN-<slug>.md`, frozen once published | approve the plan |
+| | Addy `planning-and-task-breakdown` | the milestone's plan as an ADR plus its tickets (M2: ADR-0003; M3 the same way, under #74); no `docs/plans/` file exists, and the week plan lives in the coordinator's `.scratch/` | approve the plan |
 | | `to-tickets` | GitHub issues with native blocking edges, on the Project | nothing: it publishes |
-| Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`, which runs as a self-review under `REVIEW.md`) | PR, reviewed under `REVIEW.md` by the reviewer bot (until #68, a reviewer agent the coordinator dispatches) | review and merge admin-review PRs (every PR until #68) |
+| Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`, which runs as a self-review under `REVIEW.md`) | PR, reviewed under `REVIEW.md` by the reviewer bot (until #68, also a reviewer agent the coordinator dispatches) | review and merge admin-review PRs (every PR until #68) |
 | ↳ high stakes: sim determinism, authority, RLS | Addy `doubt-driven-development` | adversarial review | |
 | ↳ framework APIs: Next, Drizzle, Supabase | Addy `source-driven-development` | docs-verified code | |
 | ↳ module or API shape | Addy `api-and-interface-design` + `codebase-design` | interface sketch | the interface |
 | ↳ something broke | `diagnosing-bugs` | regression test + fix | |
 | ↳ only the admin can do it | `wizard` | setup script; issue gets `blocked:admin` until done | |
 | Weekly | `improve-codebase-architecture` | deepening candidates | which one to pick |
-| | `retro` (see **Weekly retro convention**), a cloud routine on Sundays at 08:00 | a draft PR with `docs/retros/YYYY-MM-DD.md`, new checks and standards | which fixes to adopt |
+| | `retro` (see **Weekly retro convention**), a cloud routine on Sundays at 08:00; it handles the comments in the Retro inbox #55 | a draft PR with `docs/retros/YYYY-MM-DD.md`, new checks and standards | which fixes to adopt |
 | Milestone gate | Addy `code-review-and-quality` + `security-and-hardening`, `browser-testing-with-devtools`, `shipping-and-launch` | go/no-go with rollback plan | go or no-go |
 | After playtests | `triage` | feedback turned into ready issues | what's worth doing |
 | End of day | `remember:remember` (plugin) | handoff with the top 3 next | |
@@ -123,6 +132,15 @@ Not used, because another skill owns the job: Addy `interview-me` and `idea-refi
 (`grill-with-docs`), Matt `to-spec` (`spec-driven-development`), Addy `incremental-implementation`
 (`implement`), Addy `documentation-and-adrs` (`domain-modeling`). `wayfinder` stays in reserve for
 an effort too foggy for one grill.
+
+Why `implement` owns the ticket loop (admin, 9 Nov, #55): it starts from a GitHub issue (through
+`docs/agents/issue-tracker.md`), drives `tdd`, and ends with `code-review`, which checks the work
+against the repo's standards and the issue's criteria. `incremental-implementation` and Addy's
+`/build` start from a plan's task list instead, and `to-tickets` has already sliced the work small,
+so their slicing adds nothing. The trade-off: `implement` is thin, so a large ticket may name
+`incremental-implementation` under "Extra skills:". `implement` can't start itself
+(`disable-model-invocation: true`), so the admin types `/implement #N` in the launch line. #112
+re-evaluates this, including `/build auto` for the factory.
 
 ## Self-improving loops
 
@@ -150,6 +168,10 @@ as early as possible: the cheapest moment is the first repeat.
 
 Each answer becomes an issue or a direct change in the same week, never only a note.
 
+During the week, notes for the retro go to the **Retro inbox** (#55) as comments; the retro
+handles each one (#79 closed, retro 2026-11-15, Outcomes 8). The retro itself is to become a module
+of the agent-workflow package, not yet specified (same Outcomes item).
+
 ## Daily routine (Stage 0)
 
 Morning, about 10 minutes:
@@ -158,15 +180,20 @@ Morning, about 10 minutes:
 2. Open the **This week** board. Pick at most 3 outcomes (usually 1 design and 1–2 build) and
    move them to **Ready**. Ready is your focus; everything else stays in Backlog.
 3. Launch Factory items first, so agents work while you design.
-4. For each Manual item, write a brief and open a fresh session in the repo:
+4. For each Manual item, write a brief (`/today` drafts them into `.scratch/`; its full shape is
+   `.claude/skills/today/SKILL.md`, "Drafting a brief") and open a fresh session in the repo with
+   the launch line `/implement #N Read and follow <brief> first.` The brief, in short:
 
    ```
-   Work in a worktree named <N>-<slug>.
-   Work on #N: <one-line goal>.
-   Read first: <files, ADRs, links>.
+   Build lane: #N "<title>" (<milestone>, <week>, <priority>, under #<parent>).
+   Before the first edit, enter your own worktree as .claude/worktrees/<N>-<slug>
+   (a cloud lane has no worktree step: it works on its own branch).
+   Read first: <the issue's criteria, the docs and the sections that matter>.
+   Skills: /implement #N drives tdd and ends with code-review, run as a self-review under REVIEW.md.
+   Extra skills: <the ↳ rows of "When to use what" that fit, or "none">.
    Decided: <settled points, with links>.
-   Start with: <skill>.
-   Report back: <PR link, check output, open questions>.
+   Things to know: <code-owned paths, review:admin rows, area label, other lanes on the same files>.
+   Deliverable: <one PR or a stack; the checks to run; PR number, head SHA, "close #N?">.
    ```
 
 During the day, at each phase boundary choose, in this order: continue · subagent · `/clear` ·
@@ -182,24 +209,43 @@ coordinating session; every work session gets its own git worktree under `.claud
 - The local Supabase stack is one per machine and shared by every worktree.
 - Most git commands (worktrees, commits, pushes) run inside the sandbox. The exceptions are in
   `docs/agents/sandbox.md`, "Git inside the sandbox" and "When git does need the host".
+- **Cloud lanes** (claude.ai/code sessions) run in their own container on their own branch, so they
+  have no worktree step and nothing to tidy locally: `scripts/after-merge.sh` only removes local
+  worktrees and their branches, and GitHub deletes a merged head branch itself. They reach GitHub
+  over REST only (`gh api repos/…`, no GraphQL), so they can't link a native stack.
+
+**Stacks.** A PR over the split size becomes a stack, as `CONSTRAINTS.md`, "Split size" sets out
+today: `Part of #N` on every part but the last, `Closes #N` on the last (and nowhere else, not even
+in prose), and after a part merges the next one merges `origin/main` in, with no rebase or
+force-push. #264 rewrites that rule to allow the native restack (`gh stack`); until it lands, the
+coordinator links a cloud lane's parts locally (`REVIEW.md`, "Review kinds", Split stack).
 
 Evening, about 10 minutes. This routine stays manual, with no schedule: it needs local state (the
 worktrees, the handoff), which a cloud routine can't see.
 
-1. Update the board: statuses, `blocked:*` labels with their reason.
+1. Update the board: statuses, `blocked:*` labels with their reason. Before an issue closes, the
+   coordinator ticks the acceptance criteria its reviewer confirmed (`docs/agents/issue-tracker.md`,
+   "Checkboxes"). `scripts/missing-fields.sh` and `scripts/orphan-issues.sh` list the open issues
+   missing a field or a parent (`issue-tracker.md`, "Issue fields" and "Grouping").
 2. A light `retro` if you built something. Note any step you repeated by hand.
 3. Tidy up after the PRs that merged: check `git worktree list`, then from the main folder run
    `scripts/after-merge.sh <name>` for each (it fast-forwards main, removes the worktree and
    deletes the branch). If it exits 3, run the command it prints outside the sandbox; see
-   `docs/agents/sandbox.md`, "When git does need the host".
+   `docs/agents/sandbox.md`, "When git does need the host". A cloud lane's branch isn't a local
+   worktree, so the script doesn't reach it; GitHub deletes it at merge (the repo's
+   "Automatically delete head branches").
 4. `remember:remember` handoff with the top 3 next.
+
+At merge, a required check that is red on a change you approved (for example `guard / floor` on
+an intended `CONSTRAINTS.md` edit) is yours to lift: the PR says so in its Concerns, and you lift
+`main checks` for that one merge. Agents never bypass a ruleset (`AGENTS.md`).
 
 ## Automation stages
 
 | Stage | When | What runs |
 |---|---|---|
 | 0 | now | Everything above, by hand. Note repeated steps in each retro. |
-| 1 | ~week 2 | Read-only `/today`: handoff + this week's board → brief, agenda, a brief per Manual item, a prompt per Factory item. |
-| 2 | ~week 3 | Billetto-style gather script, background review agents, action batch, check every ~75 min, `/today wrap`. |
+| 1 | landed 9 Nov (#117), coordinator mode 11 Nov (#157) | Read-only `/today`: handoff + this week's board → agenda, a brief per Manual item, a prompt per Factory item; then coordinator mode for the rest of the day. |
+| 2 | ~week 4 (#109) | Billetto-style gather script, background review agents, action batch, check every ~75 min, `/today wrap`. |
 
 Automate a step only after doing it by hand 3 times with the same result.

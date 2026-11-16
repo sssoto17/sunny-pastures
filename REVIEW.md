@@ -49,6 +49,10 @@ Each item names where its rule lives. Read the rule there.
    it; on a test-heavy PR, prove it with a mutant (Conduct).
 9. **The PR's own boxes**: each ticked "How it was verified" box has its evidence in the PR.
 10. **Repo rules**: `AGENTS.md`, "Layout" and "Rules", for whatever the diff touches.
+11. **Knock-on edits** (retro 2026-11-15, #273): a PR that changes a rule greps the repo for the
+    old wording and lists every hit it leaves; an Optional finding a lane defers goes into the
+    closing part's body or a follow-up issue. Check that the list is in the PR body and rerun the
+    grep (`git grep -n '<old wording>'`); a hit neither fixed nor listed is a Required finding.
 
 ## Severity
 
