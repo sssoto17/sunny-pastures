@@ -94,7 +94,12 @@
 			"Edit(**/.claude/skills/**)",
 			"Edit(supabase/**)",
 			"Bash(gh pr edit *--remove-label*review:admin*)",
-			"Bash(gh issue edit *--remove-label*review:admin*)"
+			"Bash(gh issue edit *--remove-label*review:admin*)",
+			"Bash(pnpm exec prettier *--write*)",
+			"Bash(pnpm exec prettier * -w*)",
+			"Bash(pnpm exec vitest *--update*)",
+			"Bash(pnpm exec vitest * -u*)",
+			"Bash(pnpm exec vitest *--outputFile*)"
 		],
 		"deny": [
 			"Read(.env)",
