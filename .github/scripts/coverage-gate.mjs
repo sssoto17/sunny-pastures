@@ -11,9 +11,8 @@
 // lcov isn't a source file under coverage, so it doesn't count.
 import { existsSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
-import { baseArg, CannotRun, enterRepo, readChange } from "./diff.mjs";
+import { baseArg, CannotRun, enterRepo, isMain, readChange } from "./diff.mjs";
 
 // The changed-line thresholds, in percent. First match wins.
 export const THRESHOLDS = [
@@ -164,7 +163,7 @@ const main = () => {
 	return 1;
 };
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (isMain(import.meta.url)) {
 	try {
 		process.exitCode = main();
 	} catch (e) {

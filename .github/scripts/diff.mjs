@@ -1,11 +1,26 @@
 // Reads the change a PR makes: the diff from the merge base to the working tree, plus untracked
-// files. Shared by floor-guard.mjs and coverage-gate.mjs. Adapted from the floor-guard reference
-// (.agents/skills/constraint-driven-development/references/floor-guard.md, "Contract").
+// files. Also holds `isMain`, the entry check the scripts in .github/scripts/ share. Adapted from
+// the floor-guard reference (.agents/skills/constraint-driven-development/references/floor-guard.md,
+// "Contract").
 import { execFileSync } from "node:child_process";
-import { lstatSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // Thrown when the change can't be read. Callers exit 2, which must never read as clean.
 export class CannotRun extends Error {}
+
+// True when the module whose `import.meta.url` is given is the script Node was started with. Node
+// gives `import.meta.url` the real path, but `process.argv[1]` keeps a symlinked one (a linked
+// home, macOS /tmp, a symlinked worktree), so both sides are resolved before comparing. A plain
+// URL comparison is false there, `main` never runs, and the script exits 0 with no output (#48's
+// review). Resolving both sides also holds under --preserve-symlinks-main.
+export const isMain = (importMetaUrl) => {
+	try {
+		return realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(importMetaUrl));
+	} catch {
+		return false;
+	}
+};
 
 // `git diff --no-index` exits 1 whenever the two sides differ, which is the normal case for a new
 // file, so that output is kept. Any other failure is null, and null never reads as clean.
