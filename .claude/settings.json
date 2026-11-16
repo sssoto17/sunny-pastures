@@ -51,9 +51,13 @@
 			"Bash(pnpm typecheck)",
 			"Bash(pnpm check:fast)",
 			"Bash(pnpm check:task)",
+			"Bash(pnpm exec vitest run *)",
+			"Bash(pnpm exec vitest bench *)",
+			"Bash(pnpm exec prettier --check *)",
 			"Bash(scripts/today-gather.sh)",
 			"Bash(scripts/today-gather.sh *)",
-			"Bash(bash .claude/hooks/block-branch-switch.test.sh)"
+			"Bash(bash .claude/hooks/block-branch-switch.test.sh)",
+			"Bash(bash scripts/new-issue.test.sh)"
 		],
 		"ask": [
 			"Bash(gh pr merge *)",
