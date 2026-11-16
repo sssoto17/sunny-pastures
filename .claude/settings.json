@@ -61,7 +61,16 @@
 			"mcp__github-ci__get_job_logs"
 		],
 		"ask": [
+			"Bash(gh pr merge)",
 			"Bash(gh pr merge *)",
+			"Bash(gh api *pulls/*/merge*)",
+			"Bash(curl *pulls/*/merge*)",
+			"Bash(gh stack merge*)",
+			"Bash(gh stack *merge*)",
+			"Bash(gh api *stacks/*/unstack*)",
+			"Bash(curl *stacks/*/unstack*)",
+			"mcp__github__merge_pull_request",
+			"mcp__github__enable_pr_auto_merge",
 			"Bash(gh pr close *)",
 			"Bash(gh issue close *)",
 			"Bash(gh issue reopen *)",
@@ -132,6 +141,8 @@
 			"Bash(git -C * push * main *)",
 			"Bash(git -C * push *:main*)",
 			"Bash(gh pr merge*--admin*)",
+			"mcp__github__resolve_review_thread",
+			"mcp__github-ci__resolve_review_thread",
 			"Bash(gh repo delete*)",
 			"Bash(gh repo archive*)",
 			"Bash(sh)",
@@ -167,6 +178,16 @@
 					{
 						"type": "command",
 						"command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-branch-switch.sh",
+						"timeout": 10
+					}
+				]
+			},
+			{
+				"matcher": "Bash|mcp__.*",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-thread-resolve.sh",
 						"timeout": 10
 					}
 				]
