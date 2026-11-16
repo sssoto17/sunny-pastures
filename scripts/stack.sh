@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # The one way to build a split as a native GitHub stack (#264; CONSTRAINTS.md, "Split size"), for
-# local and cloud lanes alike. Plain git plus `gh api` over REST: the stack endpoints
-# (repos/{o}/{r}/stacks, stacks/{n}/add) and pulls are REST, while `gh stack` and `gh pr` reach
-# GraphQL, which the cloud GitHub proxy refuses. It never merges a PR or a stack, never takes a
-# part out of a stack, never force-pushes and never moves a base by hand: merging stays with the
-# admin.
+# local and cloud lanes alike: git plus `gh api` over REST (pulls, stacks), since `gh stack` and
+# `gh pr` reach GraphQL, which the cloud proxy refuses. It never merges, never force-pushes, never
+# takes a part out of a stack and never moves a base by hand: merging stays with the admin.
 # Tests: scripts/stack.test.sh. Needs git 2.38+ (merge-tree --write-tree) and an authenticated gh.
 set -euo pipefail
 shopt -s inherit_errexit # a failed gh inside $( … ) stops the script too
@@ -48,8 +46,9 @@ parse_parts() { # <branch>=<body-file>... -> branches, bodies; checks each befor
 check_chain() { # base-ref branch... : each part is built on the one below and adds commits
   local below=$1 b
   shift
-  for b in "$@"; do
-    git merge-base --is-ancestor "$below" "$b" || die 2 "$b is not built on ${below#origin/}: rebuild it on top, the stack can't hold a hand-made chain"
+  for b in "$@"; do # part 1 may sit on an older base: GitHub diffs it from the merge base
+    [[ $below == origin/* ]] || git merge-base --is-ancestor "$below" "$b" ||
+      die 2 "$b is not built on $below: rebuild it on top of $below"
     [[ -n $(git rev-list -n1 "$below..$b") ]] || die 2 "$b has no commits of its own on top of ${below#origin/}"
     below=$b
   done
@@ -97,12 +96,10 @@ cmd_open() {
   done
   parse_parts "$@"
   ((${#branches[@]} >= 2)) || die 2 "a stack needs at least 2 parts; one part is a plain PR"
-  git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base" 2>/dev/null ||
-    die 2 "no branch $base on origin"
+  git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base"
   check_chain "origin/$base" "${branches[@]}"
 
-  # Every refusal comes before anything is pushed or created: a hand-chained PR, or a PR that's
-  # already in a stack other than the one these parts make up.
+  # Every refusal comes first: a hand-chained PR, or a PR in a stack these parts don't make up.
   local i bases=("$base" "${branches[@]}") found pr st s="" in_stack=0 whole=1 nums=()
   for i in "${!branches[@]}"; do
     found=$(open_pr_for "${branches[i]}")
@@ -113,7 +110,7 @@ cmd_open() {
     if ((i == 0)); then s=$st; elif [[ $st != "$s" ]]; then whole=0; fi
   done
   [[ -n $s ]] || whole=0
-  ((whole || !in_stack)) || die 2 "a part's PR is already in another stack: take it out of that stack in the UI first"
+  ((whole || !in_stack)) || die 2 "a part's PR is already in a stack: add a part with 'scripts/stack.sh add', or unlink it in the UI"
 
   git push -q origin "${branches[@]}"
   for i in "${!branches[@]}"; do

@@ -109,9 +109,8 @@ if [[ -n $filter ]]; then jq -r "$filter" <<<"$out"; else printf '%s\n' "$out"; 
 FAKE
 chmod +x "$work/bin/gh"
 # A git on PATH that records each push's arguments, then runs the real git.
-real_git=$(command -v git)
 printf '#!/usr/bin/env bash\n[[ $1 == push ]] && printf "%%s\\n" "$*" >>"%s/pushes"\nexec "%s" "$@"\n' \
-  "$work" "$real_git" >"$work/bin/git"
+  "$work" "$(command -v git)" >"$work/bin/git"
 chmod +x "$work/bin/git"
 
 # --- fixtures ---------------------------------------------------------------------------------
@@ -238,9 +237,6 @@ expect_code 2
 expect_err "p2 has no commits of its own"
 reset
 three_parts
-case_ open --base nosuch p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
-expect_code 2
-expect_err "no branch nosuch on origin"
 # an open PR for a part on another base is a hand-chained PR: refuse rather than stack it
 git -C "$repo" push -q origin p1 p2
 printf '{"number":390,"state":"open","head":{"ref":"p2","sha":"x"},"base":{"ref":"main"},"stack":null}' \
