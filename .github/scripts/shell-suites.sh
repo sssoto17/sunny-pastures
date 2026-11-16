@@ -2,16 +2,25 @@
 # Runs the shell scripts' test suites (#255): every *.test.sh under scripts/ and .claude/hooks/,
 # found here, so a new suite is picked up without a workflow edit. Run from the repo root:
 #   bash .github/scripts/shell-suites.sh
+# Tests: .github/scripts/tests/shell-suites.test.mjs
+# No `set -e`: a suite's exit code is collected, never acted on, so every suite runs; the summary
+# decides the exit code.
 set -uo pipefail
 
+# Each folder must hold a suite: one that was moved or renamed fails here instead of dropping
+# its suites out of the run.
 suites=()
-while IFS= read -r -d '' f; do suites+=("$f"); done < <(
-  find scripts .claude/hooks -type f -name '*.test.sh' -print0 2>/dev/null | sort -z
-)
-if ((${#suites[@]} == 0)); then
-  echo "shell-suites: no *.test.sh suites found under scripts/ or .claude/hooks/; run it from the repo root" >&2
-  exit 1
-fi
+for root in scripts .claude/hooks; do
+  found=()
+  while IFS= read -r -d '' f; do found+=("$f"); done < <(
+    find "$root" -type f -name '*.test.sh' -print0 2>/dev/null | sort -z
+  )
+  if ((${#found[@]} == 0)); then
+    echo "shell-suites: no *.test.sh suite found under $root/; run it from the repo root" >&2
+    exit 1
+  fi
+  suites+=("${found[@]}")
+done
 
 # Every suite puts its own fake gh first on PATH. One that forgets must fail here, not reach
 # GitHub: a gh that refuses every call goes ahead of the real one, with no token and an empty
