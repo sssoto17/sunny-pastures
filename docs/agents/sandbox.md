@@ -18,12 +18,13 @@ Write each Bash call so a rule in `.claude/settings.json` can match it, or it pr
 
 ## Must run outside the sandbox
 
-| What                                                                                                                                                                                   | Symptom inside the sandbox      | Why                                                                                                                                                                                                                                                     |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Git commands that write `.git/config` or `.git/hooks`: `git push -u` / `--set-upstream`, `git worktree add` from a remote branch with tracking, `git remote set-url`, `gh pr checkout` | `could not lock config file`    | The sandbox protects `.git/config` and `.git/hooks`, so a session can't plant a hook or a `core.fsmonitor` program. Avoid these commands rather than leaving the sandbox; see "Git inside the sandbox".                                                 |
-| Every bare `supabase` command, even `supabase --version`                                                                                                                               | `EROFS: read-only file system`  | The CLI writes telemetry to `~/.supabase`, and home is read-only. `HOME=$TMPDIR supabase …` also works. The `pnpm db:*` scripts and `pnpm supabase:check` run outside the sandbox on their own (`sandbox.excludedCommands` in `.claude/settings.json`). |
-| Anything that connects to a service on the host: local Postgres (55322), the Supabase API (55321), a spike server started in an earlier command                                        | `Connection refused`            | The sandbox has its own network namespace, so `127.0.0.1` inside it isn't the host's loopback. Checked on 6 Nov: port 55322 refused inside, open outside.                                                                                               |
-| Reading `.env`, `.env.local`, `.env.*.local`, `.env.production`, `~/.ssh`, `~/.aws`                                                                                                    | Empty file or permission denied | These paths are read-denied, so `node --env-file=.env` sees nothing. Pass `DATABASE_URL` in the environment, or run the command outside.                                                                                                                |
+<!-- prettier-ignore -->
+| What | Symptom inside the sandbox | Why |
+|---|---|---|
+| Git commands that write `.git/config` or `.git/hooks`: `git push -u` / `--set-upstream`, `git worktree add` from a remote branch with tracking, `git remote set-url`, `gh pr checkout` | `could not lock config file` | The sandbox protects `.git/config` and `.git/hooks`, so a session can't plant a hook or a `core.fsmonitor` program. Avoid these commands rather than leaving the sandbox; see "Git inside the sandbox". |
+| Every bare `supabase` command, even `supabase --version` | `EROFS: read-only file system` | The CLI writes telemetry to `~/.supabase`, and home is read-only. `HOME=$TMPDIR supabase …` also works. The `pnpm db:*` scripts and `pnpm supabase:check` run outside the sandbox on their own (`sandbox.excludedCommands` in `.claude/settings.json`). |
+| Anything that connects to a service on the host: local Postgres (55322), the Supabase API (55321), a spike server started in an earlier command | `Connection refused` | The sandbox has its own network namespace, so `127.0.0.1` inside it isn't the host's loopback. Checked on 6 Nov: port 55322 refused inside, open outside. |
+| Reading `.env`, `.env.local`, `.env.*.local`, `.env.production`, `~/.ssh`, `~/.aws` | Empty file or permission denied | These paths are read-denied, so `node --env-file=.env` sees nothing. Pass `DATABASE_URL` in the environment, or run the command outside. |
 
 A server and the client that calls it work inside the sandbox only when they run in the same command
 (for example, start the server in the background, run the curl, then kill the server). Across
@@ -139,11 +140,12 @@ That moves the session's working directory into the worktree, where `cd` is allo
 The admin pastes terminal output back into sessions (see the rule in `AGENTS.md`). Commands that
 print credentials, and what to use instead:
 
-| Prints secrets                                                | Use instead                                                                        |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `supabase start` (keys, S3 credentials, DB URL with password) | `pnpm db:start`                                                                    |
-| `supabase status`                                             | `pnpm db:status`; `pnpm db:env` writes `DATABASE_URL` to `.env` without echoing it |
-| `env`, `printenv`, `cat .env` (denied by permission rules)    | `test -n "${NAME:+x}" && echo set` to check a variable is set                      |
+<!-- prettier-ignore -->
+| Prints secrets | Use instead |
+|---|---|
+| `supabase start` (keys, S3 credentials, DB URL with password) | `pnpm db:start` |
+| `supabase status` | `pnpm db:status`; `pnpm db:env` writes `DATABASE_URL` to `.env` without echoing it |
+| `env`, `printenv`, `cat .env` (denied by permission rules) | `test -n "${NAME:+x}" && echo set` to check a variable is set |
 
 As a backstop, a `UserPromptSubmit` hook (`.claude/hooks/block-secret-paste.sh`, registered in
 `.claude/settings.json`) refuses any prompt that contains a key, a token or a database URL with a

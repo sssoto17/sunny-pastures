@@ -12,20 +12,21 @@ Project field (Status, Track, Mode, Size, Priority, Week) stays a field and neve
 - Every other label is `prefix:value`, and all labels with one prefix share one colour.
 - No new prefix without the admin.
 
-| Label         | Colour    |
-| ------------- | --------- |
-| `feature`     | `#0E8A16` |
-| `bug`         | `#D73A4A` |
-| `spike`       | `#006B75` |
-| `design`      | `#D4C5F9` |
-| `chore`       | `#BFDADC` |
-| `idea`        | `#F9D0C4` |
-| `area:*`      | `#1D76DB` |
-| `triage`      | `#FBCA04` |
-| `blocked:*`   | `#B60205` |
-| `factory:*`   | `#D93F0B` |
+<!-- prettier-ignore -->
+| Label | Colour |
+|---|---|
+| `feature` | `#0E8A16` |
+| `bug` | `#D73A4A` |
+| `spike` | `#006B75` |
+| `design` | `#D4C5F9` |
+| `chore` | `#BFDADC` |
+| `idea` | `#F9D0C4` |
+| `area:*` | `#1D76DB` |
+| `triage` | `#FBCA04` |
+| `blocked:*` | `#B60205` |
+| `factory:*` | `#D93F0B` |
 | `wayfinder:*` | `#5319E7` |
-| `review:*`    | `#C5DEF5` |
+| `review:*` | `#C5DEF5` |
 
 ## Types
 
@@ -35,14 +36,15 @@ type in the last column (`issue-tracker.md`, **Issue fields**). The scripts read
 (#266). PRs carry no type label: the Conventional Commit prefix in the PR title is the type (see
 **Pull requests**).
 
-| Label     | Use for                                                                                                                                       | Native type |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `feature` | New behaviour for the player, the admin or the API                                                                                            | Feature     |
-| `bug`     | Something that worked, or was specified, behaves wrongly                                                                                      | Bug         |
-| `spike`   | Throwaway work that answers a question with measurements or a prototype; its result lands in an ADR or doc                                    | Chore       |
-| `design`  | Work whose output is decisions: a grill, an ADR, glossary terms, the spec. It blocks the issues that depend on it through a native dependency | Design      |
-| `chore`   | Upkeep with no new behaviour: tooling, config, hooks, dependencies, and docs-only work                                                        | Chore       |
-| `idea`    | Wanted but not shaped enough to build. Parked until picked up                                                                                 | Chore       |
+<!-- prettier-ignore -->
+| Label | Use for | Native type |
+|---|---|---|
+| `feature` | New behaviour for the player, the admin or the API | Feature |
+| `bug` | Something that worked, or was specified, behaves wrongly | Bug |
+| `spike` | Throwaway work that answers a question with measurements or a prototype; its result lands in an ADR or doc | Chore |
+| `design` | Work whose output is decisions: a grill, an ADR, glossary terms, the spec. It blocks the issues that depend on it through a native dependency | Design |
+| `chore` | Upkeep with no new behaviour: tooling, config, hooks, dependencies, and docs-only work | Chore |
+| `idea` | Wanted but not shaped enough to build. Parked until picked up | Chore |
 
 **`idea`** never moves to Ready. To work it, either a `design` issue that blocks it fleshes it out,
 or it's retyped (`feature`, `chore`…) once its body meets definition-of-ready rules 2–5. `design` is
@@ -54,15 +56,16 @@ Every issue carries **exactly one area**, set when it's filed: the layer the wor
 carries **one area per area its changed files touch**, so you can see at a glance what it changes.
 Set them by hand (a labeler is an automation candidate below).
 
-| Label        | Paths                                                                                                                                    |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `area:ui`    | `apps/web/` outside `src/server/`: pages, components, client state                                                                       |
-| `area:api`   | `apps/web/src/server/`, route handlers                                                                                                   |
-| `area:sim`   | `packages/sim/`                                                                                                                          |
-| `area:db`    | `supabase/`, the Drizzle schema, migrations, RLS                                                                                         |
-| `area:ci-cd` | `.github/`, deploy config, root config (`package.json`, `pnpm-workspace.yaml`, lockfile…)                                                |
+<!-- prettier-ignore -->
+| Label | Paths |
+|---|---|
+| `area:ui` | `apps/web/` outside `src/server/`: pages, components, client state |
+| `area:api` | `apps/web/src/server/`, route handlers |
+| `area:sim` | `packages/sim/` |
+| `area:db` | `supabase/`, the Drizzle schema, migrations, RLS |
+| `area:ci-cd` | `.github/`, deploy config, root config (`package.json`, `pnpm-workspace.yaml`, lockfile…) |
 | `area:tools` | All dev tooling: `tools/` (`load/`, `analysis/`), `scripts/`, `.claude/` (hooks, skills, agents, settings), `.agents/` (vendored skills) |
-| `area:docs`  | `docs/`, `GLOSSARY.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`                                                                            |
+| `area:docs` | `docs/`, `GLOSSARY.md`, `AGENTS.md`, `CLAUDE.md`, `README.md` |
 
 - `tests/acceptance/` and `prototypes/<name>/` take the area of what they test or prototype (a
   persistence store prototype is `area:db`).
@@ -72,13 +75,14 @@ Set them by hand (a labeler is an automation candidate below).
 
 ## Triage
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                                                                             |
-| -------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
-| `needs-triage`             | `triage`             | Needs evaluation before it can be worked                                                            |
-| `needs-info`               | a `blocked:*` label  | Can't move until the reason named below clears                                                      |
-| `ready-for-agent`          | `factory:ready`      | Fully specified; the factory may pick it up without the admin                                       |
+<!-- prettier-ignore -->
+| Label in mattpocock/skills | Label in our tracker | Meaning |
+| -------------------------- | -------------------- | ------- |
+| `needs-triage`             | `triage`             | Needs evaluation before it can be worked |
+| `needs-info`               | a `blocked:*` label  | Can't move until the reason named below clears |
+| `ready-for-agent`          | `factory:ready`      | Fully specified; the factory may pick it up without the admin |
 | `ready-for-human`          | no label             | The default. Readiness is the Project **Status** `Ready` (see `issue-tracker.md`, **Status rules**) |
-| `wontfix`                  | no label             | Close with `gh issue close <n> --reason "not planned" --comment "<why>"`                            |
+| `wontfix`                  | no label             | Close with `gh issue close <n> --reason "not planned" --comment "<why>"` |
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the label string from
 this table. A role with no label means: remove `triage` if present and set the Status the role
@@ -95,11 +99,12 @@ what adds and removes the label, is `issue-tracker.md`, **Issue fields**.
 A `blocked:*` label says why an issue can't be worked, or can't be queued for the factory, yet.
 Remove it when the reason clears. An issue may carry more than one.
 
-| Label              | Use when                                                                                                                                                   |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+<!-- prettier-ignore -->
+| Label | Use when |
+|---|---|
 | `blocked:decision` | A quick call by the admin, answerable in a comment, is still open. A decision that needs real design work is a `design` issue that blocks this one instead |
-| `blocked:external` | It waits on something outside the project: a service, a person, upstream                                                                                   |
-| `blocked:admin`    | Only the admin can do it: config, secrets, protected files, dashboards                                                                                     |
+| `blocked:external` | It waits on something outside the project: a service, a person, upstream |
+| `blocked:admin` | Only the admin can do it: config, secrets, protected files, dashboards |
 
 An issue blocked by another issue uses GitHub's native issue dependencies (see `issue-tracker.md`,
 **Blocking**), not a label.
@@ -131,13 +136,14 @@ admin; widened to code-owned PRs in #47.
 
 A PR's type is its title's Conventional Commit prefix, which is also the squash-commit message:
 
-| Issue type | PR title prefix                         |
-| ---------- | --------------------------------------- |
-| `feature`  | `feat:`                                 |
-| `bug`      | `fix:`                                  |
-| `chore`    | `chore:`, or `docs:` for docs-only work |
-| `design`   | `docs:` (its decisions land as docs)    |
-| `spike`    | `spike:` (spike PRs often don't merge)  |
+<!-- prettier-ignore -->
+| Issue type | PR title prefix |
+|---|---|
+| `feature` | `feat:` |
+| `bug` | `fix:` |
+| `chore` | `chore:`, or `docs:` for docs-only work |
+| `design` | `docs:` (its decisions land as docs) |
+| `spike` | `spike:` (spike PRs often don't merge) |
 
 `idea` and `triage` issues don't get PRs.
 
@@ -148,8 +154,9 @@ automated after it's been done by hand 3 times with the same result. Each candid
 number of times it has been done by hand; the weekly retro updates the counts and files an issue
 when one reaches 3.
 
-| Candidate                   | What it would do                                                           | By hand so far |
-| --------------------------- | -------------------------------------------------------------------------- | -------------- |
-| Path labeler                | A GitHub Action that sets a PR's `area:*` labels from the path table above | 1              |
-| PR-title check              | A CI check that a PR title uses one of the prefixes above                  | 0              |
-| Mode ↔ `factory:ready` sync | Keep the Project's Mode field and the `factory:ready` label in step        | 0              |
+<!-- prettier-ignore -->
+| Candidate | What it would do | By hand so far |
+|---|---|---|
+| Path labeler | A GitHub Action that sets a PR's `area:*` labels from the path table above | 1 |
+| PR-title check | A CI check that a PR title uses one of the prefixes above | 0 |
+| Mode ↔ `factory:ready` sync | Keep the Project's Mode field and the `factory:ready` label in step | 0 |

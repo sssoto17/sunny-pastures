@@ -16,18 +16,19 @@ Before you start: the `post-review.sh` change that turns on auto-merge is merged
 review runs from `main`'s copy (`pull_request_target`). `main`'s ruleset has 1 required approval,
 stale-review dismissal and thread resolution (on since 12 Nov); `start 68` checks them.
 
-| #   | Command or step                                                                                                                                   | By hand? | Wait                      | Tests                   |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------- | ----------------------- |
-| 1   | `scripts/setup/ci-check.sh start 68`, with `allow_auto_merge` off: (a)'s review logs `auto_merge=refused`                                         |          | 2-3 min a review          | (a), (c), (e1), (f)     |
-| 2   | `scripts/setup/ci-check.sh results 68`: (a) must read `APPROVED`                                                                                  |          |                           | read them               |
-| 3   | `gh api -X PATCH repos/sssoto17/sunny-pastures --silent -F allow_auto_merge=true`                                                                 | yes      |                           | (b) needs it            |
-| 4   | `scripts/setup/ci-check.sh push 68 a > .scratch/68-push-a.md`; it refuses unless 3 is done and (a) is approved                                    |          | 2-3 min                   | (b), (d)                |
-| 5   | `scripts/setup/ci-check.sh resolve 68` (once (e1) reads pass)                                                                                     |          | up to 20 min, usually 3-5 | (e2)                    |
-| 6   | Resolve (e)'s `escalated:` thread in the PR's UI                                                                                                  | yes      |                           |                         |
-| 7   | `scripts/setup/ci-check.sh push 68 e`                                                                                                             |          | 2-3 min                   | (e3)                    |
-| 8   | `scripts/setup/ci-check.sh results 68 > .scratch/68-results.md`, add step 4's line, then `gh issue comment 68 --body-file .scratch/68-results.md` |          |                           | all                     |
-| 9   | `scripts/setup/ci-check.sh cleanup 68`                                                                                                            |          |                           | closes the PRs unmerged |
-| 10  | `gh api -X PATCH repos/sssoto17/sunny-pastures --silent -F allow_auto_merge=false`, unless Q16 holds                                              | yes      |                           |                         |
+<!-- prettier-ignore -->
+| # | Command or step | By hand? | Wait | Tests |
+|---|---|---|---|---|
+| 1 | `scripts/setup/ci-check.sh start 68`, with `allow_auto_merge` off: (a)'s review logs `auto_merge=refused` | | 2-3 min a review | (a), (c), (e1), (f) |
+| 2 | `scripts/setup/ci-check.sh results 68`: (a) must read `APPROVED` | | | read them |
+| 3 | `gh api -X PATCH repos/sssoto17/sunny-pastures --silent -F allow_auto_merge=true` | yes | | (b) needs it |
+| 4 | `scripts/setup/ci-check.sh push 68 a > .scratch/68-push-a.md`; it refuses unless 3 is done and (a) is approved | | 2-3 min | (b), (d) |
+| 5 | `scripts/setup/ci-check.sh resolve 68` (once (e1) reads pass) | | up to 20 min, usually 3-5 | (e2) |
+| 6 | Resolve (e)'s `escalated:` thread in the PR's UI | yes | | |
+| 7 | `scripts/setup/ci-check.sh push 68 e` | | 2-3 min | (e3) |
+| 8 | `scripts/setup/ci-check.sh results 68 > .scratch/68-results.md`, add step 4's line, then `gh issue comment 68 --body-file .scratch/68-results.md` | | | all |
+| 9 | `scripts/setup/ci-check.sh cleanup 68` | | | closes the PRs unmerged |
+| 10 | `gh api -X PATCH repos/sssoto17/sunny-pastures --silent -F allow_auto_merge=false`, unless Q16 holds | yes | | |
 
 - **While auto-merge is on (steps 3-10),** every real PR the App approves gets auto-merge too, and
   merges once its checks are green. Keep the window short, and open no other PRs during it.

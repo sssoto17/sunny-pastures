@@ -112,16 +112,17 @@ two farms. (Amended 6 Nov after #8.)
 
 ### Patterns
 
-| Pattern                           | Where                         | Why                                                                                                      |
-| --------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Repository                        | `GameStore`                   | SQL stays behind farm-shaped methods; the handler never sees tables.                                     |
-| Strategy (+ factory)              | A, B1, B25, B100              | Interchangeable stores chosen once from `STORE` and `SNAPSHOT_N`.                                        |
-| Functional core, imperative shell | handler + sim                 | The sim stays pure; only the handler does I/O.                                                           |
-| Optimistic Offline Lock           | `expectedSeq`                 | A conflict is detected at commit and retried, no lock held across the sim.                               |
-| Idempotent Receiver               | `idempotencyKey`, `processed` | A retried request returns the stored first answer instead of applying twice.                             |
-| Event Sourcing + Snapshot         | B                             | Actions are the source of truth; snapshots bound replay length.                                          |
-| Interface Segregation             | `AuditableStore`              | A cannot audit, so it doesn't pretend to.                                                                |
-| Shared gateway, injected          | inbox                         | One table and its SQL for all stores, handed in by the factory so every store writes gifts the same way. |
+<!-- prettier-ignore -->
+| Pattern | Where | Why |
+| --- | --- | --- |
+| Repository | `GameStore` | SQL stays behind farm-shaped methods; the handler never sees tables. |
+| Strategy (+ factory) | A, B1, B25, B100 | Interchangeable stores chosen once from `STORE` and `SNAPSHOT_N`. |
+| Functional core, imperative shell | handler + sim | The sim stays pure; only the handler does I/O. |
+| Optimistic Offline Lock | `expectedSeq` | A conflict is detected at commit and retried, no lock held across the sim. |
+| Idempotent Receiver | `idempotencyKey`, `processed` | A retried request returns the stored first answer instead of applying twice. |
+| Event Sourcing + Snapshot | B | Actions are the source of truth; snapshots bound replay length. |
+| Interface Segregation | `AuditableStore` | A cannot audit, so it doesn't pretend to. |
+| Shared gateway, injected | inbox | One table and its SQL for all stores, handed in by the factory so every store writes gifts the same way. |
 
 ### Alternatives considered
 
@@ -226,19 +227,20 @@ seq 456 with 456/456 strict round trips, and every B's `stateAt` matches the sim
 times plus the middle of the 8-hour gap, #15). Identical on the cloud container (Postgres 16), the
 laptop (Postgres 17) and the load VM (Postgres 17.11, rerun before the matrix).
 
-|                                             | A                                         | B1                                                                           | B25                                        | B100                                       |
-| ------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------ |
-| Gate (hash equivalence)                     | pass                                      | pass                                                                         | pass                                       | pass                                       |
-| p50 / p95 at 50 players (ms)                | 5 / 8                                     | 6 / 9                                                                        | 6 / 9                                      | 6 / 9                                      |
-| p50 / p95 at 200 players (ms)               | 5 / 8                                     | 6 / 9                                                                        | 6 / 8                                      | 6 / 8                                      |
-| p95 per run at 200 players (ms)             | 8, 8, 7                                   | 10, 8, 8                                                                     | 9, 8, 8                                    | 8, 8, 8                                    |
-| Worst-case load p95 (ms)                    | n/a                                       | n/a                                                                          | n/a                                        | 2.46 (n = 635)                             |
-| Offline return p95 at 50 / 200 (ms)         | 4 / 4                                     | 5 / 5                                                                        | 5 / 5                                      | 6 / 5                                      |
-| Lost updates / retries / 503s               | 0 / 0 / 0                                 | 0 / 0 / 0                                                                    | 0 / 0 / 0                                  | 0 / 0 / 0                                  |
-| Bytes per player-hour at 50 / 200           | 146,364 / 139,264                         | 209,715 / 201,114                                                            | 226,645 / 208,350                          | 216,269 / 200,704                          |
-| Replay cost (µs per action; ×10 projection) | n/a (no replay)                           | n/a (tail always 0)                                                          | 3.7 (reads 3.4, actions 3.8); ×10: 2.37 ms | 3.3 (reads 3.4, actions 3.5); ×10: 4.72 ms |
-| `stateAt` possible                          | no                                        | yes                                                                          | yes                                        | yes                                        |
-| Lines / moving parts                        | 94 code lines; `farms` + `processed_keys` | 129 code lines, shared by all B; `actions` + `snapshots` + injected `replay` | same                                       | same                                       |
+<!-- prettier-ignore -->
+| | A | B1 | B25 | B100 |
+| --- | --- | --- | --- | --- |
+| Gate (hash equivalence) | pass | pass | pass | pass |
+| p50 / p95 at 50 players (ms) | 5 / 8 | 6 / 9 | 6 / 9 | 6 / 9 |
+| p50 / p95 at 200 players (ms) | 5 / 8 | 6 / 9 | 6 / 8 | 6 / 8 |
+| p95 per run at 200 players (ms) | 8, 8, 7 | 10, 8, 8 | 9, 8, 8 | 8, 8, 8 |
+| Worst-case load p95 (ms) | n/a | n/a | n/a | 2.46 (n = 635) |
+| Offline return p95 at 50 / 200 (ms) | 4 / 4 | 5 / 5 | 5 / 5 | 6 / 5 |
+| Lost updates / retries / 503s | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| Bytes per player-hour at 50 / 200 | 146,364 / 139,264 | 209,715 / 201,114 | 226,645 / 208,350 | 216,269 / 200,704 |
+| Replay cost (µs per action; ×10 projection) | n/a (no replay) | n/a (tail always 0) | 3.7 (reads 3.4, actions 3.8); ×10: 2.37 ms | 3.3 (reads 3.4, actions 3.5); ×10: 4.72 ms |
+| `stateAt` possible | no | yes | yes | yes |
+| Lines / moving parts | 94 code lines; `farms` + `processed_keys` | 129 code lines, shared by all B; `actions` + `snapshots` + injected `replay` | same | same |
 
 Every normal configuration had 0 failures and 0 422s; p99 is 10–13 ms everywhere. The matrix load is
 light, about 37 requests/s at 200 players, and about half of requests are reads.
@@ -263,11 +265,12 @@ had one failure: a postgres.js `UNSAFE_TRANSACTION` error, with nothing committe
 cloud container (Postgres 16.15), not on the load VM. Each scenario sends 1,000 pairs of requests
 over HTTP at the same moment, each pair on a farm of its own.
 
-|                                                                      | A           | B1          | B25         | B100        |
-| -------------------------------------------------------------------- | ----------- | ----------- | ----------- | ----------- |
-| Gift + harvest on one farm: lost updates / retries / 503s            | 0 / 993 / 0 | 0 / 991 / 0 | 0 / 994 / 0 | 0 / 992 / 0 |
-| One action sent twice with one key: lost updates / identical answers | 0 / 1,000   | 0 / 1,000   | 0 / 1,000   | 0 / 1,000   |
-| Control, two farms: lost updates / retries                           | 0 / 0       | 0 / 0       | 0 / 0       | 0 / 0       |
+<!-- prettier-ignore -->
+| | A | B1 | B25 | B100 |
+| --- | --- | --- | --- | --- |
+| Gift + harvest on one farm: lost updates / retries / 503s | 0 / 993 / 0 | 0 / 991 / 0 | 0 / 994 / 0 | 0 / 992 / 0 |
+| One action sent twice with one key: lost updates / identical answers | 0 / 1,000 | 0 / 1,000 | 0 / 1,000 | 0 / 1,000 |
+| Control, two farms: lost updates / retries | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 
 On one farm almost every pair collides, and the loser commits on a retry. This check found the race
 where a resend misses its own first commit; the second `processed` check before a 422 (Store
@@ -279,13 +282,14 @@ Non-blank, non-comment lines on `prototype/persistence`. Every store also uses `
 the interface and `StoreError`), `stores.ts` (50: the factory, `replay` and `firstFarm`) and the
 shared gift inbox, `inbox.ts` (79).
 
-|              | A (`store-a.ts`)                                                                                                                       | B1, B25, B100 (`store-b.ts`)                                                                                                                                |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lines        | 94                                                                                                                                     | 129                                                                                                                                                         |
-| Tables       | `farms`, one row per farm; `processed_keys`, one row per action                                                                        | `actions`, one row per action; `snapshots`, one row per farm (B1) or one per Nth action (B25, B100)                                                         |
-| Constraints  | primary keys on `farms (farm_id)` and `processed_keys (farm_id, key)`; `seq > 0`                                                       | primary key on `actions (farm_id, seq)`, unique `(farm_id, key)`; primary key on `snapshots (farm_id)` in B1, `(farm_id, seq)` otherwise; `seq > 0` on both |
-| Commit paths | claim the key, or return the duplicate; insert the first row or update where `seq = expectedSeq`, or conflict; inbox write, or refused | append where the previous seq exists, or return the duplicate or conflict; inbox write, or refused; snapshot (B1 every action, B25 and B100 every Nth)      |
-| Read paths   | `load`: one row, or a new farm                                                                                                         | `load`: latest snapshot, tail, `replay`; `stateAt`: the same up to `t`                                                                                      |
+<!-- prettier-ignore -->
+| | A (`store-a.ts`) | B1, B25, B100 (`store-b.ts`) |
+| --- | --- | --- |
+| Lines | 94 | 129 |
+| Tables | `farms`, one row per farm; `processed_keys`, one row per action | `actions`, one row per action; `snapshots`, one row per farm (B1) or one per Nth action (B25, B100) |
+| Constraints | primary keys on `farms (farm_id)` and `processed_keys (farm_id, key)`; `seq > 0` | primary key on `actions (farm_id, seq)`, unique `(farm_id, key)`; primary key on `snapshots (farm_id)` in B1, `(farm_id, seq)` otherwise; `seq > 0` on both |
+| Commit paths | claim the key, or return the duplicate; insert the first row or update where `seq = expectedSeq`, or conflict; inbox write, or refused | append where the previous seq exists, or return the duplicate or conflict; inbox write, or refused; snapshot (B1 every action, B25 and B100 every Nth) |
+| Read paths | `load`: one row, or a new farm | `load`: latest snapshot, tail, `replay`; `stateAt`: the same up to `t` |
 
 The failure modes each store adds:
 

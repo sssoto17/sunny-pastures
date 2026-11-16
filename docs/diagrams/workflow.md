@@ -97,27 +97,28 @@ fresh-context reviewer agent per PR and relays the verdict before you merge
 
 ## When to use what
 
-| When                                           | Skill                                                                                                             | Produces                                                                                                    | You decide                                             |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Once, week 1                                   | `setup-matt-pocock-skills` (done)                                                                                 | `docs/agents/*.md`                                                                                          | tracker settings                                       |
-|                                                | Addy `constraint-driven-development` (done, #34)                                                                  | `CONSTRAINTS.md`                                                                                            | the quality bar                                        |
-| Start of a milestone                           | `grill-with-docs` (+ `domain-modeling`, `codebase-design`)                                                        | `GLOSSARY.md`, ADRs (pattern + alternatives)                                                                | every design decision                                  |
-| ↳ needs a runnable answer                      | `prototype`                                                                                                       | `prototype/<name>` branch, never merged                                                                     | what it taught                                         |
-| ↳ needs facts                                  | `research` (background)                                                                                           | cited `.md`                                                                                                 | nothing: it feeds the grill                            |
-|                                                | Addy `spec-driven-development`                                                                                    | `docs/requirements/spec.md` (living, doubles as the requirements chapter)                                   | edit and approve                                       |
-|                                                | Addy `planning-and-task-breakdown`                                                                                | `docs/plans/NN-<slug>.md`, frozen once published                                                            | approve the plan                                       |
-|                                                | `to-tickets`                                                                                                      | GitHub issues with native blocking edges, on the Project                                                    | nothing: it publishes                                  |
-| Daily, per ticket                              | `implement #N` in a fresh session (drives `tdd`, `code-review`, which runs as a self-review under `REVIEW.md`)    | PR, reviewed under `REVIEW.md` by the reviewer bot (until #68, a reviewer agent the coordinator dispatches) | review and merge admin-review PRs (every PR until #68) |
-| ↳ high stakes: sim determinism, authority, RLS | Addy `doubt-driven-development`                                                                                   | adversarial review                                                                                          |                                                        |
-| ↳ framework APIs: Next, Drizzle, Supabase      | Addy `source-driven-development`                                                                                  | docs-verified code                                                                                          |                                                        |
-| ↳ module or API shape                          | Addy `api-and-interface-design` + `codebase-design`                                                               | interface sketch                                                                                            | the interface                                          |
-| ↳ something broke                              | `diagnosing-bugs`                                                                                                 | regression test + fix                                                                                       |                                                        |
-| ↳ only the admin can do it                     | `wizard`                                                                                                          | setup script; issue gets `blocked:admin` until done                                                         |                                                        |
-| Weekly                                         | `improve-codebase-architecture`                                                                                   | deepening candidates                                                                                        | which one to pick                                      |
-|                                                | `retro` (see **Weekly retro convention**), a cloud routine on Sundays at 08:00                                    | a draft PR with `docs/retros/YYYY-MM-DD.md`, new checks and standards                                       | which fixes to adopt                                   |
-| Milestone gate                                 | Addy `code-review-and-quality` + `security-and-hardening`, `browser-testing-with-devtools`, `shipping-and-launch` | go/no-go with rollback plan                                                                                 | go or no-go                                            |
-| After playtests                                | `triage`                                                                                                          | feedback turned into ready issues                                                                           | what's worth doing                                     |
-| End of day                                     | `remember:remember` (plugin)                                                                                      | handoff with the top 3 next                                                                                 |                                                        |
+<!-- prettier-ignore -->
+| When | Skill | Produces | You decide |
+|---|---|---|---|
+| Once, week 1 | `setup-matt-pocock-skills` (done) | `docs/agents/*.md` | tracker settings |
+| | Addy `constraint-driven-development` (done, #34) | `CONSTRAINTS.md` | the quality bar |
+| Start of a milestone | `grill-with-docs` (+ `domain-modeling`, `codebase-design`) | `GLOSSARY.md`, ADRs (pattern + alternatives) | every design decision |
+| ↳ needs a runnable answer | `prototype` | `prototype/<name>` branch, never merged | what it taught |
+| ↳ needs facts | `research` (background) | cited `.md` | nothing: it feeds the grill |
+| | Addy `spec-driven-development` | `docs/requirements/spec.md` (living, doubles as the requirements chapter) | edit and approve |
+| | Addy `planning-and-task-breakdown` | `docs/plans/NN-<slug>.md`, frozen once published | approve the plan |
+| | `to-tickets` | GitHub issues with native blocking edges, on the Project | nothing: it publishes |
+| Daily, per ticket | `implement #N` in a fresh session (drives `tdd`, `code-review`, which runs as a self-review under `REVIEW.md`) | PR, reviewed under `REVIEW.md` by the reviewer bot (until #68, a reviewer agent the coordinator dispatches) | review and merge admin-review PRs (every PR until #68) |
+| ↳ high stakes: sim determinism, authority, RLS | Addy `doubt-driven-development` | adversarial review | |
+| ↳ framework APIs: Next, Drizzle, Supabase | Addy `source-driven-development` | docs-verified code | |
+| ↳ module or API shape | Addy `api-and-interface-design` + `codebase-design` | interface sketch | the interface |
+| ↳ something broke | `diagnosing-bugs` | regression test + fix | |
+| ↳ only the admin can do it | `wizard` | setup script; issue gets `blocked:admin` until done | |
+| Weekly | `improve-codebase-architecture` | deepening candidates | which one to pick |
+| | `retro` (see **Weekly retro convention**), a cloud routine on Sundays at 08:00 | a draft PR with `docs/retros/YYYY-MM-DD.md`, new checks and standards | which fixes to adopt |
+| Milestone gate | Addy `code-review-and-quality` + `security-and-hardening`, `browser-testing-with-devtools`, `shipping-and-launch` | go/no-go with rollback plan | go or no-go |
+| After playtests | `triage` | feedback turned into ready issues | what's worth doing |
+| End of day | `remember:remember` (plugin) | handoff with the top 3 next | |
 
 Not used, because another skill owns the job: Addy `interview-me` and `idea-refine`
 (`grill-with-docs`), Matt `to-spec` (`spec-driven-development`), Addy `incremental-implementation`
@@ -132,14 +133,15 @@ rule, a Fallow boundary, a test, a CI step), **judgement calls become standards*
 `AGENTS.md` or `CONSTRAINTS.md`, a coding standard `code-review` enforces). Add the safeguard as
 early as possible: the cheapest moment is the first repeat.
 
-| Loop                     | Output of                                           | Feeds                                                                                             |
-| ------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Complexity and coupling  | Fallow hotspots, duplication, cycles                | weekly `improve-codebase-architecture` candidates                                                 |
-| Property failures        | fast-check's shrunk counterexample                  | a named regression test kept next to the property                                                 |
-| Repeated review findings | `code-review` flagging the same kind of issue twice | a check or a standard, via `retro`                                                                |
-| Playtests                | tester feedback                                     | `triage` → `ready` issues; the next grill may reopen a MoSCoW item                                |
-| Load tests               | Locust latency and storage numbers                  | response-time limits in `docs/requirements/spec.md`, so later runs check against measured numbers |
-| Repeated manual steps    | daily routine, noted in retros                      | the next automation stage (`/today`, factory)                                                     |
+<!-- prettier-ignore -->
+| Loop | Output of | Feeds |
+|---|---|---|
+| Complexity and coupling | Fallow hotspots, duplication, cycles | weekly `improve-codebase-architecture` candidates |
+| Property failures | fast-check's shrunk counterexample | a named regression test kept next to the property |
+| Repeated review findings | `code-review` flagging the same kind of issue twice | a check or a standard, via `retro` |
+| Playtests | tester feedback | `triage` → `ready` issues; the next grill may reopen a MoSCoW item |
+| Load tests | Locust latency and storage numbers | response-time limits in `docs/requirements/spec.md`, so later runs check against measured numbers |
+| Repeated manual steps | daily routine, noted in retros | the next automation stage (`/today`, factory) |
 
 **Weekly retro convention.** Besides "what went well and what didn't", every weekly `retro` asks:
 
@@ -196,10 +198,11 @@ worktrees, the handoff), which a cloud routine can't see.
 
 ## Automation stages
 
-| Stage | When    | What runs                                                                                                            |
-| ----- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| 0     | now     | Everything above, by hand. Note repeated steps in each retro.                                                        |
-| 1     | ~week 2 | Read-only `/today`: handoff + this week's board → brief, agenda, a brief per Manual item, a prompt per Factory item. |
-| 2     | ~week 3 | Billetto-style gather script, background review agents, action batch, check every ~75 min, `/today wrap`.            |
+<!-- prettier-ignore -->
+| Stage | When | What runs |
+|---|---|---|
+| 0 | now | Everything above, by hand. Note repeated steps in each retro. |
+| 1 | ~week 2 | Read-only `/today`: handoff + this week's board → brief, agenda, a brief per Manual item, a prompt per Factory item. |
+| 2 | ~week 3 | Billetto-style gather script, background review agents, action batch, check every ~75 min, `/today wrap`. |
 
 Automate a step only after doing it by hand 3 times with the same result.

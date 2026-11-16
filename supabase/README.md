@@ -16,14 +16,15 @@ Ports use the 553xx range (API 55321, DB 55322, Studio 55323, Mailpit 55324) ins
 
 Run them from the repo root (or a worktree's root).
 
-| Task   | Command                     | Notes                                                             |
-| ------ | --------------------------- | ----------------------------------------------------------------- |
-| Start  | `pnpm db:start`             | First run pulls the images. Prints the URLs; every key is hidden. |
-| Info   | `pnpm db:status`            | Same list again.                                                  |
-| `.env` | `pnpm db:env`               | Writes `DATABASE_URL` to `./.env` without printing it.            |
-| Stop   | `supabase stop`             | Keeps the data in Docker volumes.                                 |
-| Reset  | `supabase db reset`         | Recreates the local database and reruns migrations and seed.      |
-| Wipe   | `supabase stop --no-backup` | Stops and deletes the local data.                                 |
+<!-- prettier-ignore -->
+| Task   | Command                     | Notes                                                                  |
+| ------ | --------------------------- | ---------------------------------------------------------------------- |
+| Start  | `pnpm db:start`             | First run pulls the images. Prints the URLs; every key is hidden.      |
+| Info   | `pnpm db:status`            | Same list again.                                                       |
+| `.env` | `pnpm db:env`               | Writes `DATABASE_URL` to `./.env` without printing it.                 |
+| Stop   | `supabase stop`             | Keeps the data in Docker volumes.                                      |
+| Reset  | `supabase db reset`         | Recreates the local database and reruns migrations and seed.           |
+| Wipe   | `supabase stop --no-backup` | Stops and deletes the local data.                                      |
 
 **Don't run `supabase start` or `supabase status` directly.** They print the local keys, S3
 credentials and the database password on stdout _and_ stderr (even when piped), and terminal output

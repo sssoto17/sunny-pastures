@@ -126,14 +126,15 @@ one repo milestone (`M1 Persistence spike` … `M9 Hand-in`; list them with
 
 The ids, for reading raw `gh project` output (the script doesn't use this table):
 
-| Field    | Field id                         | Options (name = option id)                                                                                                                                           |
-| -------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status   | `PVTSSF_lAHOCI1msM4BqXYMzhou1Sw` | Backlog=`97a20eba` Ready=`eb23e874` In progress=`03b81b61` In review=`e763de54` Done=`04fb4a2b`                                                                      |
-| Track    | `PVTSSF_lAHOCI1msM4BqXYMzhou1gg` | Build=`60e95dc9` Design=`df832856` Report=`d064f0c0` Infra=`3200c1d7` Evaluation=`145afb58`                                                                          |
-| Mode     | `PVTSSF_lAHOCI1msM4BqXYMzhou1g0` | Manual=`ca9bd7b8` Factory=`f92520e5`                                                                                                                                 |
-| Size     | `PVTSSF_lAHOCI1msM4BqXYMzhou1g4` | S=`7a7f9f73` M=`e0e2efb6` L=`c7dede81`                                                                                                                               |
-| Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                                                                                              |
-| Week     | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
+<!-- prettier-ignore -->
+| Field  | Field id                         | Options (name = option id)                                                                 |
+| ------ | -------------------------------- | ------------------------------------------------------------------------------------------ |
+| Status | `PVTSSF_lAHOCI1msM4BqXYMzhou1Sw` | Backlog=`97a20eba` Ready=`eb23e874` In progress=`03b81b61` In review=`e763de54` Done=`04fb4a2b` |
+| Track  | `PVTSSF_lAHOCI1msM4BqXYMzhou1gg` | Build=`60e95dc9` Design=`df832856` Report=`d064f0c0` Infra=`3200c1d7` Evaluation=`145afb58` |
+| Mode   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g0` | Manual=`ca9bd7b8` Factory=`f92520e5`                                                       |
+| Size   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g4` | S=`7a7f9f73` M=`e0e2efb6` L=`c7dede81`                                                     |
+| Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
+| Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
 
 When a skill publishes tickets, make each one a sub-issue of its workstream parent (see
 **Grouping**), give it a milestone, add it to the Project and set the native type, Track, Mode,
@@ -230,12 +231,13 @@ Before any ticket exists, a workstream goes through design and idea refinement, 
 Priority orders work inside a milestone; MoSCoW (`docs/requirements/moscow.md`) decides scope. They
 are separate: a Could can be P0 for the week it's being built.
 
-| Priority | Meaning                                                        |
-| -------- | -------------------------------------------------------------- |
-| P0       | Blocks the current milestone or the critical path: do it first |
-| P1       | Needed for the current milestone                               |
-| P2       | Wanted this milestone; slips if P0 or P1 work needs the time   |
-| P3       | Whenever there is slack                                        |
+<!-- prettier-ignore -->
+| Priority | Meaning                                                              |
+| -------- | -------------------------------------------------------------------- |
+| P0       | Blocks the current milestone or the critical path: do it first       |
+| P1       | Needed for the current milestone                                     |
+| P2       | Wanted this milestone; slips if P0 or P1 work needs the time         |
+| P3       | Whenever there is slack                                              |
 
 ## Status rules
 
@@ -276,9 +278,10 @@ all of:
 
 **The other moves:**
 
-| Move                    | When                                                                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Ready → In progress     | Someone starts it: the admin is assigned (manual), or the factory claims it (factory). A branch exists.                      |
-| In progress → In review | A PR is open with `Closes #N` and its checks are green.                                                                      |
-| In review → Done        | The PR merged (the issue closes, and the Project moves it).                                                                  |
-| Any → Backlog           | It turns out not ready (add the `blocked:*` label that says why, or split it), or the admin drops it from the current focus. |
+<!-- prettier-ignore -->
+| Move                     | When                                                                                     |
+| ------------------------ | ---------------------------------------------------------------------------------------- |
+| Ready → In progress      | Someone starts it: the admin is assigned (manual), or the factory claims it (factory). A branch exists. |
+| In progress → In review  | A PR is open with `Closes #N` and its checks are green.                                   |
+| In review → Done         | The PR merged (the issue closes, and the Project moves it).                               |
+| Any → Backlog            | It turns out not ready (add the `blocked:*` label that says why, or split it), or the admin drops it from the current focus. |

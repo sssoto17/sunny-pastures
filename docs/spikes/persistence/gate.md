@@ -39,14 +39,15 @@ and the step 0 hashes stay unchanged, and no run can see another run's gifts.
 Run on 6 Nov 2026 in a cloud container: Node v24.22.2, PostgreSQL 16.15 on the same host, 4 CPUs.
 Rerun the same day with the gap audit time (#15): unchanged except for the eleventh `stateAt` row.
 
-|                                                         | A                | B1       | B25      | B100     |
-| ------------------------------------------------------- | ---------------- | -------- | -------- | -------- |
-| Gate                                                    | **pass**         | **pass** | **pass** | **pass** |
-| Final seq (step 0: 456)                                 | 456              | 456      | 456      | 456      |
-| Final state hash = step 0's                             | yes              | yes      | yes      | yes      |
-| Round trips strictly equal                              | 456/456          | 456/456  | 456/456  | 456/456  |
-| `stateAt` matches the sim                               | n/a (no history) | 11/11    | 11/11    | 11/11    |
-| …of which the gap's middle (t = 16,366,000 ms, seq 225) | n/a              | match    | match    | match    |
+<!-- prettier-ignore -->
+| | A | B1 | B25 | B100 |
+| --- | --- | --- | --- | --- |
+| Gate | **pass** | **pass** | **pass** | **pass** |
+| Final seq (step 0: 456) | 456 | 456 | 456 | 456 |
+| Final state hash = step 0's | yes | yes | yes | yes |
+| Round trips strictly equal | 456/456 | 456/456 | 456/456 | 456/456 |
+| `stateAt` matches the sim | n/a (no history) | 11/11 | 11/11 | 11/11 |
+| …of which the gap's middle (t = 16,366,000 ms, seq 225) | n/a | match | match | match |
 
 Step 0 and every store end on the state hash
 `e1925b02b5840ff7de506ccfa6db285b477aac1001d717e626dbdd3456968afc`. No failures, so nothing to

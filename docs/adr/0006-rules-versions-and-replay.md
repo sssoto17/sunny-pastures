@@ -275,15 +275,16 @@ client never replays an old log.
 
 ## Patterns
 
-| Pattern                                                    | Where                                        | Why                                                                                                               |
-| ---------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Event Sourcing with versioned events and snapshots         | log rows and snapshots carry a rules version | The log stays the source of truth across rules changes, and replay knows which rules each row was accepted under. |
-| Registry                                                   | version → content and `upgrade`              | Old rules are kept as data (ADR-0003's `createSim(content)`), not as old code.                                    |
-| Upcaster, chained                                          | `upgrade` per version                        | One place changes a farm's shape between versions; the rules only see their own shape.                            |
-| Lazy migration on the next write                           | base snapshot in the first commit            | No deploy job, reads never write, inactive farms cost nothing.                                                    |
-| Feature switch in content                                  | behaviour changes in the rules code          | One sim reproduces every version; the switch is part of frozen content.                                           |
-| Monotonic version with fix-forward                         | commit check, 503 on unknown versions        | Overlapping deploys and rollbacks can't write a farm backwards.                                                   |
-| Golden-file (recorded log) tests plus property-based tests | the rules-version check                      | Recorded logs pin old outcomes; generated farms reach the version-upgrade cases recordings miss.                  |
+<!-- prettier-ignore -->
+| Pattern | Where | Why |
+| --- | --- | --- |
+| Event Sourcing with versioned events and snapshots | log rows and snapshots carry a rules version | The log stays the source of truth across rules changes, and replay knows which rules each row was accepted under. |
+| Registry | version → content and `upgrade` | Old rules are kept as data (ADR-0003's `createSim(content)`), not as old code. |
+| Upcaster, chained | `upgrade` per version | One place changes a farm's shape between versions; the rules only see their own shape. |
+| Lazy migration on the next write | base snapshot in the first commit | No deploy job, reads never write, inactive farms cost nothing. |
+| Feature switch in content | behaviour changes in the rules code | One sim reproduces every version; the switch is part of frozen content. |
+| Monotonic version with fix-forward | commit check, 503 on unknown versions | Overlapping deploys and rollbacks can't write a farm backwards. |
+| Golden-file (recorded log) tests plus property-based tests | the rules-version check | Recorded logs pin old outcomes; generated farms reach the version-upgrade cases recordings miss. |
 
 ## Consequences
 

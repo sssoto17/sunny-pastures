@@ -244,14 +244,15 @@ can't check.
 
 ### Types (Q16)
 
-|            | Convention                           | Decision                                                                                                                                                                                                           | Enforced by                                                                              |
-| ---------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| C1         | Strictness                           | Keep this repo's options; add `erasableSyntaxOnly` and `allowUnreachableCode: false`. Not `noUnusedLocals`/`noUnusedParameters`: `no-unused-vars` already covers them, and tsc's version blocks a compile mid-edit | `tsconfig.base.json`                                                                     |
-| C1         | `as` casts                           | Adapt: no `as` on object literals (type the variable instead); `as const` allowed                                                                                                                                  | `@typescript-eslint/consistent-type-assertions` (`objectLiteralTypeAssertions: "never"`) |
-| C4         | `interface` vs `type`                | Adopt: `interface` for object shapes, `type` for unions and derived types; props are `<Component>Props`                                                                                                            | `@typescript-eslint/consistent-type-definitions: "interface"`                            |
-| C5         | No enums                             | Adopt; `as const satisfies` for fixed tables (doc)                                                                                                                                                                 | `erasableSyntaxOnly`                                                                     |
-| conflict 6 | `import type`                        | Repo wins                                                                                                                                                                                                          | `verbatimModuleSyntax` (on)                                                              |
-| conflict 7 | `noImplicitAny: false`, suppressions | Repo wins                                                                                                                                                                                                          | `strict`; the Floor                                                                      |
+<!-- prettier-ignore -->
+| | Convention | Decision | Enforced by |
+|---|---|---|---|
+| C1 | Strictness | Keep this repo's options; add `erasableSyntaxOnly` and `allowUnreachableCode: false`. Not `noUnusedLocals`/`noUnusedParameters`: `no-unused-vars` already covers them, and tsc's version blocks a compile mid-edit | `tsconfig.base.json` |
+| C1 | `as` casts | Adapt: no `as` on object literals (type the variable instead); `as const` allowed | `@typescript-eslint/consistent-type-assertions` (`objectLiteralTypeAssertions: "never"`) |
+| C4 | `interface` vs `type` | Adopt: `interface` for object shapes, `type` for unions and derived types; props are `<Component>Props` | `@typescript-eslint/consistent-type-definitions: "interface"` |
+| C5 | No enums | Adopt; `as const satisfies` for fixed tables (doc) | `erasableSyntaxOnly` |
+| conflict 6 | `import type` | Repo wins | `verbatimModuleSyntax` (on) |
+| conflict 7 | `noImplicitAny: false`, suppressions | Repo wins | `strict`; the Floor |
 
 An `interface` has no implicit index signature, so it doesn't satisfy `Record<string, unknown>` or a
 recursive `JsonValue` type. If the sim ever proves at type level that `FarmState` is plain JSON,
@@ -259,12 +260,13 @@ relax the rule for the state types.
 
 ### Functions, classes, exports (Q17)
 
-|                | Convention                       | Decision                                                                                                                | Enforced by                                                                                                                                                                              |
-| -------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C2             | `function` declarations          | Adopt: exported and top-level functions are declarations; arrows for callbacks and small local helpers                  | core `func-style: ["error", "declaration", { allowArrowFunctions: true, overrides: { namedExports: "declaration" } }]` on `{apps,packages}/**/*.{ts,tsx}`; private top-level arrows: doc |
-| C2, conflict 8 | No classes                       | Adopt, strictly in the sim (ADR-0003 §5); doc elsewhere                                                                 | `no-restricted-syntax` on `ClassDeclaration`, `ClassExpression` in the sim's `SIM_SYNTAX`                                                                                                |
-| C3             | Main export first, helpers below | Adapt: `index.ts` starts with the interface (as few names as possible), then private helpers as `function` declarations | doc                                                                                                                                                                                      |
-| C6             | Default vs named                 | Adopt: named only in `.ts`; default for React components (`.tsx`) and where Next requires it                            | core `no-restricted-exports` (`restrictDefaultExports`, all options) on `{apps,packages}/**/*.ts`, except `apps/web/src/app/**`                                                          |
+<!-- prettier-ignore -->
+| | Convention | Decision | Enforced by |
+|---|---|---|---|
+| C2 | `function` declarations | Adopt: exported and top-level functions are declarations; arrows for callbacks and small local helpers | core `func-style: ["error", "declaration", { allowArrowFunctions: true, overrides: { namedExports: "declaration" } }]` on `{apps,packages}/**/*.{ts,tsx}`; private top-level arrows: doc |
+| C2, conflict 8 | No classes | Adopt, strictly in the sim (ADR-0003 §5); doc elsewhere | `no-restricted-syntax` on `ClassDeclaration`, `ClassExpression` in the sim's `SIM_SYNTAX` |
+| C3 | Main export first, helpers below | Adapt: `index.ts` starts with the interface (as few names as possible), then private helpers as `function` declarations | doc |
+| C6 | Default vs named | Adopt: named only in `.ts`; default for React components (`.tsx`) and where Next requires it | core `no-restricted-exports` (`restrictDefaultExports`, all options) on `{apps,packages}/**/*.ts`, except `apps/web/src/app/**` |
 
 ### Imports (Q18)
 
@@ -275,47 +277,50 @@ tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's p
 
 ### Naming in code (Q21; C9)
 
-| Kind                             | Decision                                                                                                       | Enforced by                                                                                                                                                                                                                                           |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Types, interfaces, components    | PascalCase                                                                                                     | `@typescript-eslint/naming-convention`                                                                                                                                                                                                                |
-| Functions, variables, parameters | camelCase; functions start with a verb                                                                         | same (the verb: doc)                                                                                                                                                                                                                                  |
-| Module constants                 | camelCase, no UPPER_SNAKE (conflict 15). Names that mirror an outside spec keep its name (SHA-256's `K`, `H0`) | same, with the spec names in its `filter`                                                                                                                                                                                                             |
-| Outside shapes                   | snake_case only where data mirrors one (DB columns, API fields); sim state and actions are camelCase           | same: object-literal and type properties may be camelCase or snake_case, everything else camelCase; in `packages/sim` properties are camelCase only (it mirrors no outside shape); whether a snake_case property really mirrors an outside shape: doc |
-| Booleans                         | `is`, `has`, `can` prefix                                                                                      | same (type-aware selector, Q22)                                                                                                                                                                                                                       |
-| Domain words                     | `GLOSSARY.md` terms, never its _Avoid_ words                                                                   | doc                                                                                                                                                                                                                                                   |
-| Handlers (`apps/web`)            | `handleX` inside, `onX` props                                                                                  | doc (M3)                                                                                                                                                                                                                                              |
+<!-- prettier-ignore -->
+| Kind | Decision | Enforced by |
+|---|---|---|
+| Types, interfaces, components | PascalCase | `@typescript-eslint/naming-convention` |
+| Functions, variables, parameters | camelCase; functions start with a verb | same (the verb: doc) |
+| Module constants | camelCase, no UPPER_SNAKE (conflict 15). Names that mirror an outside spec keep its name (SHA-256's `K`, `H0`) | same, with the spec names in its `filter` |
+| Outside shapes | snake_case only where data mirrors one (DB columns, API fields); sim state and actions are camelCase | same: object-literal and type properties may be camelCase or snake_case, everything else camelCase; in `packages/sim` properties are camelCase only (it mirrors no outside shape); whether a snake_case property really mirrors an outside shape: doc |
+| Booleans | `is`, `has`, `can` prefix | same (type-aware selector, Q22) |
+| Domain words | `GLOSSARY.md` terms, never its *Avoid* words | doc |
+| Handlers (`apps/web`) | `handleX` inside, `onX` props | doc (M3) |
 
 ### Errors, absence, async (Q23)
 
-|                  | Convention                 | Decision                                                                                                                                                       | Enforced by                                                      |
-| ---------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| C10              | Expected failures returned | Adopt (agrees with ADR-0003 §4, conflict 12); `throw` only for programmer errors                                                                               | `only-throw-error`                                               |
-| C10              | Logged and dropped         | Drop: handle or pass up                                                                                                                                        | `no-console` in `packages/*`; empty `catch` blocked by the Floor |
-| C10              | Messages to users          | Full sentences ending in a period                                                                                                                              | doc                                                              |
-| C11, conflict 11 | `\|\|` fallbacks           | Drop for `??` (0 coins is a value)                                                                                                                             | `prefer-nullish-coalescing`                                      |
-| C11, conflict 11 | Defensive `?.`             | Drop                                                                                                                                                           | `no-unnecessary-condition`                                       |
-| C11, conflict 10 | `null` vs `undefined`      | `null` for an absent value wherever we control it (it survives JSON; ADR-0003 §5); `undefined` only where the language gives it; no `null \| undefined` unions | doc; `exactOptionalPropertyTypes` (on)                           |
-| C11              | `==`                       | `===` always                                                                                                                                                   | core `eqeqeq: "always"`                                          |
-| C12              | `return await`             | Adopt                                                                                                                                                          | `return-await: ["error", "always"]`                              |
-| C12              | `.then` inside `await`     | Drop; `Promise.all` for independent awaits                                                                                                                     | doc                                                              |
+<!-- prettier-ignore -->
+| | Convention | Decision | Enforced by |
+|---|---|---|---|
+| C10 | Expected failures returned | Adopt (agrees with ADR-0003 §4, conflict 12); `throw` only for programmer errors | `only-throw-error` |
+| C10 | Logged and dropped | Drop: handle or pass up | `no-console` in `packages/*`; empty `catch` blocked by the Floor |
+| C10 | Messages to users | Full sentences ending in a period | doc |
+| C11, conflict 11 | `\|\|` fallbacks | Drop for `??` (0 coins is a value) | `prefer-nullish-coalescing` |
+| C11, conflict 11 | Defensive `?.` | Drop | `no-unnecessary-condition` |
+| C11, conflict 10 | `null` vs `undefined` | `null` for an absent value wherever we control it (it survives JSON; ADR-0003 §5); `undefined` only where the language gives it; no `null \| undefined` unions | doc; `exactOptionalPropertyTypes` (on) |
+| C11 | `==` | `===` always | core `eqeqeq: "always"` |
+| C12 | `return await` | Adopt | `return-await: ["error", "always"]` |
+| C12 | `.then` inside `await` | Drop; `Promise.all` for independent awaits | doc |
 
 Rejected: **`eslint-plugin-promise`** for `.then` mixing (`prefer-await-to-then`): a plugin for one
 rule.
 
 ### Comments and statements (Q24)
 
-|     | Convention         | Decision                                                                                                                                                                          | Enforced by                                                     |
-| --- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| C13 | UPPERCASE banners  | Allowed; more than two is a cue to split into a sibling                                                                                                                           | doc                                                             |
-| C13 | No JSDoc           | Comments say why and cite the decision (ADR section, MUST-xx, #N) (conflict 13); a doc comment on an export only when it states what the type can't (invariant, error mode, unit) | doc                                                             |
-| C13 | Commented-out code | Drop: git keeps history                                                                                                                                                           | doc                                                             |
-| C13 | TODOs              | Drop: open an issue                                                                                                                                                               | core `no-warning-comments` (`terms: ["todo", "fixme"]`)         |
-| C13 | Language           | English                                                                                                                                                                           | doc                                                             |
-| C14 | Guard clauses      | One-line `if` without braces, then a blank line                                                                                                                                   | core `curly: ["error", "multi-line"]`; the blank line: doc      |
-| C14 | Early return       | No `else` after `return`                                                                                                                                                          | core `no-else-return`                                           |
-| C14 | Destructuring      | Objects                                                                                                                                                                           | core `prefer-destructuring` (`object: true`, `array: false`)    |
-| C14 | Ternaries          | One level at most                                                                                                                                                                 | core `no-nested-ternary`                                        |
-| C14 | Strings, spread    | Templates and spread                                                                                                                                                              | core `prefer-template`, `prefer-spread`, `prefer-object-spread` |
+<!-- prettier-ignore -->
+| | Convention | Decision | Enforced by |
+|---|---|---|---|
+| C13 | UPPERCASE banners | Allowed; more than two is a cue to split into a sibling | doc |
+| C13 | No JSDoc | Comments say why and cite the decision (ADR section, MUST-xx, #N) (conflict 13); a doc comment on an export only when it states what the type can't (invariant, error mode, unit) | doc |
+| C13 | Commented-out code | Drop: git keeps history | doc |
+| C13 | TODOs | Drop: open an issue | core `no-warning-comments` (`terms: ["todo", "fixme"]`) |
+| C13 | Language | English | doc |
+| C14 | Guard clauses | One-line `if` without braces, then a blank line | core `curly: ["error", "multi-line"]`; the blank line: doc |
+| C14 | Early return | No `else` after `return` | core `no-else-return` |
+| C14 | Destructuring | Objects | core `prefer-destructuring` (`object: true`, `array: false`) |
+| C14 | Ternaries | One level at most | core `no-nested-ternary` |
+| C14 | Strings, spread | Templates and spread | core `prefer-template`, `prefer-spread`, `prefer-object-spread` |
 
 Rejected: **`sonarjs/no-commented-code`** (`eslint-plugin-sonarjs`) for commented-out code: a large
 plugin for one rule.
@@ -342,14 +347,15 @@ plugin for one rule.
 
 ## Patterns
 
-| Pattern                                  | Where                             | Why                                                                           |
-| ---------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------- |
-| Module pattern, information hiding       | every module folder               | Callers see one entry; the rest can change without them.                      |
-| Deep modules                             | module interfaces                 | Much behaviour behind few names, deepened inside the folder.                  |
-| Facade                                   | `packages/*/src/index.ts`         | One export list, so every change to the exported names is a diff to one file. |
-| Package by feature, shared kernel        | `packages/sim/src/`               | A ticket mostly adds one folder; names match `GLOSSARY.md`.                   |
-| DRY at the second occurrence, by concept | shared modules such as `storage/` | No copies, and no `utils/` drawer without an owner.                           |
-| Co-located tests in a subfolder          | `<module>/tests/`                 | Tests move with their module and may test its internal seams.                 |
+<!-- prettier-ignore -->
+| Pattern | Where | Why |
+| --- | --- | --- |
+| Module pattern, information hiding | every module folder | Callers see one entry; the rest can change without them. |
+| Deep modules | module interfaces | Much behaviour behind few names, deepened inside the folder. |
+| Facade | `packages/*/src/index.ts` | One export list, so every change to the exported names is a diff to one file. |
+| Package by feature, shared kernel | `packages/sim/src/` | A ticket mostly adds one folder; names match `GLOSSARY.md`. |
+| DRY at the second occurrence, by concept | shared modules such as `storage/` | No copies, and no `utils/` drawer without an owner. |
+| Co-located tests in a subfolder | `<module>/tests/` | Tests move with their module and may test its internal seams. |
 
 ## Consequences
 

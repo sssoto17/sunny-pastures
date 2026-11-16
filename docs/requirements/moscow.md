@@ -16,50 +16,54 @@ The game is not a valid answer to the research question without these.
 
 **Gameplay**
 
-| ID      | Item                                                                                                           |
-| ------- | -------------------------------------------------------------------------------------------------------------- |
-| MUST-01 | Crops: wheat, corn and strawberries (plant, grow over time, harvest)                                           |
-| MUST-02 | Animals: chickens and cows (feed, produce over time, collect)                                                  |
-| MUST-03 | Production facilities with timed queues: feed mill, bakery, dairy                                              |
-| MUST-04 | NPC order board: deliver goods for coins and XP                                                                |
-| MUST-05 | Economy and progression: coins, XP and levels that unlock content                                              |
+<!-- prettier-ignore -->
+| ID      | Item                                                                                   |
+| ------- | -------------------------------------------------------------------------------------- |
+| MUST-01 | Crops: wheat, corn and strawberries (plant, grow over time, harvest)                    |
+| MUST-02 | Animals: chickens and cows (feed, produce over time, collect)                           |
+| MUST-03 | Production facilities with timed queues: feed mill, bakery, dairy                       |
+| MUST-04 | NPC order board: deliver goods for coins and XP                                         |
+| MUST-05 | Economy and progression: coins, XP and levels that unlock content                       |
 | MUST-06 | Upgrades for fields, facility tiers 1–3, animal pens, silo and barn; Loop and Collector add-ons for facilities |
-| MUST-07 | Offline progress: the farm keeps producing while the player is away                                            |
-| MUST-08 | Gifting: send goods to a friend (friend list, invite link)                                                     |
-| MUST-09 | Play without a sign-up form (Supabase anonymous sign-in)                                                       |
+| MUST-07 | Offline progress: the farm keeps producing while the player is away                     |
+| MUST-08 | Gifting: send goods to a friend (friend list, invite link)                              |
+| MUST-09 | Play without a sign-up form (Supabase anonymous sign-in)                               |
 
 **System qualities**
 
-| ID      | Item                                                                                          |
-| ------- | --------------------------------------------------------------------------------------------- |
-| MUST-10 | One deterministic simulation (`packages/sim`) shared by client and server                     |
-| MUST-11 | Server authority: server time and server-side validation of every action                      |
-| MUST-12 | Optimistic client prediction, reconciled with the server's result                             |
+<!-- prettier-ignore -->
+| ID      | Item                                                                                   |
+| ------- | -------------------------------------------------------------------------------------- |
+| MUST-10 | One deterministic simulation (`packages/sim`) shared by client and server               |
+| MUST-11 | Server authority: server time and server-side validation of every action                |
+| MUST-12 | Optimistic client prediction, reconciled with the server's result                       |
 | MUST-13 | Persistence that survives concurrent actions and retries (sequence numbers, idempotency keys) |
-| MUST-14 | Property tests for the simulation (time-splitting invariance, replay equals prediction)       |
-| MUST-15 | Protected black-box acceptance tests that agent PRs can't modify                              |
-| MUST-16 | Cheat-attack tests mapped to the threat model and OWASP Top 10                                |
-| MUST-17 | CI running the checks on every PR; deployed on Vercel with Supabase Postgres                  |
+| MUST-14 | Property tests for the simulation (time-splitting invariance, replay equals prediction) |
+| MUST-15 | Protected black-box acceptance tests that agent PRs can't modify                       |
+| MUST-16 | Cheat-attack tests mapped to the threat model and OWASP Top 10                          |
+| MUST-17 | CI running the checks on every PR; deployed on Vercel with Supabase Postgres            |
 
 **Evaluation**
 
-| ID      | Item                                                                                 |
-| ------- | ------------------------------------------------------------------------------------ |
-| MUST-18 | Two playtests: a think-aloud test of the vertical slice, then an offline-return test |
-| MUST-19 | System metrics: latency, rollbacks between prediction and server, unlock curves      |
+<!-- prettier-ignore -->
+| ID      | Item                                                                                   |
+| ------- | -------------------------------------------------------------------------------------- |
+| MUST-18 | Two playtests: a think-aloud test of the vertical slice, then an offline-return test   |
+| MUST-19 | System metrics: latency, rollbacks between prediction and server, unlock curves         |
 
 **Baseline qualities**
 
 These apply to every item above and are never cut. Their criteria are in `spec.md`; their thresholds
 and the checks that enforce them are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
 
-| ID      | Item                                                                                       |
-| ------- | ------------------------------------------------------------------------------------------ |
-| BASE-01 | The UI is in English                                                                       |
+<!-- prettier-ignore -->
+| ID      | Item                                                                                   |
+| ------- | -------------------------------------------------------------------------------------- |
+| BASE-01 | The UI is in English                                                                   |
 | BASE-02 | Works in the latest two Chrome, Firefox and Safari, at desktop and phone widths (≥ 360 px) |
-| BASE-03 | The DOM UI meets WCAG 2.2 AA                                                               |
-| BASE-04 | Action latency on the deployed stack has p95 < 300 ms                                      |
-| BASE-05 | A prediction shows within 100 ms of a tap                                                  |
+| BASE-03 | The DOM UI meets WCAG 2.2 AA                                                           |
+| BASE-04 | Action latency on the deployed stack has p95 < 300 ms                                  |
+| BASE-05 | A prediction shows within 100 ms of a tap                                              |
 
 **If the Musts don't fit**
 
@@ -74,47 +78,50 @@ another grill. The baseline qualities are never cut:
 
 Clearly valuable; dropped only if the Musts are at risk.
 
-| ID        | Item                                                                                   |
-| --------- | -------------------------------------------------------------------------------------- |
-| SHOULD-01 | Read-only visits to another player's farm                                              |
-| SHOULD-02 | Free game assets instead of placeholder UI, with licences tracked in `CREDITS.md`      |
-| SHOULD-03 | Load tests with Locust, analysed in `tools/analysis`                                   |
-| SHOULD-04 | Link an email to an anonymous player, to keep the farm across browsers                 |
+<!-- prettier-ignore -->
+| ID        | Item                                                                                 |
+| --------- | ------------------------------------------------------------------------------------ |
+| SHOULD-01 | Read-only visits to another player's farm                                            |
+| SHOULD-02 | Free game assets instead of placeholder UI, with licences tracked in `CREDITS.md`    |
+| SHOULD-03 | Load tests with Locust, analysed in `tools/analysis`                                 |
+| SHOULD-04 | Link an email to an anonymous player, to keep the farm across browsers               |
 | SHOULD-05 | Farmhands on crops and animals (feed and collect), with speed upgrades and the Foreman |
-| SHOULD-06 | Clovers: a rare currency earned in play, spent to skip waits                           |
-| SHOULD-07 | Away summary since the player last looked, across actions taken in between             |
-| SHOULD-08 | Facility tiers 4–5, and the Collector add-on for pens                                  |
+| SHOULD-06 | Clovers: a rare currency earned in play, spent to skip waits                         |
+| SHOULD-07 | Away summary since the player last looked, across actions taken in between           |
+| SHOULD-08 | Facility tiers 4–5, and the Collector add-on for pens                                |
 
 ## Could have
 
 Only if there's time after the Musts and Shoulds, and only if they still serve the research
 question.
 
-| ID       | Item                                                                                                                                                                    |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| COULD-01 | Trading between players                                                                                                                                                 |
-| COULD-02 | Real-time updates (Supabase Realtime): live notifications, live visits                                                                                                  |
-| COULD-03 | Skill mini-games that earn clovers, server-verifiable by seed and input replay                                                                                          |
-| COULD-04 | An event-store library in place of the hand-built action log                                                                                                            |
+<!-- prettier-ignore -->
+| ID       | Item                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------ |
+| COULD-01 | Trading between players                                                                    |
+| COULD-02 | Real-time updates (Supabase Realtime): live notifications, live visits                     |
+| COULD-03 | Skill mini-games that earn clovers, server-verifiable by seed and input replay            |
+| COULD-04 | An event-store library in place of the hand-built action log                               |
 | COULD-05 | Admin dashboard for monitoring and feature flags ([#1](https://github.com/sssoto17/sunny-pastures/issues/1)); a CLI script that replays a farm's log to reproduce a bug |
-| COULD-06 | Tractor: a farmhand works a whole field as one task                                                                                                                     |
-| COULD-07 | Farmhands deliver orders while the player is away                                                                                                                       |
-| COULD-08 | Production line add-on: a facility repeats a player-defined sequence of recipes                                                                                         |
-| COULD-09 | Farm activity history: a timeline of the player's past actions                                                                                                          |
+| COULD-06 | Tractor: a farmhand works a whole field as one task                                        |
+| COULD-07 | Farmhands deliver orders while the player is away                                          |
+| COULD-08 | Production line add-on: a facility repeats a player-defined sequence of recipes            |
+| COULD-09 | Farm activity history: a timeline of the player's past actions                             |
 
 ## Won't have (this time)
 
 Consciously out of scope for this project. Candidates for the report's Perspective chapter.
 
-| ID      | Item                                                                                                       |
-| ------- | ---------------------------------------------------------------------------------------------------------- |
-| WONT-01 | A native mobile app (it could reuse `packages/sim` later)                                                  |
-| WONT-02 | A canvas or game-engine renderer: the UI is DOM-based React                                                |
-| WONT-03 | Custom artwork                                                                                             |
-| WONT-04 | Company or client context: the project refers to the game only                                             |
-| WONT-05 | Reusing Revenge of the Assassin (the 1st-semester JS browser game) beyond a brief mention                  |
+<!-- prettier-ignore -->
+| ID      | Item                                                                                     |
+| ------- | ---------------------------------------------------------------------------------------- |
+| WONT-01 | A native mobile app (it could reuse `packages/sim` later)                                |
+| WONT-02 | A canvas or game-engine renderer: the UI is DOM-based React                               |
+| WONT-03 | Custom artwork                                                                           |
+| WONT-04 | Company or client context: the project refers to the game only                           |
+| WONT-05 | Reusing Revenge of the Assassin (the 1st-semester JS browser game) beyond a brief mention |
 | WONT-06 | A sync engine such as Zero (Rocicorp) in place of the hand-built prediction, action log and reconciliation |
-| WONT-07 | Playing without a connection: actions queued offline and sent later                                        |
+| WONT-07 | Playing without a connection: actions queued offline and sent later                     |
 
 ## Notes on tools considered
 
