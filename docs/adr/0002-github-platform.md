@@ -480,9 +480,12 @@ opens. Claude is billed through the admin's employer seat (#37; "The factory's i
   and a community report says an App's approval counts only with `contents: write`
   ([discussion #211598](https://github.com/orgs/community/discussions/211598)). So `contents:
   read` would fail. **So the App gets `contents: write` and `pull_requests: write`, and the `main`
-  ruleset gets `require_last_push_approval: true`** (A8, from checklist step 12), so the App can
-  never approve a push it made itself. The blast radius: a prompt-injected reviewer could push commits to PR
-  branches, but not to `main` or to tags, which the rulesets block. The checklist's test
+  ruleset gets `require_last_push_approval: true`** (A8), so the App can never approve a push it
+  made itself. **Not at step 12 (admin, 17 Nov 2026, #264's decisions):** while lanes push as the
+  admin's account, the last pusher is the admin and the rule would hold every PR for someone
+  else's approval, so it stays off until #336 moves PR authorship to the App. The blast radius: a
+  prompt-injected reviewer could push commits to PR branches, but not to `main` or to tags, which
+  the rulesets block. The checklist's test
   (step 12) confirms each step of the flow.
 - **What it reads is untrusted.** The bot feeds text that the PR wrote to a model, so a PR could
   try to talk it into approving. It runs on `pull_request_target`, from `main`'s copy of the
@@ -517,7 +520,8 @@ repo's branches. The pattern is *propose, then apply*: Claude proposes and plain
   `.github/scripts/tests/post-review.test.mjs`) then posts the review and applies the rules
   above in code. It approves only when none of these holds: a Required finding, an escalation
   row, `review:admin`, an escalation thread of its own, or an earlier finding of its own still
-  open. **#264 drops the escalation row and the escalation thread from that list**; the script
+  open. **#264 drops the escalation row and the escalation thread from that list on a PR the
+  admin's account opened** (on an App-opened PR they still withhold); the script
   follows in its own change (#322), and `review:admin` keeps holding approval until #104. It also
   reopens escalation threads someone other than the admin resolved, resolves only the App's own
   fixed finding threads, adds the label and the escalation thread, requests the admin's review on
@@ -579,10 +583,11 @@ last-push approval off (#68).
   a hand-chained PR can't slip in. On `opened` the event's `pull_request.stack` is `null`,
   because `stack.sh` links the stack after opening the PRs (seen on throwaway stack #315), so the
   guard asks GitHub again for up to 60 s before it fails.
-- **Approvals.** The reviewer approves each clean part, escalated ones included; the escalation
-  thread alone holds the merge ("Approvals", above). GitHub's stack merge needs "all pull
-  requests below it … approved and … passing checks", and its restack "will … retain approvals if
-  a diff has not changed, even if you have the dismiss stale approvals rule enabled" ([merging
+- **Approvals.** The reviewer approves each clean part, escalated ones included when the admin's
+  account opened them; the escalation thread alone holds the merge ("Approvals", above). GitHub's
+  stack merge needs "all pull requests below it … approved and … passing checks", and its restack
+  "will … retain approvals if a diff has not changed, even if you have the dismiss stale approvals
+  rule enabled" ([merging
   stacked pull requests](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/merging-stacked-pull-requests),
   quoted in #264). Throwaway stack #315 under a ruleset like `main` at 1 approval (admin, 16 Nov)
   showed what a bypass can't do: a bypass merges one part at a time, and "Merge stack" offers no
@@ -622,8 +627,11 @@ last-push approval off (#68).
 - **No cancelled twins on a head.** One push to a stacked part fires two `pull_request` events
   on the same head. With `cancel-in-progress`, one run was cancelled, and GitHub read the
   cancelled checks as the latest results: #313 showed "10 cancelled, 3 successful" and couldn't
-  merge although the same checks had passed. So `ci` and `security` group runs by PR and head
-  and never cancel (a second run on a head waits), and `pr-body`, seconds long, has no group.
+  merge although the same checks had passed. So `ci`, `security` and `pr-body` have no
+  concurrency group: nothing is cancelled, and both twins run to completion. The cost: runs for a
+  superseded head finish too, and a flaky job gets two draws at turning a head red. On `150dbda`,
+  `ci / test` timed out on one twin and passed on the other, and `ci / scripts`'
+  `issue-fields.test.sh` failed on one and passed on the other.
 - **The floor guard compares the whole stack below a part with the stack's base**, not each part
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the
   guard from the lower part's branch, so a part could swap the guard that judges the part above,
@@ -1452,9 +1460,10 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
 - **The gap before the reviewer App (decided 7 Nov, Q15).** From the ruleset (checklist step 3)
   until the reviewer App works (step 12), nobody but the admin could give an approval, and the
   admin can't approve their own PRs, which the factory's are. So the `main` ruleset starts with
-  `required_approving_review_count: 0` and goes to 1 at step 12, together with
-  `require_last_push_approval`. Code-owner review stays on throughout, so code-owned PRs still
-  need the admin, by bypass while the factory acts as the admin.
+  `required_approving_review_count: 0` and goes to 1 at step 12; `require_last_push_approval`
+  follows once #336 moves PR authorship to the App (admin, 17 Nov 2026). Code-owner review stays
+  on throughout, so code-owned PRs still need the admin, by bypass while the factory acts as the
+  admin.
 - Required checks can't be added until CI reports them. Until the CI/CD step, the ruleset blocks
   direct pushes, force-pushes and deletion, and requires code-owner review on code-owned PRs.
   Auto-merge stays off.
@@ -1471,8 +1480,8 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   stay instruction-only, before and after #37. PR #52 turns tag pushes and label removal into
   prompts.
 - **Rollout order** (checklist): rulesets now, with 0 required approvals → the reviewer App,
-  then 1 required approval and `require_last_push_approval`, then tests (a)–(f) → auto-merge only
-  when the required checks report, the App passes (a)–(f) and #47's escalation criteria are
+  then 1 required approval (`require_last_push_approval` after #336), then tests (a)–(f) →
+  auto-merge only when the required checks report, the App passes (a)–(f) and #47's escalation criteria are
   merged (Q16) → unattended factory work only once the factory App runs (#37 decided it: checks
   #101–#103, then the build issues under #58). Attended sessions are never blocked.
 - `CONSTRAINTS.md` owns the escalation criteria and the split size (#47) and the list of ways a
@@ -1573,7 +1582,7 @@ deferred to go-public (#38), Q10 waits for Vercel and Q11 for #47. Q14–Q16 wer
     required from the CI/CD step; when CodeQL becomes available, one of them stays required and
     the other runs as advice (area 8).
 14. **Q14, the reviewer App's permissions.** *Decided 7 Nov:* `contents: write` and
-    `pull_requests: write`, with `require_last_push_approval: true` on `main` from step 12
+    `pull_requests: write`, with `require_last_push_approval: true` on `main` once #336 lands
     (area 2). With `contents: read`, it couldn't turn on auto-merge. The blast radius: a
     prompt-injected reviewer could push to PR branches, not to `main` or to tags.
 15. **Q15, the approval count before the reviewer App.** *Decided 7 Nov:* 0 required approvals
@@ -1663,8 +1672,9 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     review workflow (area 2). **After #37 has settled how Claude is billed in CI** (Consequences),
     register the reviewer App (with #37's factory App) with `contents: write` and
     `pull_requests: write` (Q14); its key as an environment secret. Then update the `main`
-    ruleset: `required_approving_review_count` to 1 (Q15) and `require_last_push_approval` to
-    `true` (Q14). Code-owner review stays on. **Test the flow once**, on
+    ruleset: `required_approving_review_count` to 1 (Q15); `require_last_push_approval` stays
+    `false` until #336 moves PR authorship to the App (admin, 17 Nov 2026; Q14's `true` waits for
+    it). Code-owner review stays on. **Test the flow once**, on
     throwaway PRs, reading each result with
     `gh pr view N --json reviewDecision,mergeStateStatus`:
     - (a) the App's approval on a PR outside CODEOWNERS gives `reviewDecision: APPROVED`;
@@ -2215,12 +2225,13 @@ both entries, deviations the admin decided on 8 Nov:
 ```
 
 This is the ruleset as created at checklist step 3 (Q15): 0 required approvals, because nobody
-but the admin could approve yet. At step 12, once the reviewer App works, two values change:
-`"required_approving_review_count": 1` and `"require_last_push_approval": true` (Q14). From then
+but the admin could approve yet. At step 12, once the reviewer App works,
+`"required_approving_review_count"` goes to 1; `"require_last_push_approval": true` (Q14) waits for
+#336, since lanes push as the admin's account until then (admin, 17 Nov 2026). From then
 on, one approval is required: the reviewer App's, or the admin's on admin-review PRs (area 2).
 Code-owner review is on throughout. Neither App is in any bypass list (#37). GitHub's docs don't
-say how `require_last_push_approval` behaves with 0 required approvals, so it changes at step 12
-with the count.
+say how `require_last_push_approval` behaves with 0 required approvals, so it changes no earlier
+than step 12, and in fact only after #336.
 
 **Applied 8 Nov, #66; read back 12 Nov** (`gh api repos/sssoto17/sunny-pastures/rulesets/26810726`).
 The rules match `ruleset-main.json` above: 0 required approvals and code-owner review on, until #68
