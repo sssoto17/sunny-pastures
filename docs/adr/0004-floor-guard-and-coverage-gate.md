@@ -238,6 +238,32 @@ pinned exactly (admin decision, 12 Nov). Its rules didn't change; only how it re
   line reader matched exact spellings of fences and pipes. The parser reads the same table however
   it's padded, which makes that spike safer.
 
+**Note, 16 Nov 2026 (#271): the guard names spent rows.** Three cleanup PRs removed rows whose
+job was done: E1 (#139), E2–E6 (#172), E1 and E7 (#238). `guard / floor` now names them, so the
+next PR can remove them instead.
+- *Spent means: in the merge base's table.* Only a row the PR adds waives anything
+  (`addedRows`), so every row of the base's parsed Exceptions table was added by a PR that has
+  merged, and waives nothing now. The guard reads the base's table with the same reader as the
+  waivers, so a row-shaped line in a fence or another table isn't named. A row the PR rewrites
+  under the same ID isn't named: its new text is a new row, and it waives.
+- *A second reason: its path is gone.* A row whose Path (backticked or not, a file or a folder
+  glob) matches no tracked or untracked file in the checkout gets "no file matches its Path".
+  It's never the only reason, since such a row is in the base too. None of the three cleanups
+  needed it: every Path existed at its base. Only #238's E1 matches nothing after the PR deletes
+  its workflow.
+- *A warning, never a finding.* One block in the log, a section in the job summary and one
+  `::warning` annotation on the first row the PR keeps; the change report gets the other 9 of
+  GitHub's 10. `guard / floor` stays green. Each row says "remove it in this PR", or "this PR
+  removes it".
+- *Pattern.* *Derived state*: the guard's own waiver rule decides what's spent, so the two can't
+  disagree.
+- *Alternatives.* Reading the PR number from the Reason and asking GitHub whether it merged: the
+  Reasons are free text ("#125 part 2" names an issue, not a PR), and the floor job has no API
+  token. `git log -S` on `CONSTRAINTS.md` to find the commit that added the row: it needs the full
+  history, and any commit it finds in the base has merged anyway. A PR column in the table: it
+  changes `CONSTRAINTS.md`'s row format and every reader of it, for an answer the base already
+  gives. "Path gone" alone: it names none of the three cleanups' rows.
+
 ## The guard and the gate as a whole (#99, decided 9 Nov)
 
 ### The floor guard
