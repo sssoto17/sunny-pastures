@@ -1,8 +1,7 @@
 // The global `ignores` in eslint.config.mjs (#256). ESLint's flat config doesn't read .gitignore,
 // so a git-ignored tool folder holding a stray .ts file failed `eslint .` and blocked every edit
-// through the after-edit hook (#111): the remember plugin's `.remember/tmp/last-ndc.ts`. An ignore
-// for a folder that holds no project code isn't a loosening, so the second test pins that: no
-// tracked file is ignored, outside the agent folders the config already skipped.
+// through the after-edit hook (#111): the remember plugin's `.remember/tmp/last-ndc.ts`. The second
+// test pins that the ignores reach no tracked code, outside the agent folders skipped before #256.
 import { execFileSync } from "node:child_process";
 import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
