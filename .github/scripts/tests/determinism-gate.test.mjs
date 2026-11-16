@@ -4,6 +4,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -249,22 +250,52 @@ describe("runGate --record", () => {
 	});
 
 	// A move that fails half way must not leave the new script beside the old hash, or the new hash
-	// beside the old script. A non-empty folder in a file's place refuses the move. In the hash's
-	// place it is refused already when the old hash is read for the restore, before either rename.
-	it.each([["determinismScript.json"], ["determinismScript.hash"]])(
-		"leaves the tests folder byte-identical when %s can't be replaced",
-		async (blocked) => {
-			const { tests, scriptPath, hashPath } = makeTestsFolder();
-			rmSync(join(tests, blocked));
-			mkdirSync(join(tests, blocked, "occupied"), { recursive: true });
-			const before = snapshotFolder(tests);
-			const moduleOf = recordWith("record.mjs", "play.mjs");
+	// beside the old script. A non-empty folder in the script's place refuses its rename on disk;
+	// the old hash goes back.
+	it("leaves the tests folder byte-identical when the script's move into place is refused", async () => {
+		const { tests, scriptPath, hashPath } = makeTestsFolder();
+		rmSync(scriptPath);
+		mkdirSync(join(scriptPath, "occupied"), { recursive: true });
+		const before = snapshotFolder(tests);
+		const moduleOf = recordWith("record.mjs", "play.mjs");
 
-			await expect(runGate(["--record"], { moduleOf, scriptPath, hashPath })).rejects.toThrow();
+		await expect(runGate(["--record"], { moduleOf, scriptPath, hashPath })).rejects.toThrow();
 
-			expect(snapshotFolder(tests)).toEqual(before);
-		},
-	);
+		expect(snapshotFolder(tests)).toEqual(before);
+	});
+
+	// The hash's rename refused while the old hash stays readable (a folder in its place would fail
+	// the read first), so this reaches the move: the script must not have moved before it.
+	it("leaves the tests folder byte-identical when the hash's move into place is refused", async () => {
+		const { tests, scriptPath, hashPath } = makeTestsFolder();
+		const before = snapshotFolder(tests);
+		const moduleOf = recordWith("record.mjs", "play.mjs");
+		const rename = (from, to) => {
+			if (to === hashPath) throw new Error("EBUSY: the hash is held open");
+			renameSync(from, to);
+		};
+
+		await expect(runGate(["--record"], { moduleOf, scriptPath, hashPath, rename })).rejects.toThrow(
+			"EBUSY",
+		);
+
+		expect(snapshotFolder(tests)).toEqual(before);
+	});
+});
+
+describe("runGate --update", () => {
+	it("moves the agreed hash into place and leaves the script and no temp file", async () => {
+		const { tests, scriptPath, hashPath } = makeTestsFolder();
+		writeScript(scriptPath, script);
+		const recorded = readFileSync(scriptPath, "utf8");
+		const moduleOf = simOf({ "playScript.js": "play.mjs" });
+
+		await expect(runGate(["--update"], { moduleOf, scriptPath, hashPath })).resolves.toBe(0);
+
+		expect(readFileSync(hashPath, "utf8")).toBe(`${hash}\n`);
+		expect(readFileSync(scriptPath, "utf8")).toBe(recorded);
+		expect(readdirSync(tests).sort()).toEqual(["determinismScript.hash", "determinismScript.json"]);
+	});
 });
 
 // A gate started through a symlink once skipped `main` and exited 0 with no output (#48's

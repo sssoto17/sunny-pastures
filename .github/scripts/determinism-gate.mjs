@@ -173,13 +173,13 @@ const tempPathBeside = (path) =>
 
 // Moves the new hash into place, then the new script. If the script's move is refused, the old
 // hash goes back, so the folder never pairs a new script with an old hash or the other way round.
-const moveIntoPlace = ({ hashTemp, hashPath, played, scriptPath }) => {
+const moveIntoPlace = ({ hashTemp, hashPath, played, scriptPath, rename }) => {
 	const oldHash = existsSync(hashPath) ? readFileSync(hashPath) : null;
-	renameSync(hashTemp, hashPath);
+	rename(hashTemp, hashPath);
 	if (played === scriptPath) return;
 
 	try {
-		renameSync(played, scriptPath);
+		rename(played, scriptPath);
 	} catch (e) {
 		if (oldHash === null) rmSync(hashPath, { force: true });
 		else writeFileSync(hashPath, oldHash);
@@ -191,9 +191,11 @@ const relativeToRoot = (path) => relative(ROOT, path);
 // The gate on a compiled sim (`moduleOf` maps a compiled file name to its URL). --record plays a
 // temp recording and moves it, and the hash, over `scriptPath` and `hashPath` only after a pass;
 // a fail (1) or a CannotRun (2) leaves both files as they were and removes the temp files (#287).
+// `rename` is fs.renameSync; a test passes one that refuses a single move, which no file on disk
+// can do while it stays readable.
 export const runGate = async (
 	argv,
-	{ moduleOf, scriptPath, hashPath, started = performance.now() },
+	{ moduleOf, scriptPath, hashPath, started = performance.now(), rename = renameSync },
 ) => {
 	const isRecord = argv.includes("--record");
 	const isUpdate = argv.includes("--update") || isRecord;
@@ -218,7 +220,7 @@ export const runGate = async (
 
 		if (isUpdate) {
 			writeFileSync(hashTemp, `${expected}\n`);
-			moveIntoPlace({ hashTemp, hashPath, played, scriptPath });
+			moveIntoPlace({ hashTemp, hashPath, played, scriptPath, rename });
 			if (isRecord) console.log(`determinism-gate: recorded ${relativeToRoot(scriptPath)}`);
 			console.log(`determinism-gate: wrote ${expected} to ${relativeToRoot(hashPath)}`);
 		}
