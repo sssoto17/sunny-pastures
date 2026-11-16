@@ -57,8 +57,7 @@
 			"Bash(scripts/today-gather.sh)",
 			"Bash(scripts/today-gather.sh *)",
 			"Bash(bash .claude/hooks/block-branch-switch.test.sh)",
-			"Bash(bash scripts/new-issue.test.sh)",
-			"mcp__github-ci__get_job_logs"
+			"Bash(bash scripts/new-issue.test.sh)"
 		],
 		"ask": [
 			"Bash(gh pr merge *)",
