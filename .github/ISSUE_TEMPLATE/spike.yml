@@ -1,6 +1,7 @@
 name: Spike
 description: Throwaway work that answers a question with measurements or a prototype
 labels: [spike, triage]
+type: Chore
 body:
   - type: textarea
     id: goal

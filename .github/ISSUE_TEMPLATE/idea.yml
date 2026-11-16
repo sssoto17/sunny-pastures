@@ -1,6 +1,7 @@
 name: Idea
 description: Wanted but not shaped enough to build. Never moves to Ready as an idea.
 labels: [idea, triage]
+type: Chore
 body:
   - type: textarea
     id: goal
