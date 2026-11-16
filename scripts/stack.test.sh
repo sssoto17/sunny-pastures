@@ -26,6 +26,7 @@ git config --global advice.detachedHead false
 # State under $work/gh: pulls/<n>.json, stacks/<n>.json, next (the next number: PRs and stacks
 # share it, as on GitHub) and calls (each call's arguments, one per line, then "--"). A file
 # fail_<METHOD>_<endpoint with / as _> fails that call with its text. --jq runs through jq.
+# reviews_<n>.json and checks_<sha>.json are canned reviews and check runs.
 cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 st=$(dirname "$0")/../gh
@@ -86,10 +87,18 @@ case "$method $path" in
     jq --argjson n "$n" --arg sha "$sha" '{number: $n, state: "open", merged_at: null, title, body,
       head: {ref: .head, sha: $sha}, base: {ref: .base}, stack: null}' <<<"$input" >"$st/pulls/$n.json"
     out=$(pr "$n") ;;
+  "GET $P/pulls/"*/reviews)
+    n=${path#"$P"/pulls/}; n=${n%/reviews}
+    out=$(cat "$st/reviews_$n.json" 2>/dev/null || echo '[]') ;;
   "GET $P/pulls/"*)
     n=${path#"$P"/pulls/}
     [[ -f $st/pulls/$n.json ]] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
     out=$(pr "$n") ;;
+  "GET $P/commits/"*/check-runs)
+    sha=${path#"$P"/commits/}; sha=${sha%/check-runs}
+    out=$(cat "$st/checks_$sha.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}') ;;
+  "POST $P/issues/"*/labels)
+    out='[]' ;;
   "POST $P/stacks")
     prs=$(jq -c .pull_requests <<<"$input")
     (($(jq length <<<"$prs") >= 2)) || { echo "gh: 2 items required (HTTP 422)" >&2; exit 1; }
@@ -97,6 +106,12 @@ case "$method $path" in
     n=$(next)
     jq -n --argjson n "$n" --argjson prs "$prs" --arg base "$base" \
       '{number: $n, base: $base, open: true, prs: $prs}' >"$st/stacks/$n.json"
+    set_stack "$n"
+    out=$(stack_json "$n") ;;
+  "POST $P/stacks/"*/add)
+    n=${path#"$P"/stacks/}; n=${n%/add}
+    jq --argjson add "$(jq -c .pull_requests <<<"$input")" '.prs += $add' "$st/stacks/$n.json" >"$st/tmp" &&
+      mv "$st/tmp" "$st/stacks/$n.json"
     set_stack "$n"
     out=$(stack_json "$n") ;;
   "GET $P/stacks/"*)
@@ -192,7 +207,7 @@ expect_err "unknown command"
 # --- open: creates each PR on the part below, then the native stack ----------------------------
 reset
 three_parts
-case_ open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
+case_ open --label review:admin p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
 expect_code 0
 expect_eq "p1 pushed" "$(remote_sha p1)" "$(git -C "$repo" rev-parse p1)"
 expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
@@ -203,6 +218,7 @@ expect_eq "title from the body file's first line" "$(pr_field 401 .title)" "feat
 expect_eq "body without the title line" "$(pr_field 401 .body)" "Part of #264."
 expect_eq "stack holds the parts in order" "$(jq -c .prs "$work/gh/stacks/403.json")" "[400,401,402]"
 expect_eq "part 3 knows its position" "$(pr_field 402 .stack.position)" 3
+expect_call "api -X POST repos/sssoto17/sunny-pastures/issues/402/labels -f labels[]=review:admin"
 expect_out "stack #403"
 # the push never forces and never sets an upstream
 assert "pushed" test -s "$work/pushes"
@@ -214,6 +230,16 @@ case_ open p1="$work/bodies/p1.md" p2="$work/bodies/p2.md" p3="$work/bodies/p3.m
 expect_code 0
 expect_eq "no new PR or stack" "$(cat "$work/gh/next")" 404
 expect_out "stack #403"
+
+# part 1 built on an older main still opens: GitHub diffs it from the merge base
+reset
+part p1 main a.txt
+part p2 p1 b.txt
+git -C "$repo" switch -q --detach main
+git -C "$repo" commit -q --allow-empty -m "main moves on" && git -C "$repo" push -q origin HEAD:main
+case_ open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+expect_code 0
+expect_eq "part 1 on main" "$(pr_field 400 .base.ref)" main
 
 # --- open: refusals change nothing ---------------------------------------------------------------
 reset
@@ -237,6 +263,19 @@ expect_code 2
 expect_err "p2 has no commits of its own"
 reset
 three_parts
+printf '\n' >"$work/bodies/empty.md"
+case_ open p1="$(body p1 'feat: one')" p2="$work/bodies/empty.md"
+expect_code 2
+expect_err "no title"
+case_ open p1="$(body p1 'feat: one')" p2="$work/bodies/missing.md"
+expect_code 2
+expect_err "can't read"
+case_ open p1="$(body p1 'feat: one')" nosuch="$(body p2 'feat: two')"
+expect_code 2
+expect_err "no local branch nosuch"
+case_ open --base nosuch p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+expect_code 2
+expect_err "no branch nosuch on origin"
 # an open PR for a part on another base is a hand-chained PR: refuse rather than stack it
 git -C "$repo" push -q origin p1 p2
 printf '{"number":390,"state":"open","head":{"ref":"p2","sha":"x"},"base":{"ref":"main"},"stack":null}' \
@@ -259,6 +298,156 @@ case_ open p1="$work/bodies/p1.md" p2="$work/bodies/p2.md"
 expect_code 0
 expect_eq "retry stacks the same PRs" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401]"
 
+# --- add: appends a part on the top open part ----------------------------------------------------
+reset
+three_parts
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+case_ add 401 p3="$(body p3 'feat: three')"
+expect_code 0
+expect_eq "new part on the top part" "$(pr_field 403 .base.ref)" p2
+expect_eq "appended to the stack" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401,403]"
+reset
+three_parts
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+part p4 p1 d.txt
+case_ add 400 p4="$(body p4 'feat: four')"
+expect_code 2
+expect_err "p4 is not built on p2"
+case_ add 999 p3="$(body p3 'feat: three')"
+expect_code 1
+expect_err "#999"
+# a hand-chained PR for the new part is refused before anything is pushed
+printf '{"number":390,"state":"open","head":{"ref":"p3","sha":"x"},"base":{"ref":"main"},"stack":null}' \
+  >"$work/gh/pulls/390.json"
+case_ add 400 p3="$(body p3 'feat: three')"
+expect_code 2
+expect_err "#390 already has p3 on main"
+expect_eq "p3 not pushed" "$(remote_sha p3)" none
+reset
+part p1 main a.txt
+git -C "$repo" push -q origin p1
+printf '{"number":390,"state":"open","head":{"ref":"p1","sha":"x"},"base":{"ref":"main"},"stack":null}' \
+  >"$work/gh/pulls/390.json"
+part p2 p1 b.txt
+case_ add 390 p2="$(body p2 'feat: two')"
+expect_code 2
+expect_err "#390 is not in a stack"
+
+# --- update: an edit to a lower part restacks the parts above it --------------------------------
+# GitHub's "Rebase stack" fails on a merge commit that replays empty after a squash (throwaway
+# stack #315, 16 Nov), so the stack stays linear: rebase, then push with a lease on each branch.
+reset
+three_parts
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
+git -C "$repo" switch -q p1
+echo fix >"$repo/a.txt"
+git -C "$repo" commit -qam "p1: fix"
+git -C "$repo" switch -q p3
+rm -f "$work/pushes"
+case_ update 402
+expect_code 0
+assert "p2 is on the new p1" git -C "$repo" merge-base --is-ancestor p1 p2
+assert "p3 is on the new p2" git -C "$repo" merge-base --is-ancestor p2 p3
+expect_eq "no merge commits" "$(git -C "$repo" rev-list --merges main..p3 | wc -l)" 0
+expect_eq "p2 adds only its own commit" "$(git -C "$repo" rev-list --count p1..p2)" 1
+expect_eq "p3 still checked out, with the fix" "$(git -C "$repo" branch --show-current) $(cat "$repo/a.txt")" "p3 fix"
+expect_eq "p1 pushed" "$(remote_sha p1)" "$(git -C "$repo" rev-parse p1)"
+expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
+assert "pushed with a lease" grep -q -- '--force-with-lease=refs/heads/p2:' "$work/pushes"
+assert "never a bare force" bash -c "! grep -qE -- ' (-f|--force)( |$)| \+' '$work/pushes'"
+case_ update 402
+expect_code 0
+expect_out "up to date"
+# a part that already sits on the part below but holds a merge commit (the old merge-upward
+# update made them) is rebuilt as one commit with the same tree, so the stack turns linear
+reset
+three_parts
+git -C "$repo" switch -q p1
+echo more >"$repo/a2.txt" && git -C "$repo" add a2.txt && git -C "$repo" commit -qm "p1: more"
+git -C "$repo" switch -q p2 && git -C "$repo" merge -q --no-edit p1
+git -C "$repo" switch -q p3 && git -C "$repo" merge -q --no-edit p2
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
+tree_p3=$(git -C "$repo" rev-parse 'p3^{tree}')
+case_ update 402
+expect_code 0
+expect_eq "now linear" "$(git -C "$repo" rev-list --merges main..p3 | wc -l)" 0
+expect_eq "p3's content unchanged" "$(git -C "$repo" rev-parse 'p3^{tree}')" "$tree_p3"
+expect_eq "p2 is one commit on p1" "$(git -C "$repo" rev-list --count p1..p2)" 1
+expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
+# a conflict changes nothing: no branch moves, nothing is pushed, no rebase is left open
+reset
+part p1 main a.txt
+part p2 p1 a.txt "two"
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+git -C "$repo" switch -q p1
+echo "one changed" >"$repo/a.txt"
+git -C "$repo" commit -qam "p1: change"
+before_p1=$(remote_sha p1) before_p2=$(git -C "$repo" rev-parse p2)
+case_ update 400
+expect_code 2
+expect_err "rebasing p2 onto p1 conflicts"
+expect_eq "p2 unmoved" "$(git -C "$repo" rev-parse p2)" "$before_p2"
+expect_eq "nothing pushed" "$(remote_sha p1)" "$before_p1"
+expect_eq "back on p1, no rebase open" "$(git -C "$repo" branch --show-current)" p1
+# uncommitted work stops it: restacking checks branches out
+echo dirty >>"$repo/README"
+case_ update 400
+expect_code 2
+expect_err "uncommitted"
+git -C "$repo" checkout -q -- README
+# it never force-pushes main, whatever the stack says
+jq '.head.ref = "main"' "$work/gh/pulls/400.json" >"$work/t" && mv "$work/t" "$work/gh/pulls/400.json"
+case_ update 400
+expect_code 2
+expect_err "never force-pushes main"
+
+# --- refresh: restack the open parts after a lower part merged -----------------------------------
+# GitHub squash-merges #400, retargets #401 to main and keeps it in the stack, but doesn't rebase
+# it (throwaway stack #315): p2 still holds p1's own commit, which the squash already has.
+reset
+three_parts
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
+old_p1=$(git -C "$repo" rev-parse p1)
+git -C "$repo" switch -q --detach main
+git -C "$repo" merge -q --squash p1 && git -C "$repo" commit -qm "feat: one (#400)"
+git -C "$repo" push -q origin HEAD:main
+jq '.state = "closed" | .merged_at = "2026-11-16T12:00:00Z"' "$work/gh/pulls/400.json" >"$work/t" && mv "$work/t" "$work/gh/pulls/400.json"
+jq '.base.ref = "main"' "$work/gh/pulls/401.json" >"$work/t" && mv "$work/t" "$work/gh/pulls/401.json"
+git -C "$repo" switch -q p2
+echo local >"$repo/l.txt" && git -C "$repo" add l.txt && git -C "$repo" commit -qm "p2: local only"
+git -C "$repo" switch -q p3
+case_ refresh 402
+expect_code 0
+expect_out "#400 merged"
+assert "p2 is on the new main" git -C "$repo" merge-base --is-ancestor origin/main p2
+assert "p1's own commit is gone from p2" bash -c "! git -C '$repo' merge-base --is-ancestor $old_p1 p2"
+expect_eq "p2 carries its two commits" "$(git -C "$repo" log --format=%s origin/main..p2 | sort | tr '\n' ,)" "p2: b.txt,p2: local only,"
+expect_eq "p3 adds one commit on p2" "$(git -C "$repo" rev-list --count p2..p3)" 1
+expect_eq "p2 pushed" "$(remote_sha p2)" "$(git -C "$repo" rev-parse p2)"
+expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
+expect_eq "p3 still checked out" "$(git -C "$repo" branch --show-current)" p3
+
+# --- status: each part with its base, approvals and checks ---------------------------------------
+reset
+three_parts
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+printf '[{"user":{"login":"sunny-reviewer[bot]"},"state":"CHANGES_REQUESTED"},{"user":{"login":"sunny-reviewer[bot]"},"state":"APPROVED"}]' \
+  >"$work/gh/reviews_400.json"
+printf '{"total_count":3,"check_runs":[{"name":"ci / test","status":"completed","conclusion":"cancelled"},{"name":"ci / test","status":"completed","conclusion":"success"},{"name":"guard / floor","status":"completed","conclusion":"failure"}]}' \
+  >"$work/gh/checks_$(git -C "$repo" rev-parse p1).json"
+rm -f "$work/gh/calls"
+case_ status 401
+expect_code 0
+expect_out "stack #402 on main"
+expect_out "1/2 #400"
+expect_out "approved"
+expect_out "failing: guard / floor"
+expect_out "1 passing, failing: guard / floor;"
+expect_out "2/2 #401"
+expect_out "base p1"
+# status never writes
+expect_no_call "-X POST"
+expect_no_call "-X PATCH"
 # no merge, ever: the script has no command that merges, and no call to a merge endpoint
 assert "no merge endpoint in the script" bash -c "! grep -qE '/merge|unstack' '$script'"
 
