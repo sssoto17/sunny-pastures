@@ -16,6 +16,9 @@ permissions: {}
 jobs:
   unticked:
     name: issue / unticked boxes
+    # Only an issue closed as done: one closed as not planned or a duplicate keeps its open boxes
+    # on purpose. A PR's closing keyword closes an issue as completed, the case this job is for.
+    if: github.event.issue.state_reason == 'completed'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

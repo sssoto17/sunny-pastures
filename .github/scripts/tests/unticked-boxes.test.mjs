@@ -29,6 +29,10 @@ describe("findUnticked", () => {
 		]);
 	});
 
+	it("reads a body typed with CRLF line ends, as the web editor saves them", () => {
+		expect(findUnticked("- [ ] a\r\n  wrapped\r\n- [x] b\r\n- [ ] c")).toEqual(["a wrapped", "c"]);
+	});
+
 	it("reads every list marker and nested boxes", () => {
 		const body = "* [ ] star\n+ [ ] plus\n1. [ ] one\n2) [ ] two\n  - [ ] nested";
 		expect(findUnticked(body)).toEqual(["star", "plus", "one", "two", "nested"]);

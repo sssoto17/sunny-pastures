@@ -7,9 +7,9 @@
 // Usage: node .github/scripts/unticked-boxes.mjs --out <file>   (reads the issue from
 // $GITHUB_EVENT_PATH). It writes the comment to <file> only when there are unticked boxes; the
 // workflow posts the file. Exit codes: 0 done, 2 could not run.
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 
-import { CannotRun, isMain } from "./diff.mjs";
+import { CannotRun, isMain, readEvent } from "./diff.mjs";
 
 const ITEM = /^\s*(?:[-*+]|\d+[.)])\s+\[( |x|X)\]\s+(.*)$/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
@@ -24,7 +24,7 @@ export const findUnticked = (body) => {
 	const items = [];
 	let open = null; // the item being read: { ticked, text }, or null between items
 	let fence = null; // the open fence's marker, or null outside fenced code
-	const lines = body.replace(/<!--[\s\S]*?(?:-->|$)/g, "").split("\n");
+	const lines = body.replace(/<!--[\s\S]*?(?:-->|$)/g, "").split(/\r?\n/);
 	for (const line of lines) {
 		const marker = FENCE.exec(line)?.[1];
 		if (fence) {
@@ -82,12 +82,7 @@ const main = () => {
 	const out = i === -1 ? null : process.argv[i + 1];
 	if (!out) throw new CannotRun("usage: unticked-boxes.mjs --out <file>");
 
-	let event;
-	try {
-		event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8"));
-	} catch {
-		throw new CannotRun("no readable issues event at $GITHUB_EVENT_PATH");
-	}
+	const event = readEvent();
 	const number = event?.issue?.number;
 	const items = findUnticked(event?.issue?.body ?? "");
 	if (items.length === 0) {
