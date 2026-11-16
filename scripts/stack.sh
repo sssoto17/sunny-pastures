@@ -138,7 +138,8 @@ restack() { # stack-base onto upstream branch...
     wt=$(checked_out_in "$b")
     [[ -z $wt || $wt == "$here" ]] || die 2 "$b is checked out in $wt: run this there"
     git rev-parse -q --verify "refs/heads/$b" >/dev/null || git branch -q --no-track "$b" "origin/$b"
-    git merge-base --is-ancestor "origin/$b" "$b" ||
+    # GitHub's commits must be in the local branch, or their changes must be (a local rebase).
+    git merge-base --is-ancestor "origin/$b" "$b" || [[ -z $(git cherry "$b" "origin/$b" | grep '^+') ]] ||
       die 2 "$b lacks commits that GitHub's $b has: rebase or fast-forward your $b onto origin/$b first"
     was_local[$b]=$(git rev-parse "refs/heads/$b") was_remote[$b]=$(git rev-parse "refs/remotes/origin/$b")
   done
