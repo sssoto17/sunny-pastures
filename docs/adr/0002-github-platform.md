@@ -556,11 +556,15 @@ last-push approval off (#68).
 - **One entry point: `scripts/stack.sh`** (`open`, `add`, `update`, `refresh`, `status`), for
   local and cloud lanes alike. It works over REST (`pulls`, `stacks`, `stacks/<n>/add`) and plain
   git: `gh stack` and `gh pr` reach GraphQL, which the cloud GitHub proxy refuses, while
-  `/stacks` passes it (checked from a cloud session, 16 Nov). An edit to a lower part merges
-  upward (`update`, fast-forward pushes only). After a lower part merges, `refresh` follows
-  GitHub's own restack and never merges `main` into a part, which is what left #303 unable to
-  stack-merge. It never merges and never unstacks; merging stays with the admin, and
-  `.claude/settings.json` asks before every REST, MCP and `gh stack` merge path.
+  `/stacks` passes it (checked from a cloud session, 16 Nov). The stack stays **linear**: after
+  an edit to a lower part, `update` rebases each part above it onto the new head below; after a
+  lower part merges, `refresh` rebases the rest onto the base, dropping the commits the squash
+  holds. Both push the stack's own part branches with `--force-with-lease`, never `main`. The
+  first design merged upward instead, and the throwaway stack showed why it can't: GitHub's
+  "Rebase stack" failed twice on #313, and replaying #313 here showed the merge commit `update`
+  had made coming out empty after #312's squash, which stops a replay. It never merges and never
+  unstacks; merging stays with the admin, and `.claude/settings.json` asks before every REST,
+  MCP and `gh stack` merge path.
   *Alternatives:* `gh stack` (GraphQL, so it fails in the cloud); a skill that calls the REST
   endpoints itself (the same calls with no tests); the GitHub MCP server (it has no stack tools).
 - **`guard / stack-base`** fails a PR whose base isn't `main` unless it's in a native stack, so
@@ -572,15 +576,27 @@ last-push approval off (#68).
   requests below it … approved and … passing checks", and its restack "will … retain approvals if
   a diff has not changed, even if you have the dismiss stale approvals rule enabled" ([merging
   stacked pull requests](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/merging-stacked-pull-requests),
-  quoted in #264). That retention isn't checked yet: on a base other than `main` the reviewer
-  doesn't run at all (below), so it's checked on the first stack after #68 sets `main` to 1
-  approval.
-- **Code-owner review on stacks.** PENDING: decided from the throwaway ruleset's result (#264,
-  criterion 1, admin steps 2a–2c). The alternatives: keep code-owner review on and the admin
-  bypass-merges a stack whose code-owned parts the admin's account opened; turn it off and let
-  the escalation thread (the code-owned row always escalates) hold those parts, with #107's App
-  identity as the boundary; or keep it on until agent PRs come from the factory App (#107), so
-  the admin can approve them.
+  quoted in #264). Throwaway stack #315 under a ruleset like `main` at 1 approval (admin, 16 Nov)
+  showed what a bypass can't do: a bypass merges one part at a time, and "Merge stack" offers no
+  bypass ("Unable to merge as a stack"), so a one-action stack merge needs every part below to
+  pass the rules itself. That's the bot's approval on each part, which needs "approval from
+  someone other than the last pusher" met, and so #68's App. After a partial merge GitHub
+  retargets the next part to the base and keeps the stack, but doesn't rebase it ("This stack is
+  out-of-date with its base branch"): `scripts/stack.sh refresh` does. Whether approvals survive
+  that restack can't be seen off `main`, where the reviewer doesn't run (below); it's checked on
+  the first stack after #68 sets `main` to 1 approval.
+- **Code-owner review on stacks** (decided from #315 for the admin's approval at this merge). On
+  a PR the admin's account opened, code-owner review showed no gate of its own: #313, code-owned,
+  showed only "At least 1 approving review is required by reviewers with write access", because
+  the admin is both its author and its only code owner. Once #68 sets 1 approval, a code-owned
+  part needs a code owner's approval that nobody can give, the bot not being a code owner, so it
+  merges only by bypass, and a bypass can't merge a stack (above). **Decision: turn code-owner
+  review off in ruleset `main` together with #68's step 12**; every code-owned PR meets the
+  Code-owned path row, so its escalation thread holds it until the admin resolves it, and #107's
+  App identity is the boundary that makes that thread the admin's alone. *Alternatives:* keep it
+  on and bypass-merge code-owned stacks part by part (the cost #264 removes); keep it on until
+  agent PRs come from the factory App (#107), so the admin can approve them (blocks #68 on #107);
+  make the bot a code owner (rejected in "Only this App approves": only `@sssoto17` is one).
 - **One test run per stack.** `ci / typecheck`, `ci / lint` and `ci / test` run on a stack's top
   part only, diffing from the stack's base, so one run covers every part. The other jobs, the
   floor guard among them, and the review run on each part. The `if:` in GitHub's
@@ -595,8 +611,14 @@ last-push approval off (#68).
   `main`, as the floor job does (#99), so a PR can't switch off its own tests. Part 1 of a stack
   on `main` still runs them once at open, since it's opened before the stack exists; later
   pushes skip it. Shown on #315: skipped on the lower parts, run on the top one (runs
-  43939156451, 43939157918, 43939156505). Whether a required job skipped by its `if:` counts as
-  passing: PENDING (admin step 2).
+  43939156451, 43939157918, 43939156505). A required job skipped by its `if:` counts as passing:
+  #312 showed ci/lint, ci/test and ci/typecheck "Skipped · Required" with a green summary ("3
+  skipped, 10 successful"; admin, 16 Nov).
+- **No cancelled twins on a head.** One push to a stacked part fires two `pull_request` events
+  on the same head. With `cancel-in-progress`, one run was cancelled, and GitHub read the
+  cancelled checks as the latest results: #313 showed "10 cancelled, 3 successful" and couldn't
+  merge although the same checks had passed. So `ci` and `security` group runs by PR and head
+  and never cancel (a second run on a head waits), and `pr-body`, seconds long, has no group.
 - **The floor guard compares the whole stack below a part with the stack's base**, not each part
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the
   guard from the lower part's branch, so a part could swap the guard that judges the part above,
@@ -609,8 +631,8 @@ last-push approval off (#68).
   now diffing from `$SINCE` are 12 `check-removed` findings in `ci.yml`, by design.
 - **A partial merge can't hide a broken `main`.** A partial stack merge lands lower parts whose
   tests ran only as part of the top part's run. A merge queue (`merge_group`) would test exactly
-  what lands, but it isn't available on this user-owned repo (handoff, 16 Nov; the "Require merge
-  queue" result: PENDING, admin step 3). So `ci` also runs on `push` to `main`, which detects
+  what lands, but it isn't available on this user-owned repo: a ruleset with a `merge_queue` rule
+  answered HTTP 422 "Invalid rule 'merge_queue'" (admin, 16 Nov). So `ci` also runs on `push` to `main`, which detects
   rather than prevents, and the standard is that a stack merges whole (`CONSTRAINTS.md`, "Split
   size"; admin, 15 Nov).
 - **The reviewer only sees stacks on `main`.** `pull_request_target` runs `main`'s
