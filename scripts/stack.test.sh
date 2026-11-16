@@ -97,6 +97,8 @@ case "$method $path" in
   "GET $P/commits/"*/check-runs)
     sha=${path#"$P"/commits/}; sha=${sha%/check-runs}
     out=$(cat "$st/checks_$sha.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}') ;;
+  "POST $P/issues/"*/labels)
+    out='[]' ;;
   "POST $P/stacks")
     prs=$(jq -c .pull_requests <<<"$input")
     (($(jq length <<<"$prs") >= 2)) || { echo "gh: 2 items required (HTTP 422)" >&2; exit 1; }
@@ -205,7 +207,7 @@ expect_err "unknown command"
 # --- open: creates each PR on the part below, then the native stack ----------------------------
 reset
 three_parts
-case_ open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
+case_ open --label review:admin p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
 expect_code 0
 expect_eq "p1 pushed" "$(remote_sha p1)" "$(git -C "$repo" rev-parse p1)"
 expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
@@ -216,6 +218,7 @@ expect_eq "title from the body file's first line" "$(pr_field 401 .title)" "feat
 expect_eq "body without the title line" "$(pr_field 401 .body)" "Part of #264."
 expect_eq "stack holds the parts in order" "$(jq -c .prs "$work/gh/stacks/403.json")" "[400,401,402]"
 expect_eq "part 3 knows its position" "$(pr_field 402 .stack.position)" 3
+expect_call "api -X POST repos/sssoto17/sunny-pastures/issues/402/labels -f labels[]=review:admin"
 expect_out "stack #403"
 # the push never forces and never sets an upstream
 assert "pushed" test -s "$work/pushes"
@@ -359,7 +362,12 @@ expect_out "up to date"
 # a part that already sits on the part below but holds a merge commit (the old merge-upward
 # update made them) is rebuilt as one commit with the same tree, so the stack turns linear
 reset
-three_parts
+part p1 main a.txt
+git -C "$repo" switch -q -c p2 p1
+echo b >"$repo/b.txt" && git -C "$repo" add b.txt
+git -C "$repo" commit -q -m "p2: b.txt" -m "Why it's here." -m "Co-Authored-By: T <t@example.invalid>"
+echo b2 >"$repo/b2.txt" && git -C "$repo" add b2.txt && git -C "$repo" commit -qm "p2: b2.txt"
+part p3 p2 c.txt
 git -C "$repo" switch -q p1
 echo more >"$repo/a2.txt" && git -C "$repo" add a2.txt && git -C "$repo" commit -qm "p1: more"
 git -C "$repo" switch -q p2 && git -C "$repo" merge -q --no-edit p1
@@ -372,6 +380,9 @@ expect_eq "now linear" "$(git -C "$repo" rev-list --merges main..p3 | wc -l)" 0
 expect_eq "p3's content unchanged" "$(git -C "$repo" rev-parse 'p3^{tree}')" "$tree_p3"
 expect_eq "p2 is one commit on p1" "$(git -C "$repo" rev-list --count p1..p2)" 1
 expect_eq "its first commit's subject kept" "$(git -C "$repo" log -1 --format=%s p2)" "p2: b.txt"
+expect_eq "its trailers stay trailers" "$(git -C "$repo" log -1 --format='%(trailers:only,unfold)' p2 | sed '/^$/d')" \
+  "Co-Authored-By: T <t@example.invalid>"
+assert "the other commits listed" bash -c "git -C '$repo' log -1 --format=%B p2 | grep -q '^- p2: b2.txt$'"
 expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
 # a conflict changes nothing: no branch moves, nothing is pushed, no rebase is left open
 reset
@@ -507,7 +518,7 @@ three_parts
 run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
 printf '[{"user":{"login":"sunny-reviewer[bot]"},"state":"CHANGES_REQUESTED"},{"user":{"login":"sunny-reviewer[bot]"},"state":"APPROVED"}]' \
   >"$work/gh/reviews_400.json"
-printf '{"total_count":3,"check_runs":[{"name":"ci / test","status":"completed","conclusion":"cancelled"},{"name":"ci / test","status":"completed","conclusion":"success"},{"name":"guard / floor","status":"completed","conclusion":"failure"}]}' \
+printf '{"total_count":4,"check_runs":[{"id":4,"name":"ci / test","status":"completed","conclusion":"success"},{"id":3,"name":"ci / test","status":"completed","conclusion":"cancelled"},{"id":2,"name":"ci / test","status":"completed","conclusion":"failure"},{"id":1,"name":"guard / floor","status":"completed","conclusion":"failure"}]}' \
   >"$work/gh/checks_$(git -C "$repo" rev-parse p1).json"
 rm -f "$work/gh/calls"
 case_ status 401
