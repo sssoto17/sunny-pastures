@@ -47,6 +47,21 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: .github/scripts
-      - run: node .github/scripts/stack-base-guard.mjs
+          fetch-depth: 0 # the default branch's copy of the script, below
+      # Run the default branch's script, not the PR's, so a PR can't switch off the checks that
+      # judge it (as the floor job does, #99). The PR's copy runs only while main has none.
+      - name: Take the script from the default branch
+        env:
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          dir="$RUNNER_TEMP/stack-guard"
+          mkdir -p "$dir"
+          if git cat-file -e "origin/$BASE:.github/scripts/stack-base-guard.mjs" 2>/dev/null; then
+            for f in stack-base-guard.mjs diff.mjs; do git show "origin/$BASE:.github/scripts/$f" >"$dir/$f"; done
+          else
+            echo "::warning::origin/$BASE has no stack-base-guard.mjs yet; using this PR's copy"
+            cp .github/scripts/stack-base-guard.mjs .github/scripts/diff.mjs "$dir/"
+          fi
+      - run: node "$RUNNER_TEMP/stack-guard/stack-base-guard.mjs"
         env:
           GITHUB_TOKEN: ${{ github.token }}

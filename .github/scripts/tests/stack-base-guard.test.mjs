@@ -70,6 +70,21 @@ describe("checkStackBase", () => {
 		expect(waits).toEqual([10000, 10000]);
 	});
 
+	it("asks again after a failed lookup, and fails only when the last one fails", async () => {
+		let n = 0;
+		const flaky = async () => {
+			n += 1;
+			if (n === 1) throw new Error("HTTP 502");
+			return { stack: STACK };
+		};
+		const r = await checkStackBase(event("270-closing-links"), { getPull: flaky, sleep: noSleep });
+		expect(r.ok).toBe(true);
+		const down = () => Promise.reject(new Error("HTTP 502"));
+		await expect(
+			checkStackBase(event("270-closing-links"), { getPull: down, sleep: noSleep, tries: 2 }),
+		).rejects.toThrow("HTTP 502");
+	});
+
 	it("reads the default branch from the event, not a fixed name", async () => {
 		const e = event("trunk");
 		e.repository.default_branch = "trunk";

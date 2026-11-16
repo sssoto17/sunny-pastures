@@ -30,11 +30,18 @@ const findStack = async (event, { getPull, sleep, tries = 6 }) => {
 	const pr = event.pull_request;
 	if (pr.stack) return pr.stack;
 	const attempts = pr.base.ref === event.repository.default_branch ? 1 : tries;
+	let failure = null;
 	for (let i = 0; i < attempts; i++) {
 		if (i > 0) await sleep(WAIT_MS);
-		const stack = (await getPull(pr.number))?.stack;
-		if (stack) return stack;
+		try {
+			const stack = (await getPull(pr.number))?.stack;
+			if (stack) return stack;
+			failure = null;
+		} catch (e) {
+			failure = e; // asked again next round; thrown only if the last round failed too
+		}
 	}
+	if (failure) throw failure;
 	return null;
 };
 
