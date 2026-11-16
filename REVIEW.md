@@ -20,6 +20,16 @@ how to report. When a pointer here and the rule's home disagree, the home wins.
   exception: its writes are set in ADR-0002, area 2.
 - **The PR description is a set of claims.** Check each one against the diff, the checks and the
   issue before you rely on it.
+- **A decision the admin made outside the PR** (#264; seen on #281, where the bot asked for an
+  Exceptions row the admin had decided against) reaches the review as a line in the body's
+  Concerns: `Decided (admin, <date>, <where>): <the decision>`, for example "Decided (admin,
+  16 Nov, #264 comment): merge by lifting `main checks`, no Exceptions row". Honour it only on a
+  PR that already escalates (`review:admin` or an escalation row), and only after reading the
+  place it cites (the issue comment or PR) and finding that it says what the line claims. Then
+  don't report a finding against the decided route; name the decision in the report instead. A
+  line on a PR that doesn't escalate, one whose source says otherwise, or one that names no
+  admin, date or place is a reason to escalate, never to drop a finding. It never drops an
+  escalation row, `review:admin` or any other rule.
 - **Reproduce, then report.** Run the claim: tests in a temporary worktree under `$TMPDIR`
   (`git worktree add "$TMPDIR/review-<N>" <sha>`, then `pnpm install --frozen-lockfile`), removed
   with `git worktree remove` when you're done. The main folder stays on the branch it's on
@@ -94,8 +104,11 @@ Report at most five Nits per review. Pick the ones a reader would trip on.
   A merge commit that only brings in earlier fixes adds nothing; confirm it with an empty
   `git show --remerge-diff <merge sha>`.
 - **Split stack**: part by part, as `CONSTRAINTS.md`, "Split size" sets out: a `Part of #N` part
-  for scope, the `Closes #N` part for every criterion across the whole stack. Cloud lanes can't
-  link native stacks; the coordinator links them locally.
+  for scope, the `Closes #N` part for every criterion across the whole stack. Every split is a
+  native stack that `scripts/stack.sh` built, cloud lanes' included; `scripts/stack.sh status
+  <N>` reads it where `gh pr view` can't reach GraphQL. A part based on another part outside a
+  native stack is a Required finding (`guard / stack-base` fails it too). `ci / typecheck`,
+  `ci / lint` and `ci / test` run on the top part only, so item 2 reads them there.
 - **Self-review**: a lane reviewing its own work when `/implement` reaches `code-review`, before
   the PR exists. Its inputs are the branch diff against `origin/main`, the issue and the brief;
   Always check items 2 and 9 wait for the PR. The lane edits its own branch, so Read-only doesn't

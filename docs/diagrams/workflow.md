@@ -212,13 +212,13 @@ coordinating session; every work session gets its own git worktree under `.claud
 - **Cloud lanes** (claude.ai/code sessions) run in their own container on their own branch, so they
   have no worktree step and nothing to tidy locally: `scripts/after-merge.sh` only removes local
   worktrees and their branches, and GitHub deletes a merged head branch itself. They reach GitHub
-  over REST only (`gh api repos/…`, no GraphQL), so they can't link a native stack.
+  over REST only (`gh api repos/…`, no GraphQL), so they build stacks with `scripts/stack.sh`,
+  which needs nothing else (#264).
 
 **Stacks.** A PR over the split size becomes a stack, as `CONSTRAINTS.md`, "Split size" sets out
-today: `Part of #N` on every part but the last, `Closes #N` on the last, and after a part merges
-the next one merges `origin/main` in, with no rebase or force-push. Read the rule there; this is
-only a pointer. #264 rewrites that rule to allow the native restack (`gh stack`); until it lands,
-the coordinator links a cloud lane's parts locally (`REVIEW.md`, "Review kinds", Split stack).
+today: `Part of #N` on every part but the last, `Closes #N` on the last, and what a lane does
+after a lower part merges. Read the rule there; this is only a pointer. Every lane, cloud or
+local, opens and keeps its stack with `scripts/stack.sh` (#264), never with hand-chained bases.
 
 Evening, about 10 minutes. This routine stays manual, with no schedule: it needs local state (the
 worktrees, the handoff), which a cloud routine can't see.

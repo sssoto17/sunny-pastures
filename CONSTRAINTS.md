@@ -228,6 +228,13 @@ the size is only a note.
 The bot may still escalate on its own judgement beyond these rows (ADR-0002). It names its reason
 the same way.
 
+**Agents never resolve review threads** (admin, 15 Nov 2026, #264). An open review thread, the
+bot's escalation thread above all, holds the merge until the admin resolves it. A standard plus a
+check: the `deny` rule on the GitHub MCP resolve-thread tool and the hook
+`.claude/hooks/block-thread-resolve.sh`, which runs in cloud sessions too, stop it in Claude Code.
+Neither is the boundary: until agent PRs come from the factory App (#107), GitHub sees the
+admin's account either way.
+
 ### Split size
 
 The bot reviews a PR of at most **400 changed lines**. Above that, it submits Request changes that
@@ -242,10 +249,18 @@ ask for a split, suggests where to cut, and doesn't review the lines.
   each later part on the previous part's branch. Each part stays within the split size and is
   reviewed on its own diff (`gh pr diff`); the closing part's criteria check covers the whole
   stack. A fix for a part that merged early can ride in a later part's fix commit. After a part
-  merges, the next branch merges `origin/main` in (no rebase or force-push) and its base moves to
-  `main`. GitHub records `Closes #N` only while the base is `main`, so the closing part's
+  merges, `scripts/stack.sh refresh` rebases the open parts onto `main` and force-pushes them with
+  a lease (GitHub retargets the next part but doesn't rebase it), and an edit to a lower part
+  reaches the parts above with `scripts/stack.sh update`, the same way. Only the stack's own part
+  branches are force-pushed, never `main`. GitHub records `Closes #N` only while the base is
+  `main`, so the closing part's
   `closingIssuesReferences` is checked once its base is `main`; if it's empty, the admin re-links
   the issue in the UI.
+- **The one entry point:** every lane and the coordinator opens, extends, updates and reads a
+  stack with `scripts/stack.sh` (`open`, `add`, `update`, `refresh`, `status`), local or cloud.
+  Never hand-chain bases: `guard / stack-base` fails a PR on another PR's branch outside a native
+  stack. A stack merges whole; `ci` on `push` to `main` shows a partial merge that broke it
+  (ADR-0002, area 2, "Stacks").
 - **What counts:** added plus deleted lines across all files, tests and Markdown included. Tests
   count at full weight: the bot has to read them (the risk the mutation row exists for), and the
   coverage rows stop an agent from trimming tests below the floor to fit. If retros show tests
