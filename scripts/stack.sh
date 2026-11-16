@@ -141,7 +141,7 @@ restack() { # stack-base onto upstream branch...
     [[ -z $wt || $wt == "$here" ]] || die 2 "$b is checked out in $wt: run this there"
     git rev-parse -q --verify "refs/heads/$b" >/dev/null || git branch -q --no-track "$b" "origin/$b"
     git merge-base --is-ancestor "origin/$b" "$b" ||
-      die 2 "$b lacks commits that GitHub's $b has: merge them into your $b first"
+      die 2 "$b lacks commits that GitHub's $b has: rebase or fast-forward your $b onto origin/$b first"
     was_local[$b]=$(git rev-parse "refs/heads/$b") was_remote[$b]=$(git rev-parse "refs/remotes/origin/$b")
   done
   for i in "${!heads[@]}"; do
@@ -168,8 +168,13 @@ restack() { # stack-base onto upstream branch...
     [[ $(git rev-parse "refs/heads/$b") == "${was_remote[$b]}" ]] && continue
     leases+=("--force-with-lease=refs/heads/$b:${was_remote[$b]}") refs+=("$b")
   done
-  ((${#refs[@]})) || return 1
-  git push -q --atomic "${leases[@]}" origin "${refs[@]}"
+  ((${#refs[@]})) || { echo "nothing to push: the stack is up to date"; return 0; }
+  git push -q --atomic "${leases[@]}" origin "${refs[@]}" || {
+    git switch -q --detach HEAD
+    for b in "${heads[@]}"; do git update-ref "refs/heads/$b" "${was_local[$b]}"; done
+    git switch -q "$start" 2>/dev/null || git switch -q --detach "$start"
+    die 1 "push refused (a lease or a rule): every branch is back where it was; fetch and run this again"
+  }
 }
 
 # --- commands -----------------------------------------------------------------------------------
@@ -260,10 +265,7 @@ cmd_update() {
   mapfile -t heads < <(open_heads "$s")
   ((${#heads[@]})) || die 2 "stack #$s has no open part"
   fetch "${heads[@]}"
-  if ! restack "$base" "" "" "${heads[@]}"; then
-    echo "stack #$s is up to date"
-    return
-  fi
+  restack "$base" "" "" "${heads[@]}" # not in a condition, so errexit holds inside it
   cmd_status "$1"
 }
 
@@ -286,9 +288,9 @@ cmd_refresh() {
   # A merged part below: GitHub retargets the lowest open part to the base but leaves it on the
   # merged part's commits, which a squash already holds, so it moves onto the base.
   if [[ -n $upstream ]] && git cat-file -e "$upstream^{commit}" 2>/dev/null; then
-    restack "$base" "origin/$base" "$upstream" "${heads[@]}" || echo "stack #$s is up to date"
+    restack "$base" "origin/$base" "$upstream" "${heads[@]}"
   else
-    restack "$base" "" "" "${heads[@]}" || echo "stack #$s is up to date"
+    restack "$base" "" "" "${heads[@]}"
   fi
   cmd_status "$1"
 }

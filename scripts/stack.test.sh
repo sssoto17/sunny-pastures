@@ -344,6 +344,7 @@ echo fix >"$repo/a.txt"
 git -C "$repo" commit -qam "p1: fix"
 git -C "$repo" switch -q p3
 rm -f "$work/pushes"
+fetched_p2=$(remote_sha p2)
 case_ update 402
 expect_code 0
 assert "p2 is on the new p1" git -C "$repo" merge-base --is-ancestor p1 p2
@@ -353,7 +354,7 @@ expect_eq "p2 adds only its own commit" "$(git -C "$repo" rev-list --count p1..p
 expect_eq "p3 still checked out, with the fix" "$(git -C "$repo" branch --show-current) $(cat "$repo/a.txt")" "p3 fix"
 expect_eq "p1 pushed" "$(remote_sha p1)" "$(git -C "$repo" rev-parse p1)"
 expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
-assert "pushed with a lease" grep -q -- '--force-with-lease=refs/heads/p2:' "$work/pushes"
+assert "the lease is the fetched head" grep -q -- "--force-with-lease=refs/heads/p2:$fetched_p2" "$work/pushes"
 assert "never a bare force" bash -c "! grep -qE -- ' (-f|--force)( |$)| \+' '$work/pushes'"
 case_ update 402
 expect_code 0
@@ -384,6 +385,38 @@ jq '.head.ref = "main"' "$work/gh/pulls/400.json" >"$work/t" && mv "$work/t" "$w
 case_ update 400
 expect_code 2
 expect_err "never force-pushes main"
+
+# GitHub's branch moved since this clone last saw it: refuse rather than force-push over it,
+# even though the lease (the fetched head) would let the push through
+reset
+three_parts
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+git -C "$repo" switch -q --detach "$(remote_sha p2)"
+echo theirs >"$repo/t.txt" && git -C "$repo" add t.txt && git -C "$repo" commit -qm "p2: pushed elsewhere"
+git -C "$repo" push -q origin HEAD:p2
+theirs=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q p1
+git -C "$repo" commit -q --allow-empty -m "p1: one more"
+case_ update 400
+expect_code 2
+expect_err "rebase or fast-forward"
+expect_eq "their commit kept" "$(remote_sha p2)" "$theirs"
+# a push GitHub refuses: exit 1, every branch back where it was, nothing reported as done
+reset
+three_parts
+run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+git -C "$repo" switch -q p1
+git -C "$repo" commit -q --allow-empty -m "p1: one more"
+was_p1=$(git -C "$repo" rev-parse p1) was_p2=$(git -C "$repo" rev-parse p2)
+printf '#!/bin/sh\necho "refused by test" >&2\nexit 1\n' >"$work/remote.git/hooks/pre-receive"
+chmod +x "$work/remote.git/hooks/pre-receive"
+case_ update 400
+expect_code 1
+expect_err "push refused"
+expect_eq "p2 restored" "$(git -C "$repo" rev-parse p2)" "$was_p2"
+expect_eq "p1 kept" "$(git -C "$repo" rev-parse p1)" "$was_p1"
+expect_eq "still on p1" "$(git -C "$repo" branch --show-current)" p1
+rm "$work/remote.git/hooks/pre-receive"
 
 # --- refresh: restack the open parts after a lower part merged -----------------------------------
 # GitHub squash-merges #400, retargets #401 to main and keeps it in the stack, but doesn't rebase
