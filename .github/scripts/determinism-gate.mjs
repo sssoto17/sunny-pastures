@@ -168,7 +168,7 @@ const record = async (moduleUrl, path) => {
 
 // A file beside `path`, so the rename that replaces `path` stays on one file system (a rename
 // from os.tmpdir() can fail with EXDEV). Random, so two runs never share one.
-const besideOf = (path) =>
+const tempPathBeside = (path) =>
 	join(dirname(path), `.${basename(path)}.${randomBytes(6).toString("hex")}.tmp`);
 
 // Moves the new hash into place, then the new script. If the script's move is refused, the old
@@ -186,7 +186,7 @@ const moveIntoPlace = ({ hashTemp, hashPath, played, scriptPath }) => {
 		throw e;
 	}
 };
-const shown = (path) => relative(ROOT, path);
+const relativeToRoot = (path) => relative(ROOT, path);
 
 // The gate on a compiled sim (`moduleOf` maps a compiled file name to its URL). --record plays a
 // temp recording and moves it, and the hash, over `scriptPath` and `hashPath` only after a pass;
@@ -197,8 +197,8 @@ export const runGate = async (
 ) => {
 	const isRecord = argv.includes("--record");
 	const isUpdate = argv.includes("--update") || isRecord;
-	const played = isRecord ? besideOf(scriptPath) : scriptPath;
-	const hashTemp = besideOf(hashPath);
+	const played = isRecord ? tempPathBeside(scriptPath) : scriptPath;
+	const hashTemp = tempPathBeside(hashPath);
 	try {
 		if (isRecord) await record(moduleOf("recordScript.js"), played);
 		const runs = PROCESSES.map((p) => spawnRun(p, moduleOf("playScript.js"), played));
@@ -219,10 +219,12 @@ export const runGate = async (
 		if (isUpdate) {
 			writeFileSync(hashTemp, `${expected}\n`);
 			moveIntoPlace({ hashTemp, hashPath, played, scriptPath });
-			if (isRecord) console.log(`determinism-gate: recorded ${shown(scriptPath)}`);
-			console.log(`determinism-gate: wrote ${expected} to ${shown(hashPath)}`);
+			if (isRecord) console.log(`determinism-gate: recorded ${relativeToRoot(scriptPath)}`);
+			console.log(`determinism-gate: wrote ${expected} to ${relativeToRoot(hashPath)}`);
 		}
-		console.log(`determinism-gate: pass, both processes match ${shown(hashPath)} (${seconds} s)`);
+		console.log(
+			`determinism-gate: pass, both processes match ${relativeToRoot(hashPath)} (${seconds} s)`,
+		);
 		return 0;
 	} finally {
 		if (isRecord) rmSync(played, { force: true });
@@ -234,6 +236,7 @@ const main = async (argv) => {
 	// `pnpm determinism -- --update` passes the `--` through.
 	const unknown = argv.filter((a) => a !== "--" && !FLAGS.includes(a));
 	if (unknown.length > 0) throw new CannotRun(`unknown argument ${unknown.join(" ")}`);
+
 	const started = performance.now();
 	const dir = mkdtempSync(join(tmpdir(), "determinism-gate-"));
 	try {

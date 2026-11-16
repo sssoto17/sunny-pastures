@@ -189,7 +189,7 @@ describe("spawnRun", () => {
 });
 
 // A copy of the recorded script and its hash, so a real --record never touches packages/sim.
-const copyOfTests = () => {
+const makeTestsFolder = () => {
 	const tests = join(dir, "tests");
 	mkdirSync(tests);
 	const scriptPath = join(tests, "determinismScript.json");
@@ -199,7 +199,7 @@ const copyOfTests = () => {
 	return { tests, scriptPath, hashPath };
 };
 // Every entry's bytes, or a folder's listing.
-const snapshot = (folder) =>
+const snapshotFolder = (folder) =>
 	Object.fromEntries(
 		readdirSync(folder, { withFileTypes: true }).map((e) => [
 			e.name,
@@ -208,57 +208,61 @@ const snapshot = (folder) =>
 				: readFileSync(join(folder, e.name), "utf8"),
 		]),
 	);
-const sim = (files) => (file) => urlOf(files[file]);
+const simOf = (files) => (file) => urlOf(files[file]);
+
+const recordWith = (record, play) => simOf({ "recordScript.js": record, "playScript.js": play });
 
 describe("runGate --record", () => {
 	it("moves the new script and its hash into place after the checks pass", async () => {
-		const { tests, scriptPath, hashPath } = copyOfTests();
-		const moduleOf = sim({ "recordScript.js": "record.mjs", "playScript.js": "play.mjs" });
+		const { tests, scriptPath, hashPath } = makeTestsFolder();
+		const moduleOf = recordWith("record.mjs", "play.mjs");
 
-		const code = await runGate(["--record"], { moduleOf, scriptPath, hashPath });
+		await expect(runGate(["--record"], { moduleOf, scriptPath, hashPath })).resolves.toBe(0);
 
-		expect(code).toBe(0);
 		expect(JSON.parse(readFileSync(scriptPath, "utf8"))).toEqual(script);
 		expect(readFileSync(hashPath, "utf8")).toBe(`${hash}\n`);
 		expect(readdirSync(tests).sort()).toEqual(["determinismScript.hash", "determinismScript.json"]);
 	});
 
-	// Exit 1 is a returned 1; exit 2 is a CannotRun, which the entry turns into 2.
-	it.each([
-		["the checks fail (exit 1)", "record-short.mjs", "play.mjs", 1],
-		["a process can't run (exit 2)", "record.mjs", "crash.mjs", CannotRun],
-	])("leaves the tests folder byte-identical when %s", async (_, record, play, expected) => {
-		const { tests, scriptPath, hashPath } = copyOfTests();
-		const before = snapshot(tests);
-		const moduleOf = sim({ "recordScript.js": record, "playScript.js": play });
+	// A snapshot holds every entry, dotfiles included, so a temp file left behind shows too.
+	it("leaves the tests folder byte-identical when the checks fail (exit 1)", async () => {
+		const { tests, scriptPath, hashPath } = makeTestsFolder();
+		const before = snapshotFolder(tests);
+		const moduleOf = recordWith("record-short.mjs", "play.mjs");
 
-		const outcome = await runGate(["--record"], { moduleOf, scriptPath, hashPath }).catch((e) => e);
+		await expect(runGate(["--record"], { moduleOf, scriptPath, hashPath })).resolves.toBe(1);
 
-		if (expected === 1) expect(outcome).toBe(1);
-		else expect(outcome).toBeInstanceOf(expected);
-		expect(snapshot(tests)).toEqual(before);
+		expect(snapshotFolder(tests)).toEqual(before);
 	});
-});
 
-// A move that fails half way must not leave the new script beside the old hash, or the new hash
-// beside the old script. A non-empty folder in a file's place refuses the move. In the hash's place
-// it is refused already when the old hash is read for the restore, before either rename.
-describe("runGate --record, when a move into place is refused", () => {
+	// The entry turns a CannotRun into exit 2.
+	it("leaves the tests folder byte-identical when a process can't run (exit 2)", async () => {
+		const { tests, scriptPath, hashPath } = makeTestsFolder();
+		const before = snapshotFolder(tests);
+		const moduleOf = recordWith("record.mjs", "crash.mjs");
+
+		await expect(runGate(["--record"], { moduleOf, scriptPath, hashPath })).rejects.toThrow(
+			CannotRun,
+		);
+
+		expect(snapshotFolder(tests)).toEqual(before);
+	});
+
+	// A move that fails half way must not leave the new script beside the old hash, or the new hash
+	// beside the old script. A non-empty folder in a file's place refuses the move. In the hash's
+	// place it is refused already when the old hash is read for the restore, before either rename.
 	it.each([["determinismScript.json"], ["determinismScript.hash"]])(
 		"leaves the tests folder byte-identical when %s can't be replaced",
 		async (blocked) => {
-			const { tests, scriptPath, hashPath } = copyOfTests();
+			const { tests, scriptPath, hashPath } = makeTestsFolder();
 			rmSync(join(tests, blocked));
 			mkdirSync(join(tests, blocked, "occupied"), { recursive: true });
-			const before = snapshot(tests);
-			const moduleOf = sim({ "recordScript.js": "record.mjs", "playScript.js": "play.mjs" });
+			const before = snapshotFolder(tests);
+			const moduleOf = recordWith("record.mjs", "play.mjs");
 
-			const outcome = await runGate(["--record"], { moduleOf, scriptPath, hashPath }).catch(
-				(e) => e,
-			);
+			await expect(runGate(["--record"], { moduleOf, scriptPath, hashPath })).rejects.toThrow();
 
-			expect(outcome).toBeInstanceOf(Error);
-			expect(snapshot(tests)).toEqual(before);
+			expect(snapshotFolder(tests)).toEqual(before);
 		},
 	);
 });
