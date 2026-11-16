@@ -3,21 +3,31 @@
 # Required checks are matched by job name, so each `name:` is exactly the check name in
 # ADR-0002, area 2. No path filters: a required check must report on every PR.
 # Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
+# Stacks (#264; ADR-0002, area 2, "Stacks"): typecheck, lint and test run once per stack, on its
+# top part, against the stack's base, so they cover every part below; every other job runs on
+# each part. A required job skipped by its `if:` reports as passing. `push` to main runs the
+# suite on exactly what landed, so a partial stack merge that breaks main shows at once.
 name: ci
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   typecheck:
     name: ci / typecheck
+    # Once per stack: on the top part, or on a PR outside a stack, or on main after a merge.
+    if: >-
+      github.event_name == 'push' || github.event.pull_request.stack == null ||
+      github.event.pull_request.stack.position == github.event.pull_request.stack.size
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -29,10 +39,18 @@ jobs:
 
   lint:
     name: ci / lint
+    # Once per stack: on the top part, or on a PR outside a stack, or on main after a merge.
+    if: >-
+      github.event_name == 'push' || github.event.pull_request.stack == null ||
+      github.event.pull_request.stack.position == github.event.pull_request.stack.size
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      BASE_REF: ${{ github.base_ref }}
+      # What changed: since the stack's base for a PR (every part below the top included), since
+      # the commit before the push on main.
+      SINCE: >-
+        ${{ github.event_name == 'push' && github.event.before ||
+        format('origin/{0}', github.event.pull_request.stack.base.ref || github.base_ref) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,16 +61,24 @@ jobs:
       # CONSTRAINTS.md, formatting row.
       - run: pnpm format:check
       # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
-      - run: pnpm dupes --changed-since "origin/$BASE_REF"
+      - run: pnpm dupes --changed-since "$SINCE"
 
   test:
     name: ci / test
+    # Once per stack: on the top part, or on a PR outside a stack, or on main after a merge.
+    if: >-
+      github.event_name == 'push' || github.event.pull_request.stack == null ||
+      github.event.pull_request.stack.position == github.event.pull_request.stack.size
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       # CONSTRAINTS.md, Stages: CI runs larger property runs. Local runs leave it unset (100).
       SIM_PROPERTY_RUNS: '1000'
-      BASE_REF: ${{ github.base_ref }}
+      # What changed: since the stack's base for a PR (every part below the top included), since
+      # the commit before the push on main.
+      SINCE: >-
+        ${{ github.event_name == 'push' && github.event.before ||
+        format('origin/{0}', github.event.pull_request.stack.base.ref || github.base_ref) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -60,7 +86,7 @@ jobs:
           fetch-depth: 0 # the coverage gate diffs against the merge base
       - uses: ./.github/actions/setup
       - run: pnpm test
-      - run: node .github/scripts/coverage-gate.mjs --base "origin/$BASE_REF"
+      - run: node .github/scripts/coverage-gate.mjs --base "$SINCE"
 
   # CONSTRAINTS.md, Determinism row (#48): the recorded script through packages/sim in two
   # processes, against the recorded state hash. No path filter: the hash covers every rules change.
@@ -110,10 +136,15 @@ jobs:
 
   floor:
     name: guard / floor
+    # A PR guard: on every part of a stack, never on main after a merge.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
-      BASE_REF: ${{ github.base_ref }}
+      # The stack's base, not the part below (ADR-0002, area 2, "Stacks"): the guard always comes
+      # from main, never from a lower part's branch, and judges the whole stack below this part,
+      # so an Exceptions row in a lower part covers the parts above it.
+      BASE_REF: ${{ github.event.pull_request.stack.base.ref || github.base_ref }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
