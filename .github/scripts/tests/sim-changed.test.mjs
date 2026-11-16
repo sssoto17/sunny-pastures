@@ -70,6 +70,25 @@ describe("sim-changed", () => {
 		expect(runHelper().out).toContain("runs=unset");
 	});
 
+	it("reads --base only as its first argument, never from the command", () => {
+		repo = makeRepo(FILES);
+		repo.git("update-ref", "refs/remotes/origin/main", "main");
+		repo.write({ "packages/sim/src/hash/index.ts": "export const a = 5;\n" });
+		repo.commit();
+
+		// No leading --base, so the base is origin/main; the command's `--base HEAD` is its own.
+		const { out } = runHelper([
+			"SIM_PROPERTY_RUNS=1000",
+			"--",
+			...PRINT_RUNS,
+			"--",
+			"--base",
+			"HEAD",
+		]);
+
+		expect(out).toContain("runs=1000");
+	});
+
 	it("exits with the command's own status", () => {
 		repo = makeRepo(FILES);
 
@@ -97,6 +116,8 @@ describe("sim-changed", () => {
 		[["SIM_PROPERTY_RUNS=1000", ...PRINT_RUNS]],
 		[["SIM_PROPERTY_RUNS=1000", "--"]],
 		[["sim_property_runs", "--", ...PRINT_RUNS]],
+		[["--base"]],
+		[["--base", "SIM_PROPERTY_RUNS=1000", "--", ...PRINT_RUNS]],
 	])("exits 2 on arguments it can't read: %j", (args) => {
 		repo = makeRepo(FILES);
 

@@ -15,13 +15,18 @@
 // command never runs on a change the script couldn't read, so a 2 never runs it at the low count.
 import { spawnSync } from "node:child_process";
 
-import { baseArg, CannotRun, git, isMain } from "./diff.mjs";
+import { CannotRun, git, isMain } from "./diff.mjs";
 
 const SIM = "packages/sim/";
 
-// The NAME=VALUE pairs and the command, from the arguments after an optional `--base <ref>`.
+// The base, the NAME=VALUE pairs and the command. `--base <ref>` counts only as the first
+// argument, so a `--base` inside the command never moves the comparison.
 export const parseArgs = (argv) => {
-	const rest = argv[0] === "--base" ? argv.slice(2) : argv;
+	const hasBase = argv[0] === "--base";
+	const base = hasBase ? argv[1] : "origin/main";
+	if (!base || base.startsWith("-") || base.includes("="))
+		throw new CannotRun("--base needs a ref");
+	const rest = hasBase ? argv.slice(2) : argv;
 	const split = rest.indexOf("--");
 	const pairs = split > -1 ? rest.slice(0, split) : [];
 	const command = split > -1 ? rest.slice(split + 1) : [];
@@ -33,7 +38,7 @@ export const parseArgs = (argv) => {
 		if (!m) throw new CannotRun(`not a NAME=VALUE pair: ${pair}`);
 		env[m[1]] = m[2];
 	}
-	return { env, command };
+	return { base, env, command };
 };
 
 // The changed paths, relative to the top of the work tree, as vitest's `--changed <base>` reads
@@ -54,9 +59,7 @@ export const changedPaths = (base) => {
 };
 
 const main = () => {
-	const argv = process.argv.slice(2);
-	const { env, command } = parseArgs(argv);
-	const base = baseArg(argv);
+	const { base, env, command } = parseArgs(process.argv.slice(2));
 	const changed = changedPaths(base).some((p) => p.startsWith(SIM));
 	const names = Object.entries(env).map(([k, v]) => `${k}=${v}`);
 	console.error(
