@@ -1,6 +1,7 @@
 name: Chore
 description: Upkeep with no new behaviour (tooling, config, hooks, dependencies, docs-only work)
 labels: [chore, triage]
+type: Chore
 body:
   - type: textarea
     id: goal
