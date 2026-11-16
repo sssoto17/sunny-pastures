@@ -39,7 +39,7 @@ const SELF = new Set([
 ]);
 // A workflow line that runs a check: removing it, or letting the job fail quietly, weakens the bar.
 const WORKFLOW = /^\.github\/(workflows|actions)\/.+\.ya?ml$/;
-const GUARDED_JOBS = new Set(["floor", "stack"]);
+const GUARDED_JOBS = new Set(["floor", "stack", "stack-base"]);
 const CHECK_STEP =
 	/floor-guard\.mjs|stack-base-guard\.mjs|coverage-gate\.mjs|pnpm (typecheck|lint|test|dupes|format:check)\b|SIM_PROPERTY_RUNS/;
 // The checks a package.json script runs (#99, review of #134). CI runs the PR's own scripts, so a

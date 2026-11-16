@@ -61,7 +61,8 @@ jobs:
         run: |
           dir="$RUNNER_TEMP/stack-guard"
           mkdir -p "$dir"
-          if [[ -n $(git -C .stack-base ls-tree HEAD -- .github/scripts/stack-base-guard.mjs) ]]; then
+          listed=$(git -C .stack-base ls-tree HEAD -- .github/scripts/stack-base-guard.mjs) || exit 1
+          if [[ -n $listed ]]; then
             cp .stack-base/.github/scripts/stack-base-guard.mjs .stack-base/.github/scripts/diff.mjs "$dir/"
           else
             echo "::warning::the default branch has no stack-base-guard.mjs yet; using this PR's copy"
