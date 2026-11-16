@@ -11,5 +11,8 @@ skills-lock.json
 # Agent configuration, owned by the admin.
 .claude/
 .agents/
+# The remember plugin's scratch folder: it ignores itself with a nested .gitignore, which Prettier
+# doesn't read (#288).
+.remember/
 # Local tool config, not the repo's code (in the sandbox it is an unreadable placeholder).
 .mcp.json
