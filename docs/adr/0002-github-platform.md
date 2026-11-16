@@ -588,10 +588,15 @@ last-push approval off (#68).
   reads `github.event.pull_request.stack`, which is `null` on `opened`, so all three parts of
   #315 ran the suite at open. So a job, `ci / stack`, asks GitHub instead (`isTopPart` in
   `stack-base-guard.mjs`) and the three jobs skip only when it answers `false`; a failed lookup
-  never skips them. Part 1 of a stack on `main` still runs them once at open, since it's opened
-  before the stack exists; later pushes skip it. Shown on #315: skipped on the lower parts, run
-  on the top one (runs 43939156451, 43939157918, 43939156505). Whether a required job skipped by
-  its `if:` counts as passing: PENDING (admin step 2).
+  never skips them. It answers `false` only for a lower part whose head the top open part's head
+  already contains (REST compare: `ahead` or `identical`), so a push to a lower part without
+  `scripts/stack.sh update`, or a top part that left the stack, runs the suite on that part
+  rather than leaving a stale green above it (#264's fix round). Both jobs take the script from
+  `main`, as the floor job does (#99), so a PR can't switch off its own tests. Part 1 of a stack
+  on `main` still runs them once at open, since it's opened before the stack exists; later
+  pushes skip it. Shown on #315: skipped on the lower parts, run on the top one (runs
+  43939156451, 43939157918, 43939156505). Whether a required job skipped by its `if:` counts as
+  passing: PENDING (admin step 2).
 - **The floor guard compares the whole stack below a part with the stack's base**, not each part
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the
   guard from the lower part's branch, so a part could swap the guard that judges the part above,
@@ -599,7 +604,9 @@ last-push approval off (#68).
   #301's review). The cumulative diff costs this: an expected floor finding in a lower part turns
   every part above it red, as on #259 and on this stack's own `ci.yml`. A stack merges whole, so
   one route clears it: an Exceptions row in the part that needs it covers the parts above it, or
-  the admin lifts `main checks` once for the stack's merge.
+  the admin lifts `main checks` once for the stack's merge. #264's own stack took the second
+  (admin, 16 Nov 2026): its new `if:`s, the changed floor job, and the dupes and coverage steps
+  now diffing from `$SINCE` are 12 `check-removed` findings in `ci.yml`, by design.
 - **A partial merge can't hide a broken `main`.** A partial stack merge lands lower parts whose
   tests ran only as part of the top part's run. A merge queue (`merge_group`) would test exactly
   what lands, but it isn't available on this user-owned repo (handoff, 16 Nov; the "Require merge

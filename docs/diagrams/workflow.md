@@ -216,9 +216,8 @@ coordinating session; every work session gets its own git worktree under `.claud
   which needs nothing else (#264).
 
 **Stacks.** A PR over the split size becomes a stack, as `CONSTRAINTS.md`, "Split size" sets out
-today: `Part of #N` on every part but the last, `Closes #N` on the last, and after a part merges
-the next one merges `origin/main` in, with no rebase or force-push. Read the rule there; this is
-only a pointer. Every lane, cloud or local, opens and keeps its stack with `scripts/stack.sh`
+today: `Part of #N` on every part but the last, `Closes #N` on the last, and what a lane does
+after a lower part merges. Read the rule there; this is only a pointer. Every lane, cloud or local, opens and keeps its stack with `scripts/stack.sh`
 (#264), never with hand-chained bases.
 
 Evening, about 10 minutes. This routine stays manual, with no schedule: it needs local state (the
