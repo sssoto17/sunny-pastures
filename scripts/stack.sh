@@ -15,11 +15,13 @@ usage() {
   cat >&2 <<'EOF'
 usage: scripts/stack.sh <command> ...
 
-  open [--base <branch>] <branch>=<body-file>...
+  open [--base <branch>] [--label <name>]... <branch>=<body-file>...
       Push the parts, open each PR on the part below (part 1 on --base, default main), and link
       them as one native stack. Each part must be built on the one below and add commits of its
       own. A body file's first line is the PR title; the rest is the body. Run it again after a
       failure: it reuses the PRs and the stack it finds.
+  add <pr> [--label <name>]... <branch>=<body-file>
+      Append a part on top of the stack that holds <pr>.
   update <pr>
       After an edit to a lower part: rebase each open part onto the new head of the one below,
       then push them, each with a lease on the head it fetched. The stack stays linear.
@@ -41,7 +43,7 @@ die() { # code message
 }
 
 # --- parts --------------------------------------------------------------------------------------
-branches=() bodies=()
+branches=() bodies=() labels=()
 parse_parts() { # <branch>=<body-file>... -> branches, bodies; checks each before anything runs
   local arg b f
   for arg in "$@"; do
@@ -86,6 +88,13 @@ ensure_pr() { # head base body-file -> prints the PR number; reuses an open PR o
   title=$(head -n1 "$f")
   body=$(tail -n +2 "$f" | sed '/./,$!d')
   gh api -X POST "$P/pulls" -f title="$title" -f head="$head" -f base="$base" -f body="$body" --jq .number
+}
+
+add_labels() { # pr
+  local l
+  for l in "${labels[@]}"; do
+    gh api -X POST "$P/issues/$1/labels" -f "labels[]=$l" --jq 'length' >/dev/null
+  done
 }
 
 stack_of() { # pr -> its stack's number, or nothing
@@ -151,7 +160,25 @@ restack() { # stack-base onto upstream branch...
     else
       below_new=$(git rev-parse "refs/heads/${heads[i - 1]}") below_old=${was_remote[${heads[i - 1]}]}
     fi
-    git merge-base --is-ancestor "$below_new" "$b" && continue # already on top of it
+    if git merge-base --is-ancestor "$below_new" "$b"; then
+      # On top already. A merge commit in its range (the old merge-upward update) would stop
+      # GitHub's restack, so rebuild the part as one commit with the same tree.
+      [[ -n $(git rev-list --merges -n1 "$below_new..$b") ]] || continue
+      local first
+      first=$(git rev-list --reverse --no-merges "$below_new..$b" | head -n1)
+      # Message: the first commit's subject and body, the other commits' subjects, its trailers last.
+      local msg trailers
+      msg=$(git log -1 --format=%B "$first")
+      trailers=$(git log -1 --format='%(trailers:only,unfold)' "$first")
+      [[ -z $trailers ]] || msg=$(head -n "-$(wc -l <<<"$trailers")" <<<"$msg")
+      git update-ref "refs/heads/$b" "$(git commit-tree "$b^{tree}" -p "$below_new" -F <(
+        printf '%s\n' "$msg"
+        git log --reverse --no-merges --format='- %s' "$first..$b" | sed '1s/^/\nAlso in this part:\n/'
+        [[ -z $trailers ]] || printf '\n%s\n' "$trailers"
+      ))"
+      echo "rebuilt $b as one commit"
+      continue
+    fi
     git merge-base --is-ancestor "$below_old" "$b" || below_old=$(git merge-base "$below_new" "$b")
     if ! git rebase -q --onto "$below_new" "$below_old" "$b" >/dev/null 2>&1; then
       git rebase --abort 2>/dev/null || true
@@ -182,6 +209,7 @@ cmd_open() {
   while (($#)); do
     case $1 in
       --base) (($# >= 2)) || die 2 "--base needs a branch"; base=$2; shift 2 ;;
+      --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
       *) break ;;
     esac
   done
@@ -207,6 +235,7 @@ cmd_open() {
   git push -q origin "${branches[@]}"
   for i in "${!branches[@]}"; do
     nums+=("$(ensure_pr "${branches[i]}" "${bases[i]}" "${bodies[i]}")")
+    add_labels "${nums[i]}"
   done
   if ((!whole)); then
     local fields=() n
@@ -215,6 +244,36 @@ cmd_open() {
       die 1 "PRs $(printf '#%s ' "${nums[@]}")are open but not stacked; run the same command again"
   fi
   cmd_status "${nums[0]}"
+}
+
+cmd_add() {
+  (($# >= 1)) || die 2 "add needs a PR number"
+  local pr=$1
+  shift
+  while (($#)); do
+    case $1 in
+      --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
+      *) break ;;
+    esac
+  done
+  parse_parts "$@"
+  ((${#branches[@]} == 1)) || die 2 "add takes one part"
+  local s top
+  s=$(require_stack "$pr")
+  top=$(stack_parts "$s" | awk '$2 == "open" { b = $3 } END { print b }')
+  [[ -n $top ]] || die 2 "stack #$s has no open part to build on"
+  fetch "$top"
+  git merge-base --is-ancestor "origin/$top" "${branches[0]}" ||
+    die 2 "${branches[0]} is not built on $top: rebuild it on top of $top"
+  check_chain "origin/$top" "${branches[0]}"
+  refuse_other_base "${branches[0]}" "$top" "$(open_pr_for "${branches[0]}")"
+  git push -q origin "${branches[0]}"
+  local n
+  n=$(ensure_pr "${branches[0]}" "$top" "${bodies[0]}")
+  add_labels "$n"
+  gh api -X POST "$P/stacks/$s/add" -F "pull_requests[]=$n" --jq .number >/dev/null ||
+    die 1 "#$n is open on $top but not in stack #$s; run the same command again"
+  cmd_status "$n"
 }
 
 open_heads() { # stack -> the open parts' head refs, bottom first
@@ -285,8 +344,10 @@ cmd_status() {
       | if ($ok | length) == 0 and ($no | length) == 0 then "no approval"
         else ([if ($ok | length) > 0 then "approved by " + ($ok | join(", ")) else empty end,
                if ($no | length) > 0 then "changes requested by " + ($no | join(", ")) else empty end] | join("; ")) end')
+    # One run per check name: two events on one push can leave a cancelled twin beside the real
+    # run, so a cancelled run counts only when no other run of that name exists.
     checks=$(gh api "$P/commits/$sha/check-runs?per_page=100" --jq '
-      .check_runs as $r
+      [.check_runs | group_by(.name)[] | sort_by(.id) | (map(select(.conclusion != "cancelled")) | last) // last] as $r
       | ([$r[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral"))] | length) as $ok
       | ([$r[] | select(.status != "completed")] | length) as $wait
       | [$r[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral") | .name] as $bad
@@ -303,7 +364,7 @@ cmd_status() {
 
 case ${1:-} in
   -h | --help) usage; exit 0 ;;
-  open | update | refresh | status) cmd=$1; shift; "cmd_$cmd" "$@" ;;
+  open | add | update | refresh | status) cmd=$1; shift; "cmd_$cmd" "$@" ;;
   "") usage; exit 2 ;;
   *) usage; die 2 "unknown command: $1" ;;
 esac
