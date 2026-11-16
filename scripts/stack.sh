@@ -24,12 +24,10 @@ usage: scripts/stack.sh <command> ...
       Append a part on top of the stack that holds <pr>.
   update <pr>
       After an edit to a lower part: rebase each open part onto the new head of the one below,
-      then push them, each with a lease on the head it fetched. The stack stays linear, which
-      GitHub's own "Rebase stack" needs; a merge commit there replays empty after a squash.
+      then push them, each with a lease on the head it fetched. The stack stays linear.
   refresh <pr>
-      After a lower part merged: GitHub retargets the lowest open part to the base but doesn't
-      rebase it. Rebase it onto the base, dropping the merged part's commits, and the parts
-      above it onto it, then push as update does. It never merges the base into a part.
+      After a lower part merged (GitHub retargets but doesn't rebase): rebase the open parts onto
+      the base, dropping the merged part's commits, then push as update does.
   status <pr>
       Each part of the stack: its PR, state, base, approvals, checks, and whether the local
       branch matches GitHub's.
@@ -125,11 +123,9 @@ checked_out_in() { # branch -> the worktree that has it checked out, or nothing
   git worktree list --porcelain | awk -v ref="branch refs/heads/$1" '/^worktree /{wt=substr($0,10)} $0==ref{print wt}'
 }
 
-# Rebase each open part onto the new head of the part below and push them all, each with a lease
-# on the head this run fetched. The stack stays linear: GitHub's "Rebase stack" stops on a merge
-# commit that replays empty after a squash (throwaway stack #315, 16 Nov). <onto> and <upstream>
-# move the bottom part too (refresh: onto the base, from the merged part's head); empty, the
-# bottom part stays. A conflict restores every branch and pushes nothing.
+# Rebase each part onto the new head below, then push them with a lease each: linear, since GitHub's
+# "Rebase stack" stops on a merge commit that replays empty after a squash (#315). <onto>/<upstream>
+# move the bottom part too (refresh). A conflict restores every branch and pushes nothing.
 restack() { # stack-base onto upstream branch...
   local base=$1 onto=$2 upstream=$3 here start b i wt below_new below_old
   shift 3
@@ -156,15 +152,7 @@ restack() { # stack-base onto upstream branch...
     else
       below_new=$(git rev-parse "refs/heads/${heads[i - 1]}") below_old=${was_remote[${heads[i - 1]}]}
     fi
-    if git merge-base --is-ancestor "$below_new" "$b"; then
-      # On top already. A merge commit in its range (the old merge-upward update) would stop
-      # GitHub's restack, so rebuild the part as one commit with the same tree.
-      [[ -n $(git rev-list --merges -n1 "$below_new..$b") ]] || continue
-      git update-ref "refs/heads/$b" "$(git log --reverse --no-merges --format='- %s' "$below_new..$b" |
-        git commit-tree "$b^{tree}" -p "$below_new" -F <(printf '%s (linear)\n\n' "$b"; cat))"
-      echo "rebuilt $b as one commit"
-      continue
-    fi
+    git merge-base --is-ancestor "$below_new" "$b" && continue # already on top of it
     git merge-base --is-ancestor "$below_old" "$b" || below_old=$(git merge-base "$below_new" "$b")
     if ! git rebase -q --onto "$below_new" "$below_old" "$b" >/dev/null 2>&1; then
       git rebase --abort 2>/dev/null || true
@@ -327,10 +315,8 @@ cmd_status() {
       | if ($ok | length) == 0 and ($no | length) == 0 then "no approval"
         else ([if ($ok | length) > 0 then "approved by " + ($ok | join(", ")) else empty end,
                if ($no | length) > 0 then "changes requested by " + ($no | join(", ")) else empty end] | join("; ")) end')
-    # One run per check name: two events on one push can leave a cancelled twin beside the real
-    # run, so a cancelled run counts only when no other run of that name exists.
     checks=$(gh api "$P/commits/$sha/check-runs?per_page=100" --jq '
-      [.check_runs | group_by(.name)[] | (map(select(.conclusion != "cancelled")) | last) // last] as $r
+      .check_runs as $r
       | ([$r[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral"))] | length) as $ok
       | ([$r[] | select(.status != "completed")] | length) as $wait
       | [$r[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral") | .name] as $bad

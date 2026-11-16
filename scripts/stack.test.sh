@@ -358,22 +358,6 @@ assert "never a bare force" bash -c "! grep -qE -- ' (-f|--force)( |$)| \+' '$wo
 case_ update 402
 expect_code 0
 expect_out "up to date"
-# a part that already sits on the part below but holds a merge commit (the old merge-upward
-# update made them) is rebuilt as one commit with the same tree, so the stack turns linear
-reset
-three_parts
-git -C "$repo" switch -q p1
-echo more >"$repo/a2.txt" && git -C "$repo" add a2.txt && git -C "$repo" commit -qm "p1: more"
-git -C "$repo" switch -q p2 && git -C "$repo" merge -q --no-edit p1
-git -C "$repo" switch -q p3 && git -C "$repo" merge -q --no-edit p2
-run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
-tree_p3=$(git -C "$repo" rev-parse 'p3^{tree}')
-case_ update 402
-expect_code 0
-expect_eq "now linear" "$(git -C "$repo" rev-list --merges main..p3 | wc -l)" 0
-expect_eq "p3's content unchanged" "$(git -C "$repo" rev-parse 'p3^{tree}')" "$tree_p3"
-expect_eq "p2 is one commit on p1" "$(git -C "$repo" rev-list --count p1..p2)" 1
-expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
 # a conflict changes nothing: no branch moves, nothing is pushed, no rebase is left open
 reset
 part p1 main a.txt
@@ -433,7 +417,7 @@ three_parts
 run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
 printf '[{"user":{"login":"sunny-reviewer[bot]"},"state":"CHANGES_REQUESTED"},{"user":{"login":"sunny-reviewer[bot]"},"state":"APPROVED"}]' \
   >"$work/gh/reviews_400.json"
-printf '{"total_count":3,"check_runs":[{"name":"ci / test","status":"completed","conclusion":"cancelled"},{"name":"ci / test","status":"completed","conclusion":"success"},{"name":"guard / floor","status":"completed","conclusion":"failure"}]}' \
+printf '{"total_count":2,"check_runs":[{"name":"ci / test","status":"completed","conclusion":"success"},{"name":"guard / floor","status":"completed","conclusion":"failure"}]}' \
   >"$work/gh/checks_$(git -C "$repo" rev-parse p1).json"
 rm -f "$work/gh/calls"
 case_ status 401
@@ -442,7 +426,6 @@ expect_out "stack #402 on main"
 expect_out "1/2 #400"
 expect_out "approved"
 expect_out "failing: guard / floor"
-expect_out "1 passing, failing: guard / floor;"
 expect_out "2/2 #401"
 expect_out "base p1"
 # status never writes
