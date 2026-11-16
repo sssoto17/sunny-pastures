@@ -33,6 +33,11 @@ tool=$(json_field tool_name) || exit 0
 shopt -s nocasematch
 if [[ $tool == mcp__* ]]; then
   [[ $tool =~ (^|[^n])resolve_?review_?thread ]] && deny "the MCP tool $tool resolves a review thread"
+  # GitHub's MCP server resolves through one tool with a method (github-mcp-server README).
+  if [[ $tool == *pull_request_review_write ]]; then
+    method=$(json_field method) || exit 0
+    [[ $method == resolve_thread ]] && deny "$tool with method resolve_thread resolves a review thread"
+  fi
   exit 0
 fi
 [[ $tool == Bash ]] || exit 0

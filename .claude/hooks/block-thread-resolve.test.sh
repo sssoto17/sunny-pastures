@@ -68,6 +68,8 @@ deny 'curl https://api.github.com/graphql --data-urlencode query@q.graphql'
 deny 'curl -T q.json https://api.github.com/graphql'
 deny 'curl -K q.cfg https://api.github.com/graphql'
 deny 'xargs -a q.txt gh api graphql -f query'
+deny 'printf "%s" "$Q" | xargs -I{} gh api graphql -f query={}'
+deny 'printf "query { viewer { login } }" | xargs -I{} gh api graphql -f query={}'
 
 # --- what stays allowed ------------------------------------------------------------------------
 allow 'gh api graphql -f query='\''query { viewer { login } }'\'''
@@ -84,6 +86,25 @@ check 2 mcp__other_server__resolveReviewThread ''
 check 0 mcp__github__unresolve_review_thread ''
 check 0 mcp__github__pull_request_read ''
 check 0 Read ''
+
+# GitHub's MCP server (the local plugin's) resolves a thread with pull_request_review_write,
+# method resolve_thread (github-mcp-server README); its other methods stay allowed.
+mcp_method() { # expected-code tool method
+  local input
+  input=$(printf '{"session_id":"t","cwd":%s,"hook_event_name":"PreToolUse","tool_name":%s,"tool_input":{"owner":"o","repo":"r","pullNumber":1,"method":%s}}' \
+    "$(json_str "$CWD")" "$(json_str "$2")" "$(json_str "$3")")
+  err=$(timeout 5 bash "$hook" <<<"$input" 2>&1 >/dev/null)
+  code=$?
+  if [[ $code -eq $1 ]]; then pass=$((pass + 1)); else
+    fail=$((fail + 1))
+    printf 'FAIL: expected exit %s, got %s\n  tool: %s method: %s\n  stderr: %s\n' "$1" "$code" "$2" "$3" "$err"
+  fi
+}
+mcp_method 2 mcp__plugin_github_github__pull_request_review_write resolve_thread
+mcp_method 2 mcp__github__pull_request_review_write RESOLVE_THREAD
+mcp_method 0 mcp__plugin_github_github__pull_request_review_write unresolve_thread
+mcp_method 0 mcp__plugin_github_github__pull_request_review_write create
+mcp_method 0 mcp__plugin_github_github__pull_request_review_write submit_pending
 
 # --- unlike the other hooks, it runs in cloud sessions and Actions too ------------------------
 export CLAUDE_CODE_REMOTE=true
