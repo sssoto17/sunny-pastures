@@ -158,6 +158,22 @@ describe("stack-base-guard.mjs", () => {
 		expect(readFileSync(out, "utf8")).toBe("top=false\n");
 	});
 
+	// ci.yml runs typecheck, lint and test unless top is exactly "false": a lookup that can't run
+	// must write nothing, so they run.
+	it("--top writes nothing and exits 2 when it can't tell", () => {
+		dir = mkdtempSync(join(tmpdir(), "stack-base-"));
+		const path = join(dir, "event.json");
+		const out = join(dir, "output");
+		writeFileSync(path, JSON.stringify({ pull_request: { number: 296 } }));
+		writeFileSync(out, "");
+		const r = spawnSync(process.execPath, [SCRIPT, "--top"], {
+			encoding: "utf8",
+			env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: path, GITHUB_OUTPUT: out },
+		});
+		expect(r.status).toBe(2);
+		expect(readFileSync(out, "utf8")).toBe("");
+	});
+
 	it("exits 2, never a pass, without an event", () => {
 		const r = run(undefined);
 		expect(r.status).toBe(2);

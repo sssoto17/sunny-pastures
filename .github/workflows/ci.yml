@@ -5,8 +5,8 @@
 # Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
 # Stacks (#264; ADR-0002, area 2, "Stacks"): typecheck, lint and test run once per stack, on its
 # top part, diffing from the stack's base, so they cover every part below; `ci / stack` says which
-# part is the top. Every other job runs on each part. A required job skipped by its `if:` reports
-# as passing. `push` to main runs the suite on exactly what landed, so a partial stack merge that
+# part is the top. Every other job runs on each part. GitHub documents a required job skipped by
+# its `if:` as passing; #264's throwaway ruleset checks it here. `push` to main runs the suite on exactly what landed, so a partial stack merge that
 # breaks main shows at once.
 name: ci
 

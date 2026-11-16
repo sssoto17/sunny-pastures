@@ -1,8 +1,8 @@
 # `guard / pr-body` (#270) and `guard / stack-base` (#264, below). pr-body fails when a body that
 # says `Part of #N` also links #N with a closing keyword, which closes #N when that earlier part
 # merges (retro 2026-11-15, issue B). The script and its grammar are in pr-body-guard.mjs.
-# Its own workflow, not a job in ci.yml: a body edit (`edited`) re-runs this check only, not all
-# of ci. No path filter, so it reports on every PR and can become a required check (ADR-0002,
+# Its own workflow, not a job in ci.yml: a body or base edit (`edited`) re-runs these two checks
+# only, not all of ci. No path filter, so it reports on every PR and can become a required check (ADR-0002,
 # area 2). The body is untrusted text: the script reads it from $GITHUB_EVENT_PATH, never through
 # an expression in `run:`. Actions are GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
 name: pr-body
