@@ -20,6 +20,8 @@ describe("Prettier's ignore files", () => {
 	it("skip the remember plugin's temporary files", async () => {
 		expect(await ignored(".remember/tmp/last-ndc.ts")).toBe(true);
 		expect(await ignored(".remember/tmp/last-save.json")).toBe(true);
+		// The whole folder, not only tmp/.
+		expect(await ignored(".remember/x.ts")).toBe(true);
 	});
 
 	it("skip no tracked file outside the paths skipped before", async () => {
