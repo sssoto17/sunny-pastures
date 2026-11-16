@@ -1,6 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { evaluate } from "../determinism-gate.mjs";
+import { evaluate, runGate, spawnRun } from "../determinism-gate.mjs";
+import { CannotRun } from "../diff.mjs";
 
 const hash = "a".repeat(64);
 const other = "b".repeat(64);
@@ -103,5 +117,174 @@ describe("determinism gate", () => {
 			"the rules refuse 0 of the script's steps, fewer than 10",
 			"the script never draws from the orders stream",
 		]);
+	});
+});
+
+// The process paths (#287): a stand-in for the compiled sim, written to a temp folder, so these
+// tests run the gate's real child processes without compiling packages/sim.
+const GATE = fileURLToPath(new URL("../determinism-gate.mjs", import.meta.url));
+const SCRIPTS = dirname(GATE);
+// sha256 of `{"steps":7}`, the plain JSON of the stand-in's final farm for a 7-step script: a
+// length the recorded script doesn't have, so a child that plays another file shows.
+const FINAL_7 = "20333c207540c6fd6b472ded21443c9507965e1852460d99eb1cbb1eca089d91";
+const STAND_INS = {
+	// Plays any script: reports what the gate's checks want, and what the process saw.
+	"play.mjs": `export const playScript = (script) => ({
+	final: { steps: script.steps.length },
+	hash: "${hash}",
+	zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+	accepted: 450,
+	refused: 50,
+	streamsMoved: { yields: true, orders: true },
+	isGapBusy: true,
+	problems: [],
+});
+`,
+	"crash.mjs": 'export const playScript = () => { throw new Error("the sim fell over"); };\n',
+	"record.mjs": `export const recordScript = () => (${JSON.stringify(script)});\n`,
+	// Too short for the gate's checks, so a --record of it must fail with exit 1.
+	"record-short.mjs": `export const recordScript = () => (${JSON.stringify({ ...script, steps: script.steps.slice(0, 100) })});\n`,
+};
+
+let dir;
+beforeEach(() => {
+	dir = mkdtempSync(join(tmpdir(), "determinism-gate-test-"));
+	for (const [name, source] of Object.entries(STAND_INS)) writeFileSync(join(dir, name), source);
+	vi.spyOn(console, "log").mockReturnValue(undefined);
+	vi.spyOn(console, "error").mockReturnValue(undefined);
+});
+afterEach(() => {
+	vi.restoreAllMocks();
+	rmSync(dir, { recursive: true, force: true });
+});
+const urlOf = (name) => pathToFileURL(join(dir, name)).href;
+const writeScript = (path, value) => writeFileSync(path, `${JSON.stringify(value)}\n`);
+
+describe("spawnRun", () => {
+	it("plays the script at the given path in a child with the process's time zone", () => {
+		const path = join(dir, "script.json");
+		writeScript(path, { ...script, steps: script.steps.slice(0, 7) });
+
+		const run = spawnRun(
+			{ label: "process 2", env: { TZ: "Pacific/Chatham" } },
+			urlOf("play.mjs"),
+			path,
+		);
+
+		expect(run).toMatchObject({ label: "process 2", hash, zone: "Pacific/Chatham", accepted: 450 });
+		expect(run.jsonHash).toBe(FINAL_7);
+	});
+
+	it("can't run when the child exits non-zero, and names the process", () => {
+		const path = join(dir, "script.json");
+		writeScript(path, script);
+
+		expect(() => spawnRun({ label: "process 1", env: {} }, urlOf("crash.mjs"), path)).toThrow(
+			expect.objectContaining({
+				constructor: CannotRun,
+				message: expect.stringMatching(/^process 1 exited 2:[\s\S]*the sim fell over/),
+			}),
+		);
+	});
+});
+
+// A copy of the recorded script and its hash, so a real --record never touches packages/sim.
+const copyOfTests = () => {
+	const tests = join(dir, "tests");
+	mkdirSync(tests);
+	const scriptPath = join(tests, "determinismScript.json");
+	const hashPath = join(tests, "determinismScript.hash");
+	writeScript(scriptPath, { farmId: "before", steps: [] });
+	writeFileSync(hashPath, `${other}\n`);
+	return { tests, scriptPath, hashPath };
+};
+// Every entry's bytes, or a folder's listing.
+const snapshot = (folder) =>
+	Object.fromEntries(
+		readdirSync(folder, { withFileTypes: true }).map((e) => [
+			e.name,
+			e.isDirectory()
+				? readdirSync(join(folder, e.name))
+				: readFileSync(join(folder, e.name), "utf8"),
+		]),
+	);
+const sim = (files) => (file) => urlOf(files[file]);
+
+describe("runGate --record", () => {
+	it("moves the new script and its hash into place after the checks pass", async () => {
+		const { tests, scriptPath, hashPath } = copyOfTests();
+		const moduleOf = sim({ "recordScript.js": "record.mjs", "playScript.js": "play.mjs" });
+
+		const code = await runGate(["--record"], { moduleOf, scriptPath, hashPath });
+
+		expect(code).toBe(0);
+		expect(JSON.parse(readFileSync(scriptPath, "utf8"))).toEqual(script);
+		expect(readFileSync(hashPath, "utf8")).toBe(`${hash}\n`);
+		expect(readdirSync(tests).sort()).toEqual(["determinismScript.hash", "determinismScript.json"]);
+	});
+
+	// Exit 1 is a returned 1; exit 2 is a CannotRun, which the entry turns into 2.
+	it.each([
+		["the checks fail (exit 1)", "record-short.mjs", "play.mjs", 1],
+		["a process can't run (exit 2)", "record.mjs", "crash.mjs", CannotRun],
+	])("leaves the tests folder byte-identical when %s", async (_, record, play, expected) => {
+		const { tests, scriptPath, hashPath } = copyOfTests();
+		const before = snapshot(tests);
+		const moduleOf = sim({ "recordScript.js": record, "playScript.js": play });
+
+		const outcome = await runGate(["--record"], { moduleOf, scriptPath, hashPath }).catch((e) => e);
+
+		if (expected === 1) expect(outcome).toBe(1);
+		else expect(outcome).toBeInstanceOf(expected);
+		expect(snapshot(tests)).toEqual(before);
+	});
+});
+
+// A move that fails half way must not leave the new script beside the old hash, or the new hash
+// beside the old script. A non-empty folder in a file's place refuses the move. In the hash's place
+// it is refused already when the old hash is read for the restore, before either rename.
+describe("runGate --record, when a move into place is refused", () => {
+	it.each([["determinismScript.json"], ["determinismScript.hash"]])(
+		"leaves the tests folder byte-identical when %s can't be replaced",
+		async (blocked) => {
+			const { tests, scriptPath, hashPath } = copyOfTests();
+			rmSync(join(tests, blocked));
+			mkdirSync(join(tests, blocked, "occupied"), { recursive: true });
+			const before = snapshot(tests);
+			const moduleOf = sim({ "recordScript.js": "record.mjs", "playScript.js": "play.mjs" });
+
+			const outcome = await runGate(["--record"], { moduleOf, scriptPath, hashPath }).catch(
+				(e) => e,
+			);
+
+			expect(outcome).toBeInstanceOf(Error);
+			expect(snapshot(tests)).toEqual(before);
+		},
+	);
+});
+
+// A gate started through a symlink once skipped `main` and exited 0 with no output (#48's
+// review); it now uses the shared `isMain` (#283). The same two links as entry-point.test.mjs.
+describe("the gate started through a symlink", () => {
+	const viaFileLink = (links) => {
+		symlinkSync(GATE, join(links, "determinism-gate.mjs"));
+		return join(links, "determinism-gate.mjs");
+	};
+	const viaFolderLink = (links) => {
+		symlinkSync(SCRIPTS, join(links, "scripts"));
+		return join(links, "scripts", "determinism-gate.mjs");
+	};
+
+	it.each([
+		["a symlinked file", viaFileLink],
+		["a symlinked folder", viaFolderLink],
+	])("runs through %s and refuses an unknown flag with exit 2", (_, link) => {
+		const links = join(dir, "links");
+		mkdirSync(links);
+
+		const r = spawnSync(process.execPath, [link(links), "--bogus"], { encoding: "utf8" });
+
+		expect(r.status).toBe(2);
+		expect(r.stderr).toContain("determinism-gate: cannot run: unknown argument --bogus");
 	});
 });
