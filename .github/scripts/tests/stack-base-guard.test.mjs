@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkStackBase } from "../stack-base-guard.mjs";
+import { checkStackBase, isTopPart } from "../stack-base-guard.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../stack-base-guard.mjs", import.meta.url));
 const STACK = { number: 305, position: 2, size: 2, base: { ref: "main" } };
@@ -78,6 +78,47 @@ describe("checkStackBase", () => {
 	});
 });
 
+// ci.yml's `ci / stack` job: typecheck, lint and test run unless this says the PR is a lower part.
+describe("isTopPart", () => {
+	const top = { ...STACK, position: 2, size: 2 };
+	const lower = { ...STACK, position: 1, size: 2 };
+
+	it("is true on a push to main, without asking GitHub", async () => {
+		const { calls, getPull } = answers(lower);
+		expect(await isTopPart({ ref: "refs/heads/main" }, { getPull, sleep: noSleep })).toBe(true);
+		expect(calls).toEqual([]);
+	});
+
+	it("reads the position from the event's stack", async () => {
+		const { calls, getPull } = answers(null);
+		expect(await isTopPart(event("main", lower), { getPull, sleep: noSleep })).toBe(false);
+		expect(await isTopPart(event("270-closing-links", top), { getPull, sleep: noSleep })).toBe(
+			true,
+		);
+		expect(calls).toEqual([]);
+	});
+
+	// On `opened` the event has no stack yet: scripts/stack.sh links it after opening the PRs.
+	it("waits for the stack of a part on another part", async () => {
+		const { calls, getPull } = answers(null, top);
+		expect(await isTopPart(event("270-closing-links"), { getPull, sleep: noSleep })).toBe(true);
+		expect(calls).toHaveLength(2);
+		const second = answers(null, lower);
+		const r = await isTopPart(event("270-closing-links"), {
+			getPull: second.getPull,
+			sleep: noSleep,
+		});
+		expect(r).toBe(false);
+	});
+
+	it("asks once, without waiting, for a PR on main", async () => {
+		const { calls, getPull } = answers(null, lower);
+		expect(await isTopPart(event("main"), { getPull, sleep: noSleep })).toBe(true);
+		expect(calls).toEqual([296]);
+		expect(await isTopPart(event("main"), { ...answers(lower), sleep: noSleep })).toBe(false);
+	});
+});
+
 describe("stack-base-guard.mjs", () => {
 	let dir;
 	afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
@@ -102,6 +143,19 @@ describe("stack-base-guard.mjs", () => {
 		const r = run(event("270-closing-links", STACK));
 		expect(r.status).toBe(0);
 		expect(r.stdout).toContain('"position":2');
+	});
+
+	it("--top writes top=false to $GITHUB_OUTPUT for a lower part, and exits 0", () => {
+		dir = mkdtempSync(join(tmpdir(), "stack-base-"));
+		const path = join(dir, "event.json");
+		const out = join(dir, "output");
+		writeFileSync(path, JSON.stringify(event("main", { ...STACK, position: 1, size: 2 })));
+		const r = spawnSync(process.execPath, [SCRIPT, "--top"], {
+			encoding: "utf8",
+			env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: path, GITHUB_OUTPUT: out },
+		});
+		expect(r.status).toBe(0);
+		expect(readFileSync(out, "utf8")).toBe("top=false\n");
 	});
 
 	it("exits 2, never a pass, without an event", () => {
