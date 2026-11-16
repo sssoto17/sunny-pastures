@@ -58,7 +58,7 @@ check_command() {
   case $name in
     gh)
       [[ ${2:-} == api ]] || return 0
-      for w in "${@:3}"; do [[ $w =~ (^|/)graphql$ ]] && is_call=1; done
+      for w in "${@:3}"; do [[ $w =~ (^|/)graphql([?#/]|$) ]] && is_call=1; done
       ;;
     curl)
       for w in "${@:2}"; do [[ ${w,,} == *graphql* ]] && is_call=1; done

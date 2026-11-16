@@ -371,6 +371,7 @@ expect_code 0
 expect_eq "now linear" "$(git -C "$repo" rev-list --merges main..p3 | wc -l)" 0
 expect_eq "p3's content unchanged" "$(git -C "$repo" rev-parse 'p3^{tree}')" "$tree_p3"
 expect_eq "p2 is one commit on p1" "$(git -C "$repo" rev-list --count p1..p2)" 1
+expect_eq "its first commit's subject kept" "$(git -C "$repo" log -1 --format=%s p2)" "p2: b.txt"
 expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
 # a conflict changes nothing: no branch moves, nothing is pushed, no rebase is left open
 reset

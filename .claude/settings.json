@@ -143,6 +143,7 @@
 			"Bash(git -C * push *:main*)",
 			"Bash(gh pr merge*--admin*)",
 			"mcp__github__resolve_review_thread",
+			"mcp__plugin_github_github__resolve_review_thread",
 			"Bash(gh repo delete*)",
 			"Bash(gh repo archive*)",
 			"Bash(sh)",

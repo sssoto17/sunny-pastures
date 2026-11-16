@@ -157,8 +157,12 @@ restack() { # stack-base onto upstream branch...
       # On top already. A merge commit in its range (the old merge-upward update) would stop
       # GitHub's restack, so rebuild the part as one commit with the same tree.
       [[ -n $(git rev-list --merges -n1 "$below_new..$b") ]] || continue
-      git update-ref "refs/heads/$b" "$(git log --reverse --no-merges --format='- %s' "$below_new..$b" |
-        git commit-tree "$b^{tree}" -p "$below_new" -F <(printf '%s (linear)\n\n' "$b"; cat))"
+      local first
+      first=$(git rev-list --reverse --no-merges "$below_new..$b" | head -n1)
+      git update-ref "refs/heads/$b" "$(git commit-tree "$b^{tree}" -p "$below_new" -F <(
+        git log -1 --format=%B "$first"
+        git log --reverse --no-merges --format='- %s' "$first..$b" | sed '1s/^/Also in this part:\n/'
+      ))"
       echo "rebuilt $b as one commit"
       continue
     fi
@@ -328,7 +332,7 @@ cmd_status() {
     # One run per check name: two events on one push can leave a cancelled twin beside the real
     # run, so a cancelled run counts only when no other run of that name exists.
     checks=$(gh api "$P/commits/$sha/check-runs?per_page=100" --jq '
-      [.check_runs | group_by(.name)[] | (map(select(.conclusion != "cancelled")) | last) // last] as $r
+      [.check_runs | group_by(.name)[] | sort_by(.id) | (map(select(.conclusion != "cancelled")) | last) // last] as $r
       | ([$r[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral"))] | length) as $ok
       | ([$r[] | select(.status != "completed")] | length) as $wait
       | [$r[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral") | .name] as $bad
