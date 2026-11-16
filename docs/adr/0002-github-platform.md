@@ -1152,9 +1152,32 @@ then, CI checks fill the gap: `guard / secrets` and `ci / audit` below.
   source isn't named in its help text (not verified). **osv-scanner** stays only if #42 proves it
   reads the lockfile's second document, which holds the dependencies. The first holds only pnpm
   itself.
+  **Shown in #42 (throwaway PR #276, closed unmerged, 15 Nov): osv-scanner v2.7.0 reads both
+  documents.** On a fixture in pnpm 12's two-document format, with `lodash@4.17.20` as a dev
+  dependency in the second document, it found 16 packages and failed on lodash's four advisories
+  (2 High, 2 Medium), the same as on a one-document control. On the real `pnpm-lock.yaml` it found
+  264 packages and the one Medium advisory `pnpm audit` also reports (minimatch,
+  GHSA-g3hv-75wg-m249). `pnpm audit` takes its advisories from GitHub's database (its report links
+  to `github.com/advisories`). So osv-scanner qualifies under D3, but it isn't a check yet: it fails
+  on any severity and has no flag to set a threshold, so as a plain step it would turn red on
+  `main` today. Its check name, threshold and `CONSTRAINTS.md` row are #278 (the admin's
+  decision, 16 Nov, recorded on #42).
 - **Semgrep as the required check `guard / code-scan`: adopt with the CI/CD step (#42).** Like
   gitleaks, it needs an "Allowed actions" entry or a checksum-verified download, and so does
   osv-scanner if it's kept.
+  **Applied with #42:** the three scans are jobs in `.github/workflows/security.yml`, each
+  tool downloaded in a `run:` step and checked against a hash written in the repo, with no
+  third-party action. gitleaks is the v8.30.1 release archive, checked against its published
+  SHA-256. Semgrep is installed with `pip install --require-hashes --only-binary=:all:` from
+  `.github/semgrep/requirements.txt`, which pins Semgrep and every package it needs with their
+  hashes (the admin decided pip with hashes, 16 Nov; the version is approved in the PR).
+  **Known limit: the rule packs aren't pinned** (the admin's decision, 16 Nov). `p/default` and
+  `p/owasp-top-ten` download from the Semgrep registry on each run, so a rule-pack update can turn
+  `guard / code-scan` red with no code change. If that happens, read the rule diff, and consider
+  vendoring a snapshot of the packs then.
+  A root `.semgrepignore` with no entries switches off Semgrep's built-in ignore list, which skips
+  `tests/` and `test/` folders, so tests are scanned too. Semgrep v1.184.0 doesn't read
+  `.gitignore`, and a `.gitignore` entry can't hide a tracked file from it.
 - **Dependabot alerts: adopt now.** Free on private repos. No noise until there are dependencies.
   For npm dependencies, see the pnpm 12 limit above.
 - **Dependabot security updates: adopt at M2**, when `packages/sim` brings dev dependencies.

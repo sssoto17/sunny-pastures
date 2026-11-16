@@ -1,0 +1,9 @@
+# Semgrep's ignore list for `guard / code-scan` (#42). Its only job is to exist: with no root
+# .semgrepignore, Semgrep falls back to a built-in list that skips test/, tests/, build/, dist/,
+# vendor/ and node_modules/, so the tests here would go unscanned, and the list could change with
+# a Semgrep upgrade. With this file, Semgrep reads only this file. It doesn't load .gitignore, and
+# it lists tracked files with `git ls-files --cached`, which a .gitignore entry can't hide
+# (Semgrep v1.184.0: src/targeting/Semgrepignore.ml, src/targeting/Find_targets.ml).
+#
+# Every entry added below is a suppression: the floor guard blocks it unless the same PR adds an
+# Exceptions row to CONSTRAINTS.md (#40). There are none.
