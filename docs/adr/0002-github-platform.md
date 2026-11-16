@@ -368,8 +368,9 @@ The flow:
    The factory fixes them and pushes. The push dismisses any earlier approval, and the bot
    reviews again.
 5. **Needs the admin:** the bot escalates with a review thread that mentions the admin (below,
-   decided in #37). It still approves a PR it finds clean; the open escalation thread alone holds
-   the merge until the admin resolves it (#264).
+   decided in #37). On a PR the admin's account opened it still approves a PR it finds clean, and
+   the open escalation thread alone holds the merge until the admin resolves it (#264). On a PR an
+   App opened it withholds its approval.
 
 | Need | Native GitHub feature |
 |---|---|
@@ -408,13 +409,16 @@ The flow:
     triggered the row, "escalated: <rows>", which mentions `@sssoto17` so the admin is notified.
     A review summary or a plain comment wouldn't create a thread. Required conversation
     resolution holds the merge until the thread is resolved, and **that thread is the
-    escalation's gate**: the bot is to approve an escalated PR it finds clean (decided with the
-    admin, 15 Nov, #264). Withholding the approval made every escalated part of a stack a separate
-    bypass merge, since the admin can't approve PRs the admin's account opened; an approval on
-    every clean part lets a stack merge in one action once its threads are resolved ("Stacks",
-    below). **The code waits:** `post-review.sh` keeps withholding until #322, and #68's tests
-    (e) and (f) (`scripts/setup/README.md`, `ci-check-68.sh`) hold as written until then.
-    Code-owner review is separate and stays on (Q15). On a factory
+    escalation's gate**: the bot is to approve an escalated PR it finds clean **only when the
+    admin's account opened it** (decided by the admin, 15 and 16 Nov, #264's decisions comment).
+    Withholding the approval made every escalated part of a stack a separate bypass merge, since
+    the admin can't approve PRs the admin's account opened; an approval on every clean part lets
+    a stack merge in one action once its threads are resolved ("Stacks", below). On a PR an App
+    opened (#336) it still withholds: resolving a thread starts no workflow (below), so a thread
+    the factory App resolved could let the PR merge before the bot checks who resolved it.
+    **The code waits:** `post-review.sh` keeps withholding on every escalated PR until #322, and
+    #68's test (e) is rewritten there; until then tests (e) and (f) (`scripts/setup/README.md`,
+    `ci-check-68.sh`) hold as written. Code-owner review is separate and stays on (Q15). On a factory
     PR the bot also requests the admin's review, so `review-requested:@me` is the admin's queue.
     The admin's own open PRs show under `author:@me`.
   - **The escalation thread is the bot's memory across runs.** Anyone with write access can
@@ -431,8 +435,9 @@ The flow:
     resolved. When it resolves its own fixed findings, it skips escalation threads.
   - **The admin's go-ahead** is resolving the thread. The bot's approval already meets the
     count, so the PR, or the whole stack, then merges like any other. A code-owned PR still needs
-    the code owner's approval, so the admin bypass-merges it (code-owner review stays on; "Stacks",
-    below). The resolved thread and the merge are the record of who decided.
+    the code owner's approval: on a PR the admin's account opened, which the admin can't approve,
+    the admin bypass-merges it; a PR an App opened the admin approves (code-owner review stays on;
+    "Stacks", below). The resolved thread and the merge are the record of who decided.
   - **The bot's earlier Request changes.** When its re-review finds those findings fixed, the
     bot's Approve replaces its Request changes, on an escalated PR too. Until the reviewer App
     follows #264 (below), it dismisses its own Request changes on an escalated PR instead
@@ -586,8 +591,8 @@ last-push approval off (#68).
   someone other than the last pusher" met, and so #68's App. After a partial merge GitHub
   retargets the next part to the base and keeps the stack, but doesn't rebase it ("This stack is
   out-of-date with its base branch"): `scripts/stack.sh refresh` does. Whether approvals survive
-  that restack can't be seen off `main`, where the reviewer doesn't run (below); it's checked on
-  the first stack after #68 sets `main` to 1 approval.
+  that restack, or `stack.sh refresh`, can't be seen off `main`, where the reviewer doesn't run
+  (below); it's a criterion on #68, checked on the first stack after `main` goes to 1 approval.
 - **Code-owner review on stacks: a finding, not a decision** (the admin took the decision out of
   #264, 16 Nov 2026). On a PR the admin's account opened, code-owner review showed no gate of its
   own: #313, code-owned, showed only "At least 1 approving review is required by reviewers with
@@ -595,8 +600,8 @@ last-push approval off (#68).
   approval, a code-owned part needs a code owner's approval that nobody but the admin can give,
   and the admin can't approve their own PRs, so it merges only by bypass, and a bypass can't
   merge a stack (above): a stack with a code-owned part merges part by part. Code-owner review
-  stays on (Q15). This is input for #68, which decides after a deterministic `guard / code-owned`
-  check exists.
+  stays on (Q15). This is input for #68, which turns code-owner review off only after the
+  deterministic `guard / code-owned` check (#337) is required (#68's criteria).
 - **One test run per stack.** `ci / typecheck`, `ci / lint` and `ci / test` run on a stack's top
   part only, diffing from the stack's base, so one run covers every part. The other jobs, the
   floor guard among them, and the review run on each part. The `if:` in GitHub's
@@ -632,9 +637,9 @@ last-push approval off (#68).
 - **A partial merge can't hide a broken `main`.** A partial stack merge lands lower parts whose
   tests ran only as part of the top part's run. A merge queue (`merge_group`) would test exactly
   what lands, but it isn't available on this user-owned repo: a ruleset with a `merge_queue` rule
-  answered HTTP 422 "Invalid rule 'merge_queue'" (admin, 16 Nov). So `ci` also runs on `push` to `main`, which detects
-  rather than prevents, and the standard is that a stack merges whole (`CONSTRAINTS.md`, "Split
-  size"; admin, 15 Nov).
+  answered HTTP 422 "Invalid rule 'merge_queue'" (admin, 16 Nov). So `ci` also runs on `push` to
+  `main`, which detects rather than prevents, and the standard is that a stack merges whole
+  (`CONSTRAINTS.md`, "Split size"; admin, 15 Nov).
 - **The reviewer only sees stacks on `main`.** `pull_request_target` runs `main`'s
   `review.yml`, whose `branches: [main]` matches a stacked part when the stack's base is `main`:
   #303 was reviewed while stacked on #302. It doesn't match a stack on another base, even with
@@ -783,7 +788,7 @@ own. It has one, and GitHub enforces the limits on it:
 | What a session on the admin's account can do | What stops the factory App |
 |---|---|
 | Bypass-merge an admin-review PR | It's on no bypass list. Code-owner review and the 1 required approval hold the merge |
-| Clear an escalation | It can resolve the escalation thread, but the reviewer unresolves a thread the admin didn't resolve, and the thread holds the merge again (area 2, "Approvals") |
+| Clear an escalation | It can resolve the escalation thread, but the reviewer never approves an escalated PR an App opened (only one the admin's account opened, #264), and it unresolves a thread the admin didn't resolve, which holds the merge again (area 2, "Approvals") |
 | Push a `v*` tag | The tag ruleset restricts creation, and only the Repository admin role bypasses it (A8). An App installation doesn't hold that role |
 | Edit a ruleset | That needs the Administration permission, which the factory App doesn't get |
 
