@@ -514,9 +514,10 @@ repo's branches. The pattern is *propose, then apply*: Claude proposes and plain
   step asks `.github/scripts/review-gate.sh`, and every later step waits on its answer. It skips a
   head the App has already reviewed: a review of its own on that commit with a non-empty body,
   which is the summary every run posts last; the empty-body reviews its line comments make don't
-  count, so a run that died before its summary is retried. The exception keeps test (e) true: a
-  `labeled` run goes ahead while an approval of the App's still stands (state `APPROVED`, not yet
-  dismissed). Tests: `.github/scripts/tests/review-gate.test.mjs`.
+  count, so a run that died before its summary is retried. The exception keeps test (e) true: the
+  review runs again while the PR carries `review:admin` and an approval of the App's still stands
+  (state `APPROVED`, not yet dismissed), whatever the event, since a `reopened` at the same head
+  can cancel the `labeled` run. Tests: `.github/scripts/tests/review-gate.test.mjs`.
 - **Auto-merge (step 3 of the flow; #68 step 4, 12 Nov).** After an Approve, the script turns on
   auto-merge, squash, for the head it reviewed (`enablePullRequestAutoMerge` with
   `expectedHeadOid`). When a run doesn't approve, it turns off auto-merge that is on. It never

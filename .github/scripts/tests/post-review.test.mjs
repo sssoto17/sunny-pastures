@@ -224,16 +224,17 @@ describe("post-review.sh", () => {
 		const asGathered = [
 			{ author: "sunny-reviewer[bot]", state: "APPROVED", body: "merge", commit_id: "abc" },
 		];
-		const gate = (action) => {
+		const gate = (action, labels = []) => {
 			const d = mkdtempSync(join(tmpdir(), "gate-"));
 			writeFileSync(join(d, "reviews.json"), JSON.stringify(asGathered));
+			writeFileSync(join(d, "pr.json"), JSON.stringify({ head_sha: "abc", labels }));
 			writeFileSync(join(d, "out"), "");
 			spawnSync("bash", [GATE], {
 				env: {
 					PATH: process.env.PATH,
 					ACTION: action,
-					HEAD: "abc",
 					BOT: "sunny-reviewer",
+					PR_JSON: join(d, "pr.json"),
 					REVIEWS: join(d, "reviews.json"),
 					GITHUB_OUTPUT: join(d, "out"),
 				},
@@ -244,7 +245,7 @@ describe("post-review.sh", () => {
 		};
 		for (const action of ["synchronize", "reopened", "ready_for_review"])
 			expect(gate(action), action).toBe("run=false");
-		expect(gate("labeled")).toBe("run=true");
+		expect(gate("labeled", ["review:admin"])).toBe("run=true");
 
 		const r = run(verdict(), { labels: ["true"], reviews: [approval], env: { FAKE_AUTO: "true" } });
 		expect(r.calls).toContain("pulls/7/reviews/60/dismissals");

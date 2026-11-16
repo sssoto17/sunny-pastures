@@ -23,9 +23,13 @@ const review = (
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
-function gate(action, reviews) {
+// ADMIN marks a PR that carries review:admin, as gather's pr.json lists its labels.
+const ADMIN = { labels: ["review:admin"] };
+
+function gate(action, reviews, { labels = [], files = {} } = {}) {
 	dir = mkdtempSync(join(tmpdir(), "review-gate-"));
 	writeFileSync(join(dir, "reviews.json"), JSON.stringify(reviews));
+	writeFileSync(join(dir, "pr.json"), JSON.stringify({ head_sha: "abc", labels }));
 	writeFileSync(join(dir, "out"), "");
 	const res = spawnSync("bash", [SCRIPT], {
 		cwd: dir,
@@ -33,9 +37,9 @@ function gate(action, reviews) {
 		env: {
 			PATH: process.env.PATH,
 			ACTION: action,
-			HEAD: "abc",
 			BOT: "sunny-reviewer",
-			REVIEWS: join(dir, "reviews.json"),
+			PR_JSON: join(dir, files.pr ?? "pr.json"),
+			REVIEWS: join(dir, files.reviews ?? "reviews.json"),
 			GITHUB_OUTPUT: join(dir, "out"),
 		},
 	});
@@ -78,12 +82,21 @@ describe("review-gate.sh", () => {
 	// the approval and turns auto-merge off. The job's `if:` lets through only that label, added
 	// by someone other than the App.
 	it("reviews a reviewed head again when review:admin is added after its approval", () => {
-		const g = gate("labeled", [review("COMMENTED", { body: "" }), review("APPROVED")]);
+		const g = gate("labeled", [review("COMMENTED", { body: "" }), review("APPROVED")], ADMIN);
 		expect(g.run).toBe("true");
 		expect(g.out).toContain("GATE run");
 	});
 
-	it("skips any other event after that approval", () => {
+	// cancel-in-progress: a reopened or ready_for_review at the same head cancels that labeled run
+	// mid-way, so the run that replaces it must withdraw the approval in its place.
+	it.each(["reopened", "ready_for_review", "synchronize"])(
+		"still withdraws the approval on a %s run that cancelled the labeled one",
+		(action) => {
+			expect(gate(action, [review("APPROVED")], ADMIN).run).toBe("true");
+		},
+	);
+
+	it("skips any other event after that approval while review:admin is off", () => {
 		expect(gate("synchronize", [review("APPROVED")]).run).toBe("false");
 		expect(gate("reopened", [review("APPROVED")]).run).toBe("false");
 	});
@@ -92,31 +105,21 @@ describe("review-gate.sh", () => {
 		["a summary that already held the approval", [review("COMMENTED")]],
 		["an approval already dismissed", [review("DISMISSED"), review("COMMENTED")]],
 		["Request changes", [review("CHANGES_REQUESTED")]],
+		["someone else's approval", [review("COMMENTED"), review("APPROVED", { author: "sssoto17" })]],
 	])("skips review:admin added after %s: there is no approval to withdraw", (_name, reviews) => {
-		expect(gate("labeled", reviews).run).toBe("false");
+		expect(gate("labeled", reviews, ADMIN).run).toBe("false");
 	});
 
 	it("reviews an unreviewed head whatever the event", () => {
-		expect(gate("labeled", []).run).toBe("true");
+		expect(gate("labeled", [], ADMIN).run).toBe("true");
 	});
 
-	it("fails, rather than guess, on reviews it can't read", () => {
-		dir = mkdtempSync(join(tmpdir(), "review-gate-"));
-		const res = spawnSync("bash", [SCRIPT], {
-			encoding: "utf8",
-			env: {
-				PATH: process.env.PATH,
-				ACTION: "synchronize",
-				HEAD: "abc",
-				BOT: "sunny-reviewer",
-				REVIEWS: join(dir, "missing.json"),
-				GITHUB_OUTPUT: join(dir, "out"),
-			},
-		});
-		expect(res.status).not.toBe(0);
+	it.each(["reviews", "pr"])("fails, rather than guess, when %s can't be read", (which) => {
+		const g = gate("synchronize", [], { files: { [which]: "missing.json" } });
+		expect(g.code).not.toBe(0);
+		expect(g.run).toBeUndefined();
 	});
 });
-
 // The gate saves money only if review.yml asks it before Claude runs, from the reviews with their
 // commit_id. The workflow runs from main on pull_request_target, so a PR can't prove this live.
 describe("review.yml", () => {
@@ -131,7 +134,8 @@ describe("review.yml", () => {
 	};
 
 	it("asks the gate in gather, before the diff, the threads and Claude", () => {
-		const gate = at("bash .github/scripts/review-gate.sh");
+		const gate = at("REVIEWS=$CTX/reviews.json bash .github/scripts/review-gate.sh");
+		expect(at('"$CTX/pr.json"')).toBeLessThan(gate);
 		expect(at("submitted_at, body, commit_id}")).toBeLessThan(gate);
 		expect(at("if grep -qx 'run=false' \"$GITHUB_OUTPUT\"; then exit 0; fi")).toBeGreaterThan(gate);
 		expect(at("gh pr diff")).toBeGreaterThan(gate);

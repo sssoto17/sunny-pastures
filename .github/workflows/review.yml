@@ -16,7 +16,7 @@
 # Environment `review`, never `factory`: on this event the run's ref is main, so any job here
 # would get its environment's secrets on every PR (#227).
 # Once per head (#274): the gate in `gather` skips a head this App has already reviewed, before
-# Claude runs, except review:admin added while its approval stands (.github/scripts/review-gate.sh).
+# Claude runs, except review:admin on the PR while its approval stands (.github/scripts/review-gate.sh).
 # Caps: 30 turns and 15 minutes. #103's runs took 26-34 s a job; a review reads about six rule
 # files plus one file per touched area. Actions pinned to full SHAs, each at least 7 days old.
 name: review
@@ -70,8 +70,9 @@ jobs:
       # Everything Claude reads about the PR, as files. Its text stays in files and jq: nothing
       # the PR wrote is expanded into a script.
       # Once per head (#274): before anything else is fetched, the gate skips a head this App
-      # has already reviewed, unless review:admin was added while its approval stands (ADR-0002,
-      # test (e)). Later steps run only on `run == 'true'`, so a skip never pays for Claude.
+      # has already reviewed, unless review:admin is on the PR while its approval stands
+      # (ADR-0002, test (e)). Later steps run only on `run == 'true'`, so a skip never pays for
+      # Claude.
       - id: gather
         name: Gather the PR (read-only token)
         env:
@@ -89,9 +90,9 @@ jobs:
             head_sha: .head.sha, labels: [.labels[].name], additions, deletions}' >"$CTX/pr.json"
           gh api --paginate "$r/pulls/$PR/reviews?per_page=100" --jq '.[] | {id,
             author: .user.login, state, submitted_at, body, commit_id}' | jq -s . >"$CTX/reviews.json"
-          HEAD=$(jq -r .head_sha "$CTX/pr.json") REVIEWS=$CTX/reviews.json \
-            bash .github/scripts/review-gate.sh
+          PR_JSON=$CTX/pr.json REVIEWS=$CTX/reviews.json bash .github/scripts/review-gate.sh
           if grep -qx 'run=false' "$GITHUB_OUTPUT"; then exit 0; fi
+
           gh api --paginate "$r/pulls/$PR/files?per_page=100" --jq '.[] | {filename, status,
             additions, deletions, previous_filename}' | jq -s . >"$CTX/files.json"
           gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" >"$CTX/diff.patch"
