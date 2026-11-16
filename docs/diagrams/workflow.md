@@ -94,7 +94,7 @@ alike.
 **Escalation comments.** Lanes no longer write a one-line escalation comment when they add
 `review:admin`; the reviewer bot's escalation is the record (retro 2026-11-15, Outcomes 5).
 `CONSTRAINTS.md`, "Escalation criteria" still asks whoever adds the label to post one until #104
-changes it, so briefs carry the rule meanwhile.
+changes it, so until then each brief tells its lane not to write one.
 
 **Until #68, the reviewer bot reviews but doesn't approve.** Since 12 Nov it posts a review on
 every PR, but it neither approves nor turns on auto-merge: ruleset `main` stays at 0 required
@@ -215,18 +215,19 @@ coordinating session; every work session gets its own git worktree under `.claud
   over REST only (`gh api repos/…`, no GraphQL), so they can't link a native stack.
 
 **Stacks.** A PR over the split size becomes a stack, as `CONSTRAINTS.md`, "Split size" sets out
-today: `Part of #N` on every part but the last, `Closes #N` on the last (and nowhere else, not even
-in prose), and after a part merges the next one merges `origin/main` in, with no rebase or
-force-push. #264 rewrites that rule to allow the native restack (`gh stack`); until it lands, the
-coordinator links a cloud lane's parts locally (`REVIEW.md`, "Review kinds", Split stack).
+today: `Part of #N` on every part but the last, `Closes #N` on the last, and after a part merges
+the next one merges `origin/main` in, with no rebase or force-push. Read the rule there; this is
+only a pointer. #264 rewrites that rule to allow the native restack (`gh stack`); until it lands,
+the coordinator links a cloud lane's parts locally (`REVIEW.md`, "Review kinds", Split stack).
 
 Evening, about 10 minutes. This routine stays manual, with no schedule: it needs local state (the
 worktrees, the handoff), which a cloud routine can't see.
 
-1. Update the board: statuses, `blocked:*` labels with their reason. Before an issue closes, the
-   coordinator ticks the acceptance criteria its reviewer confirmed (`docs/agents/issue-tracker.md`,
-   "Checkboxes"). `scripts/missing-fields.sh` and `scripts/orphan-issues.sh` list the open issues
-   missing a field or a parent (`issue-tracker.md`, "Issue fields" and "Grouping").
+1. Update the board: statuses, `blocked:*` labels with their reason. Before giving you a closing
+   PR's verdict, the coordinator ticks the acceptance criteria its reviewer confirmed
+   (`docs/agents/issue-tracker.md`, "Checkboxes"). `scripts/missing-fields.sh` and
+   `scripts/orphan-issues.sh` list the open issues missing a field or a parent (`issue-tracker.md`,
+   "Issue fields" and "Grouping").
 2. A light `retro` if you built something. Note any step you repeated by hand.
 3. Tidy up after the PRs that merged: check `git worktree list`, then from the main folder run
    `scripts/after-merge.sh <name>` for each (it fast-forwards main, removes the worktree and

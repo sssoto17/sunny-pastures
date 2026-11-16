@@ -52,7 +52,9 @@ Each item names where its rule lives. Read the rule there.
 11. **Knock-on edits** (retro 2026-11-15, #273): a PR that changes a rule greps the repo for the
     old wording and lists every hit it leaves; an Optional finding a lane defers goes into the
     closing part's body or a follow-up issue. Check that the list is in the PR body and rerun the
-    grep (`git grep -n '<old wording>'`); a hit neither fixed nor listed is a Required finding.
+    grep (`git grep -n '<old wording>'`); a hit neither fixed nor listed is a Required finding. On
+    a closing part, check that each Optional finding an earlier review left is fixed, in the body
+    or in a linked issue.
 
 ## Severity
 
