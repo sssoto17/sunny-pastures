@@ -14,9 +14,10 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: security-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No concurrency group (#264): a push to a stacked part fires two pull_request events on one
+# head, and a group that cancels, or queues and then cancels, left a cancelled twin of a required
+# check there, which GitHub read as the latest result and blocked the merge (throwaway stack
+# #315). The cost: runs for a superseded head finish too.
 
 jobs:
   secrets:

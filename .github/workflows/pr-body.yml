@@ -1,10 +1,10 @@
-# `guard / pr-body` (#270): fails when a body that says `Part of #N` also links #N with a closing
-# keyword, which closes #N when that earlier part merges (retro 2026-11-15, issue B). The script
-# and the grammar it follows are in .github/scripts/pr-body-guard.mjs.
-# Its own workflow, not a job in ci.yml: a body edit (`edited`) re-runs this check only, not all
-# of ci. No path filter, so it reports on every PR and can become a required check (ADR-0002,
-# area 2). The body is untrusted text: the script reads it from $GITHUB_EVENT_PATH, never through
-# an expression in `run:`. Actions are GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
+# `guard / pr-body` (#270) and `guard / stack-base` (#264, below). pr-body fails when a body that
+# says `Part of #N` also links #N with a closing keyword, which closes #N when that earlier part
+# merges (retro 2026-11-15, issue B). The script and its grammar are in pr-body-guard.mjs.
+# Its own workflow, not a job in ci.yml: a body or base edit (`edited`) re-runs these two checks
+# only, not all of ci. No path filter, so each reports on every PR and can be a required check
+# (ADR-0002, area 2). The body is untrusted text: the script reads it from $GITHUB_EVENT_PATH,
+# never through an expression in `run:`. Actions are GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
 name: pr-body
 
 on:
@@ -14,9 +14,9 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pr-body-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No concurrency group (#264): a push to a stacked part fires two events on one head, and body
+# edits fire more, so any cancelling or queueing left a cancelled twin of a required check on the
+# head, which GitHub read as its latest result (throwaway stack #315). Both jobs take seconds.
 
 jobs:
   pr-body:
@@ -30,3 +30,44 @@ jobs:
           sparse-checkout: .github/scripts
       # Node's built-in modules only, so nothing is installed: the runner's Node runs it.
       - run: node .github/scripts/pr-body-guard.mjs
+
+  # `guard / stack-base` (#264): a PR based on anything but main fails unless it's part of a native
+  # stack, so related PRs are never hand-chained (CONSTRAINTS.md, "Split size"). `edited` covers a
+  # base change. It may ask GitHub for the PR again while scripts/stack.sh links the stack, hence
+  # the read-only pull-requests scope and the token in env, never in a `run:` expression.
+  stack-base:
+    name: guard / stack-base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      # Run the default branch's script, not the PR's, so a PR can't switch off the checks that
+      # judge it (as the floor job does, #99). A sparse checkout leaves other refs' blobs off the
+      # runner, so the default branch gets a checkout of its own. The PR's copy runs only while
+      # the default branch has none; if it has one that can't be read, the step fails.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+          path: .stack-base
+          sparse-checkout: .github/scripts
+      - name: Take the script from the default branch
+        run: |
+          dir="$RUNNER_TEMP/stack-guard"
+          mkdir -p "$dir"
+          listed=$(git -C .stack-base ls-tree HEAD -- .github/scripts/stack-base-guard.mjs) || exit 1
+          if [[ -n $listed ]]; then
+            cp .stack-base/.github/scripts/stack-base-guard.mjs .stack-base/.github/scripts/diff.mjs "$dir/"
+          else
+            echo "::warning::the default branch has no stack-base-guard.mjs yet; using this PR's copy"
+            cp .github/scripts/stack-base-guard.mjs .github/scripts/diff.mjs "$dir/"
+          fi
+      - run: node "$RUNNER_TEMP/stack-guard/stack-base-guard.mjs"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
