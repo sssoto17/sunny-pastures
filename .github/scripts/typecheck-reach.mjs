@@ -9,9 +9,8 @@
 // Exit codes: 0 every package referenced, 1 a package missed, 2 could not run (never reads as 0).
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
-import { pathToFileURL } from "node:url";
 
-import { CannotRun, git } from "./diff.mjs";
+import { CannotRun, git, isMain } from "./diff.mjs";
 
 const top = () => {
 	const dir = git(["rev-parse", "--show-toplevel"])?.trim();
@@ -99,7 +98,7 @@ const main = () => {
 	return 1;
 };
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (isMain(import.meta.url)) {
 	try {
 		process.exitCode = main();
 	} catch (e) {

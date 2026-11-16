@@ -24,11 +24,10 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { pathToFileURL } from "node:url";
 import { parse, postprocess, preprocess } from "micromark";
 import { gfm } from "micromark-extension-gfm";
 
-import { baseArg, CannotRun, enterRepo, git, oldContent, readChange } from "./diff.mjs";
+import { baseArg, CannotRun, enterRepo, git, isMain, oldContent, readChange } from "./diff.mjs";
 
 // This file and its tests spell out the suppression and stub patterns, so those two scans skip
 // them; every other check still applies. CI runs the base branch's copy of this guard (ci.yml,
@@ -1764,7 +1763,7 @@ const main = () => {
 	return 1;
 };
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (isMain(import.meta.url)) {
 	try {
 		process.exitCode = main();
 	} catch (e) {
