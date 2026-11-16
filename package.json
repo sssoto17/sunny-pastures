@@ -22,22 +22,22 @@
 		"format:check": "prettier --check --log-level warn \"**/*.{ts,tsx,mts,mjs,js,json}\"",
 		"check:fast": "pnpm typecheck && pnpm lint:changed && pnpm format:check && pnpm guard:floor",
 		"dupes": "fallow dupes packages/sim --fail-on-issues --quiet",
-		"check:task": "pnpm check:fast && pnpm lint && pnpm dupes --changed-since origin/main && pnpm test:related && pnpm coverage:gate --skip-ratchet && pnpm determinism",
+		"check:task": "pnpm check:fast && pnpm lint && pnpm dupes --changed-since origin/main && node .github/scripts/sim-changed.mjs SIM_PROPERTY_RUNS=1000 -- pnpm test:related && pnpm coverage:gate --skip-ratchet && pnpm determinism",
 		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm dupes --changed-since origin/main && pnpm guard:floor && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate && pnpm determinism"
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",
 		"@ianvs/prettier-plugin-sort-imports": "4.7.1",
-		"@vitest/coverage-v8": "5.0.5",
+		"@vitest/coverage-v8": "5.1.0",
 		"@vitest/eslint-plugin": "1.6.28",
 		"eslint": "10.14.0",
 		"eslint-plugin-check-file": "3.3.2",
-		"fallow": "3.38.1",
+		"fallow": "3.41.0",
 		"micromark": "4.0.3",
 		"micromark-extension-gfm": "3.0.0",
 		"prettier": "3.9.10",
 		"typescript": "6.0.3",
 		"typescript-eslint": "8.72.1",
-		"vitest": "5.0.5"
+		"vitest": "5.1.0"
 	}
 }

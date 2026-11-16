@@ -12,25 +12,19 @@
 //
 // Usage: node .github/scripts/determinism-gate.mjs [--update | --record]
 //   --update  writes the hash both processes agree on to determinismScript.hash
-//   --record  records the script again (recordScript.ts), then does what --update does
+//   --record  records the script again (recordScript.ts) to a temp file beside the recorded one,
+//             checks it as --update does, and moves it into place with the hash only on a pass
 // A released rules version's hash never changes; a new version adds its own (ADR-0006; #154).
 // Exit codes: 0 pass, 1 the gate failed, 2 could not run. A 2 never reads as a pass.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import {
-	existsSync,
-	mkdtempSync,
-	readFileSync,
-	realpathSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { CannotRun } from "./diff.mjs";
+import { CannotRun, isMain } from "./diff.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -132,7 +126,7 @@ const compile = (dir) => {
 	return (file) => pathToFileURL(join(out, SIM_TESTS.replace("packages/sim/src/", ""), file)).href;
 };
 
-// One process: plays the script and prints what it saw as JSON on stdout.
+// One process: plays the script at `scriptPath` and prints what it saw as JSON on stdout.
 const play = async (moduleUrl, scriptPath) => {
 	const { playScript } = await import(moduleUrl);
 	const { final, ...run } = playScript(JSON.parse(readFileSync(scriptPath, "utf8")));
@@ -143,8 +137,10 @@ const play = async (moduleUrl, scriptPath) => {
 	console.log(JSON.stringify({ pid: process.pid, timeZone, locale, jsonHash, ...run }));
 };
 
-const spawnRun = ({ label, env }, moduleUrl) => {
-	const child = spawnSync(process.execPath, [SELF, "--play", moduleUrl, join(ROOT, SCRIPT)], {
+// Runs `play` in a child process with the given environment. A child that exits non-zero can't
+// run, so its process never counts as having played (exit 2, never a pass).
+export const spawnRun = ({ label, env }, moduleUrl, scriptPath) => {
+	const child = spawnSync(process.execPath, [SELF, "--play", moduleUrl, scriptPath], {
 		encoding: "utf8",
 		env: { ...process.env, ...env },
 	});
@@ -156,10 +152,10 @@ const spawnRun = ({ label, env }, moduleUrl) => {
 	return { label, ...run };
 };
 
-const record = async (moduleUrl) => {
+// Records the script, formatted, to `path`.
+const record = async (moduleUrl, path) => {
 	const { recordScript } = await import(moduleUrl);
-	// One step per line, as Prettier lays out the repo's JSON (`pnpm format:check`). Formatted
-	// first, so a failure leaves the recorded script as it was.
+	// One step per line, as Prettier lays out the repo's JSON (`pnpm format:check`).
 	const prettier = join(ROOT, "node_modules/prettier/bin/prettier.cjs");
 	const result = spawnSync(process.execPath, [prettier, "--stdin-filepath", SCRIPT], {
 		cwd: ROOT,
@@ -167,28 +163,53 @@ const record = async (moduleUrl) => {
 		input: JSON.stringify(recordScript()),
 	});
 	if (result.status !== 0) throw new CannotRun(`prettier failed:\n${result.stderr}`);
-	writeFileSync(join(ROOT, SCRIPT), result.stdout);
-	console.log(`determinism-gate: recorded ${SCRIPT}`);
+	writeFileSync(path, result.stdout);
 };
 
-const main = async (argv) => {
-	// `pnpm determinism -- --update` passes the `--` through.
-	const unknown = argv.filter((a) => a !== "--" && !FLAGS.includes(a));
-	if (unknown.length > 0) throw new CannotRun(`unknown argument ${unknown.join(" ")}`);
-	const started = performance.now();
-	const dir = mkdtempSync(join(tmpdir(), "determinism-gate-"));
+// A file beside `path`, so the rename that replaces `path` stays on one file system (a rename
+// from os.tmpdir() can fail with EXDEV). Random, so two runs never share one.
+const tempPathBeside = (path) =>
+	join(dirname(path), `.${basename(path)}.${randomBytes(6).toString("hex")}.tmp`);
+
+// Moves the new hash into place, then the new script. If the script's move is refused, the old
+// hash goes back, so the folder never pairs a new script with an old hash or the other way round.
+const moveIntoPlace = ({ hashTemp, hashPath, played, scriptPath, rename }) => {
+	const oldHash = existsSync(hashPath) ? readFileSync(hashPath) : null;
+	rename(hashTemp, hashPath);
+	if (played === scriptPath) return;
+
 	try {
-		const moduleOf = compile(dir);
-		if (argv.includes("--record")) await record(moduleOf("recordScript.js"));
-		const runs = PROCESSES.map((p) => spawnRun(p, moduleOf("playScript.js")));
-		const hashFile = join(ROOT, HASH);
-		const isUpdate = argv.includes("--update") || argv.includes("--record");
+		rename(played, scriptPath);
+	} catch (e) {
+		if (oldHash === null) rmSync(hashPath, { force: true });
+		else writeFileSync(hashPath, oldHash);
+		throw e;
+	}
+};
+const relativeToRoot = (path) => relative(ROOT, path);
+
+// The gate on a compiled sim (`moduleOf` maps a compiled file name to its URL). --record plays a
+// temp recording and moves it, and the hash, over `scriptPath` and `hashPath` only after a pass;
+// a fail (1) or a CannotRun (2) leaves both files as they were and removes the temp files (#287).
+// `rename` is fs.renameSync; a test passes one that refuses a single move, which no file on disk
+// can do while it stays readable.
+export const runGate = async (
+	argv,
+	{ moduleOf, scriptPath, hashPath, started = performance.now(), rename = renameSync },
+) => {
+	const isRecord = argv.includes("--record");
+	const isUpdate = argv.includes("--update") || isRecord;
+	const played = isRecord ? tempPathBeside(scriptPath) : scriptPath;
+	const hashTemp = tempPathBeside(hashPath);
+	try {
+		if (isRecord) await record(moduleOf("recordScript.js"), played);
+		const runs = PROCESSES.map((p) => spawnRun(p, moduleOf("playScript.js"), played));
 		const expected = isUpdate
 			? runs[0].hash
-			: existsSync(hashFile)
-				? readFileSync(hashFile, "utf8").trim() || null
+			: existsSync(hashPath)
+				? readFileSync(hashPath, "utf8").trim() || null
 				: null;
-		const script = JSON.parse(readFileSync(join(ROOT, SCRIPT), "utf8"));
+		const script = JSON.parse(readFileSync(played, "utf8"));
 		const { failures, report } = evaluate({ script, runs, expected });
 		for (const r of report) console.log(`determinism-gate: ${r}`);
 		const seconds = ((performance.now() - started) / 1000).toFixed(1);
@@ -198,27 +219,43 @@ const main = async (argv) => {
 		}
 
 		if (isUpdate) {
-			writeFileSync(hashFile, `${expected}\n`);
-			console.log(`determinism-gate: wrote ${expected} to ${HASH}`);
+			writeFileSync(hashTemp, `${expected}\n`);
+			moveIntoPlace({ hashTemp, hashPath, played, scriptPath, rename });
+			if (isRecord) console.log(`determinism-gate: recorded ${relativeToRoot(scriptPath)}`);
+			console.log(`determinism-gate: wrote ${expected} to ${relativeToRoot(hashPath)}`);
 		}
-		console.log(`determinism-gate: pass, both processes match ${HASH} (${seconds} s)`);
+		console.log(
+			`determinism-gate: pass, both processes match ${relativeToRoot(hashPath)} (${seconds} s)`,
+		);
 		return 0;
+	} finally {
+		if (isRecord) rmSync(played, { force: true });
+		rmSync(hashTemp, { force: true });
+	}
+};
+
+const main = async (argv) => {
+	// `pnpm determinism -- --update` passes the `--` through.
+	const unknown = argv.filter((a) => a !== "--" && !FLAGS.includes(a));
+	if (unknown.length > 0) throw new CannotRun(`unknown argument ${unknown.join(" ")}`);
+
+	const started = performance.now();
+	const dir = mkdtempSync(join(tmpdir(), "determinism-gate-"));
+	try {
+		return await runGate(argv, {
+			moduleOf: compile(dir),
+			scriptPath: join(ROOT, SCRIPT),
+			hashPath: join(ROOT, HASH),
+			started,
+		});
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
 };
 
-// import.meta.url is the real path; argv[1] may run through a symlink (a linked home or /tmp), and
-// a gate that silently skips itself would exit 0 (#48's review).
-const isMain = () => {
-	try {
-		return realpathSync(process.argv[1] ?? "") === realpathSync(SELF);
-	} catch {
-		return false;
-	}
-};
-
-if (isMain()) {
+// The shared entry check resolves symlinks on both sides: a gate that silently skipped itself
+// would exit 0 (#48's review; #283).
+if (isMain(import.meta.url)) {
 	const argv = process.argv.slice(2);
 	try {
 		if (argv[0] === "--play") await play(argv[1], argv[2]);

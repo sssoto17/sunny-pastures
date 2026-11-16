@@ -12,7 +12,8 @@
 // only CONSTRAINTS.md, a prose file, never code, with key-like text redacted. A possible carve-out
 // (a narrowing word, a negation, a new clause, comment, footnote or rule, a rule moved to another
 // list) is marked there, `warning [rule-narrowed]` for a strong signal and `note [check]` for a
-// weak one: for the admin's merge review, never a failure (admin, 9 Nov; ADR-0004).
+// weak one: for the admin's merge review, never a failure (admin, 9 Nov; ADR-0004). It also names
+// each spent Exceptions row, a row in the merge base's table, as a warning, never a failure (#271).
 //
 // Usage: node .github/scripts/floor-guard.mjs [--base <ref>]   (default base: origin/main)
 // FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date, for tests; it's ignored in CI.
@@ -22,7 +23,7 @@
 // whose Path, one file or one folder, covers the file. Unfinished work and invalid, too broad or
 // expired exceptions always fail, and so does a second `## Exceptions` heading.
 import { randomUUID } from "node:crypto";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { parse, postprocess, preprocess } from "micromark";
 import { gfm } from "micromark-extension-gfm";
@@ -1234,7 +1235,7 @@ const escapeProp = (s) => escapeData(s).replace(/:/g, "%3A").replace(/,/g, "%2C"
 
 // The report of every changed CONSTRAINTS.md rule: for the log, the job summary, and warning
 // annotations, which GitHub shows on the PR's Files changed tab next to the changed line.
-const changeReport = (changes) => {
+const changeReport = (changes, max = MAX_ANNOTATIONS) => {
 	if (!changes.length) return null;
 	const entries = reportEntries(changes).map((e) => ({
 		...e,
@@ -1256,11 +1257,12 @@ const changeReport = (changes) => {
 	const body = entries.flatMap((e) => [e.head, ...e.lines.map((l) => `  ${l}`), ""]).join("\n");
 	const fence = "~".repeat(Math.max(3, ...[...body.matchAll(/~+/g)].map((m) => m[0].length + 1)));
 	const summary = `### floor guard: CONSTRAINTS.md changes\n\n${intro}\n\n${fence}text\n${body}${fence}\n`;
-	// GitHub keeps only 10 warning annotations per step, so past 10 the last one points to the
-	// summary, and the possible narrowings go first, then the ones to check.
+	// GitHub keeps only 10 warning annotations per step, so past `max` (10, or fewer when another
+	// report shares the step) the last one points to the summary, and the possible narrowings go
+	// first, then the ones to check.
 	const rank = { strong: 0, weak: 1, null: 2 };
 	const ranked = [...entries].sort((a, b) => rank[tierOf(a.c)] - rank[tierOf(b.c)]);
-	const shown = ranked.length > MAX_ANNOTATIONS ? ranked.slice(0, MAX_ANNOTATIONS - 1) : ranked;
+	const shown = ranked.length > max ? ranked.slice(0, max - 1) : ranked;
 	const TITLES = {
 		strong: "CONSTRAINTS.md rule may be narrowed (admin reads)",
 		weak: "CONSTRAINTS.md rule to check (admin reads)",
@@ -1389,6 +1391,53 @@ export const globToRegExp = (glob) =>
 			(glob.endsWith("/") ? ".*" : "") +
 			"$",
 	);
+
+// Spent Exceptions rows (#271; ADR-0004, "Exceptions rows"). Only a row the PR adds waives anything
+// (`addedRows` in `guard`), so every row in the merge base's table was added by a PR that has merged
+// and can no longer waive anything; only its expiry and validity are still checked. Each one is a
+// warning, never a finding, so the next PR can remove it without a cleanup PR of its own. A row
+// this PR rewrites under the same ID is a new row, which waives, so it isn't named. A Path that no
+// file in the checkout matches is named too, as a second reason.
+const checkoutFiles = () =>
+	(git(["ls-files", "-z", "--cached", "--others", "--exclude-standard"]) ?? "")
+		.split("\0")
+		.filter((f) => f && existsSync(f));
+const spentRows = (baseRows, allNow, addedRows) => {
+	const rewritten = new Set(addedRows.map((r) => parseException(r.text).id));
+	const all = baseRows.length ? checkoutFiles() : [];
+	return baseRows
+		.map((r) => ({ r, e: parseException(r.text) }))
+		.filter(({ e }) => !rewritten.has(e.id))
+		.map(({ r, e }) => {
+			const re = e.path && !neverMatches(e.path) ? globToRegExp(e.path) : null;
+			const kept = allNow.find((n) => n.text.trim() === r.text.trim());
+			return {
+				id: e.id,
+				path: e.path,
+				line: kept?.line ?? null,
+				gone: !re || !all.some((f) => re.test(f)),
+			};
+		});
+};
+// The spent rows for the log, the job summary and one warning annotation, on the first row this PR
+// keeps. Base rows are main's merged text, and a Path is one line, so it is quoted as it is:
+// `redact` would hide a path like `.github/workflows/check-103-claude.yml`. The annotation escapes it.
+const spentReport = (spent) => {
+	if (!spent.length) return null;
+	const intro = `${spent.length} spent Exceptions row(s): each is in the merge base's table, so the PR that added it has merged, and only rows a PR adds waive anything (CONSTRAINTS.md, "Exceptions"). A warning, not a finding.`;
+	const lines = spent.map(
+		(s) =>
+			`${s.id} \`${s.path}\`: ${s.line ? `CONSTRAINTS.md:${s.line}, remove it in this PR` : "this PR removes it"}${s.gone ? "; no file matches its Path" : ""}`,
+	);
+	const at = spent.find((s) => s.line)?.line;
+	return {
+		log: [`floor-guard: warning: ${intro}`, ...lines.map((l) => `  ${l}`)].join("\n"),
+		summary: `### floor guard: spent Exceptions rows\n\n${intro}\n\n${lines.map((l) => `- ${l}`).join("\n")}\n`,
+		annotations: [
+			`::warning file=CONSTRAINTS.md${at ? `,line=${at}` : ""},title=${escapeProp("CONSTRAINTS.md: spent Exceptions rows")}::${escapeData([intro, ...lines].join("\n"))}`,
+		],
+	};
+};
 
 export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = false }) => {
 	const findings = []; // { rule, file, line, key?, waivable }
@@ -1659,7 +1708,16 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 		if (w) notices.push(`${f.rule} at ${f.file}:${f.line} waived by ${w.id}`);
 		else blocking.push(f);
 	}
-	return { blocking, notices, report: changeReport(ruleChanges) };
+	const spent = spentReport(
+		spentRows(
+			exceptionRows(oldContent(mergeBase, "CONSTRAINTS.md") ?? []).waiving,
+			allNow,
+			addedRows,
+		),
+	);
+	// The spent rows take one of GitHub's 10 annotations, so the change report keeps the rest.
+	const report = changeReport(ruleChanges, spent ? MAX_ANNOTATIONS - 1 : MAX_ANNOTATIONS);
+	return { blocking, notices, report, spent };
 };
 
 const HINTS = {
@@ -1720,27 +1778,28 @@ const main = () => {
 		pr?.user?.login === "dependabot[bot]" &&
 		sameRepo &&
 		authors.every((a) => a === "dependabot[bot]");
-	const { blocking, notices, report } = guard(changes, {
+	const { blocking, notices, report, spent } = guard(changes, {
 		mergeBase,
 		today,
 		constraintsNow,
 		dependabot,
 	});
 	for (const n of notices) console.log(`floor-guard: note: ${n}`);
-	if (report) {
+	// Spent rows first: their one annotation is counted in the change report's 10.
+	const reports = [spent, report].filter(Boolean);
+	for (const r of reports) {
 		if (process.env.GITHUB_ACTIONS === "true") {
 			// The report quotes text the PR wrote. Inside a stop-commands block with an unguessable
 			// token, no line of it can run as a workflow command; the annotations come after the block.
 			const token = randomUUID();
 			console.log(`::stop-commands::${token}`);
-			console.log(report.log);
+			console.log(r.log);
 			console.log(`::${token}::`);
-			for (const a of report.annotations) console.log(a);
+			for (const a of r.annotations) console.log(a);
 		} else {
-			console.log(report.log);
+			console.log(r.log);
 		}
-		if (process.env.GITHUB_STEP_SUMMARY)
-			appendFileSync(process.env.GITHUB_STEP_SUMMARY, report.summary);
+		if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, r.summary);
 	}
 	if (blocking.length === 0) {
 		// A changed CONSTRAINTS.md is never reported as clean: the admin still reads it.

@@ -118,7 +118,8 @@ Every issue carries four values: GitHub's native **issue type**, and the Project
 - **The native type follows the type label**, and the label stays: `feature` → Feature, `bug` →
   Bug, `design` → Design, and `spike`, `chore`, `idea` → Chore (the repo offers Chore, Bug,
   Feature and Design; the admin's mapping of 15 Nov, #266). The mapping is the Types table in
-  `triage-labels.md`, and the scripts share it in `scripts/lib/issue-types.sh`. `new-issue.sh`
+  `triage-labels.md`, and the scripts share it in `scripts/lib/issue-types.sh`. The issue forms set the same type with
+  `type:` (#254), so an issue filed in the web UI gets it too. `new-issue.sh`
   and `backfill-issue-types.sh` stop with a message naming the difference when the repo's types
   and that mapping disagree, so a rename is caught on the next run. `scripts/backfill-issue-types.sh`
   sets the type on open issues whose type doesn't follow their label (none, or another type), from
