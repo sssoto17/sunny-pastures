@@ -14,9 +14,13 @@ on:
 permissions:
   contents: read
 
+# One group per PR and head (#264): a push to a stacked part fires two pull_request events on
+# the same head, and cancelling one left a cancelled twin of every check there, which GitHub then
+# read as the latest result and blocked the merge (throwaway stack #315). So a second run on the
+# same head waits instead of cancelling; a new head starts its own group.
 concurrency:
-  group: security-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: security-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: false
 
 jobs:
   secrets:

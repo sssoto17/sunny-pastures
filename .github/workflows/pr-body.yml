@@ -14,9 +14,9 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pr-body-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No concurrency group (#264): a push to a stacked part fires two events on one head, and body
+# edits fire more, so any cancelling or queueing left a cancelled twin of a required check on the
+# head, which GitHub read as its latest result (throwaway stack #315). Both jobs take seconds.
 
 jobs:
   pr-body:
