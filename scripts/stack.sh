@@ -124,6 +124,12 @@ checked_out_in() { # branch -> the worktree that has it checked out, or nothing
 # Rebase each part onto the new head below, then push them with a lease each: linear, since GitHub's
 # "Rebase stack" stops on a merge commit that replays empty after a squash (#315). <onto>/<upstream>
 # move the bottom part too (refresh). A conflict restores every branch and pushes nothing.
+held_once() { # branch : its reflog holds origin's head, so this clone wrote that head itself
+  local log
+  log=$'\n'$(git reflog --format=%H "refs/heads/$1")$'\n'
+  [[ $log == *$'\n'"$(git rev-parse "refs/remotes/origin/$1")"$'\n'* ]]
+}
+
 restack() { # stack-base onto upstream branch...
   local base=$1 onto=$2 upstream=$3 here start b i wt below_new below_old
   shift 3
@@ -138,8 +144,9 @@ restack() { # stack-base onto upstream branch...
     wt=$(checked_out_in "$b")
     [[ -z $wt || $wt == "$here" ]] || die 2 "$b is checked out in $wt: run this there"
     git rev-parse -q --verify "refs/heads/$b" >/dev/null || git branch -q --no-track "$b" "origin/$b"
-    # GitHub's commits must be in the local branch, or their changes must be (a local rebase).
-    git merge-base --is-ancestor "origin/$b" "$b" || [[ -z $(git cherry "$b" "origin/$b" | grep '^+') ]] ||
+    # GitHub's head must be in the local branch, or once have been its head (the lane rewrote it):
+    # a merge commit or a dropped commit on GitHub is never pushed over.
+    git merge-base --is-ancestor "origin/$b" "$b" || held_once "$b" ||
       die 2 "$b lacks commits that GitHub's $b has: rebase or fast-forward your $b onto origin/$b first"
     was_local[$b]=$(git rev-parse "refs/heads/$b") was_remote[$b]=$(git rev-parse "refs/remotes/origin/$b")
   done
@@ -259,6 +266,7 @@ cmd_refresh() {
   if [[ -n $upstream ]] && git cat-file -e "$upstream^{commit}" 2>/dev/null; then
     restack "$base" "origin/$base" "$upstream" "${heads[@]}"
   else
+    [[ -z $upstream ]] || echo "stack: the merged part's head ${upstream:0:7} isn't in this clone, so the lowest open part stays where it is; rebase it onto origin/$base by hand" >&2
     restack "$base" "" "" "${heads[@]}"
   fi
   cmd_status "$1"

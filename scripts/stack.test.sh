@@ -360,6 +360,38 @@ case_ update 400
 expect_code 2
 expect_err "rebase or fast-forward"
 expect_eq "their commit kept" "$(remote_sha p2)" "$theirs"
+# GitHub's branch holds a merge commit whose resolution exists nowhere else, or was rewritten to
+# drop a commit. Every other commit there has its patch in the local branch, so `git cherry` sees
+# nothing new: only a head this clone once held may be pushed over.
+for change in merge rewrite; do
+  reset
+  part p1 main a.txt
+  part p2 p1 b.txt
+  echo c >"$repo/c.txt" && git -C "$repo" add c.txt && git -C "$repo" commit -qm "p2: c.txt"
+  run open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')"
+  if [[ $change == merge ]]; then
+    git -C "$repo" switch -q -c side main
+    echo s >"$repo/s.txt" && git -C "$repo" add s.txt && git -C "$repo" commit -qm "p2: s.txt"
+    git -C "$repo" switch -q --detach "$(remote_sha p2)"
+    git -C "$repo" merge -q --no-ff --no-commit side
+    echo resolved >"$repo/m.txt" && git -C "$repo" add m.txt && git -C "$repo" commit -qm "Merge side"
+    git -C "$repo" push -q origin HEAD:p2
+    git -C "$repo" switch -q p2
+    echo s >"$repo/s.txt" && git -C "$repo" add s.txt && git -C "$repo" commit -qm "p2: s.txt"
+  else
+    git -C "$repo" switch -q --detach p1
+    git -C "$repo" cherry-pick "$(git -C "$repo" rev-parse p2)" >/dev/null # keeps c.txt, drops b.txt
+    git -C "$repo" push -q -f origin HEAD:p2
+  fi
+  theirs=$(remote_sha p2)
+  git -C "$repo" switch -q p1
+  git -C "$repo" commit -q --allow-empty -m "p1: one more"
+  case_ update 400
+  expect_code 2
+  expect_err "rebase or fast-forward"
+  expect_eq "GitHub's $change kept" "$(remote_sha p2)" "$theirs"
+done
+
 # a lane that rebased its parts itself (same commits, new SHAs) can still push them
 reset
 three_parts
