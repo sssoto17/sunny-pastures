@@ -2,9 +2,9 @@
 
 How every review in this repo is done: the reviewer the coordinator dispatches, a lane's own review
 at the end of `/implement`, and the CI reviewer App `sunny-reviewer` once #68 lands. Read it from
-`origin/main`, never from the PR under review. The project's rules live in their own files, and
-this one points to them; it holds only the review practice: which rules to check, how hard, and
-how to report. When a pointer here and the rule's home disagree, the home wins.
+`origin/main`, never from the PR under review. The project's rules live in their own files, and this
+one points to them; it holds only the review practice: which rules to check, how hard, and how to
+report. When a pointer here and the rule's home disagree, the home wins.
 
 ## Inputs
 
@@ -33,20 +33,19 @@ how to report. When a pointer here and the rule's home disagree, the home wins.
 
 Each item names where its rule lives. Read the rule there.
 
-1. **Every acceptance criterion** of the linked issue, one by one; on a split, as Review kinds
-   says.
+1. **Every acceptance criterion** of the linked issue, one by one; on a split, as Review kinds says.
 2. **CI is green** on the head SHA (`gh pr checks <N>`), on every part of a split.
-3. **The Floor** (`CONSTRAINTS.md`, "Floor" and "Guarding the bar"). Read for intent too: a
-   lowered assertion, run count or seed, or an added retry is a weakened bar even where the guard
-   can't see it.
+3. **The Floor** (`CONSTRAINTS.md`, "Floor" and "Guarding the bar"). Read for intent too: a lowered
+   assertion, run count or seed, or an added retry is a weakened bar even where the guard can't see
+   it.
 4. **The split size** (`CONSTRAINTS.md`, "Split size": the cap and what counts toward it).
 5. **`review:admin`** is on the PR when any row of `CONSTRAINTS.md`, "Escalation criteria" applies.
    Code-owned paths are those in `.github/CODEOWNERS`. The PR template's Review lines match.
 6. **Code style** for TypeScript in `packages/` and `apps/`: `docs/agents/code-style.md`.
 7. **Decisions**: the ADRs in `docs/adr/` that cover the touched area, and the requirement IDs in
    `docs/requirements/spec.md` the issue names.
-8. **Tests would catch a bug** in the change. Name one plausible bug and the test that fails on
-   it; on a test-heavy PR, prove it with a mutant (Conduct).
+8. **Tests would catch a bug** in the change. Name one plausible bug and the test that fails on it;
+   on a test-heavy PR, prove it with a mutant (Conduct).
 9. **The PR's own boxes**: each ticked "How it was verified" box has its evidence in the PR.
 10. **Repo rules**: `AGENTS.md`, "Layout" and "Rules", for whatever the diff touches.
 
@@ -62,12 +61,12 @@ Every finding gets one severity and one status.
 - **Nit**: wording, naming or layout no tool checks.
 
 The smell baseline in the `code-review` skill yields Optional at most. For the CI reviewer App,
-Required findings are the blocking ones (line comments plus Request changes); Optional and Nit go
-in the review's summary (ADR-0002, area 2).
+Required findings are the blocking ones (line comments plus Request changes); Optional and Nit go in
+the review's summary (ADR-0002, area 2).
 
 - **Confirmed**: you reproduced it, or cite `file:line` and the command output that shows it.
-- **Unverified**: inferred, not shown. Say what would confirm it. An unverified finding alone
-  never makes the verdict "don't merge".
+- **Unverified**: inferred, not shown. Say what would confirm it. An unverified finding alone never
+  makes the verdict "don't merge".
 
 ## Cap the nits
 
@@ -84,16 +83,16 @@ Report at most five Nits per review. Pick the ones a reader would trip on.
 ## Review kinds
 
 - **Full review**: the whole PR, against every item in Always check.
-- **Delta review**: only `<old head>..<new head>`, checked against the findings the fixes answer.
-  A merge commit that only brings in earlier fixes adds nothing; confirm it with an empty
+- **Delta review**: only `<old head>..<new head>`, checked against the findings the fixes answer. A
+  merge commit that only brings in earlier fixes adds nothing; confirm it with an empty
   `git show --remerge-diff <merge sha>`.
-- **Split stack**: part by part, as `CONSTRAINTS.md`, "Split size" sets out: a `Part of #N` part
-  for scope, the `Closes #N` part for every criterion across the whole stack. Cloud lanes can't
-  link native stacks; the coordinator links them locally.
-- **Self-review**: a lane reviewing its own work when `/implement` reaches `code-review`, before
-  the PR exists. Its inputs are the branch diff against `origin/main`, the issue and the brief;
-  Always check items 2 and 9 wait for the PR. The lane edits its own branch, so Read-only doesn't
-  apply. Fix every Required finding, and list what's left under the PR's Concerns.
+- **Split stack**: part by part, as `CONSTRAINTS.md`, "Split size" sets out: a `Part of #N` part for
+  scope, the `Closes #N` part for every criterion across the whole stack. Cloud lanes can't link
+  native stacks; the coordinator links them locally.
+- **Self-review**: a lane reviewing its own work when `/implement` reaches `code-review`, before the
+  PR exists. Its inputs are the branch diff against `origin/main`, the issue and the brief; Always
+  check items 2 and 9 wait for the PR. The lane edits its own branch, so Read-only doesn't apply.
+  Fix every Required finding, and list what's left under the PR's Concerns.
 
 ## Report
 
@@ -112,9 +111,9 @@ Unverified
 Follow-ups: <one line each, or none>
 ```
 
-- The verdict is the first line. "merge" means no Required finding; "merge after fixes" means
-  every Required finding has a clear fix; "don't merge" means the approach is wrong or the fix is
-  not yet known.
+- The verdict is the first line. "merge" means no Required finding; "merge after fixes" means every
+  Required finding has a clear fix; "don't merge" means the approach is wrong or the fix is not yet
+  known.
 - Findings are ranked most severe first, then confirmed before unverified.
 - Word cap: about 300 for a full review, 150 to 250 for a delta.
 - What happens to the confirmed criteria is in `docs/agents/issue-tracker.md`, "Checkboxes".

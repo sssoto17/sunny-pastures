@@ -4,25 +4,24 @@ status: accepted
 
 # Persistence model: one state row or an action log with snapshots
 
-Every action and every return after time away has to load a farm, bring it up to server time,
-apply the action and save it, and stay correct when two requests for one farm overlap. Before any
-real schema exists (M3) we compare two ways to store a farm with a throwaway spike, and let
-measurements chosen in advance pick the winner. This draft fixes the candidates, the store
-interface and the decision rule before the first measurement runs; the Decision section is filled
-in from the results.
+Every action and every return after time away has to load a farm, bring it up to server time, apply
+the action and save it, and stay correct when two requests for one farm overlap. Before any real
+schema exists (M3) we compare two ways to store a farm with a throwaway spike, and let measurements
+chosen in advance pick the winner. This draft fixes the candidates, the store interface and the
+decision rule before the first measurement runs; the Decision section is filled in from the results.
 
 ## Candidates
 
-- **A, state row.** One row per farm holding its state, its sequence number and the time of its
-  last action, overwritten on every accepted action. History is lost on each write.
+- **A, state row.** One row per farm holding its state, its sequence number and the time of its last
+  action, overwritten on every accepted action. History is lost on each write.
 - **B, action log with snapshots.** Every accepted action is appended to a per-farm log keyed by
-  sequence number; the state is a cache rebuilt by replaying the log from the latest snapshot.
-  Three snapshot intervals are measured:
+  sequence number; the state is a cache rebuilt by replaying the log from the latest snapshot. Three
+  snapshot intervals are measured:
   - **B1**: one latest snapshot per farm, overwritten on every action (log plus state row).
   - **B25** and **B100**: a snapshot is kept after every 25th or 100th action.
 
-Both compute offline progress lazily: nothing runs while a player is away; the next request
-advances the farm to server time in memory. Reads never write.
+Both compute offline progress lazily: nothing runs while a player is away; the next request advances
+the farm to server time in memory. Reads never write.
 
 ## Store interface
 
@@ -37,89 +36,92 @@ type FarmRecord = { state: FarmState; seq: number; at: number }; // after action
 type Answer = { seq: number; hash: string; rebased: boolean; retries: number }; // the POST response
 
 interface GameStore {
-  load(playerId: string): Promise<FarmRecord>;
-  processed(playerId: string, idempotencyKey: string): Promise<Answer | null>;
-  commit(playerId: string, entry: {
-    expectedSeq: number;      // the seq that was loaded; the commit writes expectedSeq + 1
-    action: Action;
-    at: number;
-    idempotencyKey: string;
-    next: FarmState;          // A always writes it; B writes it only as a snapshot
-    answer: Answer;           // stored with the key, returned unchanged for a repeat
-  }): Promise<
-    | { kind: "committed"; seq: number }
-    | { kind: "duplicate"; answer: Answer }
-    | { kind: "conflict" }
-    | { kind: "refused"; reason: string } // the inbox refused the gift write; nothing committed
-  >;
-  gift(giftId: string): Promise<Gift | null>;
+	load(playerId: string): Promise<FarmRecord>;
+	processed(playerId: string, idempotencyKey: string): Promise<Answer | null>;
+	commit(
+		playerId: string,
+		entry: {
+			expectedSeq: number; // the seq that was loaded; the commit writes expectedSeq + 1
+			action: Action;
+			at: number;
+			idempotencyKey: string;
+			next: FarmState; // A always writes it; B writes it only as a snapshot
+			answer: Answer; // stored with the key, returned unchanged for a repeat
+		},
+	): Promise<
+		| { kind: "committed"; seq: number }
+		| { kind: "duplicate"; answer: Answer }
+		| { kind: "conflict" }
+		| { kind: "refused"; reason: string } // the inbox refused the gift write; nothing committed
+	>;
+	gift(giftId: string): Promise<Gift | null>;
 }
 
 interface AuditableStore extends GameStore {
-  // B only. The farm at server time t: the actions up to t, then advanced to t. `seq` is the
-  // last action at or before t (0 before the first), so an audit can say which one it saw.
-  stateAt(playerId: string, t: number): Promise<{ state: FarmState; seq: number }>;
+	// B only. The farm at server time t: the actions up to t, then advanced to t. `seq` is the
+	// last action at or before t (0 before the first), so an audit can say which one it saw.
+	stateAt(playerId: string, t: number): Promise<{ state: FarmState; seq: number }>;
 }
 ```
 
-The audit route refuses a `t` later than server time (400): `stateAt` reads history, not a
-forecast. B's `load` doesn't compare the replayed hash with the last log row's answer hash. The
-gate covers determinism, and a per-load hash would add work to B's measured `load` that A doesn't
-do. (Amended 6 Nov after #9.)
+The audit route refuses a `t` later than server time (400): `stateAt` reads history, not a forecast.
+B's `load` doesn't compare the replayed hash with the last log row's answer hash. The gate covers
+determinism, and a per-load hash would add work to B's measured `load` that A doesn't do. (Amended 6
+Nov after #9.)
 
 Every store checks what it loads before returning it: `seq` and `at` must be safe integers
-(`Number.isSafeInteger`), or `load` throws a store error. Postgres drivers return `bigint`
-columns as strings by default, and a string `at` would otherwise reach the state hash and look
-like a simulation bug. The driver is also configured to parse `bigint` as a number, but the
-check at the boundary is the guard; the driver setting is only a convenience.
+(`Number.isSafeInteger`), or `load` throws a store error. Postgres drivers return `bigint` columns
+as strings by default, and a string `at` would otherwise reach the state hash and look like a
+simulation bug. The driver is also configured to parse `bigint` as a number, but the check at the
+boundary is the guard; the driver setting is only a convenience.
 
 A farm with no accepted action loads as `{ state: newFarm, seq: 0, at: 0 }`. The store is given a
-`newFarm(playerId)` function when it is created; that builds content, it doesn't run the
-simulation. The farm's PRNG seed comes from its id, so a new farm is the same on every server.
+`newFarm(playerId)` function when it is created; that builds content, it doesn't run the simulation.
+The farm's PRNG seed comes from its id, so a new farm is the same on every server.
 
-Store B is also given `replay(state, actions, to)` when it is created, the same
-way it gets `newFarm`. It applies the actions in seq order, each at its own `at`, then advances to
-`to`. B's `load` and `stateAt` call it, but store code never imports the sim: the factory hands it
-in. If the rules refuse a logged action, `replay` throws instead of skipping it. (Amended 11 Nov
-after #31: from M3, every log row and snapshot carries a rules version, and `replay`, `load` and
-`stateAt` take those versions and give a farm a version upgrade where the log steps up;
+Store B is also given `replay(state, actions, to)` when it is created, the same way it gets
+`newFarm`. It applies the actions in seq order, each at its own `at`, then advances to `to`. B's
+`load` and `stateAt` call it, but store code never imports the sim: the factory hands it in. If the
+rules refuse a logged action, `replay` throws instead of skipping it. (Amended 11 Nov after #31:
+from M3, every log row and snapshot carries a rules version, and `replay`, `load` and `stateAt` take
+those versions and give a farm a version upgrade where the log steps up;
 [ADR-0006](0006-rules-versions-and-replay.md), section 5.)
 
-A repeated idempotency key returns the first answer. The handler asks `processed` before it runs
-the simulation, because a resent action may no longer be valid (a resent "plant plot 0" finds the
-plot already growing) and would otherwise get a 422 instead of its first answer. The handler
-builds the full answer before it commits, and the commit stores it with the key in the same
-transaction, so a duplicate returns it unchanged: A keeps no history to rebuild an old hash from.
-The commit claims the key before it writes the farm and rolls the claim back on a conflict, so a
-lost race doesn't use up the key. (Amended 6 Nov after the tracer bullet, #5.)
+A repeated idempotency key returns the first answer. The handler asks `processed` before it runs the
+simulation, because a resent action may no longer be valid (a resent "plant plot 0" finds the plot
+already growing) and would otherwise get a 422 instead of its first answer. The handler builds the
+full answer before it commits, and the commit stores it with the key in the same transaction, so a
+duplicate returns it unchanged: A keeps no history to rebuild an old hash from. The commit claims
+the key before it writes the farm and rolls the claim back on a conflict, so a lost race doesn't use
+up the key. (Amended 6 Nov after the tracer bullet, #5.)
 
-`processed` can miss a resend that races its own first commit: it runs before that commit, and
-the load runs after it, so the rules refuse the action. Before any 422, the handler asks
-`processed` again and returns the first answer if one is there now. (Amended 6 Nov after #8.)
+`processed` can miss a resend that races its own first commit: it runs before that commit, and the
+load runs after it, so the rules refuse the action. Before any 422, the handler asks `processed`
+again and returns the first answer if one is there now. (Amended 6 Nov after #8.)
 
 Gifts use one inbox table shared by every store, in its own schema, outside the comparison. The
 factory hands each store the inbox when it is created, as it does `newFarm`. The store derives the
 inbox write from the committed action, so the two can't disagree: a `sendGift` inserts gift
 `<playerId>:<seq>`, and a `claimGift` marks its gift claimed only if it is the claimer's, unclaimed
-and holds the claimed goods. The write runs in the commit's transaction, after the farm write, so
-a race on one farm shows up as a conflict (and a retry) first. If the inbox refuses, the commit
-rolls back and returns `{ kind: "refused"; reason }`, and the handler answers 422 with no seq, key
-or gift row used. `GameStore` gains `gift(giftId)`, so the handler can fill a claim's goods before
-`apply`; the client never sends them. A farm's replay never needs another farm's data. No action
-ever writes two farms. (Amended 6 Nov after #8.)
+and holds the claimed goods. The write runs in the commit's transaction, after the farm write, so a
+race on one farm shows up as a conflict (and a retry) first. If the inbox refuses, the commit rolls
+back and returns `{ kind: "refused"; reason }`, and the handler answers 422 with no seq, key or gift
+row used. `GameStore` gains `gift(giftId)`, so the handler can fill a claim's goods before `apply`;
+the client never sends them. A farm's replay never needs another farm's data. No action ever writes
+two farms. (Amended 6 Nov after #8.)
 
 ### Patterns
 
-| Pattern | Where | Why |
-| --- | --- | --- |
-| Repository | `GameStore` | SQL stays behind farm-shaped methods; the handler never sees tables. |
-| Strategy (+ factory) | A, B1, B25, B100 | Interchangeable stores chosen once from `STORE` and `SNAPSHOT_N`. |
-| Functional core, imperative shell | handler + sim | The sim stays pure; only the handler does I/O. |
-| Optimistic Offline Lock | `expectedSeq` | A conflict is detected at commit and retried, no lock held across the sim. |
-| Idempotent Receiver | `idempotencyKey`, `processed` | A retried request returns the stored first answer instead of applying twice. |
-| Event Sourcing + Snapshot | B | Actions are the source of truth; snapshots bound replay length. |
-| Interface Segregation | `AuditableStore` | A cannot audit, so it doesn't pretend to. |
-| Shared gateway, injected | inbox | One table and its SQL for all stores, handed in by the factory so every store writes gifts the same way. |
+| Pattern                           | Where                         | Why                                                                                                      |
+| --------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Repository                        | `GameStore`                   | SQL stays behind farm-shaped methods; the handler never sees tables.                                     |
+| Strategy (+ factory)              | A, B1, B25, B100              | Interchangeable stores chosen once from `STORE` and `SNAPSHOT_N`.                                        |
+| Functional core, imperative shell | handler + sim                 | The sim stays pure; only the handler does I/O.                                                           |
+| Optimistic Offline Lock           | `expectedSeq`                 | A conflict is detected at commit and retried, no lock held across the sim.                               |
+| Idempotent Receiver               | `idempotencyKey`, `processed` | A retried request returns the stored first answer instead of applying twice.                             |
+| Event Sourcing + Snapshot         | B                             | Actions are the source of truth; snapshots bound replay length.                                          |
+| Interface Segregation             | `AuditableStore`              | A cannot audit, so it doesn't pretend to.                                                                |
+| Shared gateway, injected          | inbox                         | One table and its SQL for all stores, handed in by the factory so every store writes gifts the same way. |
 
 ### Alternatives considered
 
@@ -131,81 +133,81 @@ ever writes two farms. (Amended 6 Nov after #8.)
   lock across the sim call and serialises reads too.
 - **Template Method base class for the stores.** Rejected: the stores share almost no steps.
 - **Direct gift delivery** (writing into the recipient's farm in the sender's transaction).
-  Rejected: it needs lock ordering across two farms and puts actions the recipient never chose
-  into their history.
+  Rejected: it needs lock ordering across two farms and puts actions the recipient never chose into
+  their history.
 - **The client resolves conflicts** (409 and resend). Rejected: two open tabs would keep failing
   each other's requests.
 - **An event-store library** instead of a hand-built log: deferred (COULD-04).
 - **An `inbox` field on the commit entry** (this ADR's first draft). Rejected after #8: it is a
   second description of the action that could disagree with it.
-- **Inbox writes outside the commit's transaction.** Rejected: a crash between the two writes
-  would lose a gift or claim one twice.
-- **Duplicate detection only inside `commit`, returning the first `seq`** (this ADR's first
-  draft). Rejected after #5: a resent action the rules now refuse never reaches `commit`, and A
-  can't rebuild the first answer's hash from a `seq`.
+- **Inbox writes outside the commit's transaction.** Rejected: a crash between the two writes would
+  lose a gift or claim one twice.
+- **Duplicate detection only inside `commit`, returning the first `seq`** (this ADR's first draft).
+  Rejected after #5: a resent action the rules now refuse never reaches `commit`, and A can't
+  rebuild the first answer's hash from a `seq`.
 - **`load(playerId, idempotencyKey)` returning any stored answer with the farm.** Rejected: one
   round trip fewer, but `load` would do two jobs.
 
 ## Decision rule (fixed before measuring)
 
 1. **Gate.** Step 0, with no database: the in-memory sim runs the 500-action script twice and
-   replays it from in-memory snapshots at N = 1, 25 and 100, and every run must give the same
-   hash. This step decides where any later failure lies: if it fails, the sim is at fault; if
-   it passes but a store fails a later step, that store's code is at fault.
-   Next, a round-trip check per store: commit a farm, load it back, and require a
-   strict deep-equal (types included) with the in-memory farm, so a type mismatch shows up as a
-   store bug before any hash is compared. Then the same 500 scripted actions (including an 8-hour gap and some invalid actions)
-   give an identical state hash in A, every B and the in-memory sim, and B's `stateAt` matches
-   the sim at 10 random times and at the middle of the script's 8-hour gap, so offline progress
-   is audited on every seed (amended 6 Nov after #9; the random times land in the gap only about
-   once in 50). A failure is a bug to fix, not an input to the decision.
+   replays it from in-memory snapshots at N = 1, 25 and 100, and every run must give the same hash.
+   This step decides where any later failure lies: if it fails, the sim is at fault; if it passes
+   but a store fails a later step, that store's code is at fault. Next, a round-trip check per
+   store: commit a farm, load it back, and require a strict deep-equal (types included) with the
+   in-memory farm, so a type mismatch shows up as a store bug before any hash is compared. Then the
+   same 500 scripted actions (including an 8-hour gap and some invalid actions) give an identical
+   state hash in A, every B and the in-memory sim, and B's `stateAt` matches the sim at 10 random
+   times and at the middle of the script's 8-hour gap, so offline progress is audited on every seed
+   (amended 6 Nov after #9; the random times land in the gap only about once in 50). A failure is a
+   bug to fix, not an input to the decision.
 2. **B wins unless** either holds for a B variant:
    - at 200 players, its p95 action latency > max(2 × A's p95, A's p95 + 20 ms);
    - for B100, the worst-case load (snapshot plus a 99-action tail, read and replay, timed
      server-side) has p95 > 50 ms.
-3. **Among passing B variants**, the lowest p95 at 200 players wins; if two are within 5 ms, the
-   one with fewer bytes per player-hour wins. If none pass, A wins.
-4. Storage, offline-return latency, auditability and complexity are reported, not gates. Replay
-   cost is also reported in µs per action and projected at 10× for the full sim.
+3. **Among passing B variants**, the lowest p95 at 200 players wins; if two are within 5 ms, the one
+   with fewer bytes per player-hour wins. If none pass, A wins.
+4. Storage, offline-return latency, auditability and complexity are reported, not gates. Replay cost
+   is also reported in µs per action and projected at 10× for the full sim.
 
-**Timebox.** The spike runs on Fri 6 Nov plus a second spike day, Sat 7 or Sun 8 Nov, whichever
-Soto works. On the second spike day the gate cut-off is 18:00 and the matrix cut-off is 22:00.
-If the full Locust matrix isn't done by the matrix cut-off, one run per configuration counts. If
-the gate still fails at the gate cut-off, what happens depends on where the failure is traced. A failure in the sim (non-determinism) means A is chosen provisionally, because A doesn't
-rely on replay, and determinism is followed up in M2. A failure in one store's own code takes
-only that store out of the comparison until it's fixed; the rule then decides among the rest.
+**Timebox.** The spike runs on Fri 6 Nov plus a second spike day, Sat 7 or Sun 8 Nov, whichever Soto
+works. On the second spike day the gate cut-off is 18:00 and the matrix cut-off is 22:00. If the
+full Locust matrix isn't done by the matrix cut-off, one run per configuration counts. If the gate
+still fails at the gate cut-off, what happens depends on where the failure is traced. A failure in
+the sim (non-determinism) means A is chosen provisionally, because A doesn't rely on replay, and
+determinism is followed up in M2. A failure in one store's own code takes only that store out of the
+comparison until it's fixed; the rule then decides among the rest.
 
 ## Method
 
 A `node:http` spike server (`STORE=A|B`, `SNAPSHOT_N=1|25|100`) on a tiny sim (6 wheat plots, a
-bakery with a 3-job queue run one after another, a seeded bonus yield, gifts) against local
-Supabase Postgres, one schema per store. Locust 2.47.0 runs 50 and 200 players (80% active with
-2–8 s between taps, 20% returning after 8 hours via a spike-only clock-offset header), each
-player seeded with about 1,000 actions, 1 min warm-up plus 5 min measured, 3 runs per
-configuration, plus one stress run per store. A concurrency script fires a gift and a harvest at
-one farm at the same moment 1,000 times per store. The matrix runs on one Claude cloud VM
-(4 vCPUs, 16 GiB, PGDG Postgres 17, the local stack's major; `docs/spikes/persistence/matrix/README.md`),
-recorded in `machine.json`; the runner refuses to resume on a different machine. Locust,
-the spike server and Postgres run on the same machine, wherever the matrix runs: a network hop
-between Locust and the server would add the same delay to A and B, and the 2× term of the
-decision rule would loosen by that delay in B's favour. B1's snapshot table is keyed by farm
-and upserted on every action, like A's state row, while B25 and B100 key snapshots by (farm, seq);
-that keeps B1's per-action write comparable with A's (#7). Code
-lives on `prototype/persistence` and is not merged; results are in `docs/spikes/persistence/`.
+bakery with a 3-job queue run one after another, a seeded bonus yield, gifts) against local Supabase
+Postgres, one schema per store. Locust 2.47.0 runs 50 and 200 players (80% active with 2–8 s between
+taps, 20% returning after 8 hours via a spike-only clock-offset header), each player seeded with
+about 1,000 actions, 1 min warm-up plus 5 min measured, 3 runs per configuration, plus one stress
+run per store. A concurrency script fires a gift and a harvest at one farm at the same moment 1,000
+times per store. The matrix runs on one Claude cloud VM (4 vCPUs, 16 GiB, PGDG Postgres 17, the
+local stack's major; `docs/spikes/persistence/matrix/README.md`), recorded in `machine.json`; the
+runner refuses to resume on a different machine. Locust, the spike server and Postgres run on the
+same machine, wherever the matrix runs: a network hop between Locust and the server would add the
+same delay to A and B, and the 2× term of the decision rule would loosen by that delay in B's
+favour. B1's snapshot table is keyed by farm and upserted on every action, like A's state row, while
+B25 and B100 key snapshots by (farm, seq); that keeps B1's per-action write comparable with A's
+(#7). Code lives on `prototype/persistence` and is not merged; results are in
+`docs/spikes/persistence/`.
 
 **Load-run controls (#10).** The spike server exposes them only with `SPIKE_CLOCK=1`:
 `X-Spike-Clock-Offset` (non-negative ms added to server time; the `max(now, lastAt)` clamp still
 applies), `POST /spike/seed` and `GET /spike/storage`. Every response carries `Server-Timing`:
-**load** (store reads, including B's replay, the idempotency check and the gift lookup),
-**commit** (the commit transaction), **sim** (the rest of the handler) and **total**, written to a
-server CSV with the same numbers; a Decorator around `GameStore` measures them, so neither the
-handler nor the stores carry timing code. Players are seeded through the store's own commit path,
-player *i* with 1,000 + (*i* × 37) mod 100 actions, so replay tails spread across 0 to N−1.
-Active players plant, harvest, bake and collect; 15% of their taps are a GET of their farm
-whatever else they could do, and a tap with nothing to do is a GET as well (#11). The stress run
-per store is 200 players with no wait time, 1 min warm-up + 2 min measured, after all other
-configurations. Locust runs from its own uv
-project (uv, Python and Locust pinned; `exclude-newer` 7 days back), and its final stats come
+**load** (store reads, including B's replay, the idempotency check and the gift lookup), **commit**
+(the commit transaction), **sim** (the rest of the handler) and **total**, written to a server CSV
+with the same numbers; a Decorator around `GameStore` measures them, so neither the handler nor the
+stores carry timing code. Players are seeded through the store's own commit path, player _i_ with
+1,000 + (_i_ × 37) mod 100 actions, so replay tails spread across 0 to N−1. Active players plant,
+harvest, bake and collect; 15% of their taps are a GET of their farm whatever else they could do,
+and a tap with nothing to do is a GET as well (#11). The stress run per store is 200 players with no
+wait time, 1 min warm-up + 2 min measured, after all other configurations. Locust runs from its own
+uv project (uv, Python and Locust pinned; `exclude-newer` 7 days back), and its final stats come
 from `--json-file`, because the stats CSV is a periodic snapshot. The server's keep-alive timeout
 (65 s) exceeds the longest client wait, so idle connections aren't closed mid-reuse.
 
@@ -217,123 +219,121 @@ Locust's `GET /farms/:id [return]`, the read after 8 hours of server time.
 
 ## Results
 
-From `docs/spikes/persistence/results.md` and `results.csv` (#11). The matrix ran on 6 Nov 2026
-on the cloud VM, on Postgres 17.11, and finished before any cut-off, so all three runs count. The
-gate row is from `docs/spikes/persistence/gate.md` (#9): seed 42, every store ends on hash
-`e1925b02…` at seq 456 with 456/456 strict round trips, and every B's `stateAt` matches the sim
-11/11 (10 random times plus the middle of the 8-hour gap, #15). Identical on the cloud container
-(Postgres 16), the laptop (Postgres 17) and the load VM (Postgres 17.11, rerun before the matrix).
+From `docs/spikes/persistence/results.md` and `results.csv` (#11). The matrix ran on 6 Nov 2026 on
+the cloud VM, on Postgres 17.11, and finished before any cut-off, so all three runs count. The gate
+row is from `docs/spikes/persistence/gate.md` (#9): seed 42, every store ends on hash `e1925b02…` at
+seq 456 with 456/456 strict round trips, and every B's `stateAt` matches the sim 11/11 (10 random
+times plus the middle of the 8-hour gap, #15). Identical on the cloud container (Postgres 16), the
+laptop (Postgres 17) and the load VM (Postgres 17.11, rerun before the matrix).
 
-| | A | B1 | B25 | B100 |
-| --- | --- | --- | --- | --- |
-| Gate (hash equivalence) | pass | pass | pass | pass |
-| p50 / p95 at 50 players (ms) | 5 / 8 | 6 / 9 | 6 / 9 | 6 / 9 |
-| p50 / p95 at 200 players (ms) | 5 / 8 | 6 / 9 | 6 / 8 | 6 / 8 |
-| p95 per run at 200 players (ms) | 8, 8, 7 | 10, 8, 8 | 9, 8, 8 | 8, 8, 8 |
-| Worst-case load p95 (ms) | n/a | n/a | n/a | 2.46 (n = 635) |
-| Offline return p95 at 50 / 200 (ms) | 4 / 4 | 5 / 5 | 5 / 5 | 6 / 5 |
-| Lost updates / retries / 503s | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
-| Bytes per player-hour at 50 / 200 | 146,364 / 139,264 | 209,715 / 201,114 | 226,645 / 208,350 | 216,269 / 200,704 |
-| Replay cost (µs per action; ×10 projection) | n/a (no replay) | n/a (tail always 0) | 3.7 (reads 3.4, actions 3.8); ×10: 2.37 ms | 3.3 (reads 3.4, actions 3.5); ×10: 4.72 ms |
-| `stateAt` possible | no | yes | yes | yes |
-| Lines / moving parts | 94 code lines; `farms` + `processed_keys` | 129 code lines, shared by all B; `actions` + `snapshots` + injected `replay` | same | same |
+|                                             | A                                         | B1                                                                           | B25                                        | B100                                       |
+| ------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| Gate (hash equivalence)                     | pass                                      | pass                                                                         | pass                                       | pass                                       |
+| p50 / p95 at 50 players (ms)                | 5 / 8                                     | 6 / 9                                                                        | 6 / 9                                      | 6 / 9                                      |
+| p50 / p95 at 200 players (ms)               | 5 / 8                                     | 6 / 9                                                                        | 6 / 8                                      | 6 / 8                                      |
+| p95 per run at 200 players (ms)             | 8, 8, 7                                   | 10, 8, 8                                                                     | 9, 8, 8                                    | 8, 8, 8                                    |
+| Worst-case load p95 (ms)                    | n/a                                       | n/a                                                                          | n/a                                        | 2.46 (n = 635)                             |
+| Offline return p95 at 50 / 200 (ms)         | 4 / 4                                     | 5 / 5                                                                        | 5 / 5                                      | 6 / 5                                      |
+| Lost updates / retries / 503s               | 0 / 0 / 0                                 | 0 / 0 / 0                                                                    | 0 / 0 / 0                                  | 0 / 0 / 0                                  |
+| Bytes per player-hour at 50 / 200           | 146,364 / 139,264                         | 209,715 / 201,114                                                            | 226,645 / 208,350                          | 216,269 / 200,704                          |
+| Replay cost (µs per action; ×10 projection) | n/a (no replay)                           | n/a (tail always 0)                                                          | 3.7 (reads 3.4, actions 3.8); ×10: 2.37 ms | 3.3 (reads 3.4, actions 3.5); ×10: 4.72 ms |
+| `stateAt` possible                          | no                                        | yes                                                                          | yes                                        | yes                                        |
+| Lines / moving parts                        | 94 code lines; `farms` + `processed_keys` | 129 code lines, shared by all B; `actions` + `snapshots` + injected `replay` | same                                       | same                                       |
 
-Every normal configuration had 0 failures and 0 422s; p99 is 10–13 ms everywhere. The matrix load
-is light, about 37 requests/s at 200 players, and about half of requests are reads.
+Every normal configuration had 0 failures and 0 422s; p99 is 10–13 ms everywhere. The matrix load is
+light, about 37 requests/s at 200 players, and about half of requests are reads.
 
-Applied as written, the rule picks **B100**: every B passes step 2 against a 28 ms limit
-(max(2 × 8, 8 + 20)), and B100 passes the 50 ms worst-case load limit at 2.46 ms. In step 3 all
-three B variants tie within 5 ms. Step 3's tie-break picks B100 over B1 by 410 bytes per
-player-hour, which is one 8 kB page per run and within run-to-run spread; the latencies tie within
-1 ms.
+Applied as written, the rule picks **B100**: every B passes step 2 against a 28 ms limit (max(2 × 8,
+8 + 20)), and B100 passes the 50 ms worst-case load limit at 2.46 ms. In step 3 all three B variants
+tie within 5 ms. Step 3's tie-break picks B100 over B1 by 410 bytes per player-hour, which is one 8
+kB page per run and within run-to-run spread; the latencies tie within 1 ms.
 
-**Replay cost (step 4, #29).** A least-squares line of `load` time against tail over every
-measured read and action in the normal runs. The slope includes reading the action rows from
-Postgres as well as applying them, so it is an upper bound on the sim's own cost. The ×10 column
-is intercept + 10 × slope × (N − 1), a mean. Applied to B100's measured worst-case p95 instead
-(2.46 ms plus nine more times 3.3 µs × 99), a 10× costlier sim gives about 5.4 ms, still a tenth
-of the 50 ms limit.
+**Replay cost (step 4, #29).** A least-squares line of `load` time against tail over every measured
+read and action in the normal runs. The slope includes reading the action rows from Postgres as well
+as applying them, so it is an upper bound on the sim's own cost. The ×10 column is intercept + 10 ×
+slope × (N − 1), a mean. Applied to B100's measured worst-case p95 instead (2.46 ms plus nine more
+times 3.3 µs × 99), a 10× costlier sim gives about 5.4 ms, still a tenth of the 50 ms limit.
 
-**Stress runs (reported, not in the rule).** At about 1,450 requests/s, client p95 for actions is
-85 / 88 / 89 / 100 ms (A / B1 / B25 / B100), and server-side action p95 is 14.7 / 17.8 / 18.9 /
-24.1 ms. B100's worst-case load p95 rises to 13.4 ms (n = 3,588). No lost updates, retries or
-503s. B100 had one failure: a postgres.js `UNSAFE_TRANSACTION` error, with nothing committed.
+**Stress runs (reported, not in the rule).** At about 1,450 requests/s, client p95 for actions is 85
+/ 88 / 89 / 100 ms (A / B1 / B25 / B100), and server-side action p95 is 14.7 / 17.8 / 18.9 / 24.1
+ms. B100's worst-case load p95 rises to 13.4 ms (n = 3,588). No lost updates, retries or 503s. B100
+had one failure: a postgres.js `UNSAFE_TRANSACTION` error, with nothing committed.
 
-**Concurrency (#8, reported).** From `docs/spikes/persistence/concurrency.md`, run on 6 Nov in
-the cloud container (Postgres 16.15), not on the load VM. Each scenario sends 1,000 pairs of
-requests over HTTP at the same moment, each pair on a farm of its own.
+**Concurrency (#8, reported).** From `docs/spikes/persistence/concurrency.md`, run on 6 Nov in the
+cloud container (Postgres 16.15), not on the load VM. Each scenario sends 1,000 pairs of requests
+over HTTP at the same moment, each pair on a farm of its own.
 
-| | A | B1 | B25 | B100 |
-| --- | --- | --- | --- | --- |
-| Gift + harvest on one farm: lost updates / retries / 503s | 0 / 993 / 0 | 0 / 991 / 0 | 0 / 994 / 0 | 0 / 992 / 0 |
-| One action sent twice with one key: lost updates / identical answers | 0 / 1,000 | 0 / 1,000 | 0 / 1,000 | 0 / 1,000 |
-| Control, two farms: lost updates / retries | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+|                                                                      | A           | B1          | B25         | B100        |
+| -------------------------------------------------------------------- | ----------- | ----------- | ----------- | ----------- |
+| Gift + harvest on one farm: lost updates / retries / 503s            | 0 / 993 / 0 | 0 / 991 / 0 | 0 / 994 / 0 | 0 / 992 / 0 |
+| One action sent twice with one key: lost updates / identical answers | 0 / 1,000   | 0 / 1,000   | 0 / 1,000   | 0 / 1,000   |
+| Control, two farms: lost updates / retries                           | 0 / 0       | 0 / 0       | 0 / 0       | 0 / 0       |
 
-On one farm almost every pair collides, and the loser commits on a retry. This check found the
-race where a resend misses its own first commit; the second `processed` check before a 422
-(Store interface) closes it.
+On one farm almost every pair collides, and the loser commits on a retry. This check found the race
+where a resend misses its own first commit; the second `processed` check before a 422 (Store
+interface) closes it.
 
 ### Complexity per store
 
-Non-blank, non-comment lines on `prototype/persistence`. Every store also uses `store.ts` (29
-lines: the interface and `StoreError`), `stores.ts` (50: the factory, `replay` and `firstFarm`)
-and the shared gift inbox, `inbox.ts` (79).
+Non-blank, non-comment lines on `prototype/persistence`. Every store also uses `store.ts` (29 lines:
+the interface and `StoreError`), `stores.ts` (50: the factory, `replay` and `firstFarm`) and the
+shared gift inbox, `inbox.ts` (79).
 
-| | A (`store-a.ts`) | B1, B25, B100 (`store-b.ts`) |
-| --- | --- | --- |
-| Lines | 94 | 129 |
-| Tables | `farms`, one row per farm; `processed_keys`, one row per action | `actions`, one row per action; `snapshots`, one row per farm (B1) or one per Nth action (B25, B100) |
-| Constraints | primary keys on `farms (farm_id)` and `processed_keys (farm_id, key)`; `seq > 0` | primary key on `actions (farm_id, seq)`, unique `(farm_id, key)`; primary key on `snapshots (farm_id)` in B1, `(farm_id, seq)` otherwise; `seq > 0` on both |
-| Commit paths | claim the key, or return the duplicate; insert the first row or update where `seq = expectedSeq`, or conflict; inbox write, or refused | append where the previous seq exists, or return the duplicate or conflict; inbox write, or refused; snapshot (B1 every action, B25 and B100 every Nth) |
-| Read paths | `load`: one row, or a new farm | `load`: latest snapshot, tail, `replay`; `stateAt`: the same up to `t` |
+|              | A (`store-a.ts`)                                                                                                                       | B1, B25, B100 (`store-b.ts`)                                                                                                                                |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lines        | 94                                                                                                                                     | 129                                                                                                                                                         |
+| Tables       | `farms`, one row per farm; `processed_keys`, one row per action                                                                        | `actions`, one row per action; `snapshots`, one row per farm (B1) or one per Nth action (B25, B100)                                                         |
+| Constraints  | primary keys on `farms (farm_id)` and `processed_keys (farm_id, key)`; `seq > 0`                                                       | primary key on `actions (farm_id, seq)`, unique `(farm_id, key)`; primary key on `snapshots (farm_id)` in B1, `(farm_id, seq)` otherwise; `seq > 0` on both |
+| Commit paths | claim the key, or return the duplicate; insert the first row or update where `seq = expectedSeq`, or conflict; inbox write, or refused | append where the previous seq exists, or return the duplicate or conflict; inbox write, or refused; snapshot (B1 every action, B25 and B100 every Nth)      |
+| Read paths   | `load`: one row, or a new farm                                                                                                         | `load`: latest snapshot, tail, `replay`; `stateAt`: the same up to `t`                                                                                      |
 
 The failure modes each store adds:
 
-- **A** keeps only the latest farm. A wrong write overwrites the only copy, and no earlier state
-  can be rebuilt, so A can't audit. That is also why A stores the whole first answer with its key.
-- **B** depends on replay. If the rules refuse a logged action, `replay` throws and that farm
-  can't load. That happens if the sim isn't deterministic (the gate's step 0 checks this) or if a
-  rules change refuses an action the old rules accepted.
+- **A** keeps only the latest farm. A wrong write overwrites the only copy, and no earlier state can
+  be rebuilt, so A can't audit. That is also why A stores the whole first answer with its key.
+- **B** depends on replay. If the rules refuse a logged action, `replay` throws and that farm can't
+  load. That happens if the sim isn't deterministic (the gate's step 0 checks this) or if a rules
+  change refuses an action the old rules accepted.
 - **B** stores the farm twice, as log and as snapshots. A snapshot is the handler's `next`, not a
-  replay, so a handler bug could write one the log doesn't replay to. `load` doesn't compare
-  them; the gate's strict round trips do.
+  replay, so a handler bug could write one the log doesn't replay to. `load` doesn't compare them;
+  the gate's strict round trips do.
 - **B1** keeps only the latest snapshot, so `stateAt` at an earlier time replays the log from the
   first action. B25 and B100 replay at most N − 1 actions from the nearest earlier snapshot.
-- **B** reads the snapshot and the tail in two queries outside a transaction. That is safe
-  because the log is append-only: an older snapshot plus its tail still gives the right farm.
+- **B** reads the snapshot and the tail in two queries outside a transaction. That is safe because
+  the log is append-only: an older snapshot plus its tail still gives the right farm.
 - **B100** had the stress runs' one driver error (`UNSAFE_TRANSACTION`, #28). Its cause is open.
 
 ## Decision
 
-**Store B100: an append-only action log per farm, with a snapshot kept after every 100th
-action.** This is the rule's verdict, applied as written:
+**Store B100: an append-only action log per farm, with a snapshot kept after every 100th action.**
+This is the rule's verdict, applied as written:
 
 1. **Gate.** Every store passes: one hash at seq 456, 456/456 strict round trips, and `stateAt`
    11/11 for every B.
-2. **B wins unless.** A's p95 at 200 players is 8 ms, so the limit is max(2 × 8, 8 + 20) = 28 ms.
-   B1 (9 ms), B25 (8 ms) and B100 (8 ms) are all under it. B100's worst-case load p95 is 2.46 ms,
-   under the 50 ms limit. Every B variant passes.
-3. **Among passing variants.** The lowest p95 is 8 ms, and all three are within 5 ms of it, so
-   they tie. The tie-break is bytes per player-hour at 200 players: B100 200,704, B1 201,114, B25
+2. **B wins unless.** A's p95 at 200 players is 8 ms, so the limit is max(2 × 8, 8 + 20) = 28 ms. B1
+   (9 ms), B25 (8 ms) and B100 (8 ms) are all under it. B100's worst-case load p95 is 2.46 ms, under
+   the 50 ms limit. Every B variant passes.
+3. **Among passing variants.** The lowest p95 is 8 ms, and all three are within 5 ms of it, so they
+   tie. The tie-break is bytes per player-hour at 200 players: B100 200,704, B1 201,114, B25
    208,350. B100 wins.
 
-The rule stands as pre-registered. The tie-break margin, 410 bytes per player-hour, is one 8 kB
-page per run and within run-to-run spread (Results), so on this data B1 and B100 can't be told
-apart on storage. B1 is not re-picked on that ground: changing what counts after the results
-exist would weaken the spike.
+The rule stands as pre-registered. The tie-break margin, 410 bytes per player-hour, is one 8 kB page
+per run and within run-to-run spread (Results), so on this data B1 and B100 can't be told apart on
+storage. B1 is not re-picked on that ground: changing what counts after the results exist would
+weaken the spike.
 
-**Scope.** The verdict holds up to 200 concurrent players, about 37 requests/s, measured on the
-load VM (#15). That is the game's expected load, not its limit.
+**Scope.** The verdict holds up to 200 concurrent players, about 37 requests/s, measured on the load
+VM (#15). That is the game's expected load, not its limit.
 
-**Named risk: B is slower than A under saturation.** In the stress runs (about 1,450
-requests/s, not in the rule), client action p95 is 85 ms for A and 100 ms for B100, 18% above.
-On the server, B100's action p95 is 64% above A's (24.1 against 14.7 ms), and its worst-case
-load p95 rises from 2.46 to 13.4 ms. The revisit trigger is in Consequences.
+**Named risk: B is slower than A under saturation.** In the stress runs (about 1,450 requests/s, not
+in the rule), client action p95 is 85 ms for A and 100 ms for B100, 18% above. On the server, B100's
+action p95 is 64% above A's (24.1 against 14.7 ms), and its worst-case load p95 rises from 2.46 to
+13.4 ms. The revisit trigger is in Consequences.
 
 **Growth signal: replay cost.** B100's replay costs 3.3 µs per action (3.4 for reads, 3.5 for
 actions), reading the rows from Postgres included. With a sim 10× as costly, the worst case (a
-99-action tail) averages about 4.7 ms, and about 5.4 ms applied to the measured p95. Both are
-about a tenth of the 50 ms limit.
+99-action tail) averages about 4.7 ms, and about 5.4 ms applied to the measured p95. Both are about
+a tenth of the 50 ms limit.
 
 ## Consequences
 
@@ -341,37 +341,37 @@ Whichever store wins:
 
 - The clamp `at = max(serverNow, lastAt)` stays in the real API, so a farm's time never runs
   backwards across server instances.
-- **M2 decision: where the state hash lives.** The spike hashes with SHA-256 from
-  `node:crypto`. The real `packages/sim` can't import it (zero runtime dependencies, no `node:*`
-  imports), and the browser's `crypto.subtle` is async. So in M2 the state hash either moves out
-  of the sim into the server and client code around it, or becomes a small pure-TypeScript hash
-  inside the sim. **Decided 8 Nov:** a pure-TypeScript SHA-256 inside the sim, exported as
-  `stateHash` ([ADR-0003](0003-simulation-design.md), section 6).
+- **M2 decision: where the state hash lives.** The spike hashes with SHA-256 from `node:crypto`. The
+  real `packages/sim` can't import it (zero runtime dependencies, no `node:*` imports), and the
+  browser's `crypto.subtle` is async. So in M2 the state hash either moves out of the sim into the
+  server and client code around it, or becomes a small pure-TypeScript hash inside the sim.
+  **Decided 8 Nov:** a pure-TypeScript SHA-256 inside the sim, exported as `stateHash`
+  ([ADR-0003](0003-simulation-design.md), section 6).
 
 Because B100 won:
 
-- **M3's schema is the action log plus a snapshot after every 100th action.** `actions` is keyed
-  by (farm, seq), with a unique (farm, idempotency key) and the stored first answer. `snapshots`
-  is keyed by (farm, seq, rules version), and both tables carry a `rules_version` column
-  (amended 11 Nov, [ADR-0006](0006-rules-versions-and-replay.md)). The log is the source of
-  truth; snapshots are a cache.
-- **`stateAt` is available for audits** (`AuditableStore`). It replays at most 99 actions from
-  the nearest snapshot at or before `t`. The audit route refuses a `t` after server time.
-- **The idempotency path carries over as the spike built it:** `processed` before the sim, the
-  key and the first answer written in the log row in the commit's transaction, and a second
-  `processed` check before any 422.
-- **M2/M3 decision: replaying old logs after a rules change.** If new rules refuse an
-  action the old rules accepted, `replay` throws and that farm can't load. **Decided 11 Nov
-  (#31):** every log row and snapshot records its rules version, a replay never crosses a version,
-  and a base snapshot holds the farm after its version upgrade. That adds a `rules_version`
-  column to `actions` and to `snapshots`, whose key above becomes (farm, seq, rules version): a
-  base snapshot can sit at any seq, beside a 100th-action snapshot at the same seq
+- **M3's schema is the action log plus a snapshot after every 100th action.** `actions` is keyed by
+  (farm, seq), with a unique (farm, idempotency key) and the stored first answer. `snapshots` is
+  keyed by (farm, seq, rules version), and both tables carry a `rules_version` column (amended 11
+  Nov, [ADR-0006](0006-rules-versions-and-replay.md)). The log is the source of truth; snapshots are
+  a cache.
+- **`stateAt` is available for audits** (`AuditableStore`). It replays at most 99 actions from the
+  nearest snapshot at or before `t`. The audit route refuses a `t` after server time.
+- **The idempotency path carries over as the spike built it:** `processed` before the sim, the key
+  and the first answer written in the log row in the commit's transaction, and a second `processed`
+  check before any 422.
+- **M2/M3 decision: replaying old logs after a rules change.** If new rules refuse an action the old
+  rules accepted, `replay` throws and that farm can't load. **Decided 11 Nov (#31):** every log row
+  and snapshot records its rules version, a replay never crosses a version, and a base snapshot
+  holds the farm after its version upgrade. That adds a `rules_version` column to `actions` and to
+  `snapshots`, whose key above becomes (farm, seq, rules version): a base snapshot can sit at any
+  seq, beside a 100th-action snapshot at the same seq
   ([ADR-0006](0006-rules-versions-and-replay.md)).
-- **M3 checks its transaction use before building on it (#28).** Every query inside a
-  transaction uses the transaction handle, and a saturating stress run shows 0
-  `UNSAFE_TRANSACTION` errors and 0 lost updates.
+- **M3 checks its transaction use before building on it (#28).** Every query inside a transaction
+  uses the transaction handle, and a saturating stress run shows 0 `UNSAFE_TRANSACTION` errors and 0
+  lost updates.
 - **Revisit trigger for load.** Re-measure B100 against A before real concurrency approaches the
   stress level (about 1,450 requests/s on the load VM).
 - **The storage numbers understate B100's snapshot cost.** In a 6-minute run a farm makes about
-  50–60 actions, so B100 wrote about one snapshot per farm or none. Bytes per player-hour from
-  these runs aren't an estimate for longer play.
+  50–60 actions, so B100 wrote about one snapshot per farm or none. Bytes per player-hour from these
+  runs aren't an estimate for longer play.
