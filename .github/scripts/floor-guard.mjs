@@ -13,7 +13,7 @@
 // (a narrowing word, a negation, a new clause, comment, footnote or rule, a rule moved to another
 // list) is marked there, `warning [rule-narrowed]` for a strong signal and `note [check]` for a
 // weak one: for the admin's merge review, never a failure (admin, 9 Nov; ADR-0004). It also names
-// each spent Exceptions row, one in the merge base's table, as a warning, never a failure (#271).
+// each spent Exceptions row, a row in the merge base's table, as a warning, never a failure (#271).
 //
 // Usage: node .github/scripts/floor-guard.mjs [--base <ref>]   (default base: origin/main)
 // FLOOR_GUARD_TODAY=YYYY-MM-DD overrides today's date, for tests; it's ignored in CI.
@@ -1402,9 +1402,9 @@ const checkoutFiles = () =>
 	(git(["ls-files", "-z", "--cached", "--others", "--exclude-standard"]) ?? "")
 		.split("\0")
 		.filter((f) => f && existsSync(f));
-const spentRows = (baseRows, allNow, addedRows, files) => {
+const spentRows = (baseRows, allNow, addedRows) => {
 	const rewritten = new Set(addedRows.map((r) => parseException(r.text).id));
-	const all = baseRows.length ? files() : [];
+	const all = baseRows.length ? checkoutFiles() : [];
 	return baseRows
 		.map((r) => ({ r, e: parseException(r.text) }))
 		.filter(({ e }) => !rewritten.has(e.id))
@@ -1433,7 +1433,9 @@ const spentReport = (spent) => {
 	return {
 		log: [`floor-guard: warning: ${intro}`, ...lines.map((l) => `  ${l}`)].join("\n"),
 		summary: `### floor guard: spent Exceptions rows\n\n${intro}\n\n${lines.map((l) => `- ${l}`).join("\n")}\n`,
-		annotation: `::warning file=CONSTRAINTS.md${at ? `,line=${at}` : ""},title=${escapeProp("CONSTRAINTS.md: spent Exceptions rows")}::${escapeData([intro, ...lines].join("\n"))}`,
+		annotations: [
+			`::warning file=CONSTRAINTS.md${at ? `,line=${at}` : ""},title=${escapeProp("CONSTRAINTS.md: spent Exceptions rows")}::${escapeData([intro, ...lines].join("\n"))}`,
+		],
 	};
 };
 
@@ -1711,7 +1713,6 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 			exceptionRows(oldContent(mergeBase, "CONSTRAINTS.md") ?? []).waiving,
 			allNow,
 			addedRows,
-			checkoutFiles,
 		),
 	);
 	// The spent rows take one of GitHub's 10 annotations, so the change report keeps the rest.
@@ -1785,7 +1786,7 @@ const main = () => {
 	});
 	for (const n of notices) console.log(`floor-guard: note: ${n}`);
 	// Spent rows first: their one annotation is counted in the change report's 10.
-	const reports = [spent && { ...spent, annotations: [spent.annotation] }, report].filter(Boolean);
+	const reports = [spent, report].filter(Boolean);
 	for (const r of reports) {
 		if (process.env.GITHUB_ACTIONS === "true") {
 			// The report quotes text the PR wrote. Inside a stop-commands block with an unguessable
