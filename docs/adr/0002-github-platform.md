@@ -1081,7 +1081,7 @@ CONTRIBUTING, no issue or PR template, no licence.
 
 | File | Recommendation | Why |
 |---|---|---|
-| Issue forms per type (`.github/ISSUE_TEMPLATE/*.yml`) | **Adopt** at M2 (appendix A4) | Each form asks for a goal and "Acceptance criteria", rule 2 of the definition of ready. It sets the type label and `triage`. Agents file through `gh issue create --body`, which bypasses forms, so the forms help the admin's web filing and show agents the expected body ([issue forms syntax](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms)). |
+| Issue forms per type (`.github/ISSUE_TEMPLATE/*.yml`) | **Adopt** at M2 (appendix A4) | Each form asks for a goal and "Acceptance criteria", rule 2 of the definition of ready. It sets the type label and `triage`, and since #254 the native issue type with the top-level `type:` key, by the mapping in `scripts/lib/issue-types.sh` (#266; `.github/scripts/tests/issue-forms.test.mjs` checks the two agree). Agents file through `gh issue create --body`, which bypasses forms, so the forms help the admin's web filing and show agents the expected body ([issue forms syntax](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms)). |
 | `ISSUE_TEMPLATE/config.yml` | **Adopt**, blank issues **off** | Every issue needs a type. The setting affects only the web UI, not the API or `gh`. |
 | PR template | **Adopt** at M2 (appendix A2) | Matches the skill's change summary (skill, *Change Summaries*: changes made, things not touched, concerns) and adds `Closes #N`, verification, protected paths, screenshots and the Changelog line (area 1). |
 | CODEOWNERS | **Adopt** at M2 (appendix A3) | Defines the code-owned PRs: the `main` ruleset requires the code owner's approval on these paths (area 2, MUST-15.1). Works on a private repo on Pro. |
@@ -1761,7 +1761,8 @@ GitHub reads CODEOWNERS from the PR's base branch, so a PR can't remove its own 
 blank_issues_enabled: false
 ```
 
-Each form sets its type label plus `triage`; the area is added when the issue is evaluated
+Each form sets its type label plus `triage`, and its native issue type with `type:` (#254, by the
+mapping in `scripts/lib/issue-types.sh`); the area is added when the issue is evaluated
 (`triage-labels.md`). Milestone and Project fields are set on the Project (auto-add puts the issue
 there).
 
@@ -1771,6 +1772,7 @@ there).
 name: Feature
 description: New behaviour for the player, the admin or the API
 labels: [feature, triage]
+type: Feature
 body:
   - type: textarea
     id: goal
@@ -1799,6 +1801,7 @@ body:
 name: Bug
 description: Something that worked, or was specified, behaves wrongly
 labels: [bug, triage]
+type: Bug
 body:
   - type: textarea
     id: goal
@@ -1832,6 +1835,7 @@ body:
 name: Spike
 description: Throwaway work that answers a question with measurements or a prototype
 labels: [spike, triage]
+type: Chore
 body:
   - type: textarea
     id: goal
@@ -1866,6 +1870,7 @@ body:
 name: Design
 description: Work whose output is decisions (a grill, an ADR, glossary terms, the spec)
 labels: [design, triage]
+type: Design
 body:
   - type: textarea
     id: goal
@@ -1893,6 +1898,7 @@ body:
 name: Chore
 description: Upkeep with no new behaviour (tooling, config, hooks, dependencies, docs-only work)
 labels: [chore, triage]
+type: Chore
 body:
   - type: textarea
     id: goal
@@ -1915,6 +1921,7 @@ body:
 name: Idea
 description: Wanted but not shaped enough to build. Never moves to Ready as an idea.
 labels: [idea, triage]
+type: Chore
 body:
   - type: textarea
     id: goal

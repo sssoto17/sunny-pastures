@@ -1,6 +1,7 @@
 name: Bug
 description: Something that worked, or was specified, behaves wrongly
 labels: [bug, triage]
+type: Bug
 body:
   - type: textarea
     id: goal
