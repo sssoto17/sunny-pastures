@@ -1398,15 +1398,22 @@ describe("floor guard, end to end", () => {
 			});
 		});
 
+		// The real coverage row with its "Today" cell set, so the test keeps running the "not yet" →
+		// first value change on the real file once a value is recorded there (#98).
 		const NOT_YET = "not yet: recorded after the first `packages/sim` PR";
+		const COVERAGE_ROW = /^(\|\s*Project coverage\s*\|)[^|]*\|/m;
+		const coverageToday = (today) => {
+			if (!COVERAGE_ROW.test(REAL)) throw new Error("CONSTRAINTS.md has no Project coverage row");
+			return REAL.replace(COVERAGE_ROW, `$1 ${today} |`);
+		};
 		it("lets the coverage ratchet get its first value, then holds it", () => {
-			realRepo();
-			repo.write({ "CONSTRAINTS.md": edit(REAL, NOT_YET, "92.5%") });
+			realRepo(coverageToday(NOT_YET));
+			repo.write({ "CONSTRAINTS.md": coverageToday("92.5%") });
 			expect(guard().code).toBe(0);
-			realRepo(edit(REAL, NOT_YET, "92.5%"));
-			repo.write({ "CONSTRAINTS.md": edit(REAL, NOT_YET, "90%") });
+			realRepo(coverageToday("92.5%"));
+			repo.write({ "CONSTRAINTS.md": coverageToday("90%") });
 			expect(guard().out).toContain("[threshold-loosened] CONSTRAINTS.md");
-			repo.write({ "CONSTRAINTS.md": edit(REAL, NOT_YET, "93%") });
+			repo.write({ "CONSTRAINTS.md": coverageToday("93%") });
 			expect(guard().code).toBe(0);
 		});
 	});
