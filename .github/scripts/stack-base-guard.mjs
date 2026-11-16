@@ -50,12 +50,26 @@ const requirePr = (event) => {
 		throw new CannotRun("the event has no pull_request base or default branch");
 };
 
-/** Whether typecheck, lint and test should run: false only for a stack's lower part. */
+/**
+ * Whether typecheck, lint and test should run. False only for a stack's lower part whose head the
+ * top open part's head already contains, so the top part's run covers it. A push to a lower part
+ * without `scripts/stack.sh update`, or a top part that left the stack, runs the suite here, or a
+ * stack merge could land code no test ran on. `getStack(n)` and `compare(base, head)` (the
+ * compare endpoint's status) come from REST.
+ */
 export const isTopPart = async (event, deps) => {
 	if (!event?.pull_request) return true; // a push to main: run on what landed
 	requirePr(event);
 	const stack = await findStack(event, deps);
-	return !stack || stack.position === stack.size;
+	if (!stack || stack.position === stack.size) return true;
+	const pr = event.pull_request;
+	const open = ((await deps.getStack(stack.number))?.pull_requests ?? []).filter(
+		(p) => p.state === "open",
+	);
+	const top = open.at(-1);
+	if (!top || top.number === pr.number) return true;
+	const status = await deps.compare(pr.head.sha, top.head.sha);
+	return !(status === "ahead" || status === "identical");
 };
 
 /**
@@ -85,24 +99,27 @@ export const checkStackBase = async (event, { getPull, sleep, tries = 6 }) => {
 	};
 };
 
-const getPullFromApi = (repo, token) => async (number) => {
-	const res = await globalThis.fetch(`https://api.github.com/repos/${repo}/pulls/${number}`, {
+const apiGet = (repo, token) => async (path) => {
+	const res = await globalThis.fetch(`https://api.github.com/repos/${repo}/${path}`, {
 		headers: {
 			accept: "application/vnd.github+json",
 			...(token ? { authorization: `Bearer ${token}` } : {}),
 		},
 	});
-	if (!res.ok) throw new CannotRun(`GET pulls/${number} answered ${res.status}`);
+	if (!res.ok) throw new CannotRun(`GET ${path} answered ${res.status}`);
 	return res.json();
 };
 
 const main = async () => {
 	const event = readEvent();
+	const get = apiGet(
+		event?.repository?.full_name ?? process.env.GITHUB_REPOSITORY,
+		process.env.GITHUB_TOKEN,
+	);
 	const deps = {
-		getPull: getPullFromApi(
-			event?.repository?.full_name ?? process.env.GITHUB_REPOSITORY,
-			process.env.GITHUB_TOKEN,
-		),
+		getPull: (n) => get(`pulls/${n}`),
+		getStack: (n) => get(`stacks/${n}`),
+		compare: async (base, head) => (await get(`compare/${base}...${head}`)).status,
 		sleep: (ms) => delay(ms),
 	};
 	const pr = event?.pull_request ?? {};

@@ -12,7 +12,7 @@ const STACK = { number: 305, position: 2, size: 2, base: { ref: "main" } };
 
 const event = (base, stack = null) => ({
 	repository: { full_name: "sssoto17/sunny-pastures", default_branch: "main" },
-	pull_request: { number: 296, base: { ref: base }, stack },
+	pull_request: { number: 296, head: { sha: "own" }, base: { ref: base }, stack },
 });
 
 // A getPull that answers from a list, one entry per call, and counts its calls.
@@ -25,6 +25,25 @@ const answers = (...stacks) => {
 	return { calls, getPull };
 };
 const noSleep = () => Promise.resolve();
+
+// The stack as GET stacks/<n> lists it (#296 below #297), and the compare endpoint's status for
+// own...<top part's head>: "ahead" or "identical" means the top part contains this part's head.
+const stackOf = (status = "ahead", topState = "open") => {
+	const compared = [];
+	return {
+		compared,
+		getStack: async () => ({
+			pull_requests: [
+				{ number: 296, state: "open", head: { sha: "own" } },
+				{ number: 297, state: topState, head: { sha: "top" } },
+			],
+		}),
+		compare: async (base, head) => {
+			compared.push([base, head]);
+			return status;
+		},
+	};
+};
 
 describe("checkStackBase", () => {
 	it("passes a PR on the default branch without asking GitHub", async () => {
@@ -106,7 +125,9 @@ describe("isTopPart", () => {
 
 	it("reads the position from the event's stack", async () => {
 		const { calls, getPull } = answers(null);
-		expect(await isTopPart(event("main", lower), { getPull, sleep: noSleep })).toBe(false);
+		expect(await isTopPart(event("main", lower), { getPull, sleep: noSleep, ...stackOf() })).toBe(
+			false,
+		);
 		expect(await isTopPart(event("270-closing-links", top), { getPull, sleep: noSleep })).toBe(
 			true,
 		);
@@ -122,6 +143,7 @@ describe("isTopPart", () => {
 		const r = await isTopPart(event("270-closing-links"), {
 			getPull: second.getPull,
 			sleep: noSleep,
+			...stackOf(),
 		});
 		expect(r).toBe(false);
 	});
@@ -130,7 +152,27 @@ describe("isTopPart", () => {
 		const { calls, getPull } = answers(null, lower);
 		expect(await isTopPart(event("main"), { getPull, sleep: noSleep })).toBe(true);
 		expect(calls).toEqual([296]);
-		expect(await isTopPart(event("main"), { ...answers(lower), sleep: noSleep })).toBe(false);
+		const deps = { ...answers(lower), sleep: noSleep, ...stackOf() };
+		expect(await isTopPart(event("main"), deps)).toBe(false);
+	});
+
+	// A lower part skips only while the top part's run covers its head (#264's fix round): a push
+	// to a lower part without `scripts/stack.sh update`, or a top part that left the stack, would
+	// otherwise let a stack merge land code no test ran on.
+	it("skips a lower part only when the top part's head contains its own", async () => {
+		const ok = stackOf("identical");
+		expect(await isTopPart(event("main", lower), { sleep: noSleep, ...ok })).toBe(false);
+		expect(ok.compared).toEqual([["own", "top"]]);
+		for (const status of ["behind", "diverged"]) {
+			const stale = stackOf(status);
+			expect(await isTopPart(event("main", lower), { sleep: noSleep, ...stale })).toBe(true);
+		}
+	});
+
+	it("runs a lower part when no open part is left above it", async () => {
+		const left = stackOf("ahead", "closed");
+		expect(await isTopPart(event("main", lower), { sleep: noSleep, ...left })).toBe(true);
+		expect(left.compared).toEqual([]);
 	});
 });
 
@@ -160,17 +202,17 @@ describe("stack-base-guard.mjs", () => {
 		expect(r.stdout).toContain('"position":2');
 	});
 
-	it("--top writes top=false to $GITHUB_OUTPUT for a lower part, and exits 0", () => {
+	it("--top writes top=true to $GITHUB_OUTPUT for a stack's top part, and exits 0", () => {
 		dir = mkdtempSync(join(tmpdir(), "stack-base-"));
 		const path = join(dir, "event.json");
 		const out = join(dir, "output");
-		writeFileSync(path, JSON.stringify(event("main", { ...STACK, position: 1, size: 2 })));
+		writeFileSync(path, JSON.stringify(event("main", { ...STACK, position: 2, size: 2 })));
 		const r = spawnSync(process.execPath, [SCRIPT, "--top"], {
 			encoding: "utf8",
 			env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: path, GITHUB_OUTPUT: out },
 		});
 		expect(r.status).toBe(0);
-		expect(readFileSync(out, "utf8")).toBe("top=false\n");
+		expect(readFileSync(out, "utf8")).toBe("top=true\n");
 	});
 
 	// ci.yml runs typecheck, lint and test unless top is exactly "false": a lookup that can't run
