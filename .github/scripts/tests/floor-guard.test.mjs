@@ -90,6 +90,22 @@ describe("floor guard, end to end", () => {
 		expect(guard().code).toBe(1);
 	});
 
+	// #42: the security scans' own suppressions are a weakened bar like any other. A finding
+	// silenced inline would turn `guard / code-scan` or `guard / secrets` green with the issue still
+	// there.
+	it.each([
+		["nosemgrep", "packages/sim/src/c.ts", "run(x); // nosemgrep\n"],
+		["nosemgrep with a rule id", "packages/sim/src/c.ts", "// nosemgrep: javascript.eval\n"],
+		["gitleaks:allow", "packages/sim/src/c.ts", 'const k = "x"; // gitleaks:allow\n'],
+		["gitleaks:allow in YAML", ".github/workflows/x.yml", "key: x # gitleaks:allow\n"],
+	])("blocks the scanner suppression %s", (_, path, content) => {
+		setup();
+		repo.write({ [path]: content });
+		const r = guard();
+		expect(r.code).toBe(1);
+		expect(r.out).toContain(`[silenced-checker] ${path}:1`);
+	});
+
 	it("ignores suppressions mentioned in prose", () => {
 		setup();
 		repo.write({ "docs/x.md": "Never add @ts-ignore or a TODO.\n" });
@@ -1416,6 +1432,23 @@ describe("floor guard, end to end", () => {
 			"export default [{ rules: {\n  'no-unused-vars': 'off',\n} }];\n",
 		],
 		["a gitleaks ignore entry", ".gitleaksignore", "abc123:src/x.ts:generic-api-key:1\n"],
+		// #42: the other scanner configs that can hide a finding (CONSTRAINTS.md, Floor).
+		[
+			"a gitleaks allowlist",
+			".gitleaks.toml",
+			'[extend]\nuseDefault = true\n\n[allowlist]\npaths = ["apps/web/src/server/"]\n',
+		],
+		["a Semgrep ignore entry", ".semgrepignore", "apps/web/src/server/\n"],
+		[
+			"an osv-scanner ignored vulnerability",
+			"osv-scanner.toml",
+			'[[IgnoredVulns]]\nid = "GHSA-xxxx-xxxx-xxxx"\nreason = "not reachable"\n',
+		],
+		[
+			"an osv-scanner package override",
+			"osv-scanner.toml",
+			'[[PackageOverrides]]\nname = "lodash"\necosystem = "npm"\nignore = true\n',
+		],
 		["a Fallow ignore", ".fallow.toml", 'ignorePatterns = ["packages/sim/**"]\n'],
 	])("blocks %s", (_, path, content) => {
 		setup();

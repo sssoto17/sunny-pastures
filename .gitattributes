@@ -1,0 +1,3 @@
+# Written by tools, not by hand, so not counted toward the split size (CONSTRAINTS.md, "Split size").
+# The determinism gate's recorded script (#48): `node .github/scripts/determinism-gate.mjs --record`.
+packages/sim/src/sim/tests/determinismScript.json linguist-generated=true

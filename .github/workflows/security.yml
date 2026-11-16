@@ -1,0 +1,101 @@
+# The external security scans every PR runs (CONSTRAINTS.md, "Enforced with numbers": the Secrets,
+# Dependencies and Code security rows; #42). They live apart from ci.yml so each job stays
+# self-contained and other work on ci.yml merges cleanly.
+# Required checks are matched by job name, so each `name:` is exactly the check name in ADR-0002,
+# area 2. No path filters: a required check must report on every PR.
+# Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
+# No third-party action: each scanner is a pinned download checked against a hash written here
+# (ADR-0002, areas 8 and 9). Its suppressions and config files are the floor guard's (#40).
+name: security
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: guard / secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      BASE_REF: ${{ github.base_ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # gitleaks v8.30.1 (published 21 Mar 2026), linux x64. The hash is the release's own
+      # gitleaks_8.30.1_checksums.txt line, copied here so a replaced release asset fails the check.
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # gitleaks reads every commit in the PR's range
+      - name: Install gitleaks
+        run: |
+          dir="$RUNNER_TEMP/gitleaks"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $dir/$archive" | sha256sum --check --strict
+          tar -xzf "$dir/$archive" -C "$dir" gitleaks
+          "$dir/gitleaks" version
+          echo "$dir" >> "$GITHUB_PATH"
+      # The PR's own commits: those in its head and not in the base branch. --redact keeps a
+      # matched value out of the log; --verbose prints each finding's rule, file, line and commit.
+      - name: Scan the PR's commits
+        run: |
+          git log --oneline "origin/$BASE_REF..$HEAD_SHA"
+          gitleaks git --redact --no-banner --verbose --log-opts="origin/$BASE_REF..$HEAD_SHA" .
+
+  audit:
+    name: ci / audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # pnpm audit reads pnpm-lock.yaml, so nothing is installed.
+      - uses: ./.github/actions/setup
+        with:
+          install: 'false'
+      - run: pnpm audit --audit-level=high
+
+  code-scan:
+    name: guard / code-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE_REF: ${{ github.base_ref }}
+      SEMGREP_ENABLE_VERSION_CHECK: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # --baseline-commit needs the merge base
+      # Every package pinned with its hashes, wheels only: nothing resolves or builds here. The
+      # hashes are for the runner's Python 3.12; another Python fails the install, not the scan.
+      - name: Install Semgrep
+        run: |
+          python3 --version
+          python3 -m venv "$RUNNER_TEMP/semgrep"
+          "$RUNNER_TEMP/semgrep/bin/pip" install --quiet --disable-pip-version-check \
+            --require-hashes --only-binary=:all: --no-deps -r .github/semgrep/requirements.txt
+          "$RUNNER_TEMP/semgrep/bin/semgrep" --version
+          echo "$RUNNER_TEMP/semgrep/bin" >> "$GITHUB_PATH"
+      # Only findings that are new since the merge base count (CONSTRAINTS.md, "Ratchets").
+      # --metrics=off: nothing about the scan is sent to Semgrep; the rule packs still download.
+      - name: Scan the change since the merge base
+        run: |
+          base="$(git merge-base "origin/$BASE_REF" HEAD)"
+          echo "Merge base: $base"
+          semgrep scan --config p/default --config p/owasp-top-ten --severity ERROR --error \
+            --metrics=off --baseline-commit "$base"
