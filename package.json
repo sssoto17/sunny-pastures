@@ -18,11 +18,12 @@
 		"test:related": "vitest run --changed origin/main --coverage",
 		"guard:floor": "node .github/scripts/floor-guard.mjs",
 		"coverage:gate": "node .github/scripts/coverage-gate.mjs",
+		"determinism": "node .github/scripts/determinism-gate.mjs",
 		"format:check": "prettier --check --log-level warn \"**/*.{ts,tsx,mts,mjs,js,json}\"",
 		"check:fast": "pnpm typecheck && pnpm lint:changed && pnpm format:check && pnpm guard:floor",
 		"dupes": "fallow dupes packages/sim --fail-on-issues --quiet",
-		"check:task": "pnpm check:fast && pnpm lint && pnpm dupes --changed-since origin/main && pnpm test:related && pnpm coverage:gate --skip-ratchet",
-		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm dupes --changed-since origin/main && pnpm guard:floor && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate"
+		"check:task": "pnpm check:fast && pnpm lint && pnpm dupes --changed-since origin/main && pnpm test:related && pnpm coverage:gate --skip-ratchet && pnpm determinism",
+		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm dupes --changed-since origin/main && pnpm guard:floor && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate && pnpm determinism"
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",
