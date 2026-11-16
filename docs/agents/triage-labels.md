@@ -31,7 +31,8 @@ Project field (Status, Track, Mode, Size, Priority, Week) stays a field and neve
 
 Every issue carries **exactly one type** label, set when it's filed, and the GitHub native issue
 type in the last column (`issue-tracker.md`, **Issue fields**). The scripts read the mapping from
-`scripts/lib/issue-types.sh`, which must match this table; it was set by the admin on 15 Nov 2026
+`scripts/lib/issue-types.sh`, which must match this table, and each issue form sets the same native
+type with its `type:` key (#254; `.github/scripts/tests/issue-forms.test.mjs` checks the forms); it was set by the admin on 15 Nov 2026
 (#266). PRs carry no type label: the
 Conventional Commit prefix in the PR title is the type (see **Pull requests**).
 

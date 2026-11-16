@@ -1,6 +1,7 @@
 name: Design
 description: Work whose output is decisions (a grill, an ADR, glossary terms, the spec)
 labels: [design, triage]
+type: Design
 body:
   - type: textarea
     id: goal
