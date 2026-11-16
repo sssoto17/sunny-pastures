@@ -15,7 +15,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: scripts/stack.sh <command> ...
 
-  open [--base <branch>] [--label <name>]... <branch>=<body-file>...
+  open [--base <branch>] <branch>=<body-file>...
       Push the parts, open each PR on the part below (part 1 on --base, default main), and link
       them as one native stack. Each part must be built on the one below and add commits of its
       own. A body file's first line is the PR title; the rest is the body. Run it again after a
@@ -41,7 +41,7 @@ die() { # code message
 }
 
 # --- parts --------------------------------------------------------------------------------------
-branches=() bodies=() labels=()
+branches=() bodies=()
 parse_parts() { # <branch>=<body-file>... -> branches, bodies; checks each before anything runs
   local arg b f
   for arg in "$@"; do
@@ -86,13 +86,6 @@ ensure_pr() { # head base body-file -> prints the PR number; reuses an open PR o
   title=$(head -n1 "$f")
   body=$(tail -n +2 "$f" | sed '/./,$!d')
   gh api -X POST "$P/pulls" -f title="$title" -f head="$head" -f base="$base" -f body="$body" --jq .number
-}
-
-add_labels() { # pr
-  local l
-  for l in "${labels[@]}"; do
-    gh api -X POST "$P/issues/$1/labels" -f "labels[]=$l" --jq 'length' >/dev/null
-  done
 }
 
 stack_of() { # pr -> its stack's number, or nothing
@@ -189,7 +182,6 @@ cmd_open() {
   while (($#)); do
     case $1 in
       --base) (($# >= 2)) || die 2 "--base needs a branch"; base=$2; shift 2 ;;
-      --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
       *) break ;;
     esac
   done
@@ -215,7 +207,6 @@ cmd_open() {
   git push -q origin "${branches[@]}"
   for i in "${!branches[@]}"; do
     nums+=("$(ensure_pr "${branches[i]}" "${bases[i]}" "${bodies[i]}")")
-    add_labels "${nums[i]}"
   done
   if ((!whole)); then
     local fields=() n

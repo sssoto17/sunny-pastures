@@ -97,8 +97,6 @@ case "$method $path" in
   "GET $P/commits/"*/check-runs)
     sha=${path#"$P"/commits/}; sha=${sha%/check-runs}
     out=$(cat "$st/checks_$sha.json" 2>/dev/null || echo '{"total_count":0,"check_runs":[]}') ;;
-  "POST $P/issues/"*/labels)
-    out='[]' ;;
   "POST $P/stacks")
     prs=$(jq -c .pull_requests <<<"$input")
     (($(jq length <<<"$prs") >= 2)) || { echo "gh: 2 items required (HTTP 422)" >&2; exit 1; }
@@ -201,7 +199,7 @@ expect_err "unknown command"
 # --- open: creates each PR on the part below, then the native stack ----------------------------
 reset
 three_parts
-case_ open --label review:admin p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
+case_ open p1="$(body p1 'feat: one')" p2="$(body p2 'feat: two')" p3="$(body p3 'feat: three')"
 expect_code 0
 expect_eq "p1 pushed" "$(remote_sha p1)" "$(git -C "$repo" rev-parse p1)"
 expect_eq "p3 pushed" "$(remote_sha p3)" "$(git -C "$repo" rev-parse p3)"
@@ -212,7 +210,6 @@ expect_eq "title from the body file's first line" "$(pr_field 401 .title)" "feat
 expect_eq "body without the title line" "$(pr_field 401 .body)" "Part of #264."
 expect_eq "stack holds the parts in order" "$(jq -c .prs "$work/gh/stacks/403.json")" "[400,401,402]"
 expect_eq "part 3 knows its position" "$(pr_field 402 .stack.position)" 3
-expect_call "api -X POST repos/sssoto17/sunny-pastures/issues/402/labels -f labels[]=review:admin"
 expect_out "stack #403"
 # the push never forces and never sets an upstream
 assert "pushed" test -s "$work/pushes"
@@ -360,9 +357,8 @@ case_ update 400
 expect_code 2
 expect_err "rebase or fast-forward"
 expect_eq "their commit kept" "$(remote_sha p2)" "$theirs"
-# GitHub's branch holds a merge commit whose resolution exists nowhere else, or was rewritten to
-# drop a commit. Every other commit there has its patch in the local branch, so `git cherry` sees
-# nothing new: only a head this clone once held may be pushed over.
+# GitHub's branch holds an evil merge or dropped a commit, which `git cherry` can't see: only a
+# head this clone once held may be pushed over.
 for change in merge rewrite; do
   reset
   part p1 main a.txt
