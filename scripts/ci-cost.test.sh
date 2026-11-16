@@ -255,6 +255,22 @@ expect_out "minutes${T}4"
 expect_err "1 review log(s) could not be read"
 expect_err "gh api repos/sssoto17/sunny-pastures/actions/jobs/321/logs | grep 'RESULT subtype='"
 
+# --- a review job that never started has no log to read; a re-run's log counts its last result --
+reset
+runs_page 1 2 \
+  "$(run_json 35 review "$REV" pull_request_target a '[94]' 2026-11-12T10:00:00Z '"cancelled"')" \
+  "$(run_json 36 review "$REV" pull_request_target a '[94]' 2026-11-12T11:00:00Z '"success"')"
+jobs_of 35 "$(job_json 351 review cancelled null null)"
+jobs_of 36 "$(job_json 361 review success 2026-11-12T11:00:00Z 2026-11-12T11:00:30Z)"
+log_of 361 <<'EOF2'
+2026-11-12T11:00:10.0Z RESULT subtype=error_max_turns is_error=true num_turns=30 total_cost_usd=0.10 duration_ms=1
+2026-11-12T11:00:20.0Z RESULT subtype=success is_error=false num_turns=9 total_cost_usd=0.40 duration_ms=900
+EOF2
+case_ "${RANGE[@]}"
+expect_code 0
+expect_out "#94${T}2${T}2${T}1${T}1${T}0.40"
+expect_no_call "jobs/351/logs"
+
 # --- a cancelled review job with no log: Claude was stopped, so it counts 0, reported apart ------
 reset
 runs_page 1 1 "$(run_json 81 review "$REV" pull_request_target a '[94]' 2026-11-16T02:51:00Z '"cancelled"')"
@@ -315,6 +331,24 @@ case_ "${RANGE[@]}"
 expect_code 3
 expect_out_empty
 expect_err "use a shorter range"
+
+# The list's count and its rows disagree: a page went missing.
+reset
+runs_page 1 3 "$(run_json 52 ci "$CI" pull_request a '[94]' 2026-11-08T10:00:00Z '"success"')"
+jobs_of 52
+case_ "${RANGE[@]}"
+expect_code 3
+expect_out_empty
+expect_err "said 3 runs but gave 1"
+
+# More jobs in a run than one page holds: not paged, so it can't run.
+reset
+runs_page 1 1 "$(run_json 53 ci "$CI" pull_request a '[94]' 2026-11-08T10:00:00Z '"success"')"
+printf '{"total_count":101,"jobs":[]}' >"$work/api/${API}_actions_runs_53_jobs@1.json"
+case_ "${RANGE[@]}"
+expect_code 3
+expect_out_empty
+expect_err "more than 100 jobs"
 
 reset
 runs_page 1 2 \

@@ -103,8 +103,8 @@ runs="" total="" page=1 seen=0
 while :; do
   chunk=$(page_of "$API/actions/runs" "$page" "$RUNS" -f created="$from..$to") ||
     die 3 "could not read the workflow runs of $OWNER/$REPO (see gh's error above)"
-  head=${chunk%%$'\n'*}
-  [[ $head =~ ^total$'\t'([0-9]+)$ ]] || die 3 "unexpected answer from the runs list, has the API changed?"
+  first=${chunk%%$'\n'*}
+  [[ $first =~ ^total$'\t'([0-9]+)$ ]] || die 3 "unexpected answer from the runs list, has the API changed?"
   total=${BASH_REMATCH[1]}
   ((total <= MAX_RUNS)) || die 3 "$total runs from $from to $to; the API answers at most $MAX_RUNS: use a shorter range"
   rows=""
