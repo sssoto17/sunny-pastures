@@ -1,7 +1,6 @@
-# Prettier formats *.{ts,tsx,mts,mjs,js,json} (ADR-0005, section 6). Prettier already skips
-# what .gitignore lists.
-# Hand-wrapped prose and tables.
-*.md
+# Prettier formats *.{ts,tsx,mts,mjs,js,json,md} (ADR-0005, section 6). Prettier already skips
+# what .gitignore lists. Markdown is in scope since #344: its prose wraps at 100 columns, and each
+# table keeps `<!-- prettier-ignore -->` on the line before it (`format:md` checks both).
 # Workflow and tool files Prettier would otherwise reformat.
 *.yml
 *.yaml

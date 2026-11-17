@@ -103,6 +103,9 @@ jobs:
       - run: pnpm lint
       # CONSTRAINTS.md, formatting row.
       - run: pnpm format:check
+      # Markdown (#344; ADR-0005, section 6): Prettier's prose wrap, and every top-level table keeps
+      # `<!-- prettier-ignore -->` on the line before it. Not in check:fast, for its 5 s budget.
+      - run: pnpm format:md
       # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
       - run: pnpm dupes --changed-since "$SINCE"
 

@@ -24,11 +24,19 @@ describe("Prettier's ignore files", () => {
 		expect(await ignored(".remember/x.ts")).toBe(true);
 	});
 
+	// #344: Markdown is in scope, but agent configuration stays as the admin wrote it.
+	it("skip Markdown under .claude/ and .agents/, and format it elsewhere", async () => {
+		expect(await ignored(".claude/skills/tdd/SKILL.md")).toBe(true);
+		expect(await ignored(".agents/skills/x/SKILL.md")).toBe(true);
+		expect(await ignored("docs/adr/0005-module-and-file-organisation.md")).toBe(false);
+		expect(await ignored("CONSTRAINTS.md")).toBe(false);
+	});
+
 	it("skip no tracked file outside the paths skipped before", async () => {
 		const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
 			.split("\0")
-			// The extensions `format:check` globs; *.md and *.yml are ignored on purpose.
-			.filter((f) => /\.(ts|tsx|mts|mjs|js|json)$/.test(f) && !SKIPPED_BEFORE.test(f));
+			// The extensions `format:check` and `format:md` glob; *.yml is ignored on purpose.
+			.filter((f) => /\.(ts|tsx|mts|mjs|js|json|md)$/.test(f) && !SKIPPED_BEFORE.test(f));
 		const skipped = [];
 		for (const file of tracked) if (await ignored(file)) skipped.push(file);
 		expect(skipped).toEqual([]);
