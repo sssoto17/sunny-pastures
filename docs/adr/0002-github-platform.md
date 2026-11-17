@@ -879,16 +879,23 @@ separate: this is only the identity step for lanes in Claude Code.
   64 KB), waits for the run named `open-pr <branch>`, and prints the PR's number. A failed run
   answers with its link. `scripts/stack.sh` opens every part through it.
 - **The workflow** (`.github/workflows/open-pr.yml`) always runs `main`'s copy, as
-  `repository_dispatch` does. Its job has `permissions: {}` and environment `factory-app`, whose
+  `repository_dispatch` does. Its job has `permissions: {}` and environment `factory`, whose
   only deployment branch is `main`. It mints the App's token with `contents: read` and
   `pull_requests: write` only, checks out `main`'s `.github/scripts`, and
   `.github/scripts/open-pr.sh` opens the PR over REST, adds the labels that already exist, and
   links a stack part into the stack of the part below. Its PRs start CI and the review as any
   App's do ("The factory's identity", above).
-- **The key never enters a session.** It lives only in `factory-app`'s secret
-  `FACTORY_APP_PRIVATE_KEY`, set by the admin with `scripts/setup/factory-app.sh` through stdin;
-  the client ID is that environment's variable `FACTORY_APP_CLIENT_ID`. A new key and a new
-  environment, not #101's `factory`: that one also admits `throwaway/*` and is #107's.
+- **The key never enters a session.** It lives only in the secret `FACTORY_APP_PRIVATE_KEY` of
+  #101's environment `factory`, which #107's factory job uses too; the client ID is that
+  environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh` checks both, and
+  stores a new key only through stdin.
+- **One environment, `main` only (admin, 17 Nov 2026).** The lanes and #107's factory share
+  `factory`, and its only deployment rule is `main`: the admin removed #101's `throwaway/*` rule,
+  and the setup script stops while any other rule remains. With one App, a second key in a
+  second environment would add no protection, since either key acts as the same App. The risk is
+  a workflow on any branch other than `main` reading the key: a branch's own copy of a workflow
+  could print it. So #107's throwaway test dispatches from `main` instead of running on a
+  `throwaway/*` branch.
 - **The payload is untrusted.** Anyone with write access can dispatch, a prompt-injected session
   included. Its fields reach the shell only through `env:`, never as `${{ }}` inside `run:` (the
   run's name uses the branch, which is display text no shell reads), and go to GitHub as values
@@ -931,6 +938,10 @@ so. Until then Q14's concern, the reviewer approving a push it made itself, rest
 - **The key in the cloud environment**, minting the token in the session. Cloud environment
   variables are readable by every command the model runs (Claude Code's cloud-environment docs),
   so one prompt injection could carry the key off, and with it the App, for good.
+- **A second environment and key for the lanes** (this PR's first draft).
+  Rejected by the admin (17 Nov 2026): one App means one identity whichever key mints its
+  token, so a second key protects nothing, and two environments are two branch rules to keep
+  right.
 - **Keep opening PRs as the admin's account** (the status quo). Every admin-review PR stays a
   bypass merge that any session could make ("The honest limit", above), and auto-merge (#68)
   can't rest on a real admin approval.

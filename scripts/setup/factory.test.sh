@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for factory-app.sh through its command line. The wizard reads its answers from stdin (no
+# Tests for factory.sh through its command line. The wizard reads its answers from stdin (no
 # terminal, so no screen clearing). `gh` is a fake on PATH: it logs its arguments to $work/calls,
 # keeps the environment in $work/env (its policy, "false true" when custom) and $work/policies
 # ("<type> <name>" lines), the secret names in $work/secrets, the variable in $work/var, and saves
@@ -7,13 +7,13 @@
 # answer ("<contents> <pull_requests> <administration> <workflows> <selection>"), $work/repos its
 # repositories; no file there makes the installations call fail, as it may for gh's token.
 # The planted key holds a marker that must reach `gh secret set` on stdin and nowhere else.
-# Run: bash scripts/setup/factory-app.test.sh
+# Run: bash scripts/setup/factory.test.sh
 set -uo pipefail
 
-script="$(cd "$(dirname "$0")" && pwd)/factory-app.sh"
+script="$(cd "$(dirname "$0")" && pwd)/factory.sh"
 pass=0
 fail=0
-work=$(mktemp -d "${TMPDIR:-/tmp}/factory-app-test.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/factory-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/keys"
 
@@ -21,7 +21,7 @@ cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 d=$(dirname "$0")/..
 printf '%s\n' "$*" >>"$d/calls"
-E=repos/sssoto17/sunny-pastures/environments/factory-app
+E=repos/sssoto17/sunny-pastures/environments/factory
 case "$*" in
   "auth status") [[ -f $d/signed-out ]] && exit 1; exit 0 ;;
   "api $E/deployment-branch-policies --jq "*) cat "$d/policies" 2>/dev/null; exit 0 ;;
@@ -32,15 +32,15 @@ case "$*" in
     echo "false true" >"$d/env"; exit 0 ;;
   "api -X POST $E/deployment-branch-policies --silent -f name=main -f type=branch")
     echo "branch main" >>"$d/policies"; exit 0 ;;
-  "secret list --env factory-app --repo sssoto17/sunny-pastures --json name --jq .[].name")
+  "secret list --env factory --repo sssoto17/sunny-pastures --json name --jq .[].name")
     cat "$d/secrets" 2>/dev/null; exit 0 ;;
-  "secret set FACTORY_APP_PRIVATE_KEY --env factory-app --repo sssoto17/sunny-pastures")
+  "secret set FACTORY_APP_PRIVATE_KEY --env factory --repo sssoto17/sunny-pastures")
     [[ -f $d/fail-secret ]] && { echo "gh: HTTP 500" >&2; exit 1; }
     cat >"$d/stdin"; [[ -f $d/secret-lost ]] || echo FACTORY_APP_PRIVATE_KEY >>"$d/secrets"; exit 0 ;;
-  "variable get FACTORY_APP_CLIENT_ID --env factory-app --repo sssoto17/sunny-pastures")
+  "variable get FACTORY_APP_CLIENT_ID --env factory --repo sssoto17/sunny-pastures")
     [[ -f $d/var ]] || { [[ -f $d/var-junk ]] && echo "not-an-id"; echo "variable not found" >&2; exit 1; }
     cat "$d/var"; exit 0 ;;
-  "variable set FACTORY_APP_CLIENT_ID --env factory-app --repo sssoto17/sunny-pastures --body "*)
+  "variable set FACTORY_APP_CLIENT_ID --env factory --repo sssoto17/sunny-pastures --body "*)
     echo "${*: -1}" >"$d/var"; exit 0 ;;
   "api user/installations --paginate --jq "*)
     [[ -f $d/install ]] || { echo "gh: Forbidden (HTTP 403)" >&2; exit 1; }
@@ -100,16 +100,16 @@ reset
 run "$(happy)"
 expect_code 0
 assert "environment created with a custom policy" contains "$calls" \
-  "api -X PUT repos/sssoto17/sunny-pastures/environments/factory-app --silent"
+  "api -X PUT repos/sssoto17/sunny-pastures/environments/factory --silent"
 assert "only main may use it" test "$(cat "$work/policies")" == "branch main"
-assert "the policy read back" contains "$out" "factory-app: only main may use it"
+assert "the policy read back" contains "$out" "factory: only main may use it"
 assert "the key on stdin, byte for byte" cmp -s "$work/stdin" "$work/expected.pem"
 assert "the key file deleted" test ! -e "$work/keys/key.pem"
-assert "the secret read back by name" contains "$out" "FACTORY_APP_PRIVATE_KEY is set in factory-app"
+assert "the secret read back by name" contains "$out" "FACTORY_APP_PRIVATE_KEY is set in factory"
 assert "the client ID set in the environment" test "$(cat "$work/var")" == Iv23factory
 assert "the variable read back" contains "$out" "FACTORY_APP_CLIENT_ID is Iv23factory"
 assert "the installation checked" contains "$out" "on sssoto17/sunny-pastures only"
-assert "no repo-level secret or variable" lacks "$(grep -E '^(secret|variable) set' <<<"$calls" | grep -v -- '--env factory-app')" "set"
+assert "no repo-level secret or variable" lacks "$(grep -E '^(secret|variable) set' <<<"$calls" | grep -v -- '--env factory')" "set"
 assert "the App page opened" contains "$out" "https://github.com/settings/apps/sunny-factory"
 expect_hidden
 
@@ -117,7 +117,7 @@ expect_hidden
 reset
 run "$(happy)"
 expect_code 0
-assert "offers to create the missing environment" contains "$out" "Create factory-app with main as its only deployment branch?"
+assert "offers to create the missing environment" contains "$out" "Create factory with main as its only deployment branch?"
 assert "no 404 body taken as a policy" lacks "$err$out" "Not Found"
 
 # --- a missing variable whose read prints something on stdout: never offered as the current ID
@@ -128,7 +128,7 @@ expect_code 0
 assert "junk not shown as the current ID" lacks "$out" "not-an-id"
 assert "the typed ID stored" test "$(cat "$work/var")" == Iv23factory
 
-# --- re-run: environment as it should be, secret and variable there: nothing rewritten ----------
+# --- #101's factory, main only, key and client ID set: read back, no key asked, nothing rewritten -
 reset
 echo "false true" >"$work/env"
 echo "branch main" >"$work/policies"
@@ -142,14 +142,24 @@ assert "no policy POST on a re-run" lacks "$calls" "-X POST"
 assert "the key kept" lacks "$calls" "secret set"
 assert "the client ID kept" test "$(cat "$work/var")" == Iv23factory
 assert "the key file left alone" test -f "$work/keys/key.pem"
+assert "the stored key read back" contains "$out" "FACTORY_APP_PRIVATE_KEY is already set in factory"
+assert "no key path asked" lacks "$out" "Path to the downloaded .pem"
+assert "the policy read back" contains "$out" "factory: only main may use it"
+# Enter at "Replace it?" keeps the key too: keeping is the default
+run $'\n\n\n\n\n\n\n\n\n'
+expect_code 0
+assert "Enter keeps the key" lacks "$calls" "secret set"
 
-# --- an environment open to more than main: stop, change nothing -------------------------------
+# --- #101's factory still has its throwaway/* rule: stop with the fix, change nothing ---------
 reset
 echo "false true" >"$work/env"
 printf 'branch main\nbranch throwaway/*\n' >"$work/policies"
 run $'\n\n\n'
 expect_code 1
 assert "names the extra pattern" contains "$err" "throwaway/*"
+assert "says why" contains "$err" "could read the App's key"
+assert "says how to remove it" contains "$err" "Remove every rule but main in Settings → Environments → factory → Deployment branches and tags"
+assert "no key asked" lacks "$out" "Path to the downloaded .pem"
 assert "nothing deleted" lacks "$calls" "DELETE"
 assert "no secret set" lacks "$calls" "secret set"
 reset
@@ -178,7 +188,7 @@ reset
 touch "$work/fail-secret"
 run "$(happy)"
 expect_code 1
-assert "names the failed command" contains "$err" "gh secret set FACTORY_APP_PRIVATE_KEY --env factory-app failed"
+assert "names the failed command" contains "$err" "gh secret set FACTORY_APP_PRIVATE_KEY --env factory failed"
 assert "key file kept" test -f "$work/keys/key.pem"
 expect_hidden
 reset
@@ -222,5 +232,5 @@ expect_code 2
 assert "sign-in hint" contains "$err" "gh auth login"
 assert "no write" lacks "$calls" "set"
 
-printf 'factory-app.test.sh: %d passed, %d failed\n' "$pass" "$fail"
+printf 'factory.test.sh: %d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))

@@ -5,7 +5,7 @@
 # factory App's token and opens the PR with it, so the admin is a reviewer, not the author.
 #
 # repository_dispatch always runs main's copy of this file, so a branch can't change it, and the
-# environment `factory-app` lets only main read the App's key. The key never enters a session.
+# environment `factory` lets only main read the App's key. The key never enters a session.
 # The payload is untrusted (anyone with write access can send one): its fields reach the shell
 # only through `env:`, never as ${{ }} inside `run:`, and .github/scripts/open-pr.sh checks them
 # before any write. client_payload holds at most 10 top-level properties; this uses 5.
@@ -25,7 +25,7 @@ jobs:
     name: open-pr
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    environment: factory-app
+    environment: factory
     # GITHUB_TOKEN gets nothing: the App's token is the only identity this job acts through.
     permissions: {}
     steps:
