@@ -207,6 +207,16 @@ case_ open 7-p1="$work/bodies/7-p1.md" 7-p2="$work/bodies/7-p2.md"
 expect_code 0
 expect_eq "retry stacks the same PRs" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401]"
 
+# open-pr.sh fails for part 1 (no run answers): stop there, before part 2 is dispatched
+reset
+three_parts
+touch "$work/gh/no_workflow"
+OPEN_PR_TIMEOUT=0 case_ open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$(body 7-p2 'feat: two')"
+expect_code 1
+expect_err "no PR for 7-p1"
+expect_eq "one dispatch only" "$(wc -l <"$work/gh/dispatches")" 1
+rm "$work/gh/no_workflow"
+
 # the App's token can't link the stack (#336 records whether /stacks takes it): the PRs stay the
 # App's, and the lane's own token links the parts the run left out
 reset

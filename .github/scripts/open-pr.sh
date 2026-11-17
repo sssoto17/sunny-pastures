@@ -21,12 +21,15 @@ OWNER=${GITHUB_REPOSITORY%%/*}
 # harness's claude/<name>.
 LANE='^([0-9]+-[a-z0-9]+(-[a-z0-9]+)*|claude/[A-Za-z0-9._-]+)$'
 
+# A message may quote the payload: escaped as workflow commands require, so a newline in it can't
+# start a command of its own (::stop-commands::, ::add-mask:: …).
+esc() { local s=${1//'%'/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
 refuse() { # message
-  echo "::error title=open-pr::$1"
-  printf 'Refused: %s\n' "$1" >>"$GITHUB_STEP_SUMMARY"
+  echo "::error title=open-pr::$(esc "$1")"
+  printf 'Refused: %s\n' "$(esc "$1")" >>"$GITHUB_STEP_SUMMARY"
   exit 2
 }
-warn() { echo "::warning title=open-pr::$1"; }
+warn() { echo "::warning title=open-pr::$(esc "$1")"; }
 is_lane() { [[ $1 =~ $LANE ]]; }
 on_origin() { gh api "$R/branches/$1" --jq .name >/dev/null 2>&1; }
 open_pr() { gh api "$R/pulls?head=$OWNER:$1&state=open" --jq '.[0].number // empty'; }

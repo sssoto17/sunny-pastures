@@ -110,7 +110,7 @@ while :; do
   fi
   # With the runs unreadable, the PR's arrival answers; otherwise wait for the run to end, since
   # it links a stack part after opening it.
-  pr=$(open_pr_for "$branch")
+  pr=$(open_pr_for "$branch") || pr="" # one failed read doesn't end the wait
   [[ -n $pr && -z $before ]] && break
   if ((SECONDS - start >= TIMEOUT)); then
     if [[ -n $pr ]]; then

@@ -105,6 +105,19 @@ describe("open-pr.sh (the workflow's step)", () => {
 		expect(existsSync(join(dir, "pwned2"))).toBe(false);
 	});
 
+	// A refusal names the value, so a newline in it must not start a workflow command of its own.
+	it("never lets payload text start a workflow command", () => {
+		const r = run({
+			BRANCH: "x\n::stop-commands::t0k\n::add-mask::%y",
+			LABELS: "a\n::warning::fake",
+		});
+		expect(r.code).toBe(2);
+		expect(r.out).not.toMatch(/^::(stop-commands|add-mask)/m);
+		expect(r.out).toContain("x%0A::stop-commands::t0k%0A::add-mask::%25y");
+		const l = run({ LABELS: "a\n::warning::fake" });
+		expect(l.out).not.toMatch(/^::warning::fake/m);
+	});
+
 	it.each([
 		["main", "never opens a PR from main"],
 		["prototype/persistence", "isn't a lane branch"],

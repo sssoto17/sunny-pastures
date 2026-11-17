@@ -82,7 +82,7 @@ refuse_other_base() { # head base "<number> <base>"|"" : an open PR for head on 
 }
 
 ensure_pr() { # head base body-file -> "<number> new|reused"; reuses an open PR on the same base
-  local head=$1 base=$2 f=$3 found l args=()
+  local head=$1 base=$2 f=$3 found l n args=()
   found=$(open_pr_for "$head")
   if [[ -n $found ]]; then
     refuse_other_base "$head" "$base" "$found"
@@ -90,7 +90,8 @@ ensure_pr() { # head base body-file -> "<number> new|reused"; reuses an open PR 
     return
   fi
   for l in "${labels[@]}"; do args+=(--label "$l"); done # the App adds them as it opens the PR
-  echo "$("$OPEN_PR" --base "$base" "${args[@]}" "$head" "$f") new"
+  n=$("$OPEN_PR" --base "$base" "${args[@]}" "$head" "$f") # its own line, so a failure stops here
+  echo "$n new"
 }
 
 add_labels() { # pr : on a PR this run reused
