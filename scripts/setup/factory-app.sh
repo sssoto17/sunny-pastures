@@ -263,10 +263,15 @@ intro() {
 
 ok() { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
 
-# env_policy: "<protected_branches> <custom_branch_policies>", or "missing".
+# env_policy: "<protected_branches> <custom_branch_policies>", or "missing". On a 404, gh api
+# prints the error body on stdout, so a failed call's output is dropped, never echoed.
 env_policy() {
-  gh api "$E" --jq '.deployment_branch_policy // {} | "\(.protected_branches) \(.custom_branch_policies)"' \
-    2>/dev/null || echo missing
+  local out
+  if out=$(gh api "$E" --jq '.deployment_branch_policy // {} | "\(.protected_branches) \(.custom_branch_policies)"' 2>/dev/null); then
+    printf '%s\n' "$out"
+  else
+    echo missing
+  fi
 }
 
 # check_env: `factory-app` may be used by main and nothing else, or the wizard stops.
@@ -390,7 +395,7 @@ if ((replace_key)); then store_key; else note "kept the key already stored"; fi
 pause
 
 stage "The App's client ID"
-current=$(gh variable get "$VAR" --env "$ENV_NAME" --repo "$REPO" 2>/dev/null || true)
+current=$(gh variable get "$VAR" --env "$ENV_NAME" --repo "$REPO" 2>/dev/null) || current="" # a miss prints nothing kept
 open_url "$APP_URL"
 step "On the App's page (General), copy the Client ID. It is not the App ID, and not a secret."
 [[ -z $current ]] || note "now: $current (Enter keeps it)"

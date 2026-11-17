@@ -25,7 +25,9 @@ E=repos/sssoto17/sunny-pastures/environments/factory-app
 case "$*" in
   "auth status") [[ -f $d/signed-out ]] && exit 1; exit 0 ;;
   "api $E/deployment-branch-policies --jq "*) cat "$d/policies" 2>/dev/null; exit 0 ;;
-  "api $E --jq "*) [[ -f $d/env ]] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }; cat "$d/env"; exit 0 ;;
+  "api $E --jq "*)
+    [[ -f $d/env ]] || { echo '{"message":"Not Found","documentation_url":"https://docs.github.com/rest","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    cat "$d/env"; exit 0 ;;
   "api -X PUT $E --silent -F deployment_branch_policy[protected_branches]=false -F deployment_branch_policy[custom_branch_policies]=true")
     echo "false true" >"$d/env"; exit 0 ;;
   "api -X POST $E/deployment-branch-policies --silent -f name=main -f type=branch")
@@ -36,7 +38,8 @@ case "$*" in
     [[ -f $d/fail-secret ]] && { echo "gh: HTTP 500" >&2; exit 1; }
     cat >"$d/stdin"; [[ -f $d/secret-lost ]] || echo FACTORY_APP_PRIVATE_KEY >>"$d/secrets"; exit 0 ;;
   "variable get FACTORY_APP_CLIENT_ID --env factory-app --repo sssoto17/sunny-pastures")
-    [[ -f $d/var ]] || { echo "variable not found" >&2; exit 1; }; cat "$d/var"; exit 0 ;;
+    [[ -f $d/var ]] || { [[ -f $d/var-junk ]] && echo "not-an-id"; echo "variable not found" >&2; exit 1; }
+    cat "$d/var"; exit 0 ;;
   "variable set FACTORY_APP_CLIENT_ID --env factory-app --repo sssoto17/sunny-pastures --body "*)
     echo "${*: -1}" >"$d/var"; exit 0 ;;
   "api user/installations --paginate --jq "*)
@@ -109,6 +112,21 @@ assert "the installation checked" contains "$out" "on sssoto17/sunny-pastures on
 assert "no repo-level secret or variable" lacks "$(grep -E '^(secret|variable) set' <<<"$calls" | grep -v -- '--env factory-app')" "set"
 assert "the App page opened" contains "$out" "https://github.com/settings/apps/sunny-factory"
 expect_hidden
+
+# --- a missing environment: gh api prints its 404 body on stdout; stage 2 still offers to create it
+reset
+run "$(happy)"
+expect_code 0
+assert "offers to create the missing environment" contains "$out" "Create factory-app with main as its only deployment branch?"
+assert "no 404 body taken as a policy" lacks "$err$out" "Not Found"
+
+# --- a missing variable whose read prints something on stdout: never offered as the current ID
+reset
+touch "$work/var-junk"
+run "$(happy)"
+expect_code 0
+assert "junk not shown as the current ID" lacks "$out" "not-an-id"
+assert "the typed ID stored" test "$(cat "$work/var")" == Iv23factory
 
 # --- re-run: environment as it should be, secret and variable there: nothing rewritten ----------
 reset
