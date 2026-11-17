@@ -909,14 +909,20 @@ separate: this is only the identity step for lanes in Claude Code.
 - **Stacks with the App's token.** Whether `/stacks` accepts an App installation token isn't
   documented. The run tries, records `stack=<number>` or `stack=refused` in its output and summary,
   and never fails over it; `stack.sh` then links what the run left out with the lane's token, as
-  before. The admin's throwaway test records the answer here.
+  before. The admin's throwaway test on 17 Nov 2026 showed that `/stacks` accepts it: the `open-pr`
+  run linked #352 and #353, both opened by `sunny-factory[bot]`, as stack #354 with the App's token,
+  and `stack.sh` needed no fallback
+  ([#336, results](https://github.com/sssoto17/sunny-pastures/issues/336#issuecomment-6934736098)).
+  The fallback stays in case a later GitHub change refuses the App's token.
 
 **What changes.** The admin approves lane PRs instead of bypass-merging them: a code-owned PR, a
 code-owned part of a stack (so such a stack can merge as one), and an escalated PR, on which the
 reviewer withholds its approval when an App opened it ("Approvals", above), so the admin's Approve
-and the resolved thread both hold it. Whether GitHub counts an App's PR as "unattributed"
-(`require_extra_approval_for_unattributed_changes`, A8) is read on the same throwaway test: the
-admin's Approve must turn `reviewDecision` to `APPROVED`.
+and the resolved thread both hold it. GitHub doesn't count an App's PR as "unattributed"
+(`require_extra_approval_for_unattributed_changes`, A8): on the 17 Nov 2026 throwaway test, the
+admin's Approve on #350 (local) and #351 (cloud), both opened by `sunny-factory[bot]`, turned
+`reviewDecision` to `APPROVED` with no second approval asked
+([#336, results](https://github.com/sssoto17/sunny-pastures/issues/336#issuecomment-6934736098)).
 
 **`require_last_push_approval` stays off.** The PR's author is the App, but its commits are still
 pushed by the admin's account. The rule wants an approval "from someone other than the last pusher",
