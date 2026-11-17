@@ -228,13 +228,24 @@ can't check.
   Rejected: **a hand-picked set of typed rules** on top of `strict` (a list of our own that drifts
   as typescript-eslint adds rules), and **no typed linting** (it gives up exhaustiveness checking,
   which the sim's growing action and status unions lean on).
-- **Prettier** (Q19; C15, resolves conflict 14): `prettier` with a committed `.prettierrc`:
-  double quotes, semicolons, `trailingComma: "all"`, **tabs** (`useTabs: true`; the admin's call
-  over 2 spaces), `printWidth: 100`. Scope: `*.{ts,tsx,mts,mjs,js,json}`; Markdown is out
-  (hand-wrapped docs, tables). `prettier --check` runs in `check:fast` and CI. The reformat of
-  today's code is its own PR in #125, so `.git-blame-ignore-revs` can name its squash commit.
-  Rejected: **`@stylistic/eslint-plugin`** (formatting through lint rules, slower, with weaker
-  auto-fix) and **no formatter** (quotes and indentation drift between agents).
+- **Prettier** (Q19; C15, resolves conflict 14; Markdown added by #231): `prettier` with a committed
+  `.prettierrc`: double quotes, semicolons, `trailingComma: "all"`, **tabs** (`useTabs: true`; the
+  admin's call over 2 spaces), `printWidth: 100`, `proseWrap: "always"`. Scope:
+  `*.{ts,tsx,mts,mjs,js,json,md}`; `.claude/` and `.agents/` stay out. Markdown prose is wrapped at
+  100 columns, but tables are not formatted: every table has `<!-- prettier-ignore -->` on the line
+  before it, because Prettier pads every row of a table to its widest row (1203 columns in
+  `CONSTRAINTS.md`) and pads unaligned tables only with `proseWrap: "never"`; a check in `format:md`
+  fails a top-level table without it. Code in fenced blocks is formatted as code
+  (`embeddedLanguageFormatting` stays `auto`). The after-edit hook runs `prettier --write` on an
+  edited `.md` file before `check:fast`; `prettier --check` runs on code in `check:fast` and on
+  Markdown (`format:md`) in `check:task` and CI. The reformat of today's code is its own PR in #125,
+  and the reformat of today's Markdown is its own PR in #231's follow-up, so
+  `.git-blame-ignore-revs` can name each squash commit. Rejected: **`@stylistic/eslint-plugin`**
+  (formatting through lint rules, slower, with weaker auto-fix), **no formatter** (quotes and
+  indentation drift between agents), **formatting tables too** (rows padded past 1000 columns, a
+  whole-table diff per cell edit, and the floor guard reads re-padded Exceptions rows as new; #231),
+  **a second Markdown formatter** such as mdformat or dprint (a new dependency for what Prettier
+  already does), and **a line-length check only** (it flags, never fixes; #231).
 - **Import order** (Q20; C8): `@ianvs/prettier-plugin-sort-imports`, so sorting is part of
   formatting. Groups today: packages, a blank line, relative. `apps/web` adds `@/` and its layers
   in M3. Rejected: **`eslint-plugin-simple-import-sort`** (a second tool doing a formatting job)
