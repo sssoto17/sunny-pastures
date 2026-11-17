@@ -2,6 +2,8 @@
 // keeps `<!-- prettier-ignore -->` on the line before it, because Prettier pads every row of a
 // table to its widest row (#231, section 2).
 import { spawnSync } from "node:child_process";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { bareTables } from "../md-tables.mjs";
@@ -99,5 +101,15 @@ describe("md-tables.mjs", () => {
 		repo = makeRepo({ "a.md": "text\n" });
 
 		expect(run(["missing.md"]).code).toBe(2);
+	});
+
+	it("exits 2 outside a git work tree, rather than reading no files as clean", () => {
+		repo = makeRepo({ "a.md": `${TABLE}\n` });
+		rmSync(join(repo.dir, ".git"), { recursive: true });
+
+		const { code, out } = run();
+
+		expect(code).toBe(2);
+		expect(out).toContain("not in a git work tree");
 	});
 });
