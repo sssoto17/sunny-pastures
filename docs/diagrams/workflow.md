@@ -1,17 +1,17 @@
 # Workflow
 
-How work moves from an idea to merged code, and which skill runs at each step. Addy Osmani's
-skills own the gates (constraints, spec, plan, review, ship). Matt Pocock's skills own the design
-depth and the tracker loop (grilling, domain language, deep modules, tickets, implementation,
-retros). Each job has exactly one owning skill.
+How work moves from an idea to merged code, and which skill runs at each step. Addy Osmani's skills
+own the gates (constraints, spec, plan, review, ship). Matt Pocock's skills own the design depth and
+the tracker loop (grilling, domain language, deep modules, tickets, implementation, retros). Each
+job has exactly one owning skill.
 
 Last changed: 2026-11-16 (the Wk 2 workflow audit's stale places, #273). Before that 2026-11-12
 (`REVIEW.md` as the one review standard, #225).
 
 Every name below is a skill in `.claude/skills/`, except `remember:remember`, which comes from the
-`remember` plugin. `/clear` and `/compact` are built-in commands. `/today` is a skill too: its
-stage 1 (drafting the agenda and briefs, #117) and its coordinator mode (#157) have landed, and
-stage 2 is #109 (see **Automation stages**).
+`remember` plugin. `/clear` and `/compact` are built-in commands. `/today` is a skill too: its stage
+1 (drafting the agenda and briefs, #117) and its coordinator mode (#157) have landed, and stage 2 is
+#109 (see **Automation stages**).
 
 ## The loops
 
@@ -87,8 +87,8 @@ reviewer bot reviews every PR. It either approves, and the PR auto-merges once t
 are green, or requests changes, and the author fixes them and pushes. You review and merge only
 admin-review PRs: those that touch a code-owned path, and those carrying `review:admin` under the
 escalation criteria in `CONSTRAINTS.md`, "Admin review". Production changes only when you push a
-`v*` tag (ADR-0002, area 4). What every reviewer checks, how it rates findings and how it reports
-is `REVIEW.md`, at the repo root, for the bot, the coordinator's reviewer and a lane's own review
+`v*` tag (ADR-0002, area 4). What every reviewer checks, how it rates findings and how it reports is
+`REVIEW.md`, at the repo root, for the bot, the coordinator's reviewer and a lane's own review
 alike.
 
 **Escalation comments.** Lanes no longer write a one-line escalation comment when they add
@@ -96,16 +96,16 @@ alike.
 `CONSTRAINTS.md`, "Escalation criteria" still asks whoever adds the label to post one until #104
 changes it, so until then each brief tells its lane not to write one.
 
-**Until #68, the reviewer bot reviews but doesn't approve.** Since 12 Nov it posts a review on
-every PR, but it neither approves nor turns on auto-merge: ruleset `main` stays at 0 required
-approvals with last-push approval off until #264 ("Stacks: one approval pass and one CI run per
-stack") lands, and #68 is blocked by #264 (retro 2026-11-15, Outcomes 1). So you merge every PR,
-factory PRs included. The coordinating session dispatches a fresh-context reviewer agent per PR
-and relays its verdict before you merge (`.claude/skills/today/SKILL.md`, "After the agenda:
-coordinator mode").
+**Until #68, the reviewer bot reviews but doesn't approve.** Since 12 Nov it posts a review on every
+PR, but it neither approves nor turns on auto-merge: ruleset `main` stays at 0 required approvals
+with last-push approval off until #264 ("Stacks: one approval pass and one CI run per stack") lands,
+and #68 is blocked by #264 (retro 2026-11-15, Outcomes 1). So you merge every PR, factory PRs
+included. The coordinating session dispatches a fresh-context reviewer agent per PR and relays its
+verdict before you merge (`.claude/skills/today/SKILL.md`, "After the agenda: coordinator mode").
 
 ## When to use what
 
+<!-- prettier-ignore -->
 | When | Skill | Produces | You decide |
 |---|---|---|---|
 | Once, week 1 | `setup-matt-pocock-skills` (done) | `docs/agents/*.md` | tracker settings |
@@ -145,11 +145,12 @@ re-evaluates this, including `/build auto` for the factory.
 ## Self-improving loops
 
 The project should get harder to break over time. A mistake that happens twice is a missing
-safeguard. Matt's rule decides the kind of safeguard: **mechanical mistakes become checks**
-(a lint rule, a Fallow boundary, a test, a CI step), **judgement calls become standards** (a line
-in `AGENTS.md` or `CONSTRAINTS.md`, a coding standard `code-review` enforces). Add the safeguard
-as early as possible: the cheapest moment is the first repeat.
+safeguard. Matt's rule decides the kind of safeguard: **mechanical mistakes become checks** (a lint
+rule, a Fallow boundary, a test, a CI step), **judgement calls become standards** (a line in
+`AGENTS.md` or `CONSTRAINTS.md`, a coding standard `code-review` enforces). Add the safeguard as
+early as possible: the cheapest moment is the first repeat.
 
+<!-- prettier-ignore -->
 | Loop | Output of | Feeds |
 |---|---|---|
 | Complexity and coupling | Fallow hotspots, duplication, cycles | weekly `improve-codebase-architecture` candidates |
@@ -161,24 +162,24 @@ as early as possible: the cheapest moment is the first repeat.
 
 **Weekly retro convention.** Besides "what went well and what didn't", every weekly `retro` asks:
 
-1. Which mistakes or review findings happened more than once? Turn each into a check or a
-   standard, and record which one in the retro file.
+1. Which mistakes or review findings happened more than once? Turn each into a check or a standard,
+   and record which one in the retro file.
 2. Which manual steps did I repeat? Note each one with its count toward the 3-repetition rule.
 3. Which tool output isn't feeding anything yet? Propose the loop that would use it.
 
 Each answer becomes an issue or a direct change in the same week, never only a note.
 
-During the week, notes for the retro go to the **Retro inbox** (#55) as comments; the retro
-handles each one (#79 closed, retro 2026-11-15, Outcomes 8). The retro itself is to become a module
-of the agent-workflow package, not yet specified (same Outcomes item).
+During the week, notes for the retro go to the **Retro inbox** (#55) as comments; the retro handles
+each one (#79 closed, retro 2026-11-15, Outcomes 8). The retro itself is to become a module of the
+agent-workflow package, not yet specified (same Outcomes item).
 
 ## Daily routine (Stage 0)
 
 Morning, about 10 minutes:
 
 1. Read the handoff the session starts with.
-2. Open the **This week** board. Pick at most 3 outcomes (usually 1 design and 1–2 build) and
-   move them to **Ready**. Ready is your focus; everything else stays in Backlog.
+2. Open the **This week** board. Pick at most 3 outcomes (usually 1 design and 1–2 build) and move
+   them to **Ready**. Ready is your focus; everything else stays in Backlog.
 3. Launch Factory items first, so agents work while you design.
 4. For each Manual item, write a brief (`/today` drafts them into `.scratch/`; its full shape is
    `.claude/skills/today/SKILL.md`, "Drafting a brief") and open a fresh session in the repo with
@@ -199,10 +200,10 @@ Morning, about 10 minutes:
 During the day, at each phase boundary choose, in this order: continue · subagent · `/clear` ·
 `/compact` · `handoff` (only for a new directory, harness or mid-phase side task).
 
-**Parallel sessions.** One folder can only have one branch checked out, so two sessions in the
-same folder change each other's files underneath them. The main folder stays on `main` for the
-coordinating session; every work session gets its own git worktree under `.claude/worktrees/`
-(the session's worktree tool creates one on a new branch from `origin/main`).
+**Parallel sessions.** One folder can only have one branch checked out, so two sessions in the same
+folder change each other's files underneath them. The main folder stays on `main` for the
+coordinating session; every work session gets its own git worktree under `.claude/worktrees/` (the
+session's worktree tool creates one on a new branch from `origin/main`).
 
 - Each worktree needs its own `pnpm install` once the repo has dependencies. The pnpm store is
   shared, so it's fast.
@@ -212,13 +213,13 @@ coordinating session; every work session gets its own git worktree under `.claud
 - **Cloud lanes** (claude.ai/code sessions) run in their own container on their own branch, so they
   have no worktree step and nothing to tidy locally: `scripts/after-merge.sh` only removes local
   worktrees and their branches, and GitHub deletes a merged head branch itself. They reach GitHub
-  over REST only (`gh api repos/…`, no GraphQL), so they build stacks with `scripts/stack.sh`,
-  which needs nothing else (#264).
+  over REST only (`gh api repos/…`, no GraphQL), so they build stacks with `scripts/stack.sh`, which
+  needs nothing else (#264).
 
 **Stacks.** A PR over the split size becomes a stack, as `CONSTRAINTS.md`, "Split size" sets out
-today: `Part of #N` on every part but the last, `Closes #N` on the last, and what a lane does
-after a lower part merges. Read the rule there; this is only a pointer. Every lane, cloud or
-local, opens and keeps its stack with `scripts/stack.sh` (#264), never with hand-chained bases.
+today: `Part of #N` on every part but the last, `Closes #N` on the last, and what a lane does after
+a lower part merges. Read the rule there; this is only a pointer. Every lane, cloud or local, opens
+and keeps its stack with `scripts/stack.sh` (#264), never with hand-chained bases.
 
 Evening, about 10 minutes. This routine stays manual, with no schedule: it needs local state (the
 worktrees, the handoff), which a cloud routine can't see.
@@ -230,19 +231,20 @@ worktrees, the handoff), which a cloud routine can't see.
    "Issue fields" and "Grouping").
 2. A light `retro` if you built something. Note any step you repeated by hand.
 3. Tidy up after the PRs that merged: check `git worktree list`, then from the main folder run
-   `scripts/after-merge.sh <name>` for each (it fast-forwards main, removes the worktree and
-   deletes the branch). If it exits 3, run the command it prints outside the sandbox; see
+   `scripts/after-merge.sh <name>` for each (it fast-forwards main, removes the worktree and deletes
+   the branch). If it exits 3, run the command it prints outside the sandbox; see
    `docs/agents/sandbox.md`, "When git does need the host". A cloud lane's branch isn't a local
-   worktree, so the script doesn't reach it; GitHub deletes it at merge (the repo's
-   "Automatically delete head branches").
+   worktree, so the script doesn't reach it; GitHub deletes it at merge (the repo's "Automatically
+   delete head branches").
 4. `remember:remember` handoff with the top 3 next.
 
-At merge, a required check that is red on a change you approved (for example `guard / floor` on
-an intended `CONSTRAINTS.md` edit) is yours to lift: the PR says so in its Concerns, and you lift
+At merge, a required check that is red on a change you approved (for example `guard / floor` on an
+intended `CONSTRAINTS.md` edit) is yours to lift: the PR says so in its Concerns, and you lift
 `main checks` for that one merge. Agents never bypass a ruleset (`AGENTS.md`).
 
 ## Automation stages
 
+<!-- prettier-ignore -->
 | Stage | When | What runs |
 |---|---|---|
 | 0 | now | Everything above, by hand. Note repeated steps in each retro. |
