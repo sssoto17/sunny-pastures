@@ -915,7 +915,7 @@ separate: this is only the identity step for lanes in Claude Code.
   run linked #352 and #353, both opened by `sunny-factory[bot]`, as stack #354 with the App's token,
   and `stack.sh` needed no fallback
   ([#336, results](https://github.com/sssoto17/sunny-pastures/issues/336#issuecomment-6934736098)).
-  The fallback stays in case a later GitHub change refuses it.
+  The fallback stays in case a later GitHub change refuses the App's token.
 
 **What changes.** The admin approves lane PRs instead of bypass-merging them: a code-owned PR, a
 code-owned part of a stack (so such a stack can merge as one), and an escalated PR, on which the
