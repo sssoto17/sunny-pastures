@@ -15,3 +15,5 @@ Run typechecking regularly, single test files regularly, and the full test suite
 Once done, call the Skill tool with "code-review" to review the work.
 
 Commit your work to the current branch.
+
+When the work is ready for review, push the branch and open its PR with `scripts/open-pr.sh <branch> <body-file>` (a stack with `scripts/stack.sh`), never `gh pr create`: the PR then comes from `sunny-factory[bot]`, so the admin can approve it (#336).

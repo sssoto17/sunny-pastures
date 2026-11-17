@@ -2,6 +2,14 @@
 
 Scripts the admin runs by hand; each header says what it does. Runbooks of several commands:
 
+## #336: lanes open PRs as sunny-factory
+
+`scripts/setup/factory-app.sh`, on your own machine, before the throwaway test: it creates the
+environment `factory-app` (only `main` may use it), walks you through a new sunny-factory key
+(stored from the `.pem` through stdin, then the file is deleted), sets the client ID, and checks
+the App's installation. It reads each result back and stops at the first failed check; re-running
+is safe. The throwaway test's steps are in #336's PR, "For the admin".
+
 ## #68: the reviewer App's tests (a)-(f)
 
 ADR-0002, admin checklist step 12. `ci-check.sh` opens throwaway PRs onto `main`, the real review
