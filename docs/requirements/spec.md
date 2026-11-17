@@ -28,7 +28,8 @@ gives offline progress something to compute.
 - **Admin**: Soto, who owns the repo, the content data and the playtests.
 - **Agent**: a coding agent that opens PRs. Agents can't change the acceptance tests.
 
-Words in **bold** in the criteria, and the terms they use, are defined in [`GLOSSARY.md`](../../GLOSSARY.md).
+Words in **bold** in the criteria, and the terms they use, are defined in
+[`GLOSSARY.md`](../../GLOSSARY.md).
 
 ## How to read this spec
 
@@ -37,23 +38,24 @@ Words in **bold** in the criteria, and the terms they use, are defined in [`GLOS
 - **Numbers live in content data, not in this spec.** Content data covers grow times, prices,
   yields, XP, Level thresholds, capacities and delays. It sits next to the simulation in
   `packages/sim` and is tuned after playtest 1. A criterion that says "per content" means its test
-  reads the value from content data instead of hard-coding it. This spec fixes only what exists,
-  how it connects and the bounds that tests rely on.
-- **Tuning content is a rules change.** A farm is rebuilt by replaying its log (ADR-0001), so a
-  new grow time or price can make an old action replay differently, or be refused. Logs survive
-  it through rules versions: once released, a version's content is frozen, a tuning adds a new
-  version, and a replay never crosses one (decided in #31,
+  reads the value from content data instead of hard-coding it. This spec fixes only what exists, how
+  it connects and the bounds that tests rely on.
+- **Tuning content is a rules change.** A farm is rebuilt by replaying its log (ADR-0001), so a new
+  grow time or price can make an old action replay differently, or be refused. Logs survive it
+  through rules versions: once released, a version's content is frozen, a tuning adds a new version,
+  and a replay never crosses one (decided in #31,
   [ADR-0006](../adr/0006-rules-versions-and-replay.md); MUST-13.6).
 - **Farm history** (actions from before the farm's last action) exists because
-  [ADR-0001](../adr/0001-persistence-model.md) chose store B100: an append-only action log per
-  farm, with a snapshot after every 100th action. The criteria that rely on it are listed under
+  [ADR-0001](../adr/0001-persistence-model.md) chose store B100: an append-only action log per farm,
+  with a snapshot after every 100th action. The criteria that rely on it are listed under
   [Farm history](#farm-history-after-adr-0001).
-- **Already settled, not reopened here:** offline progress is computed lazily: nothing runs while
-  a player is away, and the next request brings the farm up to server time. Determinism,
-  sequence numbers and idempotency keys come from the persistence spike (ADR-0001, #5–#11).
+- **Already settled, not reopened here:** offline progress is computed lazily: nothing runs while a
+  player is away, and the next request brings the farm up to server time. Determinism, sequence
+  numbers and idempotency keys come from the persistence spike (ADR-0001, #5–#11).
 
 ### Verified by
 
+<!-- prettier-ignore -->
 | Tag | Meaning |
 | --- | --- |
 | `unit` | Example-based test of the simulation in `packages/sim` |
@@ -72,13 +74,13 @@ Words in **bold** in the criteria, and the terms they use, are defined in [`GLOS
 
 The commands, project structure, code style and boundaries (always / ask first / never) are in
 `AGENTS.md`, and the quality bar (thresholds and the check behind each) is in
-[`CONSTRAINTS.md`](../../CONSTRAINTS.md). This spec doesn't repeat them. Architecture decisions are in
-`docs/adr/`.
+[`CONSTRAINTS.md`](../../CONSTRAINTS.md). This spec doesn't repeat them. Architecture decisions are
+in `docs/adr/`.
 
 ## Decisions from review
 
-These were not asked directly in the grill. They were proposed as defaults in the draft and confirmed by
-the admin in review on 6 Nov.
+These were not asked directly in the grill. They were proposed as defaults in the draft and
+confirmed by the admin in review on 6 Nov.
 
 1. A facility, an animal pen or a farmhand becomes **unlocked** at a Level, then has to be bought
    with coins before it exists on the farm. It follows the same rule as tiers and storage.
@@ -94,6 +96,7 @@ the admin in review on 6 Nov.
 
 Wheat, corn and strawberries: plant, grow over time, harvest.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-01.1 | Planting an **unlocked** crop on an empty plot costs that crop's seed price in coins. It is refused if the plot isn't empty, the crop isn't unlocked or the farm has too few coins. | `unit`, `accept` |
@@ -106,6 +109,7 @@ Wheat, corn and strawberries: plant, grow over time, harvest.
 
 Chickens and cows: feed, produce over time, collect.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-02.1 | Chickens eat chicken feed and produce eggs. Cows eat cow feed and produce milk. | `content` |
@@ -118,6 +122,7 @@ Chickens and cows: feed, produce over time, collect.
 
 The feed mill, the bakery and the dairy, each with a timed queue.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-03.1 | The recipes, and the **tier** at which each becomes available: feed mill: tier 1 chicken feed, tier 2 cow feed. Dairy: tier 1 cream, tier 2 butter, tier 3 cheese. Bakery: tier 1 bread, tier 2 cookies, tier 3 strawberry cake. Inputs, outputs and times are per content. | `content` |
@@ -131,6 +136,7 @@ The feed mill, the bakery and the dairy, each with a timed queue.
 
 Deliver goods to non-player characters for coins and XP.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-04.1 | The **order board** has the number of slots the player's Level gives, per content: 3 at Level 1 and at most 9. The number never goes down. | `content`, `unit` |
@@ -146,6 +152,7 @@ Skipping a refill delay is SHOULD-06.
 
 Coins, XP and Levels that unlock content.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-05.1 | Coins never go below zero. Any action that would spend more than the farm has is refused. | `prop`, `accept` |
@@ -159,6 +166,7 @@ Coins, XP and Levels that unlock content.
 
 Upgrades for fields, facilities, pens and storage, and the first automation.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-06.1 | **Fields**: extra plots can be bought. Each plot costs more than the one before, and the maximum number of plots depends on Level. | `unit`, `content` |
@@ -181,6 +189,7 @@ another grill:
 
 The farm keeps producing while the player is away.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-07.1 | While the player is away, the farm does what it would have done if they had watched: crops ripen, jobs finish in order, animals eat from troughs, Loop and Collector work and order slots refill. Advancing in one step or in many gives the same farm (MUST-14, invariant 1). | `prop` |
@@ -192,6 +201,7 @@ The farm keeps producing while the player is away.
 
 Send goods to a friend.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-08.1 | On first play, a player picks a display name. Display names don't have to be unique. | `ui` |
@@ -206,6 +216,7 @@ Send goods to a friend.
 
 Supabase anonymous sign-in.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-09.1 | A first visit creates an anonymous user and a new farm without asking for anything but a display name. | `accept`, `ui` |
@@ -219,6 +230,7 @@ Supabase anonymous sign-in.
 
 `packages/sim`, shared by client and server.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-10.1 | `packages/sim` has zero runtime dependencies. It does no I/O, never calls `Date.now()` or `Math.random()` and imports nothing from `node:*`. A CI check enforces this, rather than review. | `ci` |
@@ -232,6 +244,7 @@ Supabase anonymous sign-in.
 
 Server time and server-side validation of every action.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-11.1 | The server stamps every action with **server time**. A request carries no time and no result. If a request includes them anyway, they are ignored or the request is rejected. | `attack` (T1, T2) |
@@ -244,6 +257,7 @@ Server time and server-side validation of every action.
 
 Optimistic client prediction, reconciled with the server's result.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-12.1 | After a tap, the **prediction** shows within 100 ms, before the server answers. | `ui` |
@@ -256,10 +270,11 @@ Optimistic client prediction, reconciled with the server's result.
 ### MUST-13 Persistence
 
 Survives concurrent actions and retries. ADR-0001 chose store B100: an append-only action log per
-farm, with a snapshot after every 100th action. Its verdict holds up to about 200 concurrent
-players (about 37 requests/s). Before real load approaches the stress level (about 1,450
-requests/s on the load VM), B100 is measured against A again, as the ADR's revisit trigger says.
+farm, with a snapshot after every 100th action. Its verdict holds up to about 200 concurrent players
+(about 37 requests/s). Before real load approaches the stress level (about 1,450 requests/s on the
+load VM), B100 is measured against A again, as the ADR's revisit trigger says.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-13.1 | Every accepted action gets the farm's next sequence number, with no gaps. | `accept` |
@@ -274,6 +289,7 @@ requests/s on the load VM), B100 is measured against A again, as the ADR's revis
 
 Randomly generated farms, action sequences and times, with a fixed seed in CI.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-14.1 | Time-splitting: `advance(advance(s, t1), t2)` equals `advance(s, t2)`. | `prop` |
@@ -289,17 +305,18 @@ Randomly generated farms, action sequences and times, with a fixed seed in CI.
 
 Agent PRs can't modify them.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-15.1 | A PR that changes `tests/acceptance/**` can't merge without the admin's approval. A CODEOWNERS entry and a ruleset on `main` requiring code-owner review enforce it. | `ci` |
 | MUST-15.2 | A CI check fails any PR from an agent branch that touches `tests/acceptance/**`. | `ci` |
 | MUST-15.3 | The acceptance tests run on every PR against a fresh stack, and they treat the app as a black box over HTTP. | `ci` |
 
-MUST-15.1 is met in mechanism once CODEOWNERS (ADR-0002, appendix A3) and the `main` ruleset are
-in place. Until #37 gives the factory its own GitHub identity, its PRs come from the admin's
-account, and GitHub doesn't let the admin approve their own PR. So until then, the admin's
-approval on a factory PR is a bypass merge, held by instructions rather than by GitHub (ADR-0002,
-area 2, "The honest limit").
+MUST-15.1 is met in mechanism once CODEOWNERS (ADR-0002, appendix A3) and the `main` ruleset are in
+place. Until #37 gives the factory its own GitHub identity, its PRs come from the admin's account,
+and GitHub doesn't let the admin approve their own PR. So until then, the admin's approval on a
+factory PR is a bypass merge, held by instructions rather than by GitHub (ADR-0002, area 2, "The
+honest limit").
 
 The setup itself belongs to the M2 GitHub-strategy issue.
 
@@ -308,9 +325,10 @@ The setup itself belongs to the M2 GitHub-strategy issue.
 Mapped to the threat model and the OWASP Top 10 (2025).
 
 Each threat has at least one attack test, and each test fails if the attack succeeds. These tests
-*prevent* cheating and don't depend on the store. *Detecting* cheating after the fact is
-MUST-16.2 to MUST-16.5.
+_prevent_ cheating and don't depend on the store. _Detecting_ cheating after the fact is MUST-16.2
+to MUST-16.5.
 
+<!-- prettier-ignore -->
 | Threat | Attack | Expected result | OWASP 2025 |
 | --- | --- | --- | --- |
 | T1 | Forged or skewed client clock | Server time decides. Nothing ripens early. | A06 Insecure Design |
@@ -324,6 +342,7 @@ MUST-16.2 to MUST-16.5.
 | T9 | Alt accounts funnelling goods by gifts | Capped by friends-only gifting, goods-only gifts and the daily limit | A06 Insecure Design |
 | T10 | Editing a log or snapshot row directly in the database | The audit flags the farm | A08 Software or Data Integrity Failures |
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-16.1 | T1–T10 each have a passing attack test, and the table above is the report's threat model. | `attack` |
@@ -336,6 +355,7 @@ MUST-16.2 to MUST-16.5.
 
 CI runs the checks on every PR. The game is deployed on Vercel with Supabase Postgres.
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-17.1 | Every PR runs typecheck, lint, unit and property tests, the determinism gate and the acceptance tests against a throwaway Supabase stack inside CI. A red check blocks the merge. | `ci` |
@@ -347,6 +367,7 @@ CI runs the checks on every PR. The game is deployed on Vercel with Supabase Pos
 
 ### MUST-18 Two playtests
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-18.1 | **Playtest 1** (think-aloud, vertical slice): 5 participants, 20–30 min each, a task script and a short questionnaire (SUS or custom). | `playtest` |
@@ -355,6 +376,7 @@ CI runs the checks on every PR. The game is deployed on Vercel with Supabase Pos
 
 ### MUST-19 System metrics
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-19.1 | **Latency**: p50 and p95 per route, from the `Server-Timing` measurements (load, sim, commit, total), as in the spike. | `metric` |
@@ -363,10 +385,11 @@ CI runs the checks on every PR. The game is deployed on Vercel with Supabase Pos
 
 ## Baseline qualities
 
-These are Musts that apply to every requirement above (settled in #34). They keep their BASE IDs
-in `moscow.md` and are never on the cut list. Their thresholds and the checks that enforce them
-are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
+These are Musts that apply to every requirement above (settled in #34). They keep their BASE IDs in
+`moscow.md` and are never on the cut list. Their thresholds and the checks that enforce them are in
+[`CONSTRAINTS.md`](../../CONSTRAINTS.md).
 
+<!-- prettier-ignore -->
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | BASE-01 | The UI is in English. | `review` |
@@ -377,6 +400,7 @@ are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
 
 ## Should have
 
+<!-- prettier-ignore -->
 | ID | Criterion |
 | --- | --- |
 | SHOULD-01 | A player can view a friend's farm, read-only, as it is at server time. Viewing never writes, and only friends can visit (T5). |
@@ -390,6 +414,7 @@ are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
 
 ## Could have
 
+<!-- prettier-ignore -->
 | ID | Criterion |
 | --- | --- |
 | COULD-01 | Two friends can trade goods for goods, and each side's goods move only when both accept. |
@@ -404,15 +429,16 @@ are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
 
 ## Won't have (this time)
 
-WONT-01 to WONT-06 as in `moscow.md`, plus **WONT-07**: no play without a connection. Actions
-aren't queued offline to be sent later. Queuing them would put predictions on top of predictions,
-and stamp actions with times the server can't trust (MUST-11).
+WONT-01 to WONT-06 as in `moscow.md`, plus **WONT-07**: no play without a connection. Actions aren't
+queued offline to be sent later. Queuing them would put predictions on top of predictions, and stamp
+actions with times the server can't trust (MUST-11).
 
 ## Farm history (after ADR-0001)
 
 During the grill, four requirements waited on #12 because they need farm history. ADR-0001 chose
 B100, so the history exists, and they were settled like this:
 
+<!-- prettier-ignore -->
 | Requirement | Settled as |
 | --- | --- |
 | Away summary "since you last looked", across actions | SHOULD-07 |
@@ -433,13 +459,13 @@ The grill checked three more and kept them independent of the log:
    content.
 3. **The OWASP 2025 mapping** in MUST-16: check it against the published list before the report
    cites it.
-4. ~~**Baseline IDs**~~ Settled 7 Nov (#34): BASE-01–05 are Musts in `moscow.md`, keep their
-   BASE IDs and are never cut. `CONSTRAINTS.md` holds their thresholds and checks.
+4. ~~**Baseline IDs**~~ Settled 7 Nov (#34): BASE-01–05 are Musts in `moscow.md`, keep their BASE
+   IDs and are never cut. `CONSTRAINTS.md` holds their thresholds and checks.
 5. **The admin role** (MUST-16.5): how an account gets it. Anonymous sign-in gives every player a
    user, so the admin needs a role that only the admin can set.
-6. ~~**Replaying old logs after a rules change**~~ Settled 11 Nov (#31): every log row and
-   snapshot records its rules version, a replay never crosses a version, and a base snapshot
-   holds the farm after its version upgrade ([ADR-0006](../adr/0006-rules-versions-and-replay.md),
-   MUST-13.6, MUST-16.3).
+6. ~~**Replaying old logs after a rules change**~~ Settled 11 Nov (#31): every log row and snapshot
+   records its rules version, a replay never crosses a version, and a base snapshot holds the farm
+   after its version upgrade ([ADR-0006](../adr/0006-rules-versions-and-replay.md), MUST-13.6,
+   MUST-16.3).
 7. ~~**Where the state hash lives**~~ Settled 8 Nov (#72): inside the simulation, as a
    pure-TypeScript SHA-256 ([ADR-0003](../adr/0003-simulation-design.md), MUST-10.5).

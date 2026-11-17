@@ -18,8 +18,8 @@ Last reviewed: 2026-11-07 by Soto (interview on #34, review of PR #45, interview
 - **This file is canonical.** The `pnpm check:*` scripts and CI jobs mirror it. If they drift, this
   file wins.
 - **Who edits it:** agents may propose a tightening (a ratchet update, a first recorded value) in a
-  PR of its own. Only the admin loosens anything. CODEOWNERS (ADR-0002, appendix A3) makes this
-  file need the admin's approval, and the floor guard checks every change to it.
+  PR of its own. Only the admin loosens anything. CODEOWNERS (ADR-0002, appendix A3) makes this file
+  need the admin's approval, and the floor guard checks every change to it.
 - The requirement each row serves is in [`docs/requirements/spec.md`](docs/requirements/spec.md).
   Its baseline qualities BASE-01–05 are Musts that apply to every item (see
   [`moscow.md`](docs/requirements/moscow.md)).
@@ -31,48 +31,47 @@ issue that turns it into a check. Until those land, review enforces the floor.
 
 Checked in the diff against the merge base by the floor guard (`guard / floor`, #40), adapted from
 [`floor-guard.md`](.agents/skills/constraint-driven-development/references/floor-guard.md). It
-reports the rule and the location, never a matched value. A change to this file is the one place
-it quotes text: see [Guarding the bar](#guarding-the-bar).
+reports the rule and the location, never a matched value. A change to this file is the one place it
+quotes text: see [Guarding the bar](#guarding-the-bar).
 
 **A weakened bar is blocked unless the same PR adds an [Exceptions](#exceptions) row.** That row
-changes this file, so the PR needs the admin's approval (a code-owned path, ADR-0002 area 2). A weakened bar is any
-of:
+changes this file, so the PR needs the admin's approval (a code-owned path, ADR-0002 area 2). A
+weakened bar is any of:
 
 - A new suppression comment: `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error`, `eslint-disable`,
   `istanbul ignore`, `c8 ignore`, `v8 ignore`, `Stryker disable`, `nosemgrep`, `gitleaks:allow`,
   `fallow-ignore-next-line`, `fallow-ignore-file`, `# noqa`, `# type: ignore`. Every other
   `fallow-ignore-*` form counts too (#99).
-- A skipped, focused or deleted test: `.skip`, `.only`, `.todo`, a removed test file, or
-  assertions removed from a test that stayed. A moved or renamed test file is not a deletion: the
-  guard uses git's rename detection. A property test's run count (`numRuns`, `SIM_PROPERTY_RUNS`)
-  lowered, deleted, or turned from a variable into a literal counts too (#99).
+- A skipped, focused or deleted test: `.skip`, `.only`, `.todo`, a removed test file, or assertions
+  removed from a test that stayed. A moved or renamed test file is not a deletion: the guard uses
+  git's rename detection. A property test's run count (`numRuns`, `SIM_PROPERTY_RUNS`) lowered,
+  deleted, or turned from a variable into a literal counts too (#99).
 - A moved threshold: a number in this file lowered, a severity dropped, a check moved to a later
   stage or removed. In this file, numbers pair by what they count. A cap added in a unit the rule
-  didn't use, joined with "or" (`≤ 50 ms or 5 s`), counts as a loosening, and so does a new
-  number with no direction in a rule that had a cap or a floor (#99). A Dependabot PR that only
-  moves a GitHub Action's pinned commit SHA, opened by Dependabot from this repo with only its own
-  commits, isn't a removed check.
+  didn't use, joined with "or" (`≤ 50 ms or 5 s`), counts as a loosening, and so does a new number
+  with no direction in a rule that had a cap or a floor (#99). A Dependabot PR that only moves a
+  GitHub Action's pinned commit SHA, opened by Dependabot from this repo with only its own commits,
+  isn't a removed check.
 - A tool config edit that excludes a path, ignores a finding or relaxes a rule. That counts as a
   moved threshold. The files: `.gitleaksignore` and `.gitleaks.toml`, `osv-scanner.toml`,
-  `.semgrepignore`, coverage `exclude` in `vitest.config.*`, rules turned off in
-  `eslint.config.*`, `strict` options relaxed in any `tsconfig*.json` (or a new one with neither
-  `extends` nor `strict`, #99), Stryker ignore patterns,
-  assertions turned off in `lighthouserc.*`, `disableRules` in the axe setup, the Fallow
-  config, a path added to `.prettierignore`, and in `.prettierrc` an `overrides` block, an
-  ignore-like key, `requirePragma` or a dropped plugin; and a new, deleted or moved Prettier
-  config file, a `prettier` key in a `package.json` or `package.yaml`, or a new or changed
-  `.editorconfig`, each of which Prettier also reads (#125). In `eslint.config.*`, `vitest.config.*`, `tsconfig*.json`, and the Fallow, Stryker and
-  Lighthouse configs written as JS, TS or JSON, and in a `.prettierrc` that parses as JSON to
-  the same value, a change that only reformats (quotes,
-  indentation, trailing commas, re-wrapped lists) isn't a loosening; any change in content still
-  is (#138). The guard compares the whole file, so a reformat must be its own PR: mixed with a
-  content change in the same config, it keeps every finding.
+  `.semgrepignore`, coverage `exclude` in `vitest.config.*`, rules turned off in `eslint.config.*`,
+  `strict` options relaxed in any `tsconfig*.json` (or a new one with neither `extends` nor
+  `strict`, #99), Stryker ignore patterns, assertions turned off in `lighthouserc.*`, `disableRules`
+  in the axe setup, the Fallow config, a path added to `.prettierignore`, and in `.prettierrc` an
+  `overrides` block, an ignore-like key, `requirePragma` or a dropped plugin; and a new, deleted or
+  moved Prettier config file, a `prettier` key in a `package.json` or `package.yaml`, or a new or
+  changed `.editorconfig`, each of which Prettier also reads (#125). In `eslint.config.*`,
+  `vitest.config.*`, `tsconfig*.json`, and the Fallow, Stryker and Lighthouse configs written as JS,
+  TS or JSON, and in a `.prettierrc` that parses as JSON to the same value, a change that only
+  reformats (quotes, indentation, trailing commas, re-wrapped lists) isn't a loosening; any change
+  in content still is (#138). The guard compares the whole file, so a reformat must be its own PR:
+  mixed with a content change in the same config, it keeps every finding.
 
 Also blocked, with no exception possible:
 
-- Unimplemented stubs: `throw new Error("Not implemented")`, an empty `catch {}`, a `TODO`
-  standing in for the implementation. Also "not yet implemented" and "unimplemented" stubs, a
-  `catch` holding only a comment, and an empty `.catch(() => {})` (#99).
+- Unimplemented stubs: `throw new Error("Not implemented")`, an empty `catch {}`, a `TODO` standing
+  in for the implementation. Also "not yet implemented" and "unimplemented" stubs, a `catch` holding
+  only a comment, and an empty `.catch(() => {})` (#99).
 - Secrets in source. Read them from env vars and keep placeholders in `.env.example`.
 - An expired row in [Exceptions](#exceptions).
 - An Exceptions row the guard can't accept: a date it can't read, a Rule it doesn't know, a Path
@@ -81,9 +80,10 @@ Also blocked, with no exception possible:
 ## Enforced with numbers
 
 All rows block, except where _warn_ is noted. "Runs at" uses the stages under [Stages](#stages).
-"Required check" is the status-check name on `main` (ADR-0002 names the checks; this file names
-the thresholds).
+"Required check" is the status-check name on `main` (ADR-0002 names the checks; this file names the
+thresholds).
 
+<!-- prettier-ignore -->
 | Dimension | Rule | Why this number | Checked by | Runs at | Required check | Enforced by |
 |---|---|---|---|---|---|---|
 | Types | 0 type errors | Any error is a bug or a lie | `tsc -b` (incremental) | edit, CI | `ci / typecheck` | #40 |
@@ -109,15 +109,13 @@ the thresholds).
 
 **What counts for coverage.** Only source files under `apps/` and `packages/`. Tests and test
 helpers (everything in a `tests/` folder, ADR-0005), config files, generated code and `tools/` are
-excluded, and the exclusion list lives in `vitest.config.*` (so
-widening it is a moved threshold). A PR with no executable changed lines passes. Coverage comes
-from the unit and property tests in the same Vitest run. The acceptance tests run over HTTP against
-a separate stack and don't count.
+excluded, and the exclusion list lives in `vitest.config.*` (so widening it is a moved threshold). A
+PR with no executable changed lines passes. Coverage comes from the unit and property tests in the
+same Vitest run. The acceptance tests run over HTTP against a separate stack and don't count.
 
 **External opinions.** gitleaks, `pnpm audit`, Semgrep, axe and Lighthouse judge the code by rules
 this project didn't write, so an agent can't make them pass with code that doesn't work. The
-coverage and mutation rows measure the project's own tests, and Stryker is the check on those
-tests.
+coverage and mutation rows measure the project's own tests, and Stryker is the check on those tests.
 
 ### Timing checks
 
@@ -125,6 +123,7 @@ CI runners are shared, so one timing can swing by tens of percent between runs o
 check that fails at random teaches everyone to rerun until it's green, so the timing rows never
 judge a single measurement:
 
+<!-- prettier-ignore -->
 | Check | Warm-up | Measured | Compared with the budget |
 |---|---|---|---|
 | `advance()` bench | 3 runs, discarded | 5 runs | the median of the 5 runs |
@@ -132,9 +131,9 @@ judge a single measurement:
 | Lighthouse | 1 run, discarded (cold start) | 3 runs | each metric's median across the 3 runs |
 | Latency smoke | 5 requests, discarded (cold start of the function and of staging Supabase) | at least 50 actions, never fewer than 20 | the p95 of the measured actions |
 
-- **Over budget:** the job re-measures once with a full new set (5 bench runs, 3 Lighthouse runs,
-  a new latency run) and fails only if both sets are over. One automatic retry, never more.
-  Retrying by hand until the check is green counts as weakening the bar.
+- **Over budget:** the job re-measures once with a full new set (5 bench runs, 3 Lighthouse runs, a
+  new latency run) and fails only if both sets are over. One automatic retry, never more. Retrying
+  by hand until the check is green counts as weakening the bar.
 - **Flaky:** if a timing check fails on unchanged code (a rerun of `main` goes red), fix the
   measurement in its own PR rather than moving the threshold.
 
@@ -144,6 +143,7 @@ No honest number exists before the code does. A ratchet records the first value,
 that makes it worse past the tolerance. When the number improves, an agent may propose the new value
 in a PR of its own.
 
+<!-- prettier-ignore -->
 | Metric | Today | Direction | Tolerance | Recorded by |
 |---|---|---|---|---|
 | Project coverage | 99.8% | must not fall | 0.5 points | #40 |
@@ -160,6 +160,7 @@ scans only from the merge base.
 These have no tool that can decide them. The admin checks them at each milestone gate
 (`docs/diagrams/workflow.md`).
 
+<!-- prettier-ignore -->
 | Requirement | What is checked |
 |---|---|
 | BASE-01 | The UI is in English. |
@@ -169,6 +170,7 @@ These have no tool that can decide them. The admin checks them at each milestone
 
 A check that stalls the agent gets switched off, so the cost of a check decides where it runs.
 
+<!-- prettier-ignore -->
 | Stage | Command | Runs | Budget |
 |---|---|---|---|
 | After each edit | `pnpm check:fast` (agent hook: `PostToolUse` in `.claude/settings.json`, #113) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, formatting check. Boundaries join this row when #41 adds them to `check:fast` | under 5 s |
@@ -183,37 +185,36 @@ A check that stalls the agent gets switched off, so the cost of a check decides 
 - **M3 watch:** 90 s at task end gets tight once `apps/web` adds its tests. Review this budget at
   M3's kickoff. The first lever is running only the tests related to the change.
 
-Each blocking CI job is a required status check on `main`. The ruleset comes from ADR-0002
-(PR #35).
+Each blocking CI job is a required status check on `main`. The ruleset comes from ADR-0002 (PR #35).
 
 ## Tools are dependencies
 
 Every tool named here (ESLint, Vitest and its v8 coverage, fast-check, Fallow, Stryker, Semgrep,
-gitleaks, Lighthouse CI, axe-core and any browser-test tool) needs the admin's approval and an
-exact pinned version (`AGENTS.md`). So do the tools of the code style (ADR-0005, #125):
+gitleaks, Lighthouse CI, axe-core and any browser-test tool) needs the admin's approval and an exact
+pinned version (`AGENTS.md`). So do the tools of the code style (ADR-0005, #125):
 `eslint-plugin-check-file`, `prettier`, `@ianvs/prettier-plugin-sort-imports` and
 `@vitest/eslint-plugin`. So does the floor guard's Markdown parser (#132): `micromark` and
-`micromark-extension-gfm`. `minimumReleaseAge` in `pnpm-workspace.yaml` covers npm
-packages only. For binaries, container images and GitHub Actions, the 7-day rule is checked by
-hand, and Actions are pinned by commit SHA. `vitest bench` is built into Vitest, so the benchmark
-adds nothing.
+`micromark-extension-gfm`. `minimumReleaseAge` in `pnpm-workspace.yaml` covers npm packages only.
+For binaries, container images and GitHub Actions, the 7-day rule is checked by hand, and Actions
+are pinned by commit SHA. `vitest bench` is built into Vitest, so the benchmark adds nothing.
 
 ## Admin review (escalation and split size)
 
 ADR-0002 (area 2) owns the mechanism: the reviewer bot approves a PR, which then auto-merges, or
-requests changes, and the label `review:admin` holds a PR for the admin. The bot never approves a
-PR that carries it, and only the admin removes it. This file owns when a PR gets the label and when
-the bot asks for a split. Auto-merge stays off until this section is merged (ADR-0002, Q16).
+requests changes, and the label `review:admin` holds a PR for the admin. The bot never approves a PR
+that carries it, and only the admin removes it. This file owns when a PR gets the label and when the
+bot asks for a split. Auto-merge stays off until this section is merged (ADR-0002, Q16).
 
 ### Escalation criteria
 
 A PR that meets any row carries `review:admin`. An agent that knows it adds the label at
 `gh pr create --label review:admin`. The reviewer bot checks every row on each review and adds the
 label when it's missing. Whoever adds it also posts a one-line comment that names every row the PR
-meets, for example "escalated: interface (sim exports)". Those comments are the tuning data
-(below). The bot checks these rows before the [split size](#split-size), so on a PR it escalates,
-the size is only a note.
+meets, for example "escalated: interface (sim exports)". Those comments are the tuning data (below).
+The bot checks these rows before the [split size](#split-size), so on a PR it escalates, the size is
+only a note.
 
+<!-- prettier-ignore -->
 | Criterion | Applies when | Who adds the label | Why |
 |---|---|---|---|
 | Code-owned path | The diff touches a path in `.github/CODEOWNERS` (ADR-0002, appendix A3). That file is the canonical list of these paths. It covers a new dependency (`package.json`, `pnpm-lock.yaml`), an Exceptions row and any change to this file, and the configs that can weaken a check | the bot, matching the diff against CODEOWNERS; the agent when it knows | GitHub already holds these PRs for the code owner. The label makes `label:review:admin` the one queue of PRs waiting for the admin, which matters while the factory acts as the admin and GitHub can't request the admin's review on the admin's own PR (#37) |
@@ -228,12 +229,12 @@ the size is only a note.
 The bot may still escalate on its own judgement beyond these rows (ADR-0002). It names its reason
 the same way.
 
-**Agents never resolve review threads** (admin, 15 Nov 2026, #264). An open review thread, the
-bot's escalation thread above all, holds the merge until the admin resolves it. A standard plus a
-check: the `deny` rule on the GitHub MCP resolve-thread tool and the hook
+**Agents never resolve review threads** (admin, 15 Nov 2026, #264). An open review thread, the bot's
+escalation thread above all, holds the merge until the admin resolves it. A standard plus a check:
+the `deny` rule on the GitHub MCP resolve-thread tool and the hook
 `.claude/hooks/block-thread-resolve.sh`, which runs in cloud sessions too, stop it in Claude Code.
-Neither is the boundary: until agent PRs come from the factory App (#107), GitHub sees the
-admin's account either way.
+Neither is the boundary: until agent PRs come from the factory App (#107), GitHub sees the admin's
+account either way.
 
 ### Split size
 
@@ -242,39 +243,37 @@ ask for a split, suggests where to cut, and doesn't review the lines.
 
 - **How a split links:** each part says `Part of #N`, and the part that completes the issue says
   `Closes #N`. Only that last part is checked against the issue's acceptance criteria, and only it
-  meets the feature-slice row (see the rows above).
-  An earlier part describes the later parts without a closing keyword, even in prose about another
-  part, a table or a code span: GitHub links "closes #N" wherever it sits (`guard / pr-body`).
+  meets the feature-slice row (see the rows above). An earlier part describes the later parts
+  without a closing keyword, even in prose about another part, a table or a code span: GitHub links
+  "closes #N" wherever it sits (`guard / pr-body`).
 - **How a split is built:** as a stack, all parts opened together. Part 1 is based on `main`, and
   each later part on the previous part's branch. Each part stays within the split size and is
-  reviewed on its own diff (`gh pr diff`); the closing part's criteria check covers the whole
-  stack. A fix for a part that merged early can ride in a later part's fix commit. After a part
-  merges, `scripts/stack.sh refresh` rebases the open parts onto `main` and force-pushes them with
-  a lease (GitHub retargets the next part but doesn't rebase it), and an edit to a lower part
-  reaches the parts above with `scripts/stack.sh update`, the same way. Only the stack's own part
-  branches are force-pushed, never `main`. GitHub records `Closes #N` only while the base is
-  `main`, so the closing part's
-  `closingIssuesReferences` is checked once its base is `main`; if it's empty, the admin re-links
-  the issue in the UI.
-- **The one entry point:** every lane and the coordinator opens, extends, updates and reads a
-  stack with `scripts/stack.sh` (`open`, `add`, `update`, `refresh`, `status`), local or cloud.
-  Never hand-chain bases: `guard / stack-base` fails a PR on another PR's branch outside a native
-  stack. A stack merges whole; `ci` on `push` to `main` shows a partial merge that broke it
-  (ADR-0002, area 2, "Stacks").
+  reviewed on its own diff (`gh pr diff`); the closing part's criteria check covers the whole stack.
+  A fix for a part that merged early can ride in a later part's fix commit. After a part merges,
+  `scripts/stack.sh refresh` rebases the open parts onto `main` and force-pushes them with a lease
+  (GitHub retargets the next part but doesn't rebase it), and an edit to a lower part reaches the
+  parts above with `scripts/stack.sh update`, the same way. Only the stack's own part branches are
+  force-pushed, never `main`. GitHub records `Closes #N` only while the base is `main`, so the
+  closing part's `closingIssuesReferences` is checked once its base is `main`; if it's empty, the
+  admin re-links the issue in the UI.
+- **The one entry point:** every lane and the coordinator opens, extends, updates and reads a stack
+  with `scripts/stack.sh` (`open`, `add`, `update`, `refresh`, `status`), local or cloud. Never
+  hand-chain bases: `guard / stack-base` fails a PR on another PR's branch outside a native stack. A
+  stack merges whole; `ci` on `push` to `main` shows a partial merge that broke it (ADR-0002, area
+  2, "Stacks").
 - **What counts:** added plus deleted lines across all files, tests and Markdown included. Tests
   count at full weight: the bot has to read them (the risk the mutation row exists for), and the
   coverage rows stop an agent from trimming tests below the floor to fit. If retros show tests
-  trimmed on split PRs, revisit this as tuning. Not
-  counted: `pnpm-lock.yaml` and any file marked `linguist-generated` in any `.gitattributes`
-  (generated code, result data). A pure rename counts 0 lines. Every `.gitattributes` is
-  code-owned, so widening what they exclude needs the admin.
+  trimmed on split PRs, revisit this as tuning. Not counted: `pnpm-lock.yaml` and any file marked
+  `linguist-generated` in any `.gitattributes` (generated code, result data). A pure rename counts 0
+  lines. Every `.gitattributes` is code-owned, so widening what they exclude needs the admin.
 - **Why 400:** an issue's PR aims at about 100–300 lines (ADR-0002, area 3), and 400 is the cap
   above that target, not the target. SmartBear's study of about 2,500 reviews at Cisco found that
-  reviewers stop catching defects past roughly 200–400 lines. Google's small-CL guidance calls
-  about 100 lines reasonable and 1,000 usually too large. A model reviewer also loses detail on
-  long diffs. Measured on recent merged PRs, 400 would have passed #26 (155 lines), #45 (330) and
-  #52 (177), and asked for a split on #19 (473), #36 (636), #56 (703) and most spikes. All six
-  touched code-owned paths, so for them the size would only have been a note.
+  reviewers stop catching defects past roughly 200–400 lines. Google's small-CL guidance calls about
+  100 lines reasonable and 1,000 usually too large. A model reviewer also loses detail on long
+  diffs. Measured on recent merged PRs, 400 would have passed #26 (155 lines), #45 (330) and #52
+  (177), and asked for a split on #19 (473), #36 (636), #56 (703) and most spikes. All six touched
+  code-owned paths, so for them the size would only have been a note.
 - **No cap on file count.** Lines measure the review's size. A change across many files with few
   lines each is still small.
 - **Can't be split:** when even expand–contract batches (`to-tickets`) can't stay green on their
@@ -308,8 +307,8 @@ At review, compare the diff against the merge base for the five ways a bar gets 
 5. **An exception appeared**: a new row below.
 
 The floor guard (#40) catches all five in the diff. It blocks 1–3 unless the same PR adds an
-exception, and it always blocks 4. A change to this file (1 and 5) also needs the admin's
-approval through CODEOWNERS.
+exception, and it always blocks 4. A change to this file (1 and 5) also needs the admin's approval
+through CODEOWNERS.
 
 **What the guard can judge in this file.** It compares each rule with its old version: a number
 moved the wrong way, a severity or a stage dropped, a listed item gone, a rule removed. It can't
@@ -320,8 +319,8 @@ goes to the guard's log, the job summary and a warning annotation on the changed
 Files changed tab (#122). GitHub shows 10 annotations per step, so with more changes the last one
 points to the job summary, which has them all. Long key-like text in the quotes is redacted.
 
-Each entry names its reasons, in two tiers (admin, 9 Nov), so a real carve-out stands out. These
-are marked `warning [rule-narrowed]`, and their annotation says "may be narrowed":
+Each entry names its reasons, in two tiers (admin, 9 Nov), so a real carve-out stands out. These are
+marked `warning [rule-narrowed]`, and their annotation says "may be narrowed":
 
 - A rule moved under another list's introduction, such as from "Also blocked, with no exception
   possible:" to "A weakened bar is any of:".
@@ -338,21 +337,21 @@ check":
 - Everyday words: `only`, `may`, `can also`, `fine`, `outside`, `skip`.
 
 That warning isn't a _warn_ row and doesn't break "Every failing check blocks the merge": it rides
-on a review that happens anyway, because every PR that touches this file carries `review:admin`.
-It warns rather than fails (admin, 9 Nov): the guard can't tell an approved carve-out from an
+on a review that happens anyway, because every PR that touches this file carries `review:admin`. It
+warns rather than fails (admin, 9 Nov): the guard can't tell an approved carve-out from an
 unapproved one, and `guard / floor` is a required check with no bypass, so a failure could only be
 cleared by an Exceptions row that expires. ADR-0004 records the choice.
 
 **The admin's merge review reads every changed rule in that report**, including the ones the guard
 passes. What the guard still can't catch, and leaves to that review:
 
-- A rewording that changes the meaning with none of the words above and no new clause, such as
-  "Only the admin loosens anything" becoming "Only the agent loosens anything".
+- A rewording that changes the meaning with none of the words above and no new clause, such as "Only
+  the admin loosens anything" becoming "Only the agent loosens anything".
 - A carve-out in words that aren't on the list, or inside a code span.
 
 It errs the other way on two edits, which fail as `rule-narrowed`, as they did before #122: a typo
-fixed inside a table's list cell, and an item appended to a list cell right before a full stop.
-Both read as a removed item.
+fixed inside a table's list cell, and an item appended to a list cell right before a full stop. Both
+read as a removed item.
 
 ## Exceptions
 
@@ -362,17 +361,16 @@ never past the feature freeze on 20 Dec 2026 (90 days, the usual default, would 
 project). The admin approves the PR, because it changes this file.
 
 IDs run `E1`, `E2`, …, and are never reused. The floor guard reads rows matching `| E<n> |` and
-fails every PR once a row's expiry date has passed, until the row is removed or the admin renews
-it.
+fails every PR once a row's expiry date has passed, until the row is removed or the admin renews it.
 
 What a row must hold, checked by the floor guard (#99):
 
-- **Rule** names the findings it waives, as the guard prints them, separated by commas. The
-  waivable ones are the weakened-bar findings: `silenced-checker`, `test-made-easier`,
-  `test-deleted`, `assertion-removed`, `property-runs-cut`, `config-loosened`, `check-removed`, and
-  this file's `rule-removed`, `rule-narrowed`, `threshold-*`, `severity-dropped` and
-  `stage-moved`. A finding the row doesn't name stays blocked, even on its Path. Any other name
-  fails the row, so `unfinished-work` and the `exception-*` findings can't be waived.
+- **Rule** names the findings it waives, as the guard prints them, separated by commas. The waivable
+  ones are the weakened-bar findings: `silenced-checker`, `test-made-easier`, `test-deleted`,
+  `assertion-removed`, `property-runs-cut`, `config-loosened`, `check-removed`, and this file's
+  `rule-removed`, `rule-narrowed`, `threshold-*`, `severity-dropped` and `stage-moved`. A finding
+  the row doesn't name stays blocked, even on its Path. Any other name fails the row, so
+  `unfinished-work` and the `exception-*` findings can't be waived.
 - **Path** is one file (`packages/sim/src/a.ts`), or one folder with at least two segments
   (`packages/sim/`, `packages/sim/**`, `.github/workflows/`), with no other wildcard. A waiver
   across every package is in effect project-wide, and the sim is what the floor protects most
@@ -392,17 +390,17 @@ What a row must hold, checked by the floor guard (#99):
   or without its outer pipes and inside a blockquote, so no formatting hides an expired row.
 
 The guard reads this file with a Markdown parser, micromark with GFM, which follows CommonMark and
-GFM for the cases above. Its own line parser, frozen from 9 Nov, was replaced by the follow-up for
-a real Markdown parser, #132 (admin, 9 Nov). A known miss remains: an ID reused after its row was
+GFM for the cases above. Its own line parser, frozen from 9 Nov, was replaced by the follow-up for a
+real Markdown parser, #132 (admin, 9 Nov). A known miss remains: an ID reused after its row was
 removed in an earlier PR isn't caught, because the guard sees only the PR's own diff. Nor is a
 closing tag inside `<![CDATA[ … ]]>` or `<? … ?>`: the browser reads both as a comment, but the
 guard counts the tag, so an element it seems to close still holds the table, which still waives.
 
-Since #132, a table inside an element that HTML above it left open waives nothing: a `<details>`
-(or `<details/>`) followed by a blank line, anywhere above the table, even above the heading or
-inside a paragraph. A level-2 Exceptions heading inside a block quote or a list item counts as a
-second one.
+Since #132, a table inside an element that HTML above it left open waives nothing: a `<details>` (or
+`<details/>`) followed by a blank line, anywhere above the table, even above the heading or inside a
+paragraph. A level-2 Exceptions heading inside a block quote or a list item counts as a second one.
 
+<!-- prettier-ignore -->
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
 
@@ -424,22 +422,23 @@ Decided in the review of PR #45 (7 Nov):
 - **D1:** a weakened bar is blocked unless the same PR adds an Exceptions row, which needs the
   admin's approval. "A reason in the commit message" is no longer enough.
 - **D2:** this file owns the blast-radius numbers, ADR-0002 owns the mechanism (#47). Since #47,
-  those numbers are the escalation criteria and the split size ([Admin review](#admin-review-escalation-and-split-size)).
+  those numbers are the escalation criteria and the split size
+  ([Admin review](#admin-review-escalation-and-split-size)).
 - **D3:** `pnpm audit --audit-level=high` is the dependency check. osv-scanner stays only if #42
   shows it catches a known-vulnerable dev dependency in pnpm's lockfile.
 
 Decided in the interview on #47 (7 Nov), for
 [Admin review](#admin-review-escalation-and-split-size):
 
-- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS, so the
-  label is the one queue of PRs waiting for the admin. A new dependency, an Exceptions row and a
-  loosened tool config fall under that row. Until `guard / floor` reports, the bot escalates a
-  weakened bar on any path.
-- **Feature slice, interface, security:** a feature slice is a PR that closes a `feature` issue.
-  An interface change includes additions to `packages/*` exports, the game API's schemas and the
-  sim's state and action types. Security-sensitive code escalates.
-- **Content:** escalates. The first answer was "no, to avoid flooding the queue", reversed once
-  the spec showed that the admin owns content and that tuning is a rules change.
+- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS, so the label
+  is the one queue of PRs waiting for the admin. A new dependency, an Exceptions row and a loosened
+  tool config fall under that row. Until `guard / floor` reports, the bot escalates a weakened bar
+  on any path.
+- **Feature slice, interface, security:** a feature slice is a PR that closes a `feature` issue. An
+  interface change includes additions to `packages/*` exports, the game API's schemas and the sim's
+  state and action types. Security-sensitive code escalates.
+- **Content:** escalates. The first answer was "no, to avoid flooding the queue", reversed once the
+  spec showed that the admin owns content and that tuning is a rules change.
 - **The bot's triggers:** a PR that doesn't match its issue, that links no issue, or that hasn't
   converged after 3 rounds of Request changes. Every escalation names its rows in a comment.
 - **Split size:** 400 changed lines, excluding `pnpm-lock.yaml` and files marked
@@ -449,43 +448,43 @@ Decided in the interview on #47 (7 Nov), for
 
 Decided in the coordinator's review of PR #57 (7 Nov):
 
-- **Splits:** a PR links its issue with `Closes #N` or `Part of #N`. Only the `Closes` PR is
-  checked against the acceptance criteria and meets the feature-slice row.
-- **Security signals:** the server-side mechanisms MUST-16's threats depend on (T1, T3–T8), not
-  the sim's rules. They become path globs at M3.
-- **Weakened bar before the guard:** the bot also requests changes unless an Exceptions row is
-  added (D1), until `guard / floor` is a required check.
+- **Splits:** a PR links its issue with `Closes #N` or `Part of #N`. Only the `Closes` PR is checked
+  against the acceptance criteria and meets the feature-slice row.
+- **Security signals:** the server-side mechanisms MUST-16's threats depend on (T1, T3–T8), not the
+  sim's rules. They become path globs at M3.
+- **Weakened bar before the guard:** the bot also requests changes unless an Exceptions row is added
+  (D1), until `guard / floor` is a required check.
 - **Test lines:** count at full weight toward the split size.
 
 Decided while building #122 (9 Nov), for [Guarding the bar](#guarding-the-bar):
 
-- **Changes to this file:** the floor guard reports every one, old and new side by side, in its
-  log, the job summary and annotations on the PR. A PR comment would have needed a floor-job change.
+- **Changes to this file:** the floor guard reports every one, old and new side by side, in its log,
+  the job summary and annotations on the PR. A PR comment would have needed a floor-job change.
 - **Carve-outs:** a narrowing word, a negation or a new clause warns as `rule-narrowed` and doesn't
   fail. A failure could only be cleared by an expiring Exceptions row, since `guard / floor` has no
   bypass, and the admin reads every PR that touches this file anyway.
 - **Two tiers:** strong signals (a move to another list, a carve-out phrase, a negation, a hidden
   comment or footnote, a clause in a list cell) stay `warning [rule-narrowed]`. Weak ones (a new
-  rule or text, a clause in prose, everyday words) become `note [check]`, so the warning stays
-  rare enough to stop at.
+  rule or text, a clause in prose, everyday words) become `note [check]`, so the warning stays rare
+  enough to stop at.
 
 Decided in the #68 step-1 grill (12 Nov), re-checking
 [Admin review](#admin-review-escalation-and-split-size) before auto-merge. On 12 Nov, 20 of 21
 merged PRs needed the admin:
 
-- **CODEOWNERS:** unchanged. Every path stays code-owned. Each one holds the rules the agents or
-  the reviewer follow, or a place where the bar can be lowered quietly. Handing off `docs/adr/` or
+- **CODEOWNERS:** unchanged. Every path stays code-owned. Each one holds the rules the agents or the
+  reviewer follow, or a place where the bar can be lowered quietly. Handing off `docs/adr/` or
   `docs/agents/` would have freed no 12 Nov PR, since each also hit another trigger. Every
   `package.json` stays too: a script edit can weaken a check without adding a dependency, and
   CODEOWNERS can't tell the two apart.
-- **Content change:** narrowed to content values and entries. #216–#222 escalated on the folder
-  path though their own comments said "no content value changed". Validation code changes no farm.
+- **Content change:** narrowed to content values and entries. #216–#222 escalated on the folder path
+  though their own comments said "no content value changed". Validation code changes no farm.
   ADR-0006 still applies: every value change escalates.
 - **Weakened bar, before `guard / floor`:** removed. Its end condition is met: the `main checks`
   ruleset requires `guard / floor`, and the Exceptions row it needs is code-owned.
 - **Kept as they are:** Code-owned path, Feature slice, Interface change (every 12 Nov hit was a
   persisted-format change), Security-sensitive code, the three process rows and the split size.
-- **Same rows for every author:** a factory PR meets the same rows. The only difference stays
-  #37's: on a factory PR, the bot also requests the admin's review when it escalates.
+- **Same rows for every author:** a factory PR meets the same rows. The only difference stays #37's:
+  on a factory PR, the bot also requests the admin's review when it escalates.
 - **The signal:** as #37 planned, the review workflow adds `review:admin` and posts the escalation
   thread; #104 retires the label.

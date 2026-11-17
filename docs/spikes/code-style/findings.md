@@ -1,8 +1,8 @@
 # The admin's JS/TS conventions, from their handwritten code
 
 Spike #123, 9 Nov 2026. It reports what the admin does when they write JavaScript and TypeScript by
-hand, so the design grill (#124) can decide from evidence and the build (#125) can turn the decisions
-into `docs/agents/code-style.md`, ESLint and tsconfig rules. It records habits, not
+hand, so the design grill (#124) can decide from evidence and the build (#125) can turn the
+decisions into `docs/agents/code-style.md`, ESLint and tsconfig rules. It records habits, not
 recommendations; opinions are confined to [Notes for the grill](#notes-for-the-grill) at the end.
 
 ## How this was gathered
@@ -13,11 +13,11 @@ recommendations; opinions are confined to [Notes for the grill](#notes-for-the-g
   commits were read, and this doc gives patterns and counts only: no code, no internal names.
 - **Counts** come from grep/find over each group's handwritten files; "N of M" means N files contain
   the pattern. Regex counts can miss multi-line forms. Readers spot-checked by reading files, and
-  five counts were re-run independently with the same result (rta files and classes, dmp
-  `interface` and default exports, foofest `??`, zero test files).
+  five counts were re-run independently with the same result (rta files and classes, dmp `interface`
+  and default exports, foofest `??`, zero test files).
 - **Rule names** in "Enforce" were checked against the pinned `eslint@10.14.0` and
-  `@typescript-eslint/eslint-plugin@8.72.1` packages. Plugin status is from the npm registry on
-  9 Nov 2026.
+  `@typescript-eslint/eslint-plugin@8.72.1` packages. Plugin status is from the npm registry on 9
+  Nov 2026.
 
 ## Sources and what counted as handwritten
 
@@ -25,6 +25,7 @@ The admin commits as `Soto` (GitHub and work) and under their KEA student identi
 number): in school and tutor repos 2023–2025, and also in dmp's 2026 commits and the May 2026
 foofest edits. Both count as the admin; see [open question 1](#open-questions-for-the-admin).
 
+<!-- prettier-ignore -->
 | Set (used below) | Path | When | Stack | Handwritten files | AI help | How it was told apart |
 |---|---|---|---|---|---|---|
 | **dmp** | `Dev/personal/dmp` | Mar–May 2026, plus about 70 uncommitted files after 7 May | Next.js 16, **TS** | 66 (median 42 lines, max 165) | none in history | Only author. Excluded 2 Supabase docs boilerplate clients and the create-next-app files left unchanged. |
@@ -66,32 +67,35 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
 - **`noImplicitAny: false` is uncommitted.** No dmp commit has it (`070e71e`, `33259d7`, `b83f8dc`
   and `3c609e2` checked); it exists only in the uncommitted working tree, so its date and intent are
   unknown ([open question 3](#open-questions-for-the-admin)). Weight it as possible, not known.
-- **Evidence.** dmp: `as` casts in 12 of 66 files, 2 `@ts-expect-error`, 2 `eslint-disable`, so looser
-  in practice than its config. work-H: 0 `any`, `strict` tsconfig. payload: TS only for config (the
-  admin converted the scaffold's `.tsx` pages to `.jsx`).
+- **Evidence.** dmp: `as` casts in 12 of 66 files, 2 `@ts-expect-error`, 2 `eslint-disable`, so
+  looser in practice than its config. work-H: 0 `any`, `strict` tsconfig. payload: TS only for
+  config (the admin converted the scaffold's `.tsx` pages to `.jsx`).
 - **Enforce.** tsconfig (this repo is already stricter); `erasableSyntaxOnly` (TS 6.0.3 has it);
   `@typescript-eslint/consistent-type-assertions` (in typescript-eslint's `stylistic`, an existing
   dependency, not enabled here) to limit `as`.
 
 ### C2. Functions, not classes; `function` declarations
 
-- **Components are `function` declarations**: dmp 26 of 26, dream 54 of 54, tutor 0 arrow components,
-  foofest 25 function vs 2 arrow files at `25a8998` (one mostly a teammate's), payload 36 vs 5,
-  work-H 3 of 3, work-A 105 vs 0. Exception: Oct–Nov 2024 Next exercises (next-shop 22 arrow vs 5).
+- **Components are `function` declarations**: dmp 26 of 26, dream 54 of 54, tutor 0 arrow
+  components, foofest 25 function vs 2 arrow files at `25a8998` (one mostly a teammate's), payload
+  36 vs 5, work-H 3 of 3, work-A 105 vs 0. Exception: Oct–Nov 2024 Next exercises (next-shop 22
+  arrow vs 5).
 - **Top-level helpers are declarations too**: dmp 40 of 66 files vs 8 with top-level arrow consts;
   work-H 10 declarations vs 2 arrows; work-A 1,465 vs 457. Arrows appear for one-line service
-  functions, small local helpers and callbacks. Two swings back to arrow-const exports: tutor fetchers
-  (Jul 2025: `export const getEvent = async (id) =>`, and `getEvents = cache(async () => …)`) and
-  ux-exam (Nov 2025, 5 of 9 files).
+  functions, small local helpers and callbacks. Two swings back to arrow-const exports: tutor
+  fetchers (Jul 2025: `export const getEvent = async (id) =>`, and
+  `getEvents = cache(async () => …)`) and ux-exam (Nov 2025, 5 of 9 files).
 - **Classes are rare in React/TS code**: dmp 4 of 66 (API clients, an error class; the newest code
-  moves to function services), work-H 1 (replaced next day), work-A 9 in 72.6k lines, tutor, school 0.
+  moves to function services), work-H 1 (replaced next day), work-A 9 in 72.6k lines, tutor,
+  school 0.
 - **Conflict: rta is class-first.** 18 classes in 11 of 17 files, 1 `function` declaration, 116
-  `#private` field references in 9 files, 26 getters, 10 setters; setters take deltas (`state.score = 3`
-  adds 3).
+  `#private` field references in 9 files, 26 getters, 10 setters; setters take deltas
+  (`state.score = 3` adds 3).
 - **Enforce.** Core `func-style` with `"declaration"`: `allowArrowFunctions` allows every arrow
-  assigned to a variable, whatever its length, and `overrides.namedExports` sets the style for exports
-  only. No core option limits arrows to one-liners; that part is doc only. Core `prefer-arrow-callback`
-  (on in work-cfg). Classes: `no-restricted-syntax` on `ClassDeclaration`, or doc only.
+  assigned to a variable, whatever its length, and `overrides.namedExports` sets the style for
+  exports only. No core option limits arrows to one-liners; that part is doc only. Core
+  `prefer-arrow-callback` (on in work-cfg). Classes: `no-restricted-syntax` on `ClassDeclaration`,
+  or doc only.
 
 ### C3. One main export per file, private helpers below it
 
@@ -99,15 +103,16 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
   54, foofest 16 of 26 (at `25a8998`), payload 13 of 34; tutor 13 of 38 files have private helpers.
   The default export comes first, helpers follow, so the main component reads like a table of
   contents. work-H puts helpers below the exported function that uses them (1 of 1).
-- **Consistency.** Stable from 2025 on. Files grow by adding helpers: tutor `CreateEvent.jsx` reaches
-  250 lines with 3 helpers, foofest `FormSections.jsx` 418 with 11. **Enforce.** Doc only.
+- **Consistency.** Stable from 2025 on. Files grow by adding helpers: tutor `CreateEvent.jsx`
+  reaches 250 lines with 3 helpers, foofest `FormSections.jsx` 418 with 11. **Enforce.** Doc only.
 
 ### C4. `interface` for shapes, `type` for unions and derived types
 
 - **Evidence.** dmp: `interface` in 20 of 66 files (props and object shapes, often with `extends`),
-  `type` in 8 to 10 (unions, intersections, `ReturnType` aliases). work-H: interface 3, type 11; work-A:
-  interface 99 (52 files), type 193 (88). Props are named `<Component>Props` (work-A 33 vs 6 plain
-  `Props`; dmp 9 `XProps`, 3 `Props`). No other set declares types. Same split in dmp and work.
+  `type` in 8 to 10 (unions, intersections, `ReturnType` aliases). work-H: interface 3, type 11;
+  work-A: interface 99 (52 files), type 193 (88). Props are named `<Component>Props` (work-A 33 vs 6
+  plain `Props`; dmp 9 `XProps`, 3 `Props`). No other set declares types. Same split in dmp and
+  work.
 - **Enforce.** `@typescript-eslint/consistent-type-definitions` with `"interface"`. It only rewrites
   object-literal type aliases, so unions stay `type`. It is in `stylistic` and not enabled here.
 
@@ -117,43 +122,45 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
   compare plain strings and use `{ label, value }` arrays. work-H: `as const` 4 and `satisfies` 4 (3
   files); work-A: `as const` 29, `satisfies` 4, plus `keyof typeof` for derived types. By volume,
   the admin uses `satisfies` more by hand than the AI does.
-- **Enforce.** tsconfig `erasableSyntaxOnly` (bans enums, namespaces and parameter properties; the admin
-  set it in dmp), or `no-restricted-syntax` on `TSEnumDeclaration`.
+- **Enforce.** tsconfig `erasableSyntaxOnly` (bans enums, namespaces and parameter properties; the
+  admin set it in dmp), or `no-restricted-syntax` on `TSEnumDeclaration`.
 
 ### C6. Default exports for components, named for everything else
 
 - **Evidence.** Components: dmp 22 of 26 default, dream 46 of 54, tutor 28 of 38. Lib/data modules:
-  named (dmp 41 of 66 files have inline named exports). work-H: default 10 lines in 8 files, named 22 in
-  11; work-A 129 vs 1,005. rta: default per class file (10 of 17), named for data. ux-exam: 8 of 9
-  files named-only. The newest dmp code (`lib/api/*`) uses an export list at the bottom (5 of 66).
+  named (dmp 41 of 66 files have inline named exports). work-H: default 10 lines in 8 files, named
+  22 in 11; work-A 129 vs 1,005. rta: default per class file (10 of 17), named for data. ux-exam: 8
+  of 9 files named-only. The newest dmp code (`lib/api/*`) uses an export list at the bottom (5 of
+  66).
 - **Enforce.** Core `no-restricted-exports` with `restrictDefaultExports`, scoped by file glob (for
   example lib only). "Default for components" has no core rule.
 
 ### C7. `index` files hold real code; barrels are avoided
 
 - **Evidence.** An `index` file is a folder's main module, not a list of re-exports: dmp
-  `components/ui/Button/index.tsx` and `lib/Spotify/index.ts`; rta `view/index.js` (a compositor) and
-  `config/index.js` (a selector); work-H 24 of 85 touched files are component-folder `index` files;
-  payload has 22 `index.jsx` and 17 `index.ts` in feature folders.
-- **Barrels.** Tried and dropped in tutor (async-exhibit added `components/index.jsx` in Jun 2025 and
-  deleted it in Jul). 0 `export *` in personal, tutor, rta and school. work-H has one `export *`
+  `components/ui/Button/index.tsx` and `lib/Spotify/index.ts`; rta `view/index.js` (a compositor)
+  and `config/index.js` (a selector); work-H 24 of 85 touched files are component-folder `index`
+  files; payload has 22 `index.jsx` and 17 `index.ts` in feature folders.
+- **Barrels.** Tried and dropped in tutor (async-exhibit added `components/index.jsx` in Jun 2025
+  and deleted it in Jul). 0 `export *` in personal, tutor, rta and school. work-H has one `export *`
   barrel, over an ORM schema split per domain; work-A has 9 re-export lines in 3 files. payload uses
   registry files (`blocks/index.jsx`, `export { A, B }` in 4 of 109 files).
-- **Enforce.** `no-restricted-syntax` on `ExportAllDeclaration` and `ExportNamedDeclaration[source]`.
+- **Enforce.** `no-restricted-syntax` on `ExportAllDeclaration` and
+  `ExportNamedDeclaration[source]`.
 
 ### C8. Imports
 
 - **Alias over relative**: `@/` in dmp 28 of 66 files (relative `../` in 14, never deeper than one
   level), dream 61 of 89, tutor 24 of 38, foofest 20 of 28; work-H 79 alias lines vs 11 relative.
-  Relative paths stay inside a folder (`./styles`, `./types`). No file extensions in Next code; `.js`
-  in rta (18 of 18, required by browser ESM) and ux-exam.
+  Relative paths stay inside a folder (`./styles`, `./types`). No file extensions in Next code;
+  `.js` in rta (18 of 18, required by browser ESM) and ux-exam.
 - **Order.** None by hand in personal and tutor (blank-line groups in 9 of 59 dmp files). foofest
   labels groups with `// COMPONENTS` and `// FUNCTIONS` comments (17 of 38 files at `25a8998`).
-  payload: the admin added `prettier-plugin-organize-imports` (20 May 2025). work-cfg: Prettier sorts
-  imports into 14 hand-written groups (builtins, react/next, packages, env, vendor clients, UI layers,
-  assets, lib, other aliases, relative), with blank lines between them.
-- **`import type`** is rare by hand: dmp 6 of 66, work-H 0 statements (2 inline specifiers), payload 5
-  of 109. work-A has 198, enforced by a rule an agent added.
+  payload: the admin added `prettier-plugin-organize-imports` (20 May 2025). work-cfg: Prettier
+  sorts imports into 14 hand-written groups (builtins, react/next, packages, env, vendor clients, UI
+  layers, assets, lib, other aliases, relative), with blank lines between them.
+- **`import type`** is rare by hand: dmp 6 of 66, work-H 0 statements (2 inline specifiers), payload
+  5 of 109. work-A has 198, enforced by a rule an agent added.
 - **Enforce.** tsconfig `paths`; core `no-restricted-imports` patterns (for example `../*`); core
   `sort-imports` only sorts members within an import and can't express groups, so groups need a
   plugin or Prettier (see "Tools named above"); `verbatimModuleSyntax` (already on) and
@@ -161,6 +168,7 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
 
 ### C9. Naming
 
+<!-- prettier-ignore -->
 | Kind | Admin's habit | Evidence | Conflicts |
 |---|---|---|---|
 | Components, types | PascalCase | every set | none |
@@ -173,9 +181,9 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
 | Domain names | generic names renamed to domain-prefixed ones, plural row types to singular | work-H rename commit (15 files); dmp `SpotifyAlbum` | none |
 | `.map` index | named `id`, used as the React key | tutor 12 of 38, foofest, payload | none |
 
-- **Enforce.** `@typescript-eslint/naming-convention` (no shared config enables it; the boolean-prefix
-  selector needs type information); snake_case exceptions go in its `filter`. Core `id-length` for
-  short names.
+- **Enforce.** `@typescript-eslint/naming-convention` (no shared config enables it; the
+  boolean-prefix selector needs type information); snake_case exceptions go in its `filter`. Core
+  `id-length` for short names.
 
 ### C10. Errors are returned, not thrown
 
@@ -186,10 +194,10 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
 - **try/catch is rare**: dmp 1 of 66, dream 1 of 89, tutor 1 of 38 (used as control flow), at most 1
   per school set, rta 0, work-H 0.
 - **Errors are often logged and dropped**: `console.log` in dmp 15 of 66 files, dream 9 of 89, early
-  school 11 of 26; `.catch((err) => console.log(err))`; tutor and school fetchers don't check `res.ok`.
-  Messages to users are full sentences ending in a period ("Please enter a valid email.").
-- **Conflict.** work-A mixes the two (296 `throw new Error` vs 214 result objects), bridged by a wrapper
-  that turns throws into results.
+  school 11 of 26; `.catch((err) => console.log(err))`; tutor and school fetchers don't check
+  `res.ok`. Messages to users are full sentences ending in a period ("Please enter a valid email.").
+- **Conflict.** work-A mixes the two (296 `throw new Error` vs 214 result objects), bridged by a
+  wrapper that turns throws into results.
 - **Enforce.** Returned errors: doc only. Core `no-console`. `@typescript-eslint/only-throw-error`
   (type-checked configs). The empty `catch {}` is already blocked by the Floor.
 
@@ -197,25 +205,26 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
 
 - **`||` for fallbacks, not `??`**: dmp `||` in 12 of 66 files vs `??` in 2; dream 0 `??`; tutor 0;
   school 0 in all five sets; rta 2. **Conflict:** work uses `??` (work-H 5, work-A 452).
-- **Heavy, defensive `?.`**: dmp 75 uses in 21 of 66 files, dream 170 in 28 of 89, foofest 66, payload
-  69. Early school 0; rta 0.
-- **Absence.** Personal: `undefined` for "not loaded yet", a bare `return;` from components (dmp 7 of 66,
-  dream 4 of 89), `null` for API-shaped fields, and unions mixing both (`string | null | undefined`).
-  Tutor writes neither. work: `null` dominates (work-H 40 vs 4 `undefined`; work-A 2,800 vs 451),
-  with `return null` and a loose `== null` (work-H 3 loose vs 1 strict). `==` elsewhere: 13 of 89 dream
-  files, 0 in dmp.
+- **Heavy, defensive `?.`**: dmp 75 uses in 21 of 66 files, dream 170 in 28 of 89, foofest 66,
+  payload 69. Early school 0; rta 0.
+- **Absence.** Personal: `undefined` for "not loaded yet", a bare `return;` from components (dmp 7
+  of 66, dream 4 of 89), `null` for API-shaped fields, and unions mixing both
+  (`string | null | undefined`). Tutor writes neither. work: `null` dominates (work-H 40 vs 4
+  `undefined`; work-A 2,800 vs 451), with `return null` and a loose `== null` (work-H 3 loose vs 1
+  strict). `==` elsewhere: 13 of 89 dream files, 0 in dmp.
 - **Enforce.** `@typescript-eslint/prefer-nullish-coalescing` and `prefer-optional-chain` (in
-  `stylistic-type-checked`, which needs typed linting); `@typescript-eslint/no-unnecessary-condition`
-  (`strict-type-checked`) would report defensive `?.`. Core `eqeqeq` (option `null: "ignore"` allows
-  `== null`). For null vs undefined: `no-restricted-syntax`, or a plugin rule (`unicorn/no-null`).
+  `stylistic-type-checked`, which needs typed linting);
+  `@typescript-eslint/no-unnecessary-condition` (`strict-type-checked`) would report defensive `?.`.
+  Core `eqeqeq` (option `null: "ignore"` allows `== null`). For null vs undefined:
+  `no-restricted-syntax`, or a plugin rule (`unicorn/no-null`).
 
 ### C12. Async
 
-- **Evidence.** async/await by default, with `return await` everywhere in dmp and dream. `.then` is mixed
-  into await expressions (`await fetch(url).then((res) => res.json())`): dmp 7 of 66 files, dream 7 of
-  89, every tutor file that uses `.then` (4), 18 sites across school 2024–2025. `Promise.all` 0 times
-  in personal and tutor. Early school (2023–24) used `.then` chains only. work-A: `.then(` 9 vs
-  `await` 5,008. React `cache()` wraps readers in dmp, tutor and payload.
+- **Evidence.** async/await by default, with `return await` everywhere in dmp and dream. `.then` is
+  mixed into await expressions (`await fetch(url).then((res) => res.json())`): dmp 7 of 66 files,
+  dream 7 of 89, every tutor file that uses `.then` (4), 18 sites across school 2024–2025.
+  `Promise.all` 0 times in personal and tutor. Early school (2023–24) used `.then` chains only.
+  work-A: `.then(` 9 vs `await` 5,008. React `cache()` wraps readers in dmp, tutor and payload.
 - **Enforce.** `@typescript-eslint/return-await` (`strict-type-checked`): its default would report
   `return await` outside try/catch, so the habit needs `"always"`. `.then` mixing: a plugin rule
   (`promise/prefer-await-to-then`).
@@ -225,22 +234,24 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
 - **UPPERCASE section banners** split a file (`// EVENT LISTENERS`, `// AUTH`, `// API ENDPOINTS`):
   dmp 7 of 66, dream 2 of 89, tutor 6 of 38, foofest 17 of 28, payload 19 of 109, ux-exam 6 of 9,
   early school 9 of 26; work-H uses one section marker. rta has none.
-- **No JSDoc**: 0 in personal (172 files), tutor, school, rta and work-H. work-A has 1,337 JSDoc blocks,
-  all AI-written, and in two handwritten diffs the admin deleted long explanatory comments.
+- **No JSDoc**: 0 in personal (172 files), tutor, school, rta and work-H. work-A has 1,337 JSDoc
+  blocks, all AI-written, and in two handwritten diffs the admin deleted long explanatory comments.
 - **Commented-out code is left in place**: dmp 124 lines in 12 files, dream 68 in 9, rta 43 in 3,
   payload 135 in 17. work cleans it up by HEAD (5 lines left).
 - **TODOs**: dmp 7 of 66 files; about 0 elsewhere. **Language**: English only in every set after the
   first-semester exercises (Nov 2023).
-- **Enforce.** Core `no-warning-comments` for TODO (the Floor already blocks a TODO standing in for an
-  implementation). Commented-out code: a plugin rule (`sonarjs/no-commented-code`). Banners: doc only.
+- **Enforce.** Core `no-warning-comments` for TODO (the Floor already blocks a TODO standing in for
+  an implementation). Commented-out code: a plugin rule (`sonarjs/no-commented-code`). Banners: doc
+  only.
 
 ### C14. Statements and control flow (choices Prettier leaves open)
 
 - **Guard clauses as one-line `if` without braces, then a blank line**: dmp 14 of 66 files, dream 24
-  of 89, rta 4 sites, work-H 8 in 5 files, work-A 407. Earlier school code prefers `if`/`else` with an
-  explicit `else` (early-return patterns 0 of 26 early files, 9 of 109 payload).
-- **`const` by default**: `let` in dmp 3 of 66, tutor 1 of 38, foofest 1 vs 164 `const`; `var` 0 except
-  2 loops in rta's first draft. Already on here (`prefer-const`, `no-var` via typescript-eslint).
+  of 89, rta 4 sites, work-H 8 in 5 files, work-A 407. Earlier school code prefers `if`/`else` with
+  an explicit `else` (early-return patterns 0 of 26 early files, 9 of 109 payload).
+- **`const` by default**: `let` in dmp 3 of 66, tutor 1 of 38, foofest 1 vs 164 `const`; `var` 0
+  except 2 loops in rta's first draft. Already on here (`prefer-const`, `no-var` via
+  typescript-eslint).
 - **Destructuring everywhere**, nested in parameters: dmp 17 of 66, dream 51 of 89, tutor 17 of 38,
   payload 46 of 109, rta 14 lines in 7 files. work-cfg turns on `prefer-destructuring` for objects.
 - **Ternaries** in JSX and class strings, nested in dream, tutor and payload (rta 0). **Default
@@ -255,75 +266,83 @@ Each entry gives the pattern, the evidence, how consistent it is, and how it cou
   imports), except the Payload scaffold's own config (single quotes, no semicolons).
 - **Indentation splits**: tabs in dream (77 of 89), portfolio, rta (17 of 17) and 2026 re-saves of
   school repos; 2 spaces in dmp (with a `.prettierrc`), work-cfg, tutor and school 2023–25.
-- **Trailing commas**: `es5` in dream, tutor and work-cfg; `all` in dmp and rta. Prettier mostly runs
-  from the editor with no repo config. **Enforce:** Prettier, a new dependency.
+- **Trailing commas**: `es5` in dream, tutor and work-cfg; `all` in dmp and rta. Prettier mostly
+  runs from the editor with no repo config. **Enforce:** Prettier, a new dependency.
 
 ### C16. Folder structure
 
 - **Next apps.** Route groups by access (dmp `(api)/(auth)/(public)`, tutor `(public)/(auth)`), with
-  route-private `_components/`. At the top, folders by type (`components/`, `lib/`, `data/`, `hooks/`);
-  inside a concern, files by layer (dmp `lib/auth/{actions,dal,dto,session,user}.ts`).
-- **work-H/work-cfg.** By role: routes; `components/` as domain folder → component folder; a data-access
-  layer with one module per domain and a `types/` folder of `*.types.ts`; typed `env/`; `hooks/`;
-  `lib/` for pure helpers; `services/<vendor>/` for third-party clients; `tests/`. The admin moved
-  hooks, data access and vendor clients out of `lib/` by hand (16–18 Sep), then locked the layers in
-  lint: routes may not import vendor clients, and shared code may not import routes.
+  route-private `_components/`. At the top, folders by type (`components/`, `lib/`, `data/`,
+  `hooks/`); inside a concern, files by layer (dmp `lib/auth/{actions,dal,dto,session,user}.ts`).
+- **work-H/work-cfg.** By role: routes; `components/` as domain folder → component folder; a
+  data-access layer with one module per domain and a `types/` folder of `*.types.ts`; typed `env/`;
+  `hooks/`; `lib/` for pure helpers; `services/<vendor>/` for third-party clients; `tests/`. The
+  admin moved hooks, data access and vendor clients out of `lib/` by hand (16–18 Sep), then locked
+  the layers in lint: routes may not import vendor clients, and shared code may not import routes.
 - **rta.** By role inside a feature root: `js/game/{config,logic,entities,view}`, mirrored in CSS.
 - **school.** ux-exam (Nov 2025): by feature, then one role file each
   (`auth/{api,modules,utils,variables,script}.js`). payload: one folder per feature with role-named
   files (`config.ts` 25, `index.jsx` 22, `index.client.jsx` 5, `access.ts` 3, `hooks.ts` 4).
-- **Enforce.** Core `no-restricted-imports` in per-folder config blocks; `import-x/no-restricted-paths`
-  (work uses the `import` equivalent); Fallow boundaries (#41, already named in `CONSTRAINTS.md`).
+- **Enforce.** Core `no-restricted-imports` in per-folder config blocks;
+  `import-x/no-restricted-paths` (work uses the `import` equivalent); Fallow boundaries (#41,
+  already named in `CONSTRAINTS.md`).
 
 ### C17. How a module grows
 
-- **A file becomes a folder with an `index` and siblings.** rta: `view.js` (161 lines) → `view/index.js`
-  → a 41-line compositor plus 4 siblings (22–24 Jun 2026). dmp: `lib/spotify/*.ts` (Mar 2026) →
-  `lib/Spotify/{schema/,services/,index.ts}` (May 2026), one schema file per API resource and one
-  service file per API area; UI components become `Button/{index.tsx,styles.ts,types.tsx}`. foofest's
-  2026 cleanup: `Filter.jsx` → `Filter/{index,Buttons,Options}.jsx`. payload had three layouts in four
-  weeks (prefixed files, then `config.ts` + `index.jsx`, then `blocks/`, `collections/`, `globals/`).
-- **Before splitting,** files grow by helpers (C3) and banners (C13); data moves out into `config/` or
-  JSON (rta, school `data/*.json`); old versions stay next to new ones (dmp `lib/Spotify/old.ts`).
+- **A file becomes a folder with an `index` and siblings.** rta: `view.js` (161 lines) →
+  `view/index.js` → a 41-line compositor plus 4 siblings (22–24 Jun 2026). dmp: `lib/spotify/*.ts`
+  (Mar 2026) → `lib/Spotify/{schema/,services/,index.ts}` (May 2026), one schema file per API
+  resource and one service file per API area; UI components become
+  `Button/{index.tsx,styles.ts,types.tsx}`. foofest's 2026 cleanup: `Filter.jsx` →
+  `Filter/{index,Buttons,Options}.jsx`. payload had three layouts in four weeks (prefixed files,
+  then `config.ts` + `index.jsx`, then `blocks/`, `collections/`, `globals/`).
+- **Before splitting,** files grow by helpers (C3) and banners (C13); data moves out into `config/`
+  or JSON (rta, school `data/*.json`); old versions stay next to new ones (dmp
+  `lib/Spotify/old.ts`).
 - **File sizes.** Median (max) lines: dmp 42 (165), dream 39 (260), tutor 32 (250), rta 60 (183).
 - **Enforce.** Doc only; core `max-lines` could prompt a split.
 
 ### C18. Tests
 
-- **No tests in any handwritten set**: 0 `*.test.*` or `*.spec.*` files in personal, tutor, rta and the
-  counted school repos. The only school test files are 3 `*.spec.ts` in `shaelinbishop_v3`, an
+- **No tests in any handwritten set**: 0 `*.test.*` or `*.spec.*` files in personal, tutor, rta and
+  the counted school repos. The only school test files are 3 `*.spec.ts` in `shaelinbishop_v3`, an
   unchanged 2026 Payload template copy.
-- **work went through three layouts.** 7 Sep: beside the source (AI-likely). 16 Sep, by hand: a `tests/`
-  folder inside each component or route folder (15 of 15 work-H test files, `index.test.tsx` mirroring
-  `index.tsx`). From 20 Sep: one central `src/tests/` tree mirroring `src/`, a rule the admin wrote by
-  hand (91 of 117 admin-touched test files at HEAD).
-- **Style.** Always `.test.` (0 `.spec.` in work-H); `.integration.test.ts` for database tests (62 of
-  117) with their own Vitest config; `describe`/`it` (work-A `it` 1,303 vs `test` 1). **Enforce.**
-  Vitest `include`; `check-file/folder-match-with-fex` (work-cfg); `vitest/consistent-test-it`.
+- **work went through three layouts.** 7 Sep: beside the source (AI-likely). 16 Sep, by hand: a
+  `tests/` folder inside each component or route folder (15 of 15 work-H test files,
+  `index.test.tsx` mirroring `index.tsx`). From 20 Sep: one central `src/tests/` tree mirroring
+  `src/`, a rule the admin wrote by hand (91 of 117 admin-touched test files at HEAD).
+- **Style.** Always `.test.` (0 `.spec.` in work-H); `.integration.test.ts` for database tests (62
+  of 117) with their own Vitest config; `describe`/`it` (work-A `it` 1,303 vs `test` 1).
+  **Enforce.** Vitest `include`; `check-file/folder-match-with-fex` (work-cfg);
+  `vitest/consistent-test-it`.
 
 ### C19. File and folder names
 
-- **Component files are PascalCase**: dmp 26 of 26, dream 54 of 54, Next exercises 55 of 70, tutor in 3
-  of 4 repos (kebab-case only where a teacher's starter set it). work-cfg: PascalCase component files,
-  and `index.tsx` for a component folder.
-- **Other modules are lowercase single words** (`dal.ts`, `session.ts`; rta 17 of 17). Multi-word names
-  changed over time: snake_case (dream `auth_actions.js`; work-H data modules before the rule) → dotted
-  (`player.types.ts` in dmp) → camelCase with a plural suffix (`*.types.ts`), enforced by work-cfg.
+- **Component files are PascalCase**: dmp 26 of 26, dream 54 of 54, Next exercises 55 of 70, tutor
+  in 3 of 4 repos (kebab-case only where a teacher's starter set it). work-cfg: PascalCase component
+  files, and `index.tsx` for a component folder.
+- **Other modules are lowercase single words** (`dal.ts`, `session.ts`; rta 17 of 17). Multi-word
+  names changed over time: snake_case (dream `auth_actions.js`; work-H data modules before the rule)
+  → dotted (`player.types.ts` in dmp) → camelCase with a plural suffix (`*.types.ts`), enforced by
+  work-cfg.
 - **Folders**: PascalCase for component and library-wrapper folders (work-cfg, payload, dmp
-  `lib/Spotify/`), lowercase or camelCase elsewhere. Client parts: `.client.jsx` (dream 5, payload 5).
+  `lib/Spotify/`), lowercase or camelCase elsewhere. Client parts: `.client.jsx` (dream 5, payload
+  5).
 - **Enforce.** A plugin: `check-file/filename-naming-convention`, `folder-naming-convention`,
   `filename-blocklist` (what work-cfg uses), or `unicorn/filename-case` (files only).
 
 ### C20. Other things that recur
 
-- **Config as data**, mapped by components: nav and option arrays in tutor (9 of 38 files spread props),
-  rta difficulty files, school JSON form steps.
-- **Copy-paste before abstraction**: a query-string builder copied 3 times (dmp) and 4 times (dream),
-  a token-retry block 3 times (tutor), `randomize()` in 3 classes (rta).
-- **Commit messages** by hand: short, no Conventional Commits prefix (personal, rta 17 of 17, work-H).
+- **Config as data**, mapped by components: nav and option arrays in tutor (9 of 38 files spread
+  props), rta difficulty files, school JSON form steps.
+- **Copy-paste before abstraction**: a query-string builder copied 3 times (dmp) and 4 times
+  (dream), a token-retry block 3 times (tutor), `randomize()` in 3 classes (rta).
+- **Commit messages** by hand: short, no Conventional Commits prefix (personal, rta 17 of 17,
+  work-H).
 
 ## Conflicts with this repo (listed for #124, not resolved)
 
+<!-- prettier-ignore -->
 | # | Admin's habit | This repo | Where it's set |
 |---|---|---|---|
 | 1 | Lowercase single-word modules, camelCase multi-word, PascalCase components, dotted or `*.types.ts` suffixes (C19) | kebab-case files (`canonical-json.ts`, `state-hash.ts`); no rule yet | `packages/sim/src/` |
@@ -349,6 +368,7 @@ readers didn't search for transcendental maths or 32-bit operators specifically.
 
 ## Tools named above (each a new dev dependency for the admin to approve, row 17)
 
+<!-- prettier-ignore -->
 | Package | Rules mentioned | Latest | Registry last updated |
 |---|---|---|---|
 | `eslint-plugin-check-file` | `filename-naming-convention`, `folder-naming-convention`, `folder-match-with-fex`, `filename-blocklist` | 3.3.2 | 2026-07-18 |
@@ -367,15 +387,16 @@ The type-aware typescript-eslint rules (C10–C12) add no dependency, but they n
 ## Open questions for the admin
 
 None was asked during the scan; these are for the grill.
+
 1. Are the KEA student identity (2023–2026) and `Soto` both you? The scan assumed so.
-2. AI help: was portfolio (Jun 2026) written with an agent? Was rta's uncommitted 24 Jun refactor (the
-   observer, the `TypeError` guards, "view adapter")?
-3. In dmp: are `lib/api/index.ts` and `errors.ts` (a class-based API client, unlike the rest) yours? Is
-   the uncommitted tree after 7 May yours, and from when? Is its `noImplicitAny: false`, which no
+2. AI help: was portfolio (Jun 2026) written with an agent? Was rta's uncommitted 24 Jun refactor
+   (the observer, the `TypeError` guards, "view adapter")?
+3. In dmp: are `lib/api/index.ts` and `errors.ts` (a class-based API client, unlike the rest) yours?
+   Is the uncommitted tree after 7 May yours, and from when? Is its `noImplicitAny: false`, which no
    commit has, deliberate or temporary?
 4. Tabs or 2 spaces, and do you have an editor-wide Prettier setting?
-5. Server actions: PascalCase (Dec 2025) or `handleX` (2026)? Arrow-const exports for fetchers (Jul and
-   Nov 2025) or `function` declarations (dmp, work)?
+5. Server actions: PascalCase (Dec 2025) or `handleX` (2026)? Arrow-const exports for fetchers (Jul
+   and Nov 2025) or `function` declarations (dmp, work)?
 6. Is snake_case for names that mirror an API, a DB column or a DOM id a rule you want to keep?
 7. Tests: was the central `src/tests/` tree (work) your preference or a lint convenience, after the
    sibling `tests/` folder you set up by hand?
@@ -389,12 +410,13 @@ None was asked during the scan; these are for the grill.
 _Opinion, not findings._
 
 - **Weight dmp and work-H for anything about types,** a thin base: treat type rules (C1, C4, C5,
-  `import type`, `??`) as new decisions rather than copies of a habit. Several JavaScript habits (`||`
-  fallbacks, untyped imports, `undefined` for "nothing yet") already clash with this repo's tsconfig.
-- **The habits most stable across eras and repos** are: `function` declarations, one main export with
-  helpers below, returned errors, no enums, no barrels, `index` as the folder's real module, a file
-  turning into a folder as it grows, and the layered folder rules the admin wrote by hand at work.
-  These look like the strongest candidates to adopt.
+  `import type`, `??`) as new decisions rather than copies of a habit. Several JavaScript habits
+  (`||` fallbacks, untyped imports, `undefined` for "nothing yet") already clash with this repo's
+  tsconfig.
+- **The habits most stable across eras and repos** are: `function` declarations, one main export
+  with helpers below, returned errors, no enums, no barrels, `index` as the folder's real module, a
+  file turning into a folder as it grows, and the layered folder rules the admin wrote by hand at
+  work. These look like the strongest candidates to adopt.
 - **The ones that drift by era** (component arrows vs declarations, UPPER_SNAKE, `??`, tabs, test
   location) need a decision, not a count. For tests, #124 has to state the `include` and coverage
   changes for any layout outside `src/` (conflict 2).

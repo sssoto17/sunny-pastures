@@ -11,6 +11,7 @@ Last changed: 2026-11-05.
 
 ## Candidates
 
+<!-- prettier-ignore -->
 | Pack                                                                                 | Licence                                                             | Fit                                                                                | Status      |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------- |
 | [Sprout Lands](https://cupnooble.itch.io/sprout-lands-asset-pack) (cupnooble)        | Free version non-commercial only; $3.99 version allows commercial use | Best match: pastel farming pixel art. Marked as made without generative AI.        | Not checked |
@@ -24,6 +25,7 @@ Last changed: 2026-11-05.
 Found on 2026-11-05 in a search for art that isn't pixel art. Licences were read from each pack's
 page that day, except where marked.
 
+<!-- prettier-ignore -->
 | Pack                                                                                 | Style                          | Licence                                                                   | Fit                                                                                                    | Status                  |
 | ------------------------------------------------------------------------------------ | ------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------- |
 | [Microsoft Fluent Emoji](https://github.com/microsoft/fluentui-emoji)                | Flat, colour or 3D-style; SVG and PNG | MIT (from the GitHub repo); redistribution allowed with the licence notice | Icons for every Must crop, animal and product: wheat (sheaf), corn, strawberry, chicken, cow, egg, milk, bread, croissant, shortcake, cake. | Licence checked         |
@@ -34,6 +36,7 @@ page that day, except where marked.
 
 ## Avoid
 
+<!-- prettier-ignore -->
 | Pack                                                                             | Reason                                                                     |
 | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | [Cafe and Tea Shop](https://pixelpossumstudio.itch.io/cafe-and-tea-shop-2d)      | No licence. Usable only with the author's written permission.              |

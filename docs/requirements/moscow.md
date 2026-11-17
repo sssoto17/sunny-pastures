@@ -16,6 +16,7 @@ The game is not a valid answer to the research question without these.
 
 **Gameplay**
 
+<!-- prettier-ignore -->
 | ID      | Item                                                                                   |
 | ------- | -------------------------------------------------------------------------------------- |
 | MUST-01 | Crops: wheat, corn and strawberries (plant, grow over time, harvest)                    |
@@ -30,6 +31,7 @@ The game is not a valid answer to the research question without these.
 
 **System qualities**
 
+<!-- prettier-ignore -->
 | ID      | Item                                                                                   |
 | ------- | -------------------------------------------------------------------------------------- |
 | MUST-10 | One deterministic simulation (`packages/sim`) shared by client and server               |
@@ -43,6 +45,7 @@ The game is not a valid answer to the research question without these.
 
 **Evaluation**
 
+<!-- prettier-ignore -->
 | ID      | Item                                                                                   |
 | ------- | -------------------------------------------------------------------------------------- |
 | MUST-18 | Two playtests: a think-aloud test of the vertical slice, then an offline-return test   |
@@ -53,6 +56,7 @@ The game is not a valid answer to the research question without these.
 These apply to every item above and are never cut. Their criteria are in `spec.md`; their thresholds
 and the checks that enforce them are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md).
 
+<!-- prettier-ignore -->
 | ID      | Item                                                                                   |
 | ------- | -------------------------------------------------------------------------------------- |
 | BASE-01 | The UI is in English                                                                   |
@@ -74,6 +78,7 @@ another grill. The baseline qualities are never cut:
 
 Clearly valuable; dropped only if the Musts are at risk.
 
+<!-- prettier-ignore -->
 | ID        | Item                                                                                 |
 | --------- | ------------------------------------------------------------------------------------ |
 | SHOULD-01 | Read-only visits to another player's farm                                            |
@@ -87,8 +92,10 @@ Clearly valuable; dropped only if the Musts are at risk.
 
 ## Could have
 
-Only if there's time after the Musts and Shoulds, and only if they still serve the research question.
+Only if there's time after the Musts and Shoulds, and only if they still serve the research
+question.
 
+<!-- prettier-ignore -->
 | ID       | Item                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------ |
 | COULD-01 | Trading between players                                                                    |
@@ -105,6 +112,7 @@ Only if there's time after the Musts and Shoulds, and only if they still serve t
 
 Consciously out of scope for this project. Candidates for the report's Perspective chapter.
 
+<!-- prettier-ignore -->
 | ID      | Item                                                                                     |
 | ------- | ---------------------------------------------------------------------------------------- |
 | WONT-01 | A native mobile app (it could reuse `packages/sim` later)                                |
@@ -125,17 +133,17 @@ Kept here so the report's technology chapter can cite the reasoning.
   simulating time, so offline progress would still be ours to build. It also needs a long-running
   `zero-cache` server and Postgres logical replication, which doesn't fit Vercel + Supabase on a
   small budget. Cite it as related work and in Perspective.
-- **Phaser (or another game engine).** A game engine covers rendering, a frame loop, input,
-  physics and assets. This project's engine is the simulation (`packages/sim`), which Phaser
-  doesn't provide, and an idle game needs no frame loop: state is a function of time. The UI is
-  DOM-based (WONT-02). If a drawn farm map is ever wanted, PixiJS inside a React component is the
-  lighter option.
+- **Phaser (or another game engine).** A game engine covers rendering, a frame loop, input, physics
+  and assets. This project's engine is the simulation (`packages/sim`), which Phaser doesn't
+  provide, and an idle game needs no frame loop: state is a function of time. The UI is DOM-based
+  (WONT-02). If a drawn farm map is ever wanted, PixiJS inside a React component is the lighter
+  option.
 - **Vercel Workflow SDK (not a game dependency; candidate for the software factory).** Durable
   functions: `"use workflow"` / `"use step"`, saved and retried steps, `sleep()` that costs nothing
-  while waiting, and hooks that pause until something external resumes them. Internally each run
-  is an append-only event log replayed through a deterministic function: the same idea as the
-  action log and the sim, so it belongs in related work next to Temporal. For game time it would
-  be the server-tick model that lazy `advance()` avoids; durable timers are worth discussing as the
+  while waiting, and hooks that pause until something external resumes them. Internally each run is
+  an append-only event log replayed through a deterministic function: the same idea as the action
+  log and the sim, so it belongs in related work next to Temporal. For game time it would be the
+  server-tick model that lazy `advance()` avoids; durable timers are worth discussing as the
   push-based alternative in sub-question 2, not building. Possible later uses: "production ready"
-  notifications, if notifications enter scope, and orchestrating the software factory
-  (issue → agent PR → CI → approval hook → merge), which is the strongest fit.
+  notifications, if notifications enter scope, and orchestrating the software factory (issue → agent
+  PR → CI → approval hook → merge), which is the strongest fit.

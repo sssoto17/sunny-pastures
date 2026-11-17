@@ -2,42 +2,44 @@
 
 Part of the persistence spike (ADR-0001 "Decision rule", step 1; issue #9). It asks whether every
 store keeps a farm exactly as the in-memory sim computes it, so the load runs (#11) only measure
-stores that are correct. The gate is `prototypes/persistence/src/gate.ts` on `prototype/persistence`.
+stores that are correct. The gate is `prototypes/persistence/src/gate.ts` on
+`prototype/persistence`.
 
 ## What runs
 
-1. **Step 0** (`gate0.ts`, #6), with no database: the 500-action script (seed 42, an 8-hour gap,
-   44 refused actions) runs twice and is replayed from in-memory snapshots at N = 1, 25 and 100.
-   Every run must give one state hash. Step 0 decides how any later failure is labelled: if it
-   fails, the **sim** is at fault; if it passes, the **store** that fails is.
+1. **Step 0** (`gate0.ts`, #6), with no database: the 500-action script (seed 42, an 8-hour gap, 44
+   refused actions) runs twice and is replayed from in-memory snapshots at N = 1, 25 and 100. Every
+   run must give one state hash. Step 0 decides how any later failure is labelled: if it fails, the
+   **sim** is at fault; if it passes, the **store** that fails is.
 2. **Per store** (A, B1, B25, B100), each in its own throwaway schemas: the same script is played
-   through the store itself, with each step's own time and no HTTP. Each step is the handler's
-   loop without its clock: `load` → `apply` at the step's time → `commit`.
+   through the store itself, with each step's own time and no HTTP. Each step is the handler's loop
+   without its clock: `load` → `apply` at the step's time → `commit`.
    - **Round trip:** after every commit the next `load` must be strictly deep-equal
      (`isDeepStrictEqual`, so types count) to the in-memory farm, with the same `seq` and `at`.
-   - **Script:** the farm the store loads at the end must have step 0's state hash and seq, and
-     the store must accept and refuse exactly the steps the in-memory sim does.
-   - **stateAt** (B only): at 10 random times and at the middle of the 8-hour gap, `stateAt`
-     must return the same `{ state, seq }` as the in-memory sim (the accepted actions up to `t`,
-     then advanced to `t`). The random times come from a seeded draw: a random step, then a moment
-     from that step up to just before the next. Every B variant is asked at the same times.
+   - **Script:** the farm the store loads at the end must have step 0's state hash and seq, and the
+     store must accept and refuse exactly the steps the in-memory sim does.
+   - **stateAt** (B only): at 10 random times and at the middle of the 8-hour gap, `stateAt` must
+     return the same `{ state, seq }` as the in-memory sim (the accepted actions up to `t`, then
+     advanced to `t`). The random times come from a seeded draw: a random step, then a moment from
+     that step up to just before the next. Every B variant is asked at the same times.
    - **The gap audit time** (added for #15, before the load matrix): the draw by step lands in the
-     gap only about once in 50, and seed 42's ten random times all miss it. Offline progress is
-     the core of the research question, so the gate always adds one fixed time halfway between
-     the last step before the gap and the first one after it. There the farm has had no action
-     for 4 hours, so `stateAt` has to advance it through offline progress to match the sim.
+     gap only about once in 50, and seed 42's ten random times all miss it. Offline progress is the
+     core of the research question, so the gate always adds one fixed time halfway between the last
+     step before the gap and the first one after it. There the farm has had no action for 4 hours,
+     so `stateAt` has to advance it through offline progress to match the sim.
 3. The schemas are dropped when the run ends.
 
 **Gifts.** The script claims gifts it makes up (`alice:7`), and the inbox refuses a claim of a gift
-that doesn't exist (#8). Before each store's run, a fresh inbox schema is seeded with every gift
-the script claims (`inbox.send`, sent at time 0 to the gate's farm, with the claimed goods). The
-script and the step 0 hashes stay unchanged, and no run can see another run's gifts.
+that doesn't exist (#8). Before each store's run, a fresh inbox schema is seeded with every gift the
+script claims (`inbox.send`, sent at time 0 to the gate's farm, with the claimed goods). The script
+and the step 0 hashes stay unchanged, and no run can see another run's gifts.
 
 ## Results
 
 Run on 6 Nov 2026 in a cloud container: Node v24.22.2, PostgreSQL 16.15 on the same host, 4 CPUs.
 Rerun the same day with the gap audit time (#15): unchanged except for the eleventh `stateAt` row.
 
+<!-- prettier-ignore -->
 | | A | B1 | B25 | B100 |
 | --- | --- | --- | --- | --- |
 | Gate | **pass** | **pass** | **pass** | **pass** |
@@ -49,8 +51,8 @@ Rerun the same day with the gap audit time (#15): unchanged except for the eleve
 
 Step 0 and every store end on the state hash
 `e1925b02b5840ff7de506ccfa6db285b477aac1001d717e626dbdd3456968afc`. No failures, so nothing to
-label. Seeds 7 and 2026 also pass in every store (seq 445 and 465), including their gap audit
-times (t = 16,377,000 ms at seq 221, and t = 16,545,000 ms at seq 236).
+label. Seeds 7 and 2026 also pass in every store (seq 445 and 465), including their gap audit times
+(t = 16,377,000 ms at seq 221, and t = 16,545,000 ms at seq 236).
 
 For seed 42 the gap runs from 1,966,000 ms (the last step before it) to 30,766,000 ms (the first
 after it), so its middle is 16,366,000 ms. The farm there is at seq 225 with state hash
@@ -117,13 +119,13 @@ PASS: every store ends on step 0's hash, loads every commit back strictly equal,
 
 `gate.test.ts` runs the gate on deliberately broken stores, and each one fails as it should:
 
-- Store A, except that the commit after action 100 stores one extra bread: the round trip fails
-  at seq 101 (100 of 456 round trips pass), the final hash differs, and every failure is labelled
+- Store A, except that the commit after action 100 stores one extra bread: the round trip fails at
+  seq 101 (100 of 456 round trips pass), the final hash differs, and every failure is labelled
   store.
 - B25 with `stateAt` answering seq + 1: the script still ends on the right hash, but all 10
   `stateAt` checks fail, labelled store.
-- B100 whose `stateAt` answers, for any time inside the gap, with the farm as it was when the
-  player left: only the gap check fails (the 10 random times still match), labelled store.
+- B100 whose `stateAt` answers, for any time inside the gap, with the farm as it was when the player
+  left: only the gap check fails (the 10 random times still match), labelled store.
 - B1 whose `load` throws: B1 fails with the error, labelled store; A in the same run still passes.
 - Rules with hidden state (one accepted action in 97 adds a wheat): step 0 fails, and every store
   failure is labelled sim.
