@@ -909,9 +909,13 @@ separate: this is only the identity step for lanes in Claude Code.
   #101), never administration or workflows; it can't leave Actions except through a workflow on
   `main`, which is code-owned.
 - **Stacks with the App's token.** Whether `/stacks` accepts an App installation token isn't
-  documented. The run tries, records `stack=<number>` or `stack=refused` in its output and
-  summary, and never fails over it; `stack.sh` then links what the run left out with the lane's
-  token, as before. The admin's throwaway test records the answer here.
+  documented. The run tries, records `stack=<number>` or `stack=refused` in its output and summary,
+  and never fails over it; `stack.sh` then links what the run left out with the lane's token, as
+  before. The admin's throwaway test on 17 Nov 2026 showed that `/stacks` accepts it: the `open-pr`
+  run linked #352 and #353, both opened by `sunny-factory[bot]`, as stack #354 with the App's token,
+  and `stack.sh` needed no fallback
+  ([#336, results](https://github.com/sssoto17/sunny-pastures/issues/336#issuecomment-6934736098)).
+  The fallback stays in case a later GitHub change refuses it.
 
 **What changes.** The admin approves lane PRs instead of bypass-merging them: a code-owned PR, a
 code-owned part of a stack (so such a stack can merge as one), and an escalated PR, on which the
