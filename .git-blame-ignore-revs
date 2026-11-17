@@ -4,3 +4,5 @@
 
 # style: format the repo with Prettier (#125) (#145)
 5974fb3dad329856fe913f202b02a38fd28ec949
+
+# style: format the repo's Markdown with Prettier (#344) — squash SHA added after merge
