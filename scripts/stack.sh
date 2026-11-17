@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # The one way to build a split as a native GitHub stack (#264; CONSTRAINTS.md, "Split size"), for
 # local and cloud lanes alike: git plus `gh api` over REST (pulls, stacks), since `gh stack` and
-# `gh pr` reach GraphQL, which the cloud proxy refuses. It never merges, never takes a part out of
+# `gh pr` reach GraphQL, which the cloud proxy refuses. Each part's PR is opened by
+# scripts/open-pr.sh, as sunny-factory[bot], and the open-pr workflow links it into the stack of the
+# part below with the App's token; whatever the run didn't link, this links with the lane's token
+# (#336). It never merges, never takes a part out of
 # a stack and never moves a base by hand: merging stays with the admin. It force-pushes only a
 # stack's own part branches, each with a lease (update, refresh), never main or the stack's base.
 # Tests: scripts/stack.test.sh. Needs bash 4+, git and an authenticated gh.
@@ -10,6 +13,7 @@ shopt -s inherit_errexit # a failed gh inside $( … ) stops the script too
 
 REPO=sssoto17/sunny-pastures
 P=repos/$REPO
+OPEN_PR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/open-pr.sh
 
 usage() {
   cat >&2 <<'EOF'
@@ -77,20 +81,20 @@ refuse_other_base() { # head base "<number> <base>"|"" : an open PR for head on 
     die 2 "#${3%% *} already has $1 on ${3#* }, not on $2: a hand-chained PR. Close it, or retarget it to $2, then run this again"
 }
 
-ensure_pr() { # head base body-file -> prints the PR number; reuses an open PR on the same base
-  local head=$1 base=$2 f=$3 found title body
+ensure_pr() { # head base body-file -> "<number> new|reused"; reuses an open PR on the same base
+  local head=$1 base=$2 f=$3 found l n args=()
   found=$(open_pr_for "$head")
   if [[ -n $found ]]; then
     refuse_other_base "$head" "$base" "$found"
-    echo "${found%% *}"
+    echo "${found%% *} reused"
     return
   fi
-  title=$(head -n1 "$f")
-  body=$(tail -n +2 "$f" | sed '/./,$!d')
-  gh api -X POST "$P/pulls" -f title="$title" -f head="$head" -f base="$base" -f body="$body" --jq .number
+  for l in ${labels[@]+"${labels[@]}"}; do args+=(--label "$l"); done # the App adds them as it opens the PR
+  n=$("$OPEN_PR" --base "$base" ${args[@]+"${args[@]}"} "$head" "$f") # its own line, so a failure stops here
+  echo "$n new"
 }
 
-add_labels() { # pr
+add_labels() { # pr : on a PR this run reused
   local l
   for l in "${labels[@]}"; do
     gh api -X POST "$P/issues/$1/labels" -f "labels[]=$l" --jq 'length' >/dev/null
@@ -233,17 +237,35 @@ cmd_open() {
   ((whole || !in_stack)) || die 2 "a part's PR is already in a stack: add a part with 'scripts/stack.sh add', or unlink it in the UI"
 
   git push -q origin "${branches[@]}"
+  local got
   for i in "${!branches[@]}"; do
-    nums+=("$(ensure_pr "${branches[i]}" "${bases[i]}" "${bodies[i]}")")
-    add_labels "${nums[i]}"
+    got=$(ensure_pr "${branches[i]}" "${bases[i]}" "${bodies[i]}")
+    nums+=("${got%% *}")
+    [[ $got == *reused ]] && add_labels "${nums[i]}"
   done
-  if ((!whole)); then
-    local fields=() n
-    for n in "${nums[@]}"; do fields+=(-F "pull_requests[]=$n"); done
-    s=$(gh api -X POST "$P/stacks" "${fields[@]}" --jq .number) ||
-      die 1 "PRs $(printf '#%s ' "${nums[@]}")are open but not stacked; run the same command again"
-  fi
+  ((whole)) || link_stack "${nums[@]}"
   cmd_status "${nums[0]}"
+}
+
+# The open-pr run links each part into the stack of the part below with the App's token. What it
+# left out (/stacks refused the token, or the part below was a reused PR) is linked here.
+link_stack() { # pr... in order
+  local s n i fields=()
+  s=$(stack_of "$1")
+  if [[ -z $s ]]; then
+    for n in "$@"; do fields+=(-F "pull_requests[]=$n"); done
+    s=$(gh api -X POST "$P/stacks" "${fields[@]}" --jq .number) ||
+      die 1 "PRs $(printf '#%s ' "$@")are open but not stacked; run the same command again"
+    echo "stack: linked $(printf '#%s ' "$@")as stack #$s with your token: the open-pr run didn't" >&2
+    return
+  fi
+  for ((i = 2; i <= $#; i++)); do
+    n=${!i}
+    [[ $(stack_of "$n") == "$s" ]] && continue
+    gh api -X POST "$P/stacks/$s/add" -F "pull_requests[]=$n" --jq .number >/dev/null ||
+      die 1 "#$n is open but not in stack #$s; run the same command again"
+    echo "stack: linked #$n into stack #$s with your token: the open-pr run didn't" >&2
+  done
 }
 
 cmd_add() {
@@ -268,11 +290,15 @@ cmd_add() {
   check_chain "origin/$top" "${branches[0]}"
   refuse_other_base "${branches[0]}" "$top" "$(open_pr_for "${branches[0]}")"
   git push -q origin "${branches[0]}"
-  local n
-  n=$(ensure_pr "${branches[0]}" "$top" "${bodies[0]}")
-  add_labels "$n"
-  gh api -X POST "$P/stacks/$s/add" -F "pull_requests[]=$n" --jq .number >/dev/null ||
-    die 1 "#$n is open on $top but not in stack #$s; run the same command again"
+  local n got
+  got=$(ensure_pr "${branches[0]}" "$top" "${bodies[0]}")
+  n=${got%% *}
+  [[ $got == *reused ]] && add_labels "$n"
+  if [[ $(stack_of "$n") != "$s" ]]; then
+    gh api -X POST "$P/stacks/$s/add" -F "pull_requests[]=$n" --jq .number >/dev/null ||
+      die 1 "#$n is open on $top but not in stack #$s; run the same command again"
+    echo "stack: linked #$n into stack #$s with your token: the open-pr run didn't" >&2
+  fi
   cmd_status "$n"
 }
 

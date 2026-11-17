@@ -7,7 +7,8 @@
 # - the common Bash writes to those paths: output redirects, `tee`, `sed -i`, `perl -i` (and
 #   either through xargs), `cp`, `mv`, `install`, `ln`, `rm`, `unlink`, `touch`, `truncate`,
 #   `git apply` and `patch`;
-# - Bash `git commit`, `gh pr create` and a `gh api` POST that opens a PR.
+# - Bash `git commit`, `gh pr create`, a `gh api` POST that opens a PR, and the App's route to one
+#   (#336): `scripts/open-pr.sh`, `scripts/stack.sh open|add` and a POST to `dispatches`.
 # Wrappers (`timeout`, `env -i`, `xargs`, …) and `bash -c` strings are looked through. The real
 # path decides (a symlink in .scratch/ to a repo file is a repo file; `rm` of a link removes the
 # link). Known misses, left to the AGENTS.md standard: other tools that write files (`curl -o`,
@@ -197,6 +198,16 @@ check_git() {
   esac
 }
 
+# The App's route opens PRs too (#336): scripts/open-pr.sh, and scripts/stack.sh open and add.
+check_pr_script() { # script args...
+  if [[ $1 == open-pr.sh ]]; then
+    [[ ${2:-} =~ ^(-h|--help)$ ]] || deny_bash '`scripts/open-pr.sh`'
+  elif [[ ${2:-} =~ ^(open|add)$ ]]; then
+    deny_bash "\`scripts/stack.sh $2\`"
+  fi
+  return 0
+}
+
 check_gh() {
   local args=("$@")
   # Skip the flags gh accepts before the command: `gh -R <repo> pr create`.
@@ -236,6 +247,8 @@ check_gh() {
     { [[ $endpoint == graphql ]] && ((mutation)); }; then
     deny_bash "\`gh api\` opening a PR ($endpoint)"
   fi
+  # repository_dispatch is how a lane asks the open-pr workflow for its PR (#336).
+  [[ $method == POST && $endpoint =~ (^|/)dispatches/?$ ]] && deny_bash "\`gh api\` dispatching ($endpoint)"
   return 0
 }
 
@@ -264,6 +277,11 @@ check_command() {
   case $name in
     git) check_git "${@:2}" ;;
     gh) check_gh "${@:2}" ;;
+    open-pr.sh | stack.sh) check_pr_script "$name" "${@:2}" ;;
+    bash | sh)
+      [[ ${2:-} == */open-pr.sh || ${2:-} == */stack.sh || ${2:-} == open-pr.sh || ${2:-} == stack.sh ]] &&
+        check_pr_script "${2##*/}" "${@:3}"
+      ;;
     tee)
       split_args '' '' "${@:2}"
       for r in "${operands[@]}"; do check_write "$r" '`tee`'; done

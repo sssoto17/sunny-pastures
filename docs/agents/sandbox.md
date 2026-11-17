@@ -40,8 +40,10 @@ host" below. These habits keep `.git/config` out of it:
 
 - Create worktrees without tracking: `git worktree add --no-track -b <branch>
   .claude/worktrees/<N>-<slug> origin/main`.
-- Push with `git push origin <branch>`, never `-u`. `gh pr create --head <branch>` doesn't need
-  an upstream.
+- Push with `git push origin <branch>`, never `-u`. Then open the PR with
+  `scripts/open-pr.sh [--label <name>]... <branch> <body-file>` (a stack with `scripts/stack.sh`),
+  never `gh pr create`: the `open-pr` workflow opens it as `sunny-factory[bot]`, and neither
+  needs an upstream (#336). It uses REST only, so it works in cloud sessions too.
 - Don't run `gh pr checkout` or `git remote set-url`. Read a PR's files with `git show
   origin/<branch>:<path>` or `gh api`.
 

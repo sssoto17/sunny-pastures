@@ -31,7 +31,7 @@
 			"Bash(git merge *)",
 			"Bash(git pull *)",
 			"Bash(git push origin *)",
-			"Bash(gh pr create *)",
+			"Bash(scripts/open-pr.sh *)",
 			"Bash(gh pr edit *)",
 			"Bash(gh pr ready *)",
 			"Bash(gh pr comment *)",
@@ -59,6 +59,7 @@
 			"Bash(bash .claude/hooks/block-branch-switch.test.sh)",
 			"Bash(bash .claude/hooks/block-thread-resolve.test.sh)",
 			"Bash(bash scripts/new-issue.test.sh)",
+			"Bash(bash scripts/open-pr.test.sh)",
 			"mcp__github-ci__get_job_logs"
 		],
 		"ask": [
@@ -74,6 +75,10 @@
 			"mcp__plugin_github_github__merge_pull_request",
 			"Bash(gh api graphql*mergePullRequest*)",
 			"Bash(gh api graphql*enablePullRequestAutoMerge*)",
+			"Bash(gh pr create)",
+			"Bash(gh pr create *)",
+			"mcp__github__create_pull_request",
+			"mcp__plugin_github_github__create_pull_request",
 			"Bash(gh pr close *)",
 			"Bash(gh issue close *)",
 			"Bash(gh issue reopen *)",

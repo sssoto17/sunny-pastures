@@ -1,0 +1,57 @@
+# Lanes open their PRs as sunny-factory[bot] (#336; ADR-0002, area 2, "Lanes open PRs as
+# sunny-factory"). A lane pushes its branch as today, then scripts/open-pr.sh sends
+# repository_dispatch (POST /repos/{o}/{r}/dispatches, which a cloud session may send with
+# contents: write; workflow_dispatch needs actions: write, which it lacks). This job mints the
+# factory App's token and opens the PR with it, so the admin is a reviewer, not the author.
+#
+# repository_dispatch always runs main's copy of this file, so a branch can't change it, and the
+# environment `factory` lets only main read the App's key. The key never enters a session.
+# The payload is untrusted (anyone with write access can send one): its fields reach the shell
+# only through `env:`, never as ${{ }} inside `run:`, and .github/scripts/open-pr.sh checks them
+# before any write. client_payload holds at most 10 top-level properties; this uses 5.
+name: open-pr
+# Its runs read "open-pr <branch>", so scripts/open-pr.sh finds its own. A name is display text
+# that no shell reads.
+run-name: open-pr ${{ github.event.client_payload.branch }}
+
+on:
+  repository_dispatch:
+    types: [open-pr]
+
+permissions: {}
+
+jobs:
+  open-pr:
+    name: open-pr
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: factory
+    # GITHUB_TOKEN gets nothing: the App's token is the only identity this job acts through.
+    permissions: {}
+    steps:
+      # Only what opening a PR needs: no issues, workflows or administration. contents: read
+      # covers the checkout below; pull requests: write opens the PR and adds its labels.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      # main's scripts only (no `ref`: the run's ref is main); the token isn't kept in .git.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Open the PR as sunny-factory
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BRANCH: ${{ github.event.client_payload.branch }}
+          BASE: ${{ github.event.client_payload.base }}
+          TITLE: ${{ github.event.client_payload.title }}
+          BODY: ${{ github.event.client_payload.body }}
+          LABELS: ${{ github.event.client_payload.labels }}
+        run: bash .github/scripts/open-pr.sh

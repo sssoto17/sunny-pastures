@@ -102,6 +102,14 @@ bash_tool 2 "$MAIN" "g'i't commit -m x"
 bash_tool 2 "$MAIN/docs" 'git commit -m x'
 bash_tool 2 "$MAIN" 'gh pr create --title t --body b --label review:admin' 'brief'
 bash_tool 2 "$MAIN" 'gh pr new --fill'
+# the App's route opens PRs too (#336): the script, a stack's open or add, and the dispatch itself
+bash_tool 2 "$MAIN" 'scripts/open-pr.sh --label review:admin 336-x .scratch/body.md'
+bash_tool 2 "$MAIN" 'bash scripts/open-pr.sh 336-x body.md'
+bash_tool 2 "$MAIN" 'scripts/stack.sh open 336-a=a.md 336-b=b.md'
+bash_tool 2 "$MAIN" 'bash ./scripts/stack.sh add 401 336-c=c.md'
+bash_tool 2 "$MAIN" 'gh api -X POST repos/sssoto17/sunny-pastures/dispatches --input - <req.json'
+bash_tool 0 "$MAIN" 'scripts/stack.sh status 401'
+bash_tool 0 "$MAIN" 'bash scripts/open-pr.sh --help'
 bash_tool 2 "$MAIN" "( cd $WT && gh pr create --fill )"
 bash_tool 2 "$MAIN" 'git fetch; gh pr create --head chore/75-x --fill'
 # gh takes the repo flag before the command too (spec review of #75)

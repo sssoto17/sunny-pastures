@@ -483,7 +483,9 @@ opens. Claude is billed through the admin's employer seat (#37; "The factory's i
   ruleset gets `require_last_push_approval: true`** (A8), so the App can never approve a push it
   made itself. **Not at step 12 (admin, 17 Nov 2026, #264's decisions):** while lanes push as the
   admin's account, the last pusher is the admin and the rule would hold every PR for someone
-  else's approval, so it stays off until #336 moves PR authorship to the App. The blast radius: a
+  else's approval, so it stays off while lanes push as the admin's account. #336 doesn't change
+  that: it moves PR authorship to the App, not the pushes ("Lanes open PRs as sunny-factory",
+  below), so the rule waits for pushes from an App (#107). The blast radius: a
   prompt-injected reviewer could push commits to PR branches, but not to `main` or to tags, which
   the rulesets block. The checklist's test
   (step 12) confirms each step of the flow.
@@ -860,6 +862,89 @@ factory PR is a bypass merge, held by instructions. `spec.md` gets a note saying
   without a second account
   ([Terms of Service, B. Account Terms](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#b-account-terms),
   checked 7 Nov).
+
+### Lanes open PRs as sunny-factory (#336)
+
+**Decided by the admin, 16 Nov 2026** (#336, "Decided"). Until #336 every lane, cloud or local,
+opened its PRs with the admin's account. So the admin couldn't approve them (GitHub refuses an
+author's approval), code-owner review showed no gate of its own ("Stacks", above), and no check
+could tell the admin's approval from an agent's. Auto-merge (#68) needs the admin to be a real
+reviewer, so the PR's **author** is now the App. #107, the unattended factory in Actions, is
+separate: this is only the identity step for lanes in Claude Code.
+
+- **Lanes push as before, then ask.** The branch is pushed with the session's credentials (the
+  admin's: the cloud GitHub proxy swaps git credentials for the owner's, #37). Then
+  `scripts/open-pr.sh` sends `repository_dispatch` with event type `open-pr` and five
+  `client_payload` properties (branch, base, title, body, labels; GitHub allows 10 and under
+  64 KB), waits for the run named `open-pr <branch>`, and prints the PR's number. A failed run
+  answers with its link. `scripts/stack.sh` opens every part through it.
+- **The workflow** (`.github/workflows/open-pr.yml`) always runs `main`'s copy, as
+  `repository_dispatch` does. Its job has `permissions: {}` and environment `factory`, whose
+  only deployment branch is `main`. It mints the App's token with `contents: read` and
+  `pull_requests: write` only, checks out `main`'s `.github/scripts`, and
+  `.github/scripts/open-pr.sh` opens the PR over REST, adds the labels that already exist, and
+  links a stack part into the stack of the part below. Its PRs start CI and the review as any
+  App's do ("The factory's identity", above).
+- **The key never enters a session.** It lives only in the secret `FACTORY_APP_PRIVATE_KEY` of
+  #101's environment `factory`, which #107's factory job uses too; the client ID is that
+  environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh` checks both, and
+  stores a new key only through stdin.
+- **One environment, `main` only (admin, 17 Nov 2026).** The lanes and #107's factory share
+  `factory`, and its only deployment rule is `main`: the admin removed #101's `throwaway/*` rule,
+  and the setup script stops while any other rule remains. With one App, a second key in a
+  second environment would add no protection, since either key acts as the same App. The risk is
+  a workflow on any branch other than `main` reading the key: a branch's own copy of a workflow
+  could print it. So #107's throwaway test dispatches from `main` instead of running on a
+  `throwaway/*` branch.
+- **The payload is untrusted.** Anyone with write access can dispatch, a prompt-injected session
+  included. Its fields reach the shell only through `env:`, never as `${{ }}` inside `run:` (the
+  run's name uses the branch, which is display text no shell reads), and go to GitHub as values
+  (`jq --arg`). Refused before any write: `main`; a name outside the lanes' (`<N>-<slug>`,
+  `claude/<name>`, area 1); a branch not on origin or with an open PR; a base that isn't `main`
+  or a lane branch with an open PR; a title over 256 or a body over 65,536 characters.
+- **The blast radius.** A dispatch can only open a PR for a lane branch already on origin, which
+  the same caller could open as the admin anyway. The token can't push (`contents: read`), isn't
+  on any bypass list, and its PR still needs the approvals and checks of any PR. A leaked key
+  would act with the installation's own permissions (contents, issues and pull requests write,
+  #101), never administration or workflows; it can't leave Actions except through a workflow on
+  `main`, which is code-owned.
+- **Stacks with the App's token.** Whether `/stacks` accepts an App installation token isn't
+  documented. The run tries, records `stack=<number>` or `stack=refused` in its output and
+  summary, and never fails over it; `stack.sh` then links what the run left out with the lane's
+  token, as before. The admin's throwaway test records the answer here.
+
+**What changes.** The admin approves lane PRs instead of bypass-merging them: a code-owned PR, a
+code-owned part of a stack (so such a stack can merge as one), and an escalated PR, on which the
+reviewer withholds its approval when an App opened it ("Approvals", above), so the admin's
+Approve and the resolved thread both hold it. Whether GitHub counts an App's PR as
+"unattributed" (`require_extra_approval_for_unattributed_changes`, A8) is read on the same
+throwaway test: the admin's Approve must turn `reviewDecision` to `APPROVED`.
+
+**`require_last_push_approval` stays off.** The PR's author is the App, but its commits are
+still pushed by the admin's account. The rule wants an approval "from someone other than the
+last pusher", so with it on the admin's Approve on a lane PR wouldn't count, and a code-owned PR
+would again merge only by bypass, undoing what #336 is for. It stays off while lanes push as the
+admin's account, and turns on once pushes come from an App (#107); #68's ruleset criterion says
+so. Until then Q14's concern, the reviewer approving a push it made itself, rests on
+`post-review.sh`, which only reviews and never pushes.
+
+**Alternatives considered.**
+- **Lanes push as the App too.** Not possible through the cloud GitHub proxy, which swaps every
+  git credential for the owner's (#37, #60). A local lane could push with a minted token, but
+  then a token, or the key that mints it, would sit in the session.
+- **`workflow_dispatch` instead of `repository_dispatch`.** It needs `actions: write`, which the
+  cloud session's token is refused; `POST /dispatches` needs `contents: write`, which lanes have
+  (#336's research, 16 Nov).
+- **The key in the cloud environment**, minting the token in the session. Cloud environment
+  variables are readable by every command the model runs (Claude Code's cloud-environment docs),
+  so one prompt injection could carry the key off, and with it the App, for good.
+- **A second environment and key for the lanes** (this PR's first draft).
+  Rejected by the admin (17 Nov 2026): one App means one identity whichever key mints its
+  token, so a second key protects nothing, and two environments are two branch rules to keep
+  right.
+- **Keep opening PRs as the admin's account** (the status quo). Every admin-review PR stays a
+  bypass merge that any session could make ("The honest limit", above), and auto-merge (#68)
+  can't rest on a real admin approval.
 
 ## 3. Merge methods
 
@@ -1430,6 +1515,7 @@ Researched on 7 Nov from each vendor's pricing, terms and docs pages, and each a
 | Policy as code | Rulesets, CODEOWNERS, `labeler.yml`, `dependabot.yml`, `release.yml` | The rules live in versioned config that the platform enforces, instead of in memory. |
 | Peer review by a bot | The reviewer App approves or requests changes; code-owner review and escalation bring in the admin (area 2) | Reviews read like a conversation on the PR, and the admin's attention goes where it counts. |
 | Quality gate | Required checks pinned to Actions (area 2) | A change reaches `main` only through named checks, whoever approved it. |
+| Credential broker | Lanes ask the `open-pr` workflow, by `repository_dispatch`, to open their PRs with the factory App's token (area 2, #336) | The App's key stays in an Actions environment; a session holds only the right to ask, and the workflow checks every request. |
 | Least privilege | Read-only `GITHUB_TOKEN`; `production` environment secrets for `v*` tags only, the reviewer App's key for the review job only; admin bypass for PRs only | Each actor gets only the rights its job needs. |
 | Convention over configuration | `<N>-<slug>` branches, Conventional Commit titles | Tools (#17's parser, the PR-title check, release notes) can rely on the shape. |
 | Single source of truth | Tags for versions, `triage-labels.md` for labels, the issue for Status | One place to change; the others read from it. |
@@ -1461,7 +1547,8 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   until the reviewer App works (step 12), nobody but the admin could give an approval, and the
   admin can't approve their own PRs, which the factory's are. So the `main` ruleset starts with
   `required_approving_review_count: 0` and goes to 1 at step 12; `require_last_push_approval`
-  follows once #336 moves PR authorship to the App (admin, 17 Nov 2026). Code-owner review stays
+  stays off while lanes push as the admin's account, #336 included (admin, 17 Nov 2026; area 2,
+  "Lanes open PRs as sunny-factory"). Code-owner review stays
   on throughout, so code-owned PRs still need the admin, by bypass while the factory acts as the
   admin.
 - Required checks can't be added until CI reports them. Until the CI/CD step, the ruleset blocks
@@ -1480,7 +1567,8 @@ The main alternatives are recorded per area. The ones that shaped the whole prop
   stay instruction-only, before and after #37. PR #52 turns tag pushes and label removal into
   prompts.
 - **Rollout order** (checklist): rulesets now, with 0 required approvals → the reviewer App,
-  then 1 required approval (`require_last_push_approval` after #336), then tests (a)–(f) →
+  then 1 required approval (`require_last_push_approval` once pushes come from an App, #107),
+  then tests (a)–(f) →
   auto-merge only when the required checks report, the App passes (a)–(f) and #47's escalation criteria are
   merged (Q16) → unattended factory work only once the factory App runs (#37 decided it: checks
   #101–#103, then the build issues under #58). Attended sessions are never blocked.
@@ -1582,8 +1670,8 @@ deferred to go-public (#38), Q10 waits for Vercel and Q11 for #47. Q14–Q16 wer
     required from the CI/CD step; when CodeQL becomes available, one of them stays required and
     the other runs as advice (area 8).
 14. **Q14, the reviewer App's permissions.** *Decided 7 Nov:* `contents: write` and
-    `pull_requests: write`, with `require_last_push_approval: true` on `main` once #336 lands
-    (area 2). With `contents: read`, it couldn't turn on auto-merge. The blast radius: a
+    `pull_requests: write`, with `require_last_push_approval: true` on `main` once lanes stop
+    pushing as the admin's account (#107; #336 moves only the PR's author, area 2). With `contents: read`, it couldn't turn on auto-merge. The blast radius: a
     prompt-injected reviewer could push to PR branches, not to `main` or to tags.
 15. **Q15, the approval count before the reviewer App.** *Decided 7 Nov:* 0 required approvals
     from step 3, 1 from step 12; code-owner review on throughout (Consequences).
@@ -1673,8 +1761,8 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     register the reviewer App (with #37's factory App) with `contents: write` and
     `pull_requests: write` (Q14); its key as an environment secret. Then update the `main`
     ruleset: `required_approving_review_count` to 1 (Q15); `require_last_push_approval` stays
-    `false` until #336 moves PR authorship to the App (admin, 17 Nov 2026; Q14's `true` waits for
-    it). Code-owner review stays on. **Test the flow once**, on
+    `false` while lanes push as the admin's account, after #336 too, which moves only the PR's
+    author to the App (admin, 17 Nov 2026; Q14's `true` waits for pushes from an App, #107). Code-owner review stays on. **Test the flow once**, on
     throwaway PRs, reading each result with
     `gh pr view N --json reviewDecision,mergeStateStatus`:
     - (a) the App's approval on a PR outside CODEOWNERS gives `reviewDecision: APPROVED`;
@@ -2226,12 +2314,13 @@ both entries, deviations the admin decided on 8 Nov:
 
 This is the ruleset as created at checklist step 3 (Q15): 0 required approvals, because nobody
 but the admin could approve yet. At step 12, once the reviewer App works,
-`"required_approving_review_count"` goes to 1; `"require_last_push_approval": true` (Q14) waits for
-#336, since lanes push as the admin's account until then (admin, 17 Nov 2026). From then
+`"required_approving_review_count"` goes to 1; `"require_last_push_approval": true` (Q14) waits
+until lanes stop pushing as the admin's account (#107; #336 moves only the PR's author; admin, 17
+Nov 2026). From then
 on, one approval is required: the reviewer App's, or the admin's on admin-review PRs (area 2).
 Code-owner review is on throughout. Neither App is in any bypass list (#37). GitHub's docs don't
 say how `require_last_push_approval` behaves with 0 required approvals, so it changes no earlier
-than step 12, and in fact only after #336.
+than step 12, and in fact only once pushes come from an App.
 
 **Applied 8 Nov, #66; read back 12 Nov** (`gh api repos/sssoto17/sunny-pastures/rulesets/26810726`).
 The rules match `ruleset-main.json` above: 0 required approvals and code-owner review on, until #68
