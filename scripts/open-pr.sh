@@ -75,7 +75,7 @@ fi
 
 # Five properties of the ten client_payload allows; the whole payload stays under 64 KB.
 request=$(jq -n --arg branch "$branch" --arg base "$base" --arg title "$title" --arg body "$body" \
-  --arg labels "$(IFS=,; echo "${labels[*]}")" \
+  --arg labels "$(IFS=,; echo "${labels[*]-}")" \
   '{event_type: "open-pr", client_payload: {branch: $branch, base: $base, title: $title,
     body: $body, labels: $labels}}')
 (($(jq -c .client_payload <<<"$request" | wc -c) < 65536)) ||

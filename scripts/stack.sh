@@ -89,8 +89,8 @@ ensure_pr() { # head base body-file -> "<number> new|reused"; reuses an open PR 
     echo "${found%% *} reused"
     return
   fi
-  for l in "${labels[@]}"; do args+=(--label "$l"); done # the App adds them as it opens the PR
-  n=$("$OPEN_PR" --base "$base" "${args[@]}" "$head" "$f") # its own line, so a failure stops here
+  for l in ${labels[@]+"${labels[@]}"}; do args+=(--label "$l"); done # the App adds them as it opens the PR
+  n=$("$OPEN_PR" --base "$base" ${args[@]+"${args[@]}"} "$head" "$f") # its own line, so a failure stops here
   echo "$n new"
 }
 

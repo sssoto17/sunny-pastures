@@ -30,7 +30,9 @@ refuse() { # message
   exit 2
 }
 warn() { echo "::warning title=open-pr::$(esc "$1")"; }
-is_lane() { [[ $1 =~ $LANE ]]; }
+# A name of dots only is a path step (`..`), never a name: refused for branches and labels.
+dots_only() { [[ $1 =~ ^\.+$ ]]; }
+is_lane() { [[ $1 =~ $LANE ]] && ! dots_only "${1#claude/}"; }
 on_origin() { gh api "$R/branches/$1" --jq .name >/dev/null 2>&1; }
 open_pr() { gh api "$R/pulls?head=$OWNER:$1&state=open" --jq '.[0].number // empty'; }
 
@@ -65,10 +67,10 @@ echo "opened #$pr: $BRANCH onto $BASE"
 # Labels: only names that exist, so the token never creates one.
 add=()
 IFS=, read -r -a wanted <<<"${LABELS:-}"
-for l in "${wanted[@]}"; do
+for l in ${wanted[@]+"${wanted[@]}"}; do
   l=${l#"${l%%[![:space:]]*}"} l=${l%"${l##*[![:space:]]}"} # trimmed
   [[ -n $l ]] || continue
-  if [[ ! $l =~ ^[A-Za-z0-9:._-]+$ ]]; then warn "label $l: not a label name here, skipped"; continue; fi
+  if [[ ! $l =~ ^[A-Za-z0-9:._-]+$ ]] || dots_only "$l"; then warn "label $l: not a label name here, skipped"; continue; fi
   if gh api "$R/labels/$l" --jq .name >/dev/null 2>&1; then
     add+=(-f "labels[]=$l")
   else

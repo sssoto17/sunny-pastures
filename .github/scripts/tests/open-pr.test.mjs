@@ -125,6 +125,9 @@ describe("open-pr.sh (the workflow's step)", () => {
 		["336_open", "isn't a lane branch"],
 		["-336-x", "isn't a lane branch"],
 		["", "isn't a lane branch"],
+		// a name of dots only is a path step, not a name (the reviewer's finding on #343)
+		["claude/..", "isn't a lane branch"],
+		["claude/.", "isn't a lane branch"],
 	])("refuses the branch %j", (branch, why) => {
 		const r = run({ BRANCH: branch }, { branches: [branch, "main"] });
 		expect(r.code).toBe(2);
@@ -181,6 +184,15 @@ describe("open-pr.sh (the workflow's step)", () => {
 		expect(r.out).toContain("::warning title=open-pr::label nosuch doesn't exist");
 		expect(r.out).toContain("::warning title=open-pr::label bad label");
 		expect(r.calls).not.toContain("labels/bad");
+	});
+
+	// GET labels/.. would resolve to the repo itself, and POST would then create a label "..".
+	it("never treats a name of dots only as a label", () => {
+		const r = run({ LABELS: "..,.,review:admin" }, { labels: ["..", ".", "review:admin"] });
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("::warning title=open-pr::label ..: not a label name here");
+		expect(r.calls).not.toMatch(/labels\/\.\.?( |$)/m);
+		expect(r.calls).toContain("--silent -f labels[]=review:admin\n");
 	});
 
 	it("keeps the PR when labelling is refused, with a warning", () => {
