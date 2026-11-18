@@ -15,7 +15,20 @@ if (!Number.isSafeInteger(simPropertyRuns) || simPropertyRuns < 1) {
 // too: 15 ms per run, never below Vitest's 5 s default. Only the property test files apply it.
 const propertyTimeout = Math.max(5_000, 15 * simPropertyRuns);
 
+// apps/web's imports, resolved as Next resolves them (#342, #329 decisions 3 and 4): `@/` is its
+// src/, and `server-only` is Next's own empty module on the server side, with no package to install.
+const fromRoot = (path: string) => decodeURIComponent(new URL(path, import.meta.url).pathname);
+
 export default defineConfig({
+	resolve: {
+		alias: [
+			{ find: /^@\//, replacement: fromRoot("apps/web/src/") },
+			{
+				find: /^server-only$/,
+				replacement: fromRoot("apps/web/node_modules/next/dist/compiled/server-only/empty.js"),
+			},
+		],
+	},
 	test: {
 		provide: { fastCheck: { seed: 0x5eed, numRuns: simPropertyRuns }, propertyTimeout },
 		include: ["{apps,packages}/*/src/**/*.{test,spec}.{ts,tsx}", ".github/scripts/**/*.test.mjs"],
