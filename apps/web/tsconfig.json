@@ -1,0 +1,20 @@
+{
+	"//": "The Next.js app (#342, #329 decision 4). Next's bundler compiles it; tsc only checks it. Next leaves a tsconfig that extends another alone, so the options it needs are written here. Its tests compile in tsconfig.test.json, so Vitest's types never enter the app's program.",
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["ES2024", "DOM", "DOM.Iterable"],
+		"types": ["next"],
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"jsx": "react-jsx",
+		"esModuleInterop": true,
+		"resolveJsonModule": true,
+		"paths": { "@/*": ["./src/*"] },
+		"plugins": [{ "name": "next" }],
+		"emitDeclarationOnly": true,
+		"sourceMap": false,
+		"outDir": "node_modules/.cache/tsc/src"
+	},
+	"include": ["src"],
+	"exclude": ["src/**/*.test.{ts,tsx}", "src/**/tests/**"]
+}

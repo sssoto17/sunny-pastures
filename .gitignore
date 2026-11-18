@@ -3,6 +3,9 @@ node_modules/
 
 # builds and test output
 .next/
+# Next writes it on every build and says not to commit it. apps/web's tsconfig loads `next`'s
+# types itself, so a checkout without a build still typechecks.
+next-env.d.ts
 out/
 dist/
 coverage/

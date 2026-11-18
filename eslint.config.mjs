@@ -264,6 +264,8 @@ export default defineConfig(
 	{
 		ignores: ["**/node_modules/", "**/coverage/", "**/dist/", "**/.next/", ".claude/", ".agents/"],
 	},
+	// Next writes next-env.d.ts on every build, like .next/, and it is git-ignored (#342, E2).
+	{ ignores: ["apps/web/next-env.d.ts"] },
 	// Flat config doesn't read .gitignore. `.remember/` is the remember plugin's git-ignored
 	// scratch folder, not project code; a stray .ts there failed `eslint .` (#256). An object with
 	// only `ignores` is a global ignore, like the one above.
@@ -332,6 +334,32 @@ export default defineConfig(
 			"prefer-template": "error",
 			"prefer-spread": "error",
 			"prefer-object-spread": "error",
+		},
+	},
+	{
+		// React components are PascalCase functions (ADR-0005, C9; #342). A later block's options
+		// replace an earlier block's, so the list is repeated with that one entry added.
+		files: ["apps/web/src/**/*.tsx"],
+		rules: {
+			"@typescript-eslint/naming-convention": [
+				...naming(["camelCase", "snake_case"]),
+				{ selector: "function", format: ["camelCase", "PascalCase"] },
+			],
+		},
+	},
+	{
+		// A route handler exports the HTTP method names Next requires (`GET`, `POST`; ADR-0005, C6).
+		files: ["apps/web/src/app/**/route.ts"],
+		rules: {
+			"@typescript-eslint/naming-convention": [
+				...naming(["camelCase", "snake_case"]),
+				{
+					selector: "function",
+					modifiers: ["exported"],
+					filter: { regex: "^(GET|HEAD|POST|PUT|DELETE|PATCH|OPTIONS)$", match: true },
+					format: null,
+				},
+			],
 		},
 	},
 	{

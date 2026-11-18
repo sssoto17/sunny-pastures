@@ -1,0 +1,10 @@
+{
+	"//": "The app's tests: the app's options, plus the types of what the root vitest.config.mts provides (vitest.context.d.ts).",
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"outDir": "node_modules/.cache/tsc/test"
+	},
+	"include": ["src/**/*.test.{ts,tsx}", "src/**/tests/**/*", "../../vitest.context.d.ts"],
+	"exclude": [],
+	"references": [{ "path": "./tsconfig.json" }]
+}

@@ -772,10 +772,12 @@ describe("floor guard, end to end", () => {
 
 	// The cases the stack review of #94–#97 found passing clean, run against the real file.
 	describe("the real CONSTRAINTS.md", () => {
+		// The real file without its Exceptions rows: a row already in the base is spent, and its
+		// warning would add an annotation to every test here (#342). floor-guard-spent.test.mjs tests those.
 		const REAL = readFileSync(
 			fileURLToPath(new URL("../../../CONSTRAINTS.md", import.meta.url)),
 			"utf8",
-		);
+		).replace(/^\| E\d+ \|.*\n/gm, "");
 		const edit = (text, from, to) => {
 			if (!text.includes(from)) throw new Error(`CONSTRAINTS.md no longer contains: ${from}`);
 			return text.replace(from, to);
