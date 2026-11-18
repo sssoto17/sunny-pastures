@@ -196,8 +196,8 @@ generator is mulberry32, as in the spike, and the streams' states live in the fa
 
 The sim is designed for `CONSTRAINTS.md`'s sim speed row: `advance()` across 30 days on the largest
 content farm in ≤ 50 ms, and `apply()` ≤ 1 ms per call. `spec.md` MUST-07.4 said 7 days and is
-corrected to 30 to match. The `advance` ticket reports a `vitest bench` at 30 days in its PR. That
-isn't gating yet: the bench check is #41 (M3).
+corrected to 30 to match. The `advance` ticket reported a `vitest bench` at 30 days in its PR. Since
+#41 it gates as `ci / bench` (`pnpm bench`), measured as `CONSTRAINTS.md`, "Timing checks" asks.
 
 **Pattern:** none (a budget).
 

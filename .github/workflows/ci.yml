@@ -159,6 +159,20 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm boundaries
 
+  # CONSTRAINTS.md, "Sim speed" (#41): advance() 30 days and apply() per call against their budgets,
+  # each the median of 5 runs after 3 warm-ups, with the one re-measure "Timing checks" allows. The
+  # bench writes both medians as notices. No path filter: a required check must report on every PR.
+  bench:
+    name: ci / bench
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm bench --reporter=github-actions
+
   # #255: the shell scripts' test suites, every *.test.sh under scripts/ and .claude/hooks/, found
   # by the runner so a new suite needs no edit here. Each suite fakes gh on PATH and needs no secret:
   # the job holds no token, persists no credentials, and the runner puts a gh that refuses every
