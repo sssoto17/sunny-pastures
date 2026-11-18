@@ -114,9 +114,9 @@ jobs:
 
       # The review skill (#68, admin 18 Nov 2026), from main's checkout. `--setting-sources user`
       # registers only ~/.claude/skills, so a typed /code-review-and-quality finds it there; the
-      # repo's .claude/ (project source: settings, hooks, .mcp.json) stays unloaded.
+      # repo's .claude/ (project source: settings, hooks, .mcp.json) stays unloaded. No `if:` on the
+      # gate (floor-guard reads a new `if:` as loosening); copying is free when Claude doesn't run.
       - name: Install the review skill (main's copy)
-        if: steps.gather.outputs.run == 'true'
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.claude/skills"

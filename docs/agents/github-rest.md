@@ -83,7 +83,7 @@ These run outside cloud lanes, and each needs at least one call that REST doesn'
 | --- | --- | --- |
 | `scripts/setup/ci-check-68.sh` | `gh pr ready` | no REST equivalent: the REST description has no ready-for-review operation (the cloud proxy offers its own route, `POST .../pulls/{n}/ccr/ready_for_review`, which isn't GitHub's REST) |
 | `scripts/setup/ci-check-68.sh`, `ci-check.sh` (`results 101`) | `gh pr view --json reviewDecision` | no REST equivalent: the REST pull request has no review decision ("Get a pull request" lists `mergeable_state`, `auto_merge`, `requested_reviewers`, not it) |
-| `scripts/setup/ci-check-68.sh`, `workflows/check-101-identities.yml`, `workflows/check-68-factory-resolve.yml` | `reviewThreads`, `resolveReviewThread` | no REST equivalent for review threads or resolving one |
+| `scripts/setup/ci-check-68.sh`, `workflows/check-101-identities.yml`, `.github/workflows/check-68-factory-resolve.yml` | `reviewThreads`, `resolveReviewThread` | no REST equivalent for review threads or resolving one |
 | `scripts/setup/workflows/check-102-project.yml` | `projectV2` read with `GITHUB_TOKEN` | the check exists to test that GraphQL read from Actions (#102) |
 | `scripts/setup/ci-check.sh`, `ci-check-68.sh` | `gh pr list`, `gh pr create --draft`, `gh pr close --comment`, `gh issue comment` | REST equivalents exist ("List pull requests", "Create a pull request" with `draft`, "Update a pull request" with `state: closed`, "Create an issue comment"), but the scripts also need the calls above, so they can't run in the cloud either way |
 

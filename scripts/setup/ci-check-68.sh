@@ -6,7 +6,7 @@
 
 T68_ADMIN=sssoto17
 T68_NOTES=docs/spikes/reviewer-app
-T68_RESOLVE=throwaway/68-factory-resolve
+T68_RESOLVE_WF=check-68-factory-resolve.yml # on main; resolve 68 dispatches it (test (e2))
 T68_THREADS='query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name)
   { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { isResolved resolvedBy { login }
   comments(first: 1) { nodes { author { login } body } } } } } } }'
@@ -75,7 +75,7 @@ start_68() {
 dismissal: a hold thread wouldn't hold, and (a)-(d) would read nothing. Nothing opened."
   t68_repo
   git -C "$repo" fetch -q origin main || die 1 "git fetch origin main failed"
-  for l in a c e f "factory-resolve"; do
+  for l in a c e f; do
     if git -C "$repo" ls-remote --exit-code -q origin "refs/heads/throwaway/68-$l" >/dev/null 2>&1; then
       die 2 "throwaway/68-$l already exists on origin: run cleanup 68 first"
     fi
@@ -146,6 +146,20 @@ Once (a) reads APPROVED, turn it on for the test window only (runbook), then pus
   printf 'APPROVED again after the fresh review, in 1-3 minutes).\n'
 }
 
+# Test (e2): main's factory workflow resolves (e)'s escalation thread as sunny-factory, pushes,
+# and reads the reviewer's answer. The `factory` environment admits main only (#336), so this
+# dispatches the copy on main instead of pushing a branch. It needs (e)'s open PR.
+resolve_68() {
+  local pr
+  pr=$(t68_pr e open) || die 1 "gh pr list failed"
+  [[ -n $pr ]] || die 2 "no open PR from throwaway/68-e: run start 68 first"
+  gh workflow run "$T68_RESOLVE_WF" --repo "$REPO" --ref main ||
+    die 1 "gh workflow run failed: is $T68_RESOLVE_WF on main?"
+  printf 'Dispatched %s on main for PR #%s. Follow it with:\n' "$T68_RESOLVE_WF" "$pr"
+  printf '  gh run list --repo %s --workflow %s\n' "$REPO" "$T68_RESOLVE_WF"
+  printf 'When it has finished: scripts/setup/ci-check.sh results 68\n'
+}
+
 # Everything results 68 reads, as one JSON object: a PR per letter, and the factory's run.
 t68_collect() {
   local l pr view reviews threads run
@@ -165,9 +179,10 @@ t68_collect() {
     data=$(jq --arg l "$l" --argjson v "$view" --argjson r "$reviews" --argjson t "$threads" \
       '.[$l] = $v + {reviews: $r, threads: $t}' <<<"$data")
   done
-  run=$(gh run list --repo "$REPO" --branch "$T68_RESOLVE" --limit 50 \
-    --json databaseId,status,conclusion,url,workflowName \
-    --jq 'map(select(.workflowName == "check-68-factory-resolve")) | .[0] // {}') || die 1 "gh run list failed"
+  # The newest dispatch of main's factory workflow (resolve 68).
+  run=$(gh run list --repo "$REPO" --workflow "$T68_RESOLVE_WF" --branch main --event workflow_dispatch \
+    --limit 1 --json databaseId,status,conclusion,url,workflowName --jq '.[0] // {}') ||
+    die 1 "gh run list failed"
   data=$(jq --argjson run "$run" '.resolve = $run' <<<"$data")
 }
 
@@ -263,7 +278,7 @@ cleanup_68() {
       die 1 "closing PR #$pr failed"
     printf 'closed PR #%s unmerged\n' "$pr"
   done
-  for l in a c e f factory-resolve; do
+  for l in a c e f; do
     b=throwaway/68-$l
     if gh api "repos/$REPO/git/ref/heads/$b" --silent >/dev/null 2>&1; then
       gh api -X DELETE "repos/$REPO/git/refs/heads/$b" --silent || die 1 "deleting $b failed"

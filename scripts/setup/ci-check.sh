@@ -33,7 +33,7 @@ usage: scripts/setup/ci-check.sh start|results|cleanup 101|102|68
   push 68 a    one more commit on (a)'s branch: tests (b) and (d); refuses while the repo's
                allow_auto_merge is off or the App hasn't approved (a)
   push 68 e    one more commit on (e)'s branch: the reviewer's next run, for test (e)
-  resolve 68   push throwaway/68-factory-resolve with check-68-factory-resolve.yml: the factory
+  resolve 68   dispatch main's check-68-factory-resolve.yml (needs actions: write): the factory
                App resolves (e)'s escalation thread, pushes, and reads the reviewer's answer
   results N    print the latest run of N's workflow as Markdown, for a comment on issue N:
                  scripts/setup/ci-check.sh results 101 > .scratch/101-results.md
@@ -66,7 +66,7 @@ case $cmd:$issue:$# in
     branch=throwaway/101-identities workflow=check-101-identities.yml pr_head=$FACTORY_PR_BRANCH ;;
   start:102:2 | results:102:2 | cleanup:102:2) branch=throwaway/102-project workflow=check-102-project.yml ;;
   start:68:2 | results:68:2 | cleanup:68:2) ;;
-  resolve:68:2) branch=throwaway/68-factory-resolve workflow=check-68-factory-resolve.yml ;;
+  resolve:68:2) ;;
   push:68:3) [[ $letter == a || $letter == e ]] || { usage; exit 2; } ;;
   *) usage; exit 2 ;;
 esac
@@ -237,7 +237,8 @@ case $cmd:$issue in
   results:68) results_68 ;;
   cleanup:68) cleanup_68 ;;
   push:68) push_68 ;;
-  start:* | resolve:*) start ;;
+  resolve:68) resolve_68 ;;
+  start:*) start ;;
   results:*) results ;;
   cleanup:*) cleanup ;;
 esac
