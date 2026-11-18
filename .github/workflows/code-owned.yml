@@ -1,0 +1,66 @@
+# `guard / code-owned` (#337): a PR whose diff touches a path in .github/CODEOWNERS fails until a
+# code owner, the admin, approves its current head, and gets `review:admin` from the diff, not from
+# the reviewer bot. The rules are in code-owned-guard.mjs. Its own workflow, so a review re-runs
+# this check only, not all of ci, and the overlap with ci.yml and pr-body.yml stays small. No path
+# filter: it reports on every PR and can be a required check (ADR-0002, area 2). Actions are
+# GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
+name: code-owned
+
+on:
+  pull_request:
+    # `edited` covers a base change, which changes the diff.
+    types: [opened, edited, synchronize, reopened]
+  # An approval turns it green without a push; a dismissed one turns it red again.
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+
+# No concurrency group (#264): a cancelled twin of a required check on one head reads as its latest
+# result (throwaway stack #315). Each run reads the PR's state when it starts, so the last run on a
+# head judges the latest reviews. It takes seconds.
+
+jobs:
+  code-owned:
+    name: guard / code-owned
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Reads the PR's files and reviews and adds `review:admin`: write on pull requests only, with
+    # the token in env, never in a `run:` expression.
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      # Run the default branch's script and CODEOWNERS, not the PR's, so a PR can't switch off the
+      # check that judges it or drop a path from its list (as the floor job does, #99). Its own
+      # checkout, since a sparse checkout leaves other refs' blobs off the runner; cone mode keeps
+      # .github/CODEOWNERS, a file in a parent folder. The PR's script runs only while the default
+      # branch has none; CODEOWNERS always comes from the default branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+          path: .code-owned
+          sparse-checkout: .github/scripts
+      - name: Take the script and CODEOWNERS from the default branch
+        run: |
+          dir="$RUNNER_TEMP/code-owned"
+          mkdir -p "$dir"
+          owners=$(git -C .code-owned ls-tree HEAD -- .github/CODEOWNERS) || exit 1
+          [[ -n $owners ]] || { echo "::error::the default branch has no .github/CODEOWNERS"; exit 1; }
+          cp .code-owned/.github/CODEOWNERS "$dir/"
+          listed=$(git -C .code-owned ls-tree HEAD -- .github/scripts/code-owned-guard.mjs) || exit 1
+          if [[ -n $listed ]]; then
+            cp .code-owned/.github/scripts/code-owned-guard.mjs .code-owned/.github/scripts/diff.mjs "$dir/"
+          else
+            echo "::warning::the default branch has no code-owned-guard.mjs yet; using this PR's copy"
+            cp .github/scripts/code-owned-guard.mjs .github/scripts/diff.mjs "$dir/"
+          fi
+      - run: node "$RUNNER_TEMP/code-owned/code-owned-guard.mjs" --codeowners "$RUNNER_TEMP/code-owned/CODEOWNERS"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
