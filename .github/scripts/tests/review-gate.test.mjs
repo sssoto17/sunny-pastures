@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -157,11 +157,38 @@ describe("review.yml", () => {
 		const claudeArgs = yml.slice(at("claude_args: >-"), at("# Minted after Claude has finished"));
 
 		it("copies main's skill into the user's skills before Claude runs", () => {
-			const copy = at(
-				'cp -R .claude/skills/code-review-and-quality "$HOME/.claude/skills/code-review-and-quality"',
-			);
-			expect(at("uses: actions/checkout@")).toBeLessThan(copy);
-			expect(copy).toBeLessThan(at("- id: claude\n"));
+			const step = at("- name: Install the review skill (main's copy)\n");
+			expect(at("uses: actions/checkout@")).toBeLessThan(step);
+			expect(step).toBeLessThan(at("- id: claude\n"));
+		});
+
+		// .claude/skills/code-review-and-quality is a symlink into .agents/skills/ (mode 120000): a
+		// plain `cp -R` copies the link, which dangles under $HOME, and the skill never registers.
+		it("leaves a real SKILL.md under $HOME, not a link", () => {
+			const lines = yml.slice(at("- name: Install the review skill (main's copy)\n")).split("\n");
+			const from = lines.findIndex((l) => l.trim() === "run: |") + 1;
+			const end = lines.findIndex((l, i) => i >= from && l.trim() === "");
+			const script = lines
+				.slice(from, end)
+				.map((l) => l.trim())
+				.join("\n");
+			const home = mkdtempSync(join(tmpdir(), "review-skill-"));
+			try {
+				const root = fileURLToPath(new URL("../../..", import.meta.url));
+				const r = spawnSync("bash", ["-c", script], {
+					cwd: root,
+					env: { ...process.env, HOME: home },
+					encoding: "utf8",
+				});
+				expect(r.status, r.stderr).toBe(0);
+				const dir = join(home, ".claude/skills/code-review-and-quality");
+				expect(lstatSync(dir).isSymbolicLink()).toBe(false);
+				expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toMatch(
+					/^---\nname: code-review-and-quality\n/,
+				);
+			} finally {
+				rmSync(home, { recursive: true, force: true });
+			}
 		});
 
 		it("invokes the skill as the prompt's first word", () => {

@@ -522,12 +522,13 @@ branches. The pattern is _propose, then apply_: Claude proposes and plain code a
   (`--json-schema`, `.github/review-verdict.schema.json`).
 - **The review skill (#68, admin 18 Nov 2026).** The prompt starts with `/code-review-and-quality`,
   so the CLI loads that skill before the task; `review-prompt.md` and `REVIEW.md` still decide what
-  is reported. A step copies `main`'s copy into `~/.claude/skills`, because `--setting-sources user`
-  registers skills from there only. _Alternatives:_ adding the `project` source was rejected: it
-  also loads the repo's `.claude/settings.json` (hooks, allow rules) and `.mcp.json`, whose servers
-  the action starts (it sets `enableAllProjectMcpServers`). Allowing the `Skill` tool was rejected
-  as unneeded: a typed skill is expanded by the CLI, not through the tool (tried with CLI 2.1.327,
-  18 Nov), so `Skill` stays denied and the model can't load another skill. The Report step logs
+  is reported. A step copies `main`'s copy into `~/.claude/skills` (`cp -RL`: the repo's entry is a
+  link into `.agents/skills/`), because `--setting-sources user` registers skills from there only.
+  _Alternatives:_ adding the `project` source was rejected: it also loads the repo's
+  `.claude/settings.json` (hooks, allow rules) and `.mcp.json`, whose servers the action starts (it
+  sets `enableAllProjectMcpServers`). Allowing the `Skill` tool was rejected as unneeded: a typed
+  skill is expanded by the CLI, not through the tool (tried with CLI 2.1.327, 18 Nov), so `Skill`
+  stays denied and the model can't load another skill. The Report step logs
   `RESULT skill=code-review-and-quality registered=` from the run's init message.
 - **Apply.** Only after Claude has finished does the job mint the App's token, scoped to contents
   and pull requests. `.github/scripts/post-review.sh` (tested by
