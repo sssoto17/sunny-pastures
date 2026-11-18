@@ -1,6 +1,9 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations. In a
+cloud lane, `gh issue`, `gh pr` and `gh project` fail (they use GraphQL, which the cloud proxy
+refuses): use `gh api` over REST there. `docs/agents/github-rest.md` lists the equivalents, and the
+scripts below already use them.
 
 ## Conventions
 
@@ -9,10 +12,14 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
   issue type, milestone, parent and Project fields in one checked command (`--help`; tests:
   `bash scripts/new-issue.test.sh`). Whoever files an issue sets its four fields as **Issue fields**
   below says.
-- **Read an issue**: `gh issue view <number> --json number,title,body,labels,comments`.
+- **Read an issue**:
+  `gh api repos/sssoto17/sunny-pastures/issues/<number> --jq '{number, title, body, labels: [.labels[].name]}'`,
+  and its comments with
+  `gh api repos/sssoto17/sunny-pastures/issues/<number>/comments --jq '.[].body'` (REST, so it works
+  in a cloud lane too).
 - **List issues**:
-  `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`
-  with appropriate `--label` and `--state` filters.
+  `gh api --paginate "repos/sssoto17/sunny-pastures/issues?state=open&per_page=100" --jq '.[] | select(has("pull_request") | not) | {number, title, labels: [.labels[].name]}'`
+  with `labels=<a,b>` and `state=` in the query to filter (REST lists PRs too, hence the select).
 - **Make an issue a sub-issue of a parent**: `gh issue create --parent <parent> ...`, or
   `gh issue edit <parent> --add-sub-issue <child>` afterwards (`gh` 2.94+). Older `gh`:
   `gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<child-db-id>`
@@ -49,14 +56,19 @@ requests; `/triage` reads this flag.)_
 When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr`
 equivalents:
 
-- **Read a PR**: `gh pr view <number> --comments` and `gh pr diff <number>` for the diff.
+- **Read a PR**:
+  `gh api repos/sssoto17/sunny-pastures/pulls/<number> --jq '{number, title, body, state, head: .head.ref}'`,
+  its comments with `gh api repos/sssoto17/sunny-pastures/issues/<number>/comments --jq '.[].body'`,
+  and the diff with
+  `gh api repos/sssoto17/sunny-pastures/pulls/<number> -H 'Accept: application/vnd.github.diff'`
+  (REST, so it works in a cloud lane too).
 - **List external PRs for triage**:
   `gh api --paginate 'repos/{owner}/{repo}/pulls?state=open' --jq '.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, title, author: .user.login, author_association, labels: [.labels[].name]}'`.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`,
   `gh pr close`.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with
-`gh pr view 42` and fall back to `gh issue view 42`.
+`gh api repos/sssoto17/sunny-pastures/issues/42 --jq 'has("pull_request")'`, which answers for both.
 
 ## When a skill says "publish to the issue tracker"
 
@@ -85,8 +97,9 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
   reports `issue_dependencies_summary.blocked_by` (open blockers only, the live gate). Where
   dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the
   child body. A ticket is unblocked when every blocker is closed.
-- **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the
-  map's sub-issues / task list), drop any with an open blocker
+- **Frontier query**: list the map's open children
+  (`gh api repos/sssoto17/sunny-pastures/issues/<map>/sub_issues --jq '.[] | select(.state == "open")'`,
+  or the issues its task list names), drop any with an open blocker
   (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an
   assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me`, the session's first write.
@@ -123,8 +136,12 @@ one repo milestone (`M1 Persistence spike` … `M9 Hand-in`; list them with
   - **`--type`** sets GitHub's native issue type (Chore, Bug, Feature, Design) on the issue itself.
     Once the type, Priority, Size and Week are all set, the script removes `triage` and its
     `Triage:` line says so (see **Issue fields**).
+  - **In a cloud lane** the Project can't be reached (the proxy refuses it with a 403): the script
+    sets `--type`, skips the Project, prints the command that finishes it from a local session, and
+    exits 4. `scripts/new-issue.sh` files the issue all the same and exits 4 too.
 
-The ids, for reading raw `gh project` output (the script doesn't use this table):
+The GraphQL node ids, for reading raw `gh project` output (the scripts don't use this table; the
+REST Projects API numbers its fields instead: `gh api users/sssoto17/projectsV2/3/fields`):
 
 <!-- prettier-ignore -->
 | Field  | Field id                         | Options (name = option id)                                                                 |
@@ -134,7 +151,7 @@ The ids, for reading raw `gh project` output (the script doesn't use this table)
 | Mode   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g0` | Manual=`ca9bd7b8` Factory=`f92520e5`                                                       |
 | Size   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g4` | S=`7a7f9f73` M=`e0e2efb6` L=`c7dede81`                                                     |
 | Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
-| Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
+| Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api users/sssoto17/projectsV2/3/fields --jq '.[] \| select(.name == "Week") \| .configuration.iterations[] \| [.id, .title.raw, .start_date] \| @tsv'` |
 
 When a skill publishes tickets, make each one a sub-issue of its workstream parent (see
 **Grouping**), give it a milestone, add it to the Project and set the native type, Track, Mode,
@@ -167,8 +184,9 @@ Every issue carries four values: GitHub's native **issue type**, and the Project
 - **No exceptions**: a workstream parent carries all four too (**Grouping**).
 - **`scripts/missing-fields.sh`** lists the open issues that break this rule: a field missing (and
   whether `triage` is on), or `triage` on an issue whose fields are set. It exits 0 when there are
-  none, 1 when it lists some, 2 on bad arguments and 3 when GitHub can't be read, and is read-only
-  (`--help`; tests: `bash scripts/missing-fields.test.sh`).
+  none, 1 when it lists some, 2 on bad arguments, 3 when GitHub can't be read, and 4 when GitHub
+  refuses the Project (a cloud lane): then it lists only the issues missing a type and names the
+  checks it skipped. It is read-only (`--help`; tests: `bash scripts/missing-fields.test.sh`).
 
 ## Workstreams
 

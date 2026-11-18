@@ -3,7 +3,8 @@
 # issue type by name, then remove `triage` once the four fields every issue carries are set
 # (docs/agents/issue-tracker.md, "Issue fields"). Field, option and type ids are looked up from
 # GitHub on every run, never hard-coded. Every name is checked before the first write, so a typo
-# changes nothing. REST only (`gh api`), local and cloud alike (#346): the issue through
+# changes nothing; with the Project refused, only the type's name can be checked (the Project's
+# field names are checked by the finishing run). REST only (`gh api`), local and cloud alike (#346): the issue through
 # repos/<owner>/<repo>, the Project through the REST Projects API, which the cloud proxy refuses;
 # then the issue's part is done and exit 4 prints the command that finishes the rest.
 # Tests: scripts/issue-fields.test.sh.
@@ -46,11 +47,13 @@ value it set, or if `triage` is still on once all four are set.
 
 Where GitHub refuses the Project (HTTP 403, as the cloud's GitHub proxy does), it still sets
 --type, prints "?" for the Project's fields, names the step it skipped and the command that
-finishes it from a local session, and exits 4.
+finishes it from a local session, and exits 4. The Project's field names (--size XL, --week
+"Wk 99") can't be checked then: only --type is. The finishing run checks them.
 
 Exit codes: 0 done, 1 a gh call failed or the read-back differs, 2 bad arguments or an unknown
 name (nothing changed), 4 the Project step was skipped: the issue's type is set, the Project
-wasn't touched; run the printed command where the Project can be reached.
+wasn't touched and its field names weren't checked; run the printed command where the Project
+can be reached.
 
 example: scripts/issue-fields.sh 47 --type Chore --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
 EOF

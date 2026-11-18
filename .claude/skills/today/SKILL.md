@@ -8,8 +8,8 @@ disable-model-invocation: true
 for the admin: an agenda, a brief per Manual item, a prompt line per Factory item. While drafting
 (steps 1–6) you only prepare; the admin decides what launches.
 
-**Read-only while drafting.** In steps 1–6 you read GitHub (`gh issue view`, `gh pr list`,
-`gh api -X GET`), git and files. Your only writes are new files in `out`, the folder the gather
+**Read-only while drafting.** In steps 1–6 you read GitHub (`gh api -X GET`, over REST, which
+works locally and in the cloud: `docs/agents/github-rest.md`), git and files. Your only writes are new files in `out`, the folder the gather
 script names. Every issue, field, label, comment, branch and worktree stays exactly as you found
 it; anything that should change goes in the agenda as a suggestion. Once you've replied (step
 6), read-only ends and **coordinator mode** (last section) holds for the rest of the day.
@@ -23,7 +23,9 @@ compare with a hand-written brief).
    belongs in the main folder, where the coordinator's briefs live: from a worktree, `out` is
    that worktree's `.scratch/`, so the main folder's briefs read as missing. When `out` isn't
    `<root>/.scratch`, the agenda's first line says so. `--help` explains every section and
-   column. On a non-zero exit, tell the admin its error and stop: write nothing.
+   column. On a non-zero exit, tell the admin its error and stop: write nothing. Exit 4 means
+   GitHub refused the Project here (a cloud session): the board's sections are empty, so there
+   is nothing to brief from.
 2. **Handoff.** If the `handoff` line says `present`, read that file. If it says `missing`, that's
    normal (`.remember/` is git-ignored); the agenda says so in one line.
 3. **Pick the briefs.** One per `ready` line with mode Manual or no mode (`-`: treat it as
@@ -47,8 +49,10 @@ accounted for under Leftovers or In flight.
 
 ## Drafting a brief
 
-Sources, all of them read before writing: the issue (`gh issue view <N> --json
-number,title,body,labels,milestone,comments`), its parent from the `ready` line, or for an issue
+Sources, all of them read before writing: the issue (`gh api -X GET
+repos/sssoto17/sunny-pastures/issues/<N> --jq '{number, title, body, labels: [.labels[].name],
+milestone: .milestone.title}'`, and its comments from `.../issues/<N>/comments --jq '.[].body'`),
+its parent from the `ready` line, or for an issue
 named in the arguments from `gh api -X GET repos/sssoto17/sunny-pastures/issues/<N> --jq
 .parent_issue_url` (the parent's body, and
 above all its **Context** section, `docs/agents/issue-tracker.md` "Kickoff" step 3), and every
