@@ -264,7 +264,7 @@ export default defineConfig(
 	{
 		ignores: ["**/node_modules/", "**/coverage/", "**/dist/", "**/.next/", ".claude/", ".agents/"],
 	},
-	// Next writes next-env.d.ts on every build, like .next/, and it is git-ignored (#342, E2).
+	// Next writes next-env.d.ts on every build, like .next/, and it is git-ignored (#342, E8).
 	{ ignores: ["apps/web/next-env.d.ts"] },
 	// Flat config doesn't read .gitignore. `.remember/` is the remember plugin's git-ignored
 	// scratch folder, not project code; a stray .ts there failed `eslint .` (#256). An object with

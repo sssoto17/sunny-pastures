@@ -403,7 +403,7 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 <!-- prettier-ignore -->
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| E2 | config-loosened | eslint.config.mjs | ESLint ignores `next-env.d.ts`, which `next build` and `next dev` write into `apps/web/` and Next says not to commit (git-ignored, like `.next/`). Without the ignore, `eslint .` fails locally after any build, on the file-name and import-privacy rules (#342; admin, 18 Nov). Remove this row when the floor guard learns git-ignored generated paths, or renew it | Soto | 2026-12-18 |
+| E8 | config-loosened | eslint.config.mjs | ESLint ignores `next-env.d.ts`, which `next build` and `next dev` write into `apps/web/` and Next says not to commit (git-ignored, like `.next/`). Without the ignore, `eslint .` fails locally after any build, on the file-name and import-privacy rules (#342; admin, 18 Nov). Remove this row when the floor guard learns git-ignored generated paths, or renew it | Soto | 2026-12-18 |
 
 ## Interview record
 
