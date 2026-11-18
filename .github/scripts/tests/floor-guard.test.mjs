@@ -2395,6 +2395,10 @@ describe("floor guard, end to end", () => {
 				"re-wrapped without its closing pipe",
 				`| E1 | silenced checker | \`${path}\` | reason | Soto | 2026-11-30`,
 			],
+			[
+				"re-wrapped inside a cell",
+				`| E1 | silenced  checker | \`${path}\` | reason | Soto | 2026-11-30 |`,
+			],
 		])("reads a row %s as unchanged: it stays spent and waives nothing", (_, text) => {
 			start();
 			repo.write({ ...SUPPRESS, "CONSTRAINTS.md": withException(text) });
