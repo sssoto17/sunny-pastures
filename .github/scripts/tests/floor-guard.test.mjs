@@ -279,6 +279,19 @@ describe("floor guard, end to end", () => {
 			expect(guard().out).toContain(`[check-removed] ${CI}`);
 		});
 
+		// #337: `guard / code-owned` runs main's copy of its script and CODEOWNERS; a PR that points the
+		// run at its own list, or replaces the run, would pass its own code-owned paths.
+		const OWNED =
+			'jobs:\n  code-owned:\n    steps:\n      - run: node "$dir/code-owned-guard.mjs" --codeowners "$dir/CODEOWNERS"\n';
+		it.each([
+			["the list swapped for the PR's", OWNED.replace('"$dir/CODEOWNERS"', ".github/CODEOWNERS")],
+			["the run replaced", OWNED.replace(/node .*\n/, "true\n")],
+		])("block %s in the code-owned job", (_, content) => {
+			repo = makeRepo({ ...BASE, [CI]: OWNED });
+			repo.write({ [CI]: content });
+			expect(guard().out).toContain(`[check-removed] ${CI}`);
+		});
+
 		// #125: the duplication and formatting checks run as steps of `ci / lint`.
 		it.each(['pnpm dupes --changed-since "origin/$BASE_REF"', "pnpm format:check"])(
 			"block a removed `%s` step",
