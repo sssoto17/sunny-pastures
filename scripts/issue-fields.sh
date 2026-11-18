@@ -155,7 +155,8 @@ load() { # what-it-means-on-failure
     die 1 "could not read the issue types of $OWNER/$REPO from GitHub; $1"
   project_ok=1
   if ! fields=$(gh api "$PROJECT_API/fields?per_page=100" --jq "$FIELDS_FILTER" 2>"$project_err"); then
-    cat "$project_err" >&2
+    [[ -n ${refusal_shown-} ]] || cat "$project_err" >&2 # once, not again on the read-back
+    refusal_shown=1
     project_refused "$project_err" || die 1 "could not read Project $PROJECT_NUMBER of $OWNER from GitHub; $1"
     project_ok=0
   fi

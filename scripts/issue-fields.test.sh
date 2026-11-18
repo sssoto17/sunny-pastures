@@ -512,6 +512,8 @@ expect_no_call "-X POST $PA"
 expect_no_call "-X PATCH $PA"
 expect_no_call "-X DELETE"
 expect_err "(HTTP 403)"
+assert "expected gh's refusal shown once, not again on the read-back" \
+  test "$(grep -c 'sessions are bound' <<<"$err")" -eq 1
 expect_err "skipped the Project step: GitHub refused the Project here"
 expect_err "the type is set"
 expect_err "Skipped: add #47 to Project 3 if it isn't on it, set Status if unset, set Size, Week, and remove \`triage\` once the four are set."
