@@ -2,7 +2,8 @@
 # Tests for after-merge.sh through its command line, against throwaway git repos under $TMPDIR:
 # a bare "origin", the main folder cloned from it, and a lane worktree under
 # .claude/worktrees/. A PR's squash merge is a commit pushed to origin from a third clone.
-# `gh` is a fake on PATH: it logs its calls and answers `pr list` from $work/prs.
+# `gh` is a fake on PATH: it logs its calls and answers `gh api .../pulls?...` (REST, #346) from
+# $work/prs (the rows its --jq filter prints), or runs that filter over $work/prs.json.
 # `stat` is a fake on PATH too: it reports the paths listed in $work/placeholders as the
 # sandbox's /dev/null placeholders (a character device, 1:3), which a test can't create without
 # root, and runs the real stat for everything else.
@@ -35,8 +36,13 @@ cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
 printf '%s\n' "$*" >>"$dir/calls"
-if [[ $1 == pr && $2 == list ]]; then
+if [[ $1 == api && $2 == --paginate && $3 == repos/sssoto17/sunny-pastures/pulls\?* ]]; then
   [[ -f $dir/fail-gh ]] && { echo "fake: gh failed" >&2; exit 1; }
+  if [[ -f $dir/prs.json ]]; then
+    [[ $4 == --jq ]] || { echo "fake: no --jq filter" >&2; exit 98; }
+    jq -r "$5" "$dir/prs.json"
+    exit
+  fi
   cat "$dir/prs" 2>/dev/null
   exit 0
 fi
@@ -163,7 +169,34 @@ expect_out "worktree: removed $lane"
 expect_out "worktrees: pruned"
 expect_out "branch: deleted $branch"
 assert "expected gh to be asked for the branch's merged PRs into main" \
-  contains "$calls" "pr list --repo sssoto17/sunny-pastures --base main --head $branch --state merged"
+  contains "$calls" "api --paginate repos/sssoto17/sunny-pastures/pulls?state=closed&base=main&per_page=100&head=sssoto17:$branch --jq"
+
+# The script's --jq filter over REST's "List pull requests" shape: a closed PR is merged only
+# with merged_at set, and its head commit is head.sha.
+reset
+merge_pr
+rm -f "$work/prs"
+jq -n --arg tip "$tip" '[
+  {number: 11, state: "closed", merged_at: null, head: {ref: "chore/9-lane", sha: "0000000"},
+   html_url: "https://github.com/sssoto17/sunny-pastures/pull/11"},
+  {number: 12, state: "closed", merged_at: "2026-11-18T10:00:00Z", head: {ref: "chore/9-lane", sha: $tip},
+   html_url: "https://github.com/sssoto17/sunny-pastures/pull/12"}]' >"$work/prs.json"
+case_ 9-lane
+rm -f "$work/prs.json"
+expect_code 0
+expect_out "branch: deleted $branch"
+expect_out "#12 https://github.com/sssoto17/sunny-pastures/pull/12"
+
+# Closed but never merged: no merged PR, so it refuses.
+reset
+merge_pr
+rm -f "$work/prs"
+jq -n '[{number: 11, state: "closed", merged_at: null, head: {ref: "chore/9-lane", sha: "0"},
+  html_url: "https://github.com/sssoto17/sunny-pastures/pull/11"}]' >"$work/prs.json"
+case_ 9-lane
+rm -f "$work/prs.json"
+expect_code 2
+expect_err "no merged PR into main has $branch as its head"
 
 # A bare name means .claude/worktrees/<name>; an absolute path works too. Ignored files
 # (node_modules) aren't work to keep, but the output names them.
