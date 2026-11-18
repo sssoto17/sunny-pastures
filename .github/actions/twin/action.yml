@@ -7,11 +7,14 @@ inputs:
     description: A token with actions:read, to list this workflow's runs on the head.
     required: true
 outputs:
-  mirror:
-    description: Job id -> the first run's conclusion, as JSON; {} when this run tests for real.
-    value: ${{ steps.gate.outputs.mirror }}
+  pass:
+    description: JSON list of the job ids whose first-run twin passed or skipped; [] tests for real.
+    value: ${{ steps.gate.outputs.pass }}
+  fail:
+    description: JSON map, job id -> the first run's other conclusion; {} tests for real.
+    value: ${{ steps.gate.outputs.fail }}
   source:
-    description: The first run's URL when `mirror` isn't empty.
+    description: The first run's URL when this run repeats it.
     value: ${{ steps.gate.outputs.source }}
 runs:
   using: composite
@@ -37,7 +40,8 @@ runs:
           echo "::warning::the default branch has no twin-gate.mjs yet; using this PR's copy"
           cp .github/scripts/twin-gate.mjs .github/scripts/diff.mjs "$dir/"
         fi
-    # The script never fails: any doubt writes mirror={} and every job tests for real.
+    # The script never fails: any doubt writes empty lists and every job tests for real. If a step
+    # here fails anyway, the outputs are empty, and the jobs (all `!cancelled()`) test for real too.
     - id: gate
       shell: bash
       run: node "$RUNNER_TEMP/twin-gate/twin-gate.mjs"

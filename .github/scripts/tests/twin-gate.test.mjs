@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { twinGate } from "../twin-gate.mjs";
 
 const MERGE = "21fd683abdea7facf40785254a8d1bb68dd8d102";
-const KEY = ` · synchronize ${MERGE}`;
+const TITLE = `synchronize ${MERGE} · part 4`;
+const RUN_FOR_REAL = { pass: [], fail: {} };
 
 const event = (action = "synchronize") => ({
 	action,
@@ -13,7 +14,7 @@ const event = (action = "synchronize") => ({
 });
 
 // A run as GET actions/runs lists it. `title` is the run's display_title, from `run-name:`.
-const run = (id, title = `part 4${KEY}`, status = "completed") => ({
+const run = (id, title = TITLE, status = "completed") => ({
 	id,
 	workflow_id: 7,
 	display_title: title,
@@ -22,7 +23,7 @@ const run = (id, title = `part 4${KEY}`, status = "completed") => ({
 });
 
 // GitHub as the gate sees it: `self` is this run, `lists` answers each listing in turn (the last
-// one repeats), `jobs` is the original's jobs. It records every call.
+// one repeats), `jobs` is the first run's jobs. It records every call.
 const github = ({ self, lists, jobs = [] }) => {
 	const calls = [];
 	let n = 0;
@@ -54,107 +55,105 @@ describe("twinGate", () => {
 		async (action) => {
 			const gh = github({ self: run(2), lists: [[]] });
 			const r = await twinGate(event(action), { runId: 2, sha: MERGE }, gh);
-			expect(r.mirror).toEqual({});
+			expect(r).toMatchObject(RUN_FOR_REAL);
 			expect(gh.calls).toEqual([]);
 		},
 	);
 
 	it("runs the first run of a merge commit for real", async () => {
-		const gh = github({ self: run(1), lists: [[run(2, `part 4${KEY}`, "queued"), run(1)]] });
+		const gh = github({ self: run(1), lists: [[run(2, TITLE, "queued"), run(1)]] });
 		const r = await twinGate(event(), { runId: 1, sha: MERGE }, gh);
-		expect(r.mirror).toEqual({});
+		expect(r).toMatchObject(RUN_FOR_REAL);
 		expect(gh.calls).toEqual(["run 1", "list 7 ccd1b0f"]);
 	});
 
-	it("makes a later twin repeat what the first run's jobs concluded, keyed by job id", async () => {
+	it("skips a later twin's jobs that passed or skipped in the first run and fails the rest", async () => {
 		const gh = github({
-			self: run(2, `part 4${KEY}`, "in_progress"),
-			lists: [[run(2, `part 4${KEY}`, "in_progress"), run(1)]],
+			self: run(2, TITLE, "in_progress"),
+			lists: [[run(2, TITLE, "in_progress"), run(1)]],
 			jobs: [
 				job("ci / twin", "skipped"),
 				job("ci / test", "failure"),
 				job("ci / lint", "success"),
 				job("guard / floor", "success"),
 				job("ci / typecheck", "skipped"),
+				job("ci / scripts", "cancelled"),
+				job("ci / determinism", null),
 			],
 		});
 		const r = await twinGate(event(), { runId: 2, sha: MERGE }, gh);
-		expect(r.mirror).toEqual({
-			test: "failure",
-			lint: "success",
-			floor: "success",
-			typecheck: "skipped",
-		});
+		expect(r.pass).toEqual(["lint", "floor", "typecheck"]);
+		expect(r.fail).toEqual({ test: "failure", scripts: "cancelled", determinism: "failure" });
 		expect(r.source).toBe("https://github.com/o/r/actions/runs/1");
-		expect(gh.calls).toContain("jobs 1");
 	});
 
 	it("waits for the first run to finish before it reads its jobs", async () => {
-		const twin = run(2, `part 4${KEY}`, "in_progress");
+		const twin = run(2, TITLE, "in_progress");
 		const gh = github({
 			self: twin,
 			lists: [
-				[twin, run(1, `part 4${KEY}`, "queued")],
-				[twin, run(1, `part 4${KEY}`, "in_progress")],
+				[twin, run(1, TITLE, "queued")],
+				[twin, run(1, TITLE, "in_progress")],
 				[twin, run(1)],
 			],
 			jobs: [job("ci / test", "success")],
 		});
 		const r = await twinGate(event(), { runId: 2, sha: MERGE }, gh, { pollMs: 1 });
-		expect(r.mirror).toEqual({ test: "success" });
+		expect(r.pass).toEqual(["test"]);
 		expect(gh.calls.filter((c) => c === "sleep")).toHaveLength(2);
 		expect(gh.calls.at(-1)).toBe("jobs 1");
 	});
 
 	it("runs for real when the first run tested another merge commit", async () => {
-		const other = ` · synchronize ${"f".repeat(40)}`;
-		const gh = github({ self: run(2), lists: [[run(2), run(1, `part 4${other}`)]] });
+		const other = `synchronize ${"f".repeat(40)} · part 4`;
+		const gh = github({ self: run(2), lists: [[run(2), run(1, other)]] });
 		const r = await twinGate(event(), { runId: 2, sha: MERGE }, gh);
-		expect(r.mirror).toEqual({});
+		expect(r).toMatchObject(RUN_FOR_REAL);
 		expect(gh.calls).not.toContain("jobs 1");
 	});
 
 	// A body edit between the twins (pr-body's `edited`) is new input: repeating the first run's
 	// result after it would report on the old body last.
 	it.each([
-		["before the wait", [[run(3), run(2, "part 4 · edited abc"), run(1)]]],
+		["before the wait", [[run(3), run(2, `edited ${MERGE} · part 4`), run(1)]]],
 		[
 			"during the wait",
 			[
-				[run(3), run(1, `part 4${KEY}`, "in_progress")],
-				[run(3), run(2, "part 4 · edited abc"), run(1)],
+				[run(3), run(1, TITLE, "in_progress")],
+				[run(3), run(2, `edited ${MERGE} · part 4`), run(1)],
 			],
 		],
 	])("runs for real when another run started after the first one, %s", async (_, lists) => {
 		const gh = github({ self: run(3), lists });
 		const r = await twinGate(event(), { runId: 3, sha: MERGE }, gh, { pollMs: 1 });
-		expect(r.mirror).toEqual({});
+		expect(r).toMatchObject(RUN_FOR_REAL);
 		expect(gh.calls).not.toContain("jobs 1");
 	});
 
 	it("runs for real when the first run outlasts the wait", async () => {
-		const gh = github({ self: run(2), lists: [[run(2), run(1, `part 4${KEY}`, "in_progress")]] });
+		const gh = github({ self: run(2), lists: [[run(2), run(1, TITLE, "in_progress")]] });
 		let t = 0;
 		const r = await twinGate(event(), { runId: 2, sha: MERGE }, gh, {
 			pollMs: 60_000,
 			maxWaitMs: 180_000,
 			now: () => (t += 60_000),
 		});
-		expect(r.mirror).toEqual({});
+		expect(r).toMatchObject(RUN_FOR_REAL);
 		expect(r.message).toMatch(/still running/);
 	});
 
-	it("runs for real when this run's name doesn't carry the merge commit", async () => {
+	it("runs for real when this run's name doesn't start with the merge commit", async () => {
 		const gh = github({ self: run(2, "part 4"), lists: [[run(2, "part 4"), run(1, "part 4")]] });
 		const r = await twinGate(event(), { runId: 2, sha: MERGE }, gh);
-		expect(r.mirror).toEqual({});
+		expect(r).toMatchObject(RUN_FOR_REAL);
 		expect(gh.calls).toEqual(["run 2"]);
 	});
 });
 
 // The gate only helps if every job of the three workflows asks it; a job that forgets is a second
 // draw again. A job without `!cancelled()` would skip whenever the gate is skipped (every run but a
-// stacked part's synchronize), and a skipped required job reads as passing.
+// stacked part's synchronize), and a skipped required job reads as passing. A job's id must be its
+// check name after ` / `: that's how the gate names it.
 describe.each(["ci", "security", "pr-body"])("%s.yml", (workflow) => {
 	const yml = readFileSync(
 		fileURLToPath(new URL(`../../workflows/${workflow}.yml`, import.meta.url)),
@@ -167,10 +166,9 @@ describe.each(["ci", "security", "pr-body"])("%s.yml", (workflow) => {
 			.slice(1)
 			.map((body) => [body.slice(0, body.indexOf(":")), body]),
 	);
-	const mirror = "fromJSON(needs.twin.outputs.mirror || '{}')";
 
-	it("names each run after its action and merge commit, the key the gate matches", () => {
-		expect(yml).toMatch(/^run-name: .*'\{0\} · \{1\} \{2\}'.*github\.event\.action, github\.sha/m);
+	it("starts each run's name with its action and merge commit, the key the gate matches", () => {
+		expect(yml).toMatch(/^run-name: .*'\{0\} \{1\} · \{2\}', github\.event\.action, github\.sha/m);
 	});
 
 	it("asks the gate only on a stacked part's synchronize, with a read-only actions token", () => {
@@ -189,11 +187,13 @@ describe.each(["ci", "security", "pr-body"])("%s.yml", (workflow) => {
 			expect(body).toMatch(/^ {4}needs: \[(stack, )?twin\]\n/m);
 			const cond = body.match(/^ {4}if: \$\{\{ (.*) \}\}\n/m)?.[1] ?? "";
 			expect(cond.startsWith("!cancelled() && ")).toBe(true);
-			expect(cond).toContain(`!contains(fromJSON('["success","skipped"]'), ${mirror}['${id}'])`);
+			expect(
+				cond.endsWith(` && !contains(fromJSON(needs.twin.outputs.pass || '[]'), '${id}')`),
+			).toBe(true);
 			const first = body.slice(body.indexOf("    steps:\n")).split("\n").slice(1, 3);
 			expect(first).toEqual([
 				"      - name: Repeat the first run's result (#358)",
-				`        if: ${mirror}[github.job]`,
+				"        if: fromJSON(needs.twin.outputs.fail || '{}')[github.job]",
 			]);
 		},
 	);

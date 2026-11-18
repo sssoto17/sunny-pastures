@@ -628,38 +628,44 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   43939156505). A required job skipped by its `if:` counts as passing: #312 showed ci/lint, ci/test
   and ci/typecheck "Skipped · Required" with a green summary ("3 skipped, 10 successful"; admin, 16
   Nov).
-- **One run per head, and no cancelled twins (#358).** A push to a stacked part that the part below
-  moved with fires `pull_request` `synchronize` twice on the same head, about a second apart: once
-  for its own push and once because the part below changed. Both runs test the same merge commit,
-  since a stacked part's merge commit is built on the merge commit of the part below. On the #346
-  stack after `stack.sh update` pushed parts 3 to 5 at once: part 4 (#365, head `ccd1b0f`) ran `ci`,
-  `security`, `pr-body` and Labeler twice each, both `ci` runs checked out `21fd683`, and the review
-  log shows `ACTION: synchronize`; `ci` and Labeler listen to nothing else that fired. Part 5
+- **One result per head, and no cancelled twins (#358).** A push to a stacked part that the part
+  below moved with fires `pull_request` `synchronize` twice on the same head, about a second apart:
+  once for its own push and once because the part below changed. Both runs test the same merge
+  commit, since a stacked part's merge commit is built on the merge commit of the part below. On the
+  #346 stack after `stack.sh update` pushed parts 3 to 5 at once: part 4 (#365, head `ccd1b0f`) ran
+  `ci`, `security`, `pr-body` and Labeler twice each, both `ci` runs checked out `21fd683`, and the
+  review log shows `ACTION: synchronize`; `ci` and Labeler listen to nothing else that fired. Part 5
   (`c591ff6`) twice too, and there `ci / test` timed out on one twin and passed on the other. Part
   3, whose part below wasn't pushed, ran `ci` once. With `cancel-in-progress`, one twin was
   cancelled and GitHub read the cancelled checks as the latest results: #313 showed "10 cancelled, 3
   successful" and couldn't merge although the same checks had passed. So `ci`, `security` and
   `pr-body` still have no concurrency group; instead each has a `twin` job
   (`.github/scripts/twin-gate.mjs`, from `main` as `ci / stack`'s script is), which runs only on a
-  stacked part's `synchronize`. Every run is named `<title> · <action> <merge commit>`
-  (`run-name:`), so the later of two `synchronize` runs on one merge commit finds the first, waits
-  for it, and repeats each of its jobs' conclusions: a job whose first-run twin passed or skipped is
-  skipped (a skipped required job reads as passing, above), and any other result fails the job at
-  its first step. Its checks finish last, so the latest result on the head is the first run's, never
-  a second draw: a twin can't turn a failed head green, and a flaky job gets one draw. Any doubt
-  runs the jobs for real: another run on the head started after the first (an `edited` body is new
-  input), the first run still going after 20 minutes, a run name without the key, or a REST call
-  that fails. The cost: the twin's `twin` job holds a runner while the first run finishes (about 5
-  minutes for `ci` on a top part, against its 7 jobs), and every stacked part's `synchronize` adds
-  the `twin` job's minute to each of the three workflows. Runs for a superseded head still finish.
-  _Pattern:_ deduplication by an idempotency key (the merge commit) with the first result replayed.
-  _Alternatives:_ an event filter (both events are `synchronize`, with one head and one merge
-  commit, so no `types:` or `paths:` filter tells them apart); a concurrency group that queues
-  without cancelling (two runs still, and a third event in the group cancels the pending one, the
-  cancelled twin of #315); skipping the twin's jobs outright (a skipped required job reads as
-  passing, so a twin finishing after a failed first run would turn the head green); pushing the
-  parts one at a time from `stack.sh` (gives up the atomic push with leases, and the part above
-  still gets a run on its old head).
+  stacked part's `synchronize`. Every run is named `<action> <merge commit> · <title>` (`run-name:`,
+  the key first so a long title can't cut it off), so the later of two `synchronize` runs on one
+  merge commit finds the first, waits for it, and repeats each of its jobs' conclusions: a job whose
+  first-run twin passed or skipped is skipped (a skipped required job reads as passing, above), and
+  any other result fails the job at its first step. Its checks finish last, so the latest result on
+  the head is the first run's: a deduplicated twin can't turn a failed head green, and a flaky job
+  gets one draw. So a stacked head still gets two runs of each workflow, but one result: the twin
+  tests nothing. Any doubt runs the jobs for real, which brings the second draw back for that push
+  only: another run on the head started after the first (an `edited` body is new input), the first
+  run still going after 30 minutes (a `ci / test` that times out takes about 20), a run name without
+  the key, or a REST call that fails. A failed result is cleared by re-running the first run's
+  failed jobs and then all of the twin's jobs: "re-run failed jobs" on the twin alone keeps its
+  gate's answer and repeats the old failure. The cost: the twin's `twin` job holds a runner while
+  the first run finishes (about 5 minutes for `ci` on a top part, against its 7 jobs), and every
+  stacked part's `synchronize` adds the `twin` job's minute to each of the three workflows. Runs for
+  a superseded head still finish. Not covered: Labeler and `review` (not required checks; `review`'s
+  own concurrency group cancels its twin, #68's area) and `guard / code-owned` (deterministic: a
+  second draw reads the same diff). _Pattern:_ deduplication by an idempotency key (the merge
+  commit) with the first result replayed. _Alternatives:_ an event filter (both events are
+  `synchronize`, with one head and one merge commit, so no `types:` or `paths:` filter tells them
+  apart); a concurrency group that queues without cancelling (two runs still, and a third event in
+  the group cancels the pending one, the cancelled twin of #315); skipping the twin's jobs outright
+  (a skipped required job reads as passing, so a twin finishing after a failed first run would turn
+  the head green); pushing the parts one at a time from `stack.sh` (gives up the atomic push with
+  leases, and the part above still gets a run on its old head).
 - **The floor guard compares the whole stack below a part with the stack's base**, not each part
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the guard
   from the lower part's branch, so a part could swap the guard that judges the part above, and a

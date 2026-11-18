@@ -7,8 +7,8 @@
 # No third-party action: each scanner is a pinned download checked against a hash written here
 # (ADR-0002, areas 8 and 9). Its suppressions and config files are the floor guard's (#40).
 name: security
-# The twin gate's key (#358): the event's action and the merge commit it tests, after the title.
-run-name: ${{ format('{0} · {1} {2}', github.event.pull_request.title, github.event.action, github.sha) }}
+# The twin gate's key (#358): the event's action and the merge commit it tests, before the title.
+run-name: ${{ format('{0} {1} · {2}', github.event.action, github.sha, github.event.pull_request.title) }}
 
 on:
   pull_request:
@@ -24,18 +24,20 @@ permissions:
 jobs:
   # #358: a push to a stacked part fires synchronize twice on one head, and both runs test the
   # same merge commit. The later run waits for the first and repeats what its jobs concluded:
-  # each job below skips where the first run's passed or skipped, and fails at its first step
-  # otherwise. Every other run skips this job, and the jobs then run as before (`!cancelled()`).
+  # each job below skips where the first run's passed or skipped (`pass`), and fails at its first
+  # step otherwise (`fail`). Every other run skips this job, and the jobs then run as before
+  # (`!cancelled()`). A job's id must be its check name after ` / `: the gate names it so.
   twin:
     name: security / twin
     if: github.event.action == 'synchronize' && github.event.pull_request.stack
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     permissions:
       contents: read
       actions: read # this workflow's runs on the head, and the first run's jobs
     outputs:
-      mirror: ${{ steps.twin.outputs.mirror }}
+      pass: ${{ steps.twin.outputs.pass }}
+      fail: ${{ steps.twin.outputs.fail }}
       source: ${{ steps.twin.outputs.source }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,7 +52,7 @@ jobs:
   secrets:
     name: guard / secrets
     needs: [twin]
-    if: ${{ !cancelled() && !contains(fromJSON('["success","skipped"]'), fromJSON(needs.twin.outputs.mirror || '{}')['secrets']) }}
+    if: ${{ !cancelled() && !contains(fromJSON(needs.twin.outputs.pass || '[]'), 'secrets') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -62,12 +64,12 @@ jobs:
       GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
     steps:
       - name: Repeat the first run's result (#358)
-        if: fromJSON(needs.twin.outputs.mirror || '{}')[github.job]
+        if: fromJSON(needs.twin.outputs.fail || '{}')[github.job]
         env:
-          RESULT: ${{ fromJSON(needs.twin.outputs.mirror || '{}')[github.job] }}
+          RESULT: ${{ fromJSON(needs.twin.outputs.fail || '{}')[github.job] }}
           SOURCE: ${{ needs.twin.outputs.source }}
         run: |
-          echo "::error title=twin::$RESULT in $SOURCE, which tested this merge commit; this twin repeats it (#358)"
+          echo "::error title=twin::$RESULT in $SOURCE, which tested this merge commit; this twin repeats it (#358). Re-run that run's failed jobs, then re-run all jobs here: re-running this job alone repeats the old result."
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,19 +96,19 @@ jobs:
   audit:
     name: ci / audit
     needs: [twin]
-    if: ${{ !cancelled() && !contains(fromJSON('["success","skipped"]'), fromJSON(needs.twin.outputs.mirror || '{}')['audit']) }}
+    if: ${{ !cancelled() && !contains(fromJSON(needs.twin.outputs.pass || '[]'), 'audit') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
     steps:
       - name: Repeat the first run's result (#358)
-        if: fromJSON(needs.twin.outputs.mirror || '{}')[github.job]
+        if: fromJSON(needs.twin.outputs.fail || '{}')[github.job]
         env:
-          RESULT: ${{ fromJSON(needs.twin.outputs.mirror || '{}')[github.job] }}
+          RESULT: ${{ fromJSON(needs.twin.outputs.fail || '{}')[github.job] }}
           SOURCE: ${{ needs.twin.outputs.source }}
         run: |
-          echo "::error title=twin::$RESULT in $SOURCE, which tested this merge commit; this twin repeats it (#358)"
+          echo "::error title=twin::$RESULT in $SOURCE, which tested this merge commit; this twin repeats it (#358). Re-run that run's failed jobs, then re-run all jobs here: re-running this job alone repeats the old result."
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -120,7 +122,7 @@ jobs:
   code-scan:
     name: guard / code-scan
     needs: [twin]
-    if: ${{ !cancelled() && !contains(fromJSON('["success","skipped"]'), fromJSON(needs.twin.outputs.mirror || '{}')['code-scan']) }}
+    if: ${{ !cancelled() && !contains(fromJSON(needs.twin.outputs.pass || '[]'), 'code-scan') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -128,12 +130,12 @@ jobs:
       SEMGREP_ENABLE_VERSION_CHECK: '0'
     steps:
       - name: Repeat the first run's result (#358)
-        if: fromJSON(needs.twin.outputs.mirror || '{}')[github.job]
+        if: fromJSON(needs.twin.outputs.fail || '{}')[github.job]
         env:
-          RESULT: ${{ fromJSON(needs.twin.outputs.mirror || '{}')[github.job] }}
+          RESULT: ${{ fromJSON(needs.twin.outputs.fail || '{}')[github.job] }}
           SOURCE: ${{ needs.twin.outputs.source }}
         run: |
-          echo "::error title=twin::$RESULT in $SOURCE, which tested this merge commit; this twin repeats it (#358)"
+          echo "::error title=twin::$RESULT in $SOURCE, which tested this merge commit; this twin repeats it (#358). Re-run that run's failed jobs, then re-run all jobs here: re-running this job alone repeats the old result."
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
