@@ -56,7 +56,12 @@ requests; `/triage` reads this flag.)_
 When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr`
 equivalents:
 
-- **Read a PR**: `gh pr view <number> --comments` and `gh pr diff <number>` for the diff.
+- **Read a PR**:
+  `gh api repos/sssoto17/sunny-pastures/pulls/<number> --jq '{number, title, body, state, head: .head.ref}'`,
+  its comments with `gh api repos/sssoto17/sunny-pastures/issues/<number>/comments --jq '.[].body'`,
+  and the diff with
+  `gh api repos/sssoto17/sunny-pastures/pulls/<number> -H 'Accept: application/vnd.github.diff'`
+  (REST, so it works in a cloud lane too).
 - **List external PRs for triage**:
   `gh api --paginate 'repos/{owner}/{repo}/pulls?state=open' --jq '.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, title, author: .user.login, author_association, labels: [.labels[].name]}'`.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`,
@@ -92,8 +97,9 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
   reports `issue_dependencies_summary.blocked_by` (open blockers only, the live gate). Where
   dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the
   child body. A ticket is unblocked when every blocker is closed.
-- **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the
-  map's sub-issues / task list), drop any with an open blocker
+- **Frontier query**: list the map's open children
+  (`gh api repos/sssoto17/sunny-pastures/issues/<map>/sub_issues --jq '.[] | select(.state == "open")'`,
+  or the issues its task list names), drop any with an open blocker
   (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an
   assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me`, the session's first write.
@@ -178,8 +184,9 @@ Every issue carries four values: GitHub's native **issue type**, and the Project
 - **No exceptions**: a workstream parent carries all four too (**Grouping**).
 - **`scripts/missing-fields.sh`** lists the open issues that break this rule: a field missing (and
   whether `triage` is on), or `triage` on an issue whose fields are set. It exits 0 when there are
-  none, 1 when it lists some, 2 on bad arguments and 3 when GitHub can't be read, and is read-only
-  (`--help`; tests: `bash scripts/missing-fields.test.sh`).
+  none, 1 when it lists some, 2 on bad arguments, 3 when GitHub can't be read, and 4 when GitHub
+  refuses the Project (a cloud lane): then it lists only the issues missing a type and names the
+  checks it skipped. It is read-only (`--help`; tests: `bash scripts/missing-fields.test.sh`).
 
 ## Workstreams
 

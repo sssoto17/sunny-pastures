@@ -507,8 +507,7 @@ cat >"$work/board.json.in" <<'JSON'
   {"id": 3, "content_type": "DraftIssue", "content": {"title": "A draft"}, "fields": [
     {"id": 1, "name": "Title", "value": {"raw": "A draft", "html": "A draft"}},
     {"id": 2, "name": "Status", "value": {"id": "97a20eba", "name": {"raw": "Backlog", "html": "Backlog"}}},
-    {"id": 3, "name": "Week", "value": {"id": "7f9c9b7a", "title": {"raw": "Wk 2 · 9–15 Nov", "html": "Wk 2 · 9–15 Nov"},
-      "start_date": "2026-11-09", "duration": 7}}]}
+    {"id": 3, "name": "Week", "value": {"id": "7f9c9b7a", "title": {"raw": "Wk 2 · 9–15 Nov", "html": "Wk 2 · 9–15 Nov"}}}]}
 ]
 JSON
 cat >"$work/prs.json.in" <<'JSON'
@@ -524,6 +523,8 @@ add_worktree 9-merged chore/9-merged
 add_worktree 10-open chore/10-open
 case_ "filters over real shapes" --date 2026-11-09
 expect_code 0
+# No item carries its own dates, so this week is found only by filling them from the field.
+assert "expected this week from the field's iterations" contains "$(section today)" "week${T}$WK2"$'\n'
 expect_section ready "#81${T}Manual${T}P0${T}M${T}$WK2${T}#72${T}-${T}Sim package"
 expect_section week "#81${T}Ready${T}Manual${T}P0${T}M${T}Sim package"
 expect_section worktrees ".claude/worktrees/10-open${T}chore/10-open${T}open${T}#116${T}-
