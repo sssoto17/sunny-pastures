@@ -124,8 +124,10 @@ tip=$(git -C "$main" rev-parse "refs/heads/$branch")
 # Every commit on the branch must be in what the PR merged: its head is the branch's tip, or
 # comes after it when "Update branch" on GitHub (ADR-0002) added a merge commit. That commit
 # isn't local, so fetch it from refs/pull/N/head, which GitHub keeps after the merge.
-prs=$(gh pr list --repo "$REPO" --base main --head "$branch" --state merged \
-  --json number,headRefOid,url --jq '.[] | [.number, .headRefOid, .url] | @tsv') ||
+# REST "List pull requests" (#346): closed PRs from this branch into main, the merged ones kept
+# (merged_at set). Same head= query as scripts/stack.sh.
+prs=$(gh api --paginate "repos/$REPO/pulls?state=closed&base=main&per_page=100&head=${REPO%%/*}:$branch" \
+  --jq '.[] | select(.merged_at) | [.number, .head.sha, .html_url] | @tsv') ||
   die 1 "could not read $branch's PRs from GitHub; nothing changed"
 pr="" merged=()
 while IFS=$'\t' read -r number oid url; do
