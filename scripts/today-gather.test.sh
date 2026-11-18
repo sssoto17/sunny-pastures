@@ -18,15 +18,17 @@ mkdir -p "$work/bin"
 real_git=$(command -v git)
 
 # --- fake gh ----------------------------------------------------------------------------------
-# Allowed (reads): `project item-list`, `pr list`, and `api` as a GET. Anything else is recorded
+# Allowed (reads): `api` as a GET, over REST (#346). Anything else is recorded
 # in $work/writes and fails with exit 97: the writes this guards against are `issue
 # create|edit|comment|close|...`, `project item-edit|item-add|...`, `pr create|merge|edit|...`,
 # `label ...` and `api` with -X/--method other than GET, or with fields (-f/-F/--input) and no
 # -X GET, which gh sends as a POST. Every call is logged to $work/calls, then a "--" line.
-# Reads serve fixture files: $work/board (project item-list --jq rows), $work/prs (pr list --jq
-# rows), $work/parents ("<n><tab><parent url or ->" lines, for api .../issues/<n>) and
-# $work/orphan-rows (rows for orphan-issues.sh's own api call). $work/fail-<name> makes that read
-# print the file to stderr and exit 1, as gh does on an HTTP error.
+# Reads serve fixture files: $work/fields.json (the Project's fields, through the call's --jq),
+# $work/board (the items' --jq rows), $work/prs (the pulls' --jq rows), $work/parents
+# ("<n><tab><parent url or ->" lines, for api .../issues/<n>) and $work/orphan-rows (rows for
+# orphan-issues.sh's own api call). $work/fail-<name> makes that read print the file to stderr
+# and exit 1, as gh does on an HTTP error; $work/refuse-projects makes every Project read answer
+# as the cloud proxy does (HTTP 403).
 cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
@@ -46,10 +48,6 @@ serve() { # name [args...] -> the fixture, or the call's --jq filter run over <n
   cat "$dir/$name" 2>/dev/null
   exit 0
 }
-case "$1 ${2-}" in
-  "project item-list") serve board "$@" ;;
-  "pr list") serve prs "$@" ;;
-esac
 [[ $1 == api ]] || write "$@"
 method="" fields="" path=""
 args=("${@:2}")
@@ -69,7 +67,14 @@ if [[ -n $method ]]; then
 elif [[ -n $fields ]]; then
   write "$@"
 fi
+if [[ -f $dir/refuse-projects && $path == users/*/projectsV2/* ]]; then
+  echo 'gh: This GitHub API path is not available: sessions are bound to their configured repositories. Use repository-scoped endpoints (repos/{owner}/{repo}/...). (HTTP 403)' >&2
+  exit 1
+fi
 case $path in
+  users/sssoto17/projectsV2/3/fields\?*) serve fields "$@" ;;
+  users/sssoto17/projectsV2/3/items\?*) serve board "$@" ;;
+  repos/sssoto17/sunny-pastures/pulls\?*) serve prs "$@" ;;
   repos/*/issues) serve orphan-rows ;;
   repos/*/issues/*)
     [[ -f $dir/fail-parents ]] && serve parents
@@ -123,10 +128,17 @@ item() { # number status mode priority size week-title week-start title (a week 
   [[ $7 == - ]] && dur=-
   printf '%s\tIssue\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$dur" "$8"
 }
-board() { # rows... -> the item-list answer: a "total" line, then the rows
-  local rows
-  rows=$(printf '%s' "$*" | grep -c . || true)
-  { printf 'total\t%s\n' "$rows"; printf '%s' "$*"; } >"$work/board"
+board() { # rows... -> the items' answer, through the script's filter
+  printf '%s' "$*" >"$work/board"
+}
+# The Project's fields as REST lists them: ids, and the Week iterations.
+fields_json() {
+  jq -n --arg w2 "$WK2" --arg w3 "$WK3" '[{id: 1, name: "Title", data_type: "title"},
+    {id: 2, name: "Status", data_type: "single_select", options: []},
+    {id: 3, name: "Week", data_type: "iteration", configuration: {iterations: [
+      {id: "7f9c9b7a", title: {raw: $w2, html: $w2}, start_date: "2026-11-09", duration: 7},
+      {id: "b40f9349", title: {raw: $w3, html: $w3}, start_date: "2026-11-16", duration: 7}]}}]' \
+    >"$work/fields.json"
 }
 
 # A throwaway main folder with a commit, under $work/repo. Built with the real git: only the
@@ -146,11 +158,12 @@ add_worktree() { # name [branch] -> a registered worktree; no branch means a det
 }
 
 reset() { # -> an empty board, no PRs, no orphans, a fresh repo
-  rm -f "$work"/calls "$work"/writes "$work"/board "$work"/prs "$work"/parents "$work"/orphan-rows "$work"/fail-* "$work"/*.json
+  rm -f "$work"/calls "$work"/writes "$work"/board "$work"/prs "$work"/parents "$work"/orphan-rows "$work"/fail-* "$work"/refuse-* "$work"/*.json
   : >"$work/prs"
   : >"$work/parents"
   : >"$work/orphan-rows"
   board ""
+  fields_json
   new_repo
 }
 
@@ -239,7 +252,8 @@ expect_call() { # substring of one call, its arguments joined by spaces
   if awk '$0 == "--" { print line; line = ""; next } { line = line (line == "" ? "" : " ") $0 }' <<<"$calls" |
     grep -qF -- "$1"; then ok; else bad "expected a gh call containing: $1"; fi
 }
-expect_call "project item-list 3 --owner sssoto17 --format json --limit 1000 --jq"
+expect_call "api users/sssoto17/projectsV2/3/fields?per_page=100 --jq"
+expect_call "api --paginate users/sssoto17/projectsV2/3/items?per_page=100&fields=1,2,3 --jq"
 
 # No --date: today in Copenhagen. A `date` stub answers a bare `date +%F` by TZ (late on 8 Nov
 # in UTC is already 9 Nov in Copenhagen) and passes every other call to the real date.
@@ -384,7 +398,7 @@ expect_section worktrees ".claude/worktrees/10-open${T}chore/10-open${T}open${T}
 .claude/worktrees/14-reused${T}chore/14-reused${T}open${T}#140${T}-
 .claude/worktrees/9-merged${T}chore/9-merged${T}merged${T}#114${T}locked"
 expect_section strays ".claude/worktrees/4-local-supabase"
-expect_call "pr list --repo sssoto17/sunny-pastures --base main --state all --limit 1000 --json number,state,headRefName --jq"
+expect_call "api --paginate repos/sssoto17/sunny-pastures/pulls?state=all&base=main&per_page=100 --jq"
 
 # From inside a worktree: the main folder is still the root, the output goes to this checkout.
 cwd="$work/repo/.claude/worktrees/10-open"
@@ -407,14 +421,6 @@ case_ "branch name as data" --date 2026-11-09
 expect_code 0
 assert "expected no command run from a branch name" test ! -e "$work/pwned"
 
-# As many PRs as --limit: some may be missing, so stop rather than call a merged branch "none".
-reset
-add_worktree 9-merged chore/9-merged
-for ((n = 1; n <= 1000; n++)); do printf 'b%d\tCLOSED\t%d\n' "$n" "$n"; done >"$work/prs"
-case_ "prs truncated" --date 2026-11-09
-expect_code 3
-expect_err "1000 pull requests read, the --limit"
-
 reset
 add_worktree 9-merged chore/9-merged
 echo "HTTP 502" >"$work/fail-prs"
@@ -427,25 +433,26 @@ reset
 case_ "no worktrees" --date 2026-11-09
 expect_section worktrees ""
 expect_section strays ""
-assert "expected no pr list call" test "$(grep -c '^pr$' <<<"$calls")" -eq 0
+assert "expected no pulls call" test "$(grep -c '/pulls?' <<<"$calls")" -eq 0
 
-# --- the board can't be read, or not all of it ------------------------------------------------
+# --- the board can't be read ---------------------------------------------------------------------
+# Every page is read (--paginate), so there is no item limit to hit.
 reset
-echo "HTTP 401: Bad credentials" >"$work/fail-board"
+echo "gh: Bad credentials (HTTP 401)" >"$work/fail-board"
 case_ "board unreadable" --date 2026-11-09
 expect_code 3
 expect_err "could not read Project 3"
 assert "expected no stdout when the board fails" test -z "$out"
 
-# More items than --limit returned: stop rather than gather from part of the board.
 reset
-{ printf 'total\t1200\n'; item 81 Backlog Manual P0 M "$WK2" 2026-11-09 'Sim package'; } >"$work/board"
-case_ "board truncated" --date 2026-11-09
+echo "gh: Bad credentials (HTTP 401)" >"$work/fail-fields"
+case_ "fields unreadable" --date 2026-11-09
 expect_code 3
-expect_err "the board has 1200 items but 1 were read"
+expect_err "could not read Project 3"
+assert "expected no stdout when the fields fail" test -z "$out"
 
-for broken in "total${T}x" "$(printf 'total\t1\nabc\tIssue\tReady\tManual\tP0\tM\t-\t-\t-\tT')" \
-  "$(printf 'total\t1\n81\tIssue\tReady\tManual\tP0\tM\t%s\tsoon\t7\tT' "$WK2")"; do
+for broken in "$(printf 'abc\tIssue\tReady\tManual\tP0\tM\t-\t-\t-\tT')" \
+  "$(printf '81\tIssue\tReady\tManual\tP0\tM\t%s\tsoon\t7\tT' "$WK2")"; do
   reset
   printf '%s\n' "$broken" >"$work/board"
   case_ "board shape: $broken" --date 2026-11-09
@@ -453,34 +460,73 @@ for broken in "total${T}x" "$(printf 'total\t1\nabc\tIssue\tReady\tManual\tP0\tM
   expect_err "unexpected"
 done
 
+# --- the Project refused (the cloud proxy, #346) -----------------------------------------------
+# Every section is still printed in its format, the board's empty; exit 4 names what was skipped.
+reset
+touch "$work/refuse-projects"
+board "$(item 81 Ready Manual P0 M "$WK2" 2026-11-09 'Sim package')"
+printf '7\tissue\tnone\t0\tchore\tLonely\n' >"$work/orphan-rows"
+add_worktree 9-merged chore/9-merged
+printf 'chore/9-merged\tMERGED\t114\n' >"$work/prs"
+case_ "board refused" --date 2026-11-09
+expect_code 4
+repo=$(cd "$work/repo" && pwd -P)
+expect_section today "date${T}2026-11-09
+week${T}-
+root${T}$repo
+out${T}$repo/.scratch
+handoff${T}$repo/.remember/remember.md${T}missing"
+expect_section ready ""
+expect_section week ""
+expect_section orphans "#7${T}Lonely"
+expect_section worktrees ".claude/worktrees/9-merged${T}chore/9-merged${T}merged${T}#114${T}-"
+expect_err "(HTTP 403)"
+expect_err "today-gather: skipped the board: GitHub refused Project 3 here"
+expect_err "Run it again from a local session for the board: scripts/today-gather.sh --date 2026-11-09"
+assert "expected no 'no Week iteration' warning when the board was skipped" test "${err/no Week iteration/}" == "$err"
+
 # --- the script's own --jq filters, over answers in GitHub's shape ------------------------------
-# Trimmed from `gh project item-list 3 --owner sssoto17 --format json` and `gh pr list --json`
-# on 9 Nov: `week` is an object; a draft has no number; an item may have no week or no mode.
+# REST shapes as GitHub's REST description shows them ("List items for a user owned project",
+# "List pull requests"): a single-select value's name is {raw, html}; an iteration value has a
+# title and may lack its dates (taken from the field's iterations); a draft has no number; an
+# item may have no week or no mode; a closed PR with merged_at is merged.
 cat >"$work/board.json.in" <<'JSON'
-{"items": [
-  {"content": {"number": 81, "type": "Issue", "title": "Sim package"}, "status": "Ready",
-   "mode": "Manual", "priority": "P0", "size": "M", "title": "Sim package",
-   "week": {"duration": 7, "iterationId": "7f9c9b7a", "startDate": "2026-11-09", "title": "Wk 2 · 9–15 Nov"}},
-  {"content": {"number": 73, "type": "Issue", "title": "Agent workflow"}, "status": "Backlog",
-   "priority": "P1", "title": "Agent workflow"},
-  {"content": {"type": "DraftIssue", "title": "A draft"}, "status": "Backlog", "title": "A draft",
-   "week": {"duration": 7, "iterationId": "7f9c9b7a", "startDate": "2026-11-09", "title": "Wk 2 · 9–15 Nov"}}
-], "totalCount": 3}
+[
+  {"id": 1, "content_type": "Issue", "content": {"number": 81, "title": "Sim package"}, "fields": [
+    {"id": 1, "name": "Title", "value": {"raw": "Sim package", "html": "Sim package", "number": 81}},
+    {"id": 2, "name": "Status", "value": {"id": "eb23e874", "name": {"raw": "Ready", "html": "Ready"}}},
+    {"id": 4, "name": "Mode", "value": {"id": "ca9bd7b8", "name": {"raw": "Manual", "html": "Manual"}}},
+    {"id": 5, "name": "Priority", "value": {"id": "598fd74b", "name": {"raw": "P0", "html": "P0"}}},
+    {"id": 6, "name": "Size", "value": {"id": "e0e2efb6", "name": {"raw": "M", "html": "M"}}},
+    {"id": 3, "name": "Week", "value": {"id": "7f9c9b7a", "title": {"raw": "Wk 2 · 9–15 Nov", "html": "Wk 2 · 9–15 Nov"}}}]},
+  {"id": 2, "content_type": "Issue", "content": {"number": 73, "title": "Agent workflow"}, "fields": [
+    {"id": 2, "name": "Status", "value": {"id": "97a20eba", "name": {"raw": "Backlog", "html": "Backlog"}}},
+    {"id": 5, "name": "Priority", "value": {"id": "ad39d061", "name": {"raw": "P1", "html": "P1"}}},
+    {"id": 3, "name": "Week", "value": null}]},
+  {"id": 3, "content_type": "DraftIssue", "content": {"title": "A draft"}, "fields": [
+    {"id": 1, "name": "Title", "value": {"raw": "A draft", "html": "A draft"}},
+    {"id": 2, "name": "Status", "value": {"id": "97a20eba", "name": {"raw": "Backlog", "html": "Backlog"}}},
+    {"id": 3, "name": "Week", "value": {"id": "7f9c9b7a", "title": {"raw": "Wk 2 · 9–15 Nov", "html": "Wk 2 · 9–15 Nov"},
+      "start_date": "2026-11-09", "duration": 7}}]}
+]
 JSON
 cat >"$work/prs.json.in" <<'JSON'
-[{"headRefName": "chore/9-merged", "number": 114, "state": "MERGED"},
- {"headRefName": "chore/10-open", "number": 116, "state": "OPEN"}]
+[{"number": 114, "state": "closed", "merged_at": "2026-11-10T10:00:00Z", "head": {"ref": "chore/9-merged"}},
+ {"number": 113, "state": "closed", "merged_at": null, "head": {"ref": "chore/9-merged"}},
+ {"number": 116, "state": "open", "merged_at": null, "head": {"ref": "chore/10-open"}}]
 JSON
 reset
 cp "$work/board.json.in" "$work/board.json"
 cp "$work/prs.json.in" "$work/prs.json"
 printf '81\t%s\n' "$P72" >"$work/parents"
 add_worktree 9-merged chore/9-merged
+add_worktree 10-open chore/10-open
 case_ "filters over real shapes" --date 2026-11-09
 expect_code 0
 expect_section ready "#81${T}Manual${T}P0${T}M${T}$WK2${T}#72${T}-${T}Sim package"
 expect_section week "#81${T}Ready${T}Manual${T}P0${T}M${T}Sim package"
-expect_section worktrees ".claude/worktrees/9-merged${T}chore/9-merged${T}merged${T}#114${T}-"
+expect_section worktrees ".claude/worktrees/10-open${T}chore/10-open${T}open${T}#116${T}-
+.claude/worktrees/9-merged${T}chore/9-merged${T}merged${T}#114${T}-"
 
 # --- the guards catch writes ------------------------------------------------------------------
 # If the fakes let a write through, every "read-only" assertion above would pass for nothing.
@@ -508,6 +554,8 @@ guard_catches gh api --method PATCH repos/sssoto17/sunny-pastures/issues/81
 guard_catches gh api -XDELETE repos/sssoto17/sunny-pastures/issues/81/labels/x
 guard_catches gh api repos/sssoto17/sunny-pastures/issues -f title=x
 guard_catches gh api graphql -f query=x
+guard_catches gh project item-list 3 --owner sssoto17
+guard_catches gh pr list --repo sssoto17/sunny-pastures
 guard_catches git commit --allow-empty -m x
 guard_catches git -C . branch -D main
 guard_catches git worktree remove x

@@ -1,6 +1,9 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations. In a
+cloud lane, `gh issue`, `gh pr` and `gh project` fail (they use GraphQL, which the cloud proxy
+refuses): use `gh api` over REST there. `docs/agents/github-rest.md` lists the equivalents, and the
+scripts below already use them.
 
 ## Conventions
 
@@ -123,8 +126,12 @@ one repo milestone (`M1 Persistence spike` … `M9 Hand-in`; list them with
   - **`--type`** sets GitHub's native issue type (Chore, Bug, Feature, Design) on the issue itself.
     Once the type, Priority, Size and Week are all set, the script removes `triage` and its
     `Triage:` line says so (see **Issue fields**).
+  - **In a cloud lane** the Project can't be reached (the proxy refuses it with a 403): the script
+    sets `--type`, skips the Project, prints the command that finishes it from a local session, and
+    exits 4. `scripts/new-issue.sh` files the issue all the same and exits 4 too.
 
-The ids, for reading raw `gh project` output (the script doesn't use this table):
+The GraphQL node ids, for reading raw `gh project` output (the scripts don't use this table; the
+REST Projects API numbers its fields instead: `gh api users/sssoto17/projectsV2/3/fields`):
 
 <!-- prettier-ignore -->
 | Field  | Field id                         | Options (name = option id)                                                                 |
@@ -134,7 +141,7 @@ The ids, for reading raw `gh project` output (the script doesn't use this table)
 | Mode   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g0` | Manual=`ca9bd7b8` Factory=`f92520e5`                                                       |
 | Size   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g4` | S=`7a7f9f73` M=`e0e2efb6` L=`c7dede81`                                                     |
 | Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
-| Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api graphql -f query='{node(id:"PVTIF_lAHOCI1msM4BqXYMzhou1aQ"){... on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}'` |
+| Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api users/sssoto17/projectsV2/3/fields --jq '.[] \| select(.name == "Week") \| .configuration.iterations[] \| [.id, .title.raw, .start_date] \| @tsv'` |
 
 When a skill publishes tickets, make each one a sub-issue of its workstream parent (see
 **Grouping**), give it a milestone, add it to the Project and set the native type, Track, Mode,

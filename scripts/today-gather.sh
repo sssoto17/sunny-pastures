@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Gather what /today needs (#78), read-only: no gh write, no git write, no file written. Prints
 # plain sections that the /today skill (.claude/skills/today/SKILL.md) reads; /today stage 2
-# (#109) is to reuse it. Tests: scripts/today-gather.test.sh.
+# (#109) is to reuse it. REST only (`gh api`; #346, docs/agents/github-rest.md): the board through
+# the REST Projects API, PRs and parents through repos/<owner>/<repo>.
+# Tests: scripts/today-gather.test.sh.
 # Needs bash 4.4+, git 2.36+, GNU date and an authenticated gh with the `project` scope.
 set -euo pipefail
 
@@ -12,8 +14,11 @@ fi
 
 OWNER=sssoto17
 REPO=sunny-pastures
-PROJECT=3
 TZONE=Europe/Copenhagen
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# PROJECT_API, PROJECT_NUMBER, PROJECT_JQ_DEFS, PROJECT_SKIPPED, project_refused.
+# shellcheck source=scripts/lib/project-rest.sh
+. "$script_dir/lib/project-rest.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -38,8 +43,13 @@ in this order:
              (open|merged|closed|none|detached; an open PR wins), PR (#N), locked
   strays     folders under .claude/worktrees/ that git doesn't list as worktrees
 
+Where GitHub refuses the Project (HTTP 403, as the cloud's GitHub proxy does), every section is
+still printed, but week is - and ready and week are empty because the board couldn't be read;
+stderr names the skipped step and it exits 4. Run it again from a local session for those.
+
 Exit codes: 0 done; 2 bad arguments (nothing read); 3 GitHub or git couldn't be read, or
-answered in an unexpected shape (nothing printed on stdout).
+answered in an unexpected shape (nothing printed on stdout); 4 the board was skipped: GitHub
+refused the Project, so today's week, ready and week are empty (the other sections are whole).
 EOF
 }
 
@@ -81,7 +91,6 @@ root=$(cd "${common%/.git}" && pwd -P)
 checkout=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
 out=$checkout/.scratch
 handoff=$root/.remember/remember.md
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Sections are collected first and printed at the end, so a failed read prints no partial list.
 report=""
@@ -90,27 +99,52 @@ add_section() { # name lines -> "== name", then the lines; an empty section is j
 }
 
 # --- the board ----------------------------------------------------------------------------------
-# One row per item, tab-separated: number, type (Issue/PullRequest/DraftIssue), status, mode,
-# priority, size, week title, week start, week duration, title; "-" for a missing field. `week`
-# is an object in item-list's JSON. A first "total" line gives the item count, so a --limit
-# below it shows up as an error instead of a short board.
-BOARD_FILTER='"total\t\(.totalCount)", (.items[] | [(.content.number // "-"), (.content.type // "-"),
-  (.status // "-"), (.mode // "-"), (.priority // "-"), (.size // "-"), (.week.title // "-"),
-  (.week.startDate // "-"), (.week.duration // "-"), (.title // "-")] | @tsv)'
-LIMIT=1000
-rows=$(gh project item-list "$PROJECT" --owner "$OWNER" --format json --limit "$LIMIT" --jq "$BOARD_FILTER") ||
-  die 3 "could not read Project $PROJECT from GitHub (see gh's error above)"
+# Read through the REST Projects API: the fields first (their ids, and each Week iteration's start
+# and length), then every item with those fields, paginated. One row per item, tab-separated:
+# number, type (Issue/PullRequest/DraftIssue), status, mode, priority, size, week title, week
+# start, week duration, title; "-" for a missing field. An item's iteration value carries its
+# title; its start and length come from the field's iterations when the value lacks them.
+FIELDS_FILTER="$PROJECT_JQ_DEFS"'
+  (["ids", ([.[].id] | map(tostring) | join(","))] | @tsv),
+  (.[] | select(.name == "Week") | (.configuration.iterations // []) + (.configuration.completed_iterations // [])
+    | .[] | ["iteration", (.title | txt), .start_date, .duration] | @tsv)'
+BOARD_FILTER="$PROJECT_JQ_DEFS"'
+  .[] | ([.fields[]? | select(.name == "Week") | .value] | first) as $w
+  | [(.content.number // "-"), (.content_type // "-"),
+    (fv("Status") // "-"), (fv("Mode") // "-"), (fv("Priority") // "-"), (fv("Size") // "-"),
+    (if $w then ($w.title | txt) else "-" end), ($w.start_date // "-"), ($w.duration // "-"),
+    (fv("Title") // .content.title // "-")] | @tsv'
+board_ok=1
+err_file=$(mktemp "${TMPDIR:-/tmp}/today-gather.XXXXXX")
+trap 'rm -f "$err_file"' EXIT
+declare -A iter_start=() iter_days=()
+rows=""
+if ! fields=$(gh api "$PROJECT_API/fields?per_page=100" --jq "$FIELDS_FILTER" 2>"$err_file"); then
+  cat "$err_file" >&2
+  project_refused "$err_file" ||
+    die 3 "could not read Project $PROJECT_NUMBER from GitHub (see gh's error above)"
+  board_ok=0
+fi
+if ((board_ok)); then
+  ids=""
+  while IFS=$'\t' read -r kind a b c; do
+    case $kind in
+      ids) ids=$a ;;
+      iteration) iter_start[$a]=$b iter_days[$a]=$c ;;
+    esac
+  done <<<"$fields"
+  [[ $ids =~ ^[0-9]+(,[0-9]+)*$ ]] || die 3 "unexpected fields of Project $PROJECT_NUMBER from GitHub, has the API changed? $ids"
+  rows=$(gh api --paginate "$PROJECT_API/items?per_page=100&fields=$ids" --jq "$BOARD_FILTER") ||
+    die 3 "could not read Project $PROJECT_NUMBER from GitHub (see gh's error above)"
+fi
 
 # Parsed once into parallel arrays (item_*), one entry per board item, after checking the shape.
 item_number=() item_type=() item_status=() item_mode=() item_priority=() item_size=()
 item_week=() item_start=() item_days=() item_title=()
-total=""
 while IFS=$'\t' read -r number type status mode priority size wtitle wstart wdays title; do
   [[ -n $number ]] || continue
-  if [[ $number == total ]]; then
-    [[ -z $total && $type =~ ^[0-9]+$ ]] || die 3 "unexpected total line from GitHub, has the API changed? $type"
-    total=$type
-    continue
+  if [[ $wtitle != - && $wstart == - && -n ${iter_start[$wtitle]-} ]]; then
+    wstart=${iter_start[$wtitle]} wdays=${iter_days[$wtitle]}
   fi
   [[ $number =~ ^[0-9]+$ || ($number == - && $type != Issue) ]] &&
     [[ ($wstart == - && $wdays == -) || ($wstart =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && $wdays =~ ^[0-9]+$) ]] ||
@@ -119,9 +153,6 @@ while IFS=$'\t' read -r number type status mode priority size wtitle wstart wday
   item_priority+=("$priority") item_size+=("$size") item_week+=("$wtitle") item_start+=("$wstart")
   item_days+=("$wdays") item_title+=("$title")
 done <<<"$rows"
-[[ -n $total ]] || die 3 "unexpected answer from GitHub: no item count"
-((${#item_number[@]} >= total)) ||
-  die 3 "the board has $total items but ${#item_number[@]} were read; raise LIMIT in $0"
 
 # This week: the iteration whose dates contain the date (start <= date < start + days).
 week="-"
@@ -131,7 +162,7 @@ for i in "${!item_number[@]}"; do
   week=${item_week[i]}
   break
 done
-[[ $week != - ]] || echo "today-gather: no Week iteration on the board contains $today" >&2
+[[ $week != - ]] || ((!board_ok)) || echo "today-gather: no Week iteration on the board contains $today" >&2
 
 add_section today "$(
   printf 'date\t%s\nweek\t%s\nroot\t%s\nout\t%s\n' "$today" "$week" "$root" "$out"
@@ -235,20 +266,18 @@ replaces() { # state number head -> does this PR replace the one kept so far for
 }
 declare -A pr_state=() pr_number=()
 if ((${#wt_path[@]})); then
-  prs=$(gh pr list --repo "$OWNER/$REPO" --base main --state all --limit "$LIMIT" \
-    --json number,state,headRefName --jq '.[] | [.headRefName, .state, .number] | @tsv') ||
+  # REST "List pull requests", every page: a closed PR with merged_at set is MERGED.
+  prs=$(gh api --paginate "repos/$OWNER/$REPO/pulls?state=all&base=main&per_page=100" \
+    --jq '.[] | [.head.ref, (if .merged_at then "MERGED" elif .state == "open" then "OPEN" else "CLOSED" end),
+      .number] | @tsv') ||
     die 3 "could not read the pull requests of $OWNER/$REPO from GitHub (see gh's error above)"
-  pr_count=0
   while IFS=$'\t' read -r head state number; do
     [[ -n $head ]] || continue
-    pr_count=$((pr_count + 1))
     [[ $number =~ ^[0-9]+$ ]] || die 3 "unexpected pull request row from GitHub, has the API changed? $head $state $number"
     if replaces "$state" "$number" "$head"; then
       pr_state[$head]=$state pr_number[$head]=$number
     fi
   done <<<"$prs"
-  ((pr_count < LIMIT)) ||
-    die 3 "$pr_count pull requests read, the --limit: some may be missing; raise LIMIT in $0"
 fi
 
 worktree_lines=""
@@ -280,3 +309,7 @@ done
 add_section strays "$(printf '%s' "$strays" | LC_ALL=C sort)"
 
 printf '%s' "$report"
+if ((!board_ok)); then
+  echo "today-gather: skipped the board: GitHub refused Project $PROJECT_NUMBER here (HTTP 403, above), so week is - and ready and week are empty; orphans, worktrees and strays are whole. Run it again from a local session for the board: scripts/today-gather.sh --date $today" >&2
+  exit "$PROJECT_SKIPPED"
+fi
