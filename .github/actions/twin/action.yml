@@ -1,0 +1,49 @@
+name: twin
+description: >-
+  The twin gate (#358): whether this run is the later of two synchronize runs on one merge commit,
+  and if so what the first run's jobs concluded. Expects a checkout of .github/scripts.
+inputs:
+  token:
+    description: A token with actions:read, to list this workflow's runs on the head.
+    required: true
+outputs:
+  pass:
+    description: JSON list of the job ids whose first-run twin passed or skipped; [] tests for real.
+    value: ${{ steps.gate.outputs.pass }}
+  fail:
+    description: JSON map, job id -> the first run's other conclusion; {} tests for real.
+    value: ${{ steps.gate.outputs.fail }}
+  source:
+    description: The first run's URL when this run repeats it.
+    value: ${{ steps.gate.outputs.source }}
+runs:
+  using: composite
+  steps:
+    # Run the default branch's script, not the PR's, as `ci / stack` does (#99): a sparse checkout
+    # leaves other refs' blobs off the runner, so the default branch gets a checkout of its own.
+    # The PR's copy runs only while the default branch has none.
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        ref: ${{ github.event.repository.default_branch }}
+        path: .twin-base
+        sparse-checkout: .github/scripts
+    - name: Take the script from the default branch
+      shell: bash
+      run: |
+        dir="$RUNNER_TEMP/twin-gate"
+        mkdir -p "$dir"
+        listed=$(git -C .twin-base ls-tree HEAD -- .github/scripts/twin-gate.mjs) || exit 1
+        if [[ -n $listed ]]; then
+          cp .twin-base/.github/scripts/twin-gate.mjs .twin-base/.github/scripts/diff.mjs "$dir/"
+        else
+          echo "::warning::the default branch has no twin-gate.mjs yet; using this PR's copy"
+          cp .github/scripts/twin-gate.mjs .github/scripts/diff.mjs "$dir/"
+        fi
+    # The script never fails: any doubt writes empty lists and every job tests for real. If a step
+    # here fails anyway, the outputs are empty, and the jobs (all `!cancelled()`) test for real too.
+    - id: gate
+      shell: bash
+      run: node "$RUNNER_TEMP/twin-gate/twin-gate.mjs"
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
