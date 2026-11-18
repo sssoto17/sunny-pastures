@@ -2390,6 +2390,68 @@ describe("floor guard, end to end", () => {
 		});
 	});
 
+	// #345: rows before and now are matched by their parsed cells, not raw text, so a row whose
+	// whitespace alone changes is the same row: it waives nothing again and stays spent (#271). Here,
+	// not in floor-guard-spent.test.mjs, since the suppression they write is one only SELF may spell.
+	describe("Exceptions rows matched by their cells (#345)", () => {
+		const path = "packages/sim/src/a.ts";
+		const old = row("E1", path, "2026-11-30");
+		const SUPPRESS = { [path]: "// eslint-disable-next-line eqeqeq\nexport const a = 1;\n" };
+		const spent = /spent Exceptions row/;
+		const start = () => (repo = makeRepo({ ...BASE, "CONSTRAINTS.md": withException(old) }));
+
+		it.each([
+			["re-padded", `|E1|silenced checker|  \`${path}\`  |reason|Soto|   2026-11-30   |`],
+			[
+				"re-padded with tabs",
+				`|\tE1\t|\tsilenced checker\t| \`${path}\` | reason | Soto | 2026-11-30 |`,
+			],
+			[
+				"re-wrapped without its closing pipe",
+				`| E1 | silenced checker | \`${path}\` | reason | Soto | 2026-11-30`,
+			],
+			[
+				"re-wrapped inside a cell",
+				`| E1 | silenced  checker | \`${path}\` | reason | Soto | 2026-11-30 |`,
+			],
+		])("reads a row %s as unchanged: it stays spent and waives nothing", (_, text) => {
+			start();
+			repo.write({ ...SUPPRESS, "CONSTRAINTS.md": withException(text) });
+			const r = guard();
+			expect(r.out).not.toContain("new exception E1");
+			expect(r.out).not.toContain("waived by E1");
+			expect(r.out).toContain(`[silenced-checker] ${path}`);
+			expect(r.code).toBe(1);
+			expect(r.out).toMatch(spent);
+			expect(r.out).toContain("remove it in this PR");
+		});
+
+		it("reads a row whose cell content changes as changed: it waives and is not spent", () => {
+			start();
+			repo.write({ ...SUPPRESS, "CONSTRAINTS.md": withException(row("E1", path, "2026-12-01")) });
+			const r = guard();
+			expect(r.out).toContain("new exception E1");
+			expect(r.out).toContain("waived by E1");
+			expect(r.code).toBe(0);
+			expect(r.out).not.toMatch(spent);
+		});
+
+		it("reads a new row as added, beside a re-padded old one", () => {
+			start();
+			const repadded = `|E1|silenced checker|\`${path}\`|reason|Soto|2026-11-30|`;
+			repo.write({
+				...SUPPRESS,
+				"CONSTRAINTS.md": withException(`${repadded}\n${row("E2", path, "2026-11-30")}`),
+			});
+			const r = guard();
+			expect(r.out).not.toContain("new exception E1");
+			expect(r.out).toContain("new exception E2");
+			expect(r.out).toContain("waived by E2");
+			expect(r.code).toBe(0);
+			expect(r.out).toMatch(/^ {2}E1 /m);
+		});
+	});
+
 	// #132: the known misses of the line reader (#131's body, #132's 9 Nov comment), each read the
 	// way GitHub renders it.
 	describe("Markdown read as GitHub renders it (#132)", () => {
