@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Gather what /today needs (#78), read-only: no gh write, no git write, no file written. Prints
-# plain sections that the /today skill (.claude/skills/today/SKILL.md) reads; /today stage 2
+# Gather what /today needs (#78), read-only: no gh write, no git write, no file written but one
+# temp file for gh's error, removed on exit. Prints plain sections that the /today skill (.claude/skills/today/SKILL.md) reads; /today stage 2
 # (#109) is to reuse it. REST only (`gh api`; #346, docs/agents/github-rest.md): the board through
 # the REST Projects API, PRs and parents through repos/<owner>/<repo>.
 # Tests: scripts/today-gather.test.sh.
@@ -24,8 +24,9 @@ usage() {
   cat >&2 <<'EOF'
 usage: scripts/today-gather.sh [--date YYYY-MM-DD]
 
-Gathers what /today needs and prints it, read-only: it reads GitHub and git and writes nothing,
-not even a file. Run it from the main folder; from a worktree, "out" is that worktree's.
+Gathers what /today needs and prints it, read-only: it reads GitHub and git and writes nothing but
+one temp file for gh's error, removed on exit. Run it from the main folder; from a worktree,
+"out" is that worktree's.
 --date picks the day (default: today in Europe/Copenhagen).
 
 Output: sections headed "== <name>", one tab-separated record per line, "-" for an empty field,

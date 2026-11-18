@@ -18,8 +18,8 @@ scripts below already use them.
   `gh api repos/sssoto17/sunny-pastures/issues/<number>/comments --jq '.[].body'` (REST, so it works
   in a cloud lane too).
 - **List issues**:
-  `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`
-  with appropriate `--label` and `--state` filters.
+  `gh api --paginate "repos/sssoto17/sunny-pastures/issues?state=open&per_page=100" --jq '.[] | select(has("pull_request") | not) | {number, title, labels: [.labels[].name]}'`
+  with `labels=<a,b>` and `state=` in the query to filter (REST lists PRs too, hence the select).
 - **Make an issue a sub-issue of a parent**: `gh issue create --parent <parent> ...`, or
   `gh issue edit <parent> --add-sub-issue <child>` afterwards (`gh` 2.94+). Older `gh`:
   `gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<child-db-id>`
