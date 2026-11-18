@@ -3,7 +3,10 @@
 # issue type by name, then remove `triage` once the four fields every issue carries are set
 # (docs/agents/issue-tracker.md, "Issue fields"). Field, option and type ids are looked up from
 # GitHub on every run, never hard-coded. Every name is checked before the first write, so a typo
-# changes nothing. Tests: scripts/issue-fields.test.sh.
+# changes nothing. REST only (`gh api`), local and cloud alike (#346): the issue through
+# repos/<owner>/<repo>, the Project through the REST Projects API, which the cloud proxy refuses;
+# then the issue's part is done and exit 4 prints the command that finishes the rest.
+# Tests: scripts/issue-fields.test.sh.
 # Needs bash 4.4+ (empty arrays under set -u) and an authenticated gh with the `project` scope.
 set -euo pipefail
 
@@ -14,7 +17,10 @@ fi
 
 OWNER=sssoto17
 REPO=sunny-pastures
-PROJECT=3
+here="$(cd "$(dirname "$0")" && pwd)"
+# PROJECT_API, PROJECT_NUMBER, PROJECT_JQ_DEFS, PROJECT_SKIPPED, project_refused, project_rerun.
+# shellcheck source=scripts/lib/project-rest.sh
+. "$here/lib/project-rest.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -38,8 +44,13 @@ refused: --status Ready and --mode Factory.
 After the writes it reads the issue and its item back and fails if a field doesn't show the
 value it set, or if `triage` is still on once all four are set.
 
+Where GitHub refuses the Project (HTTP 403, as the cloud's GitHub proxy does), it still sets
+--type, prints "?" for the Project's fields, names the step it skipped and the command that
+finishes it from a local session, and exits 4.
+
 Exit codes: 0 done, 1 a gh call failed or the read-back differs, 2 bad arguments or an unknown
-name (nothing changed).
+name (nothing changed), 4 the Project step was skipped: the issue's type is set, the Project
+wasn't touched; run the printed command where the Project can be reached.
 
 example: scripts/issue-fields.sh 47 --type Chore --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
 EOF
@@ -62,6 +73,7 @@ case ${1-} in
   "") usage; exit 2 ;;
   -h | --help) usage; exit 0 ;;
 esac
+all_args=("$@")
 issue=${1#\#}
 [[ $issue =~ ^[1-9][0-9]*$ ]] || die 2 "not an issue number: \"$1\""
 shift
@@ -105,87 +117,62 @@ while (($#)); do
   req_names+=("$value")
 done
 
-# One read-only lookup: the Project's fields and options, the repo's issue types, the issue (its
-# node id, native type and labels) and its item on the Project.
-# Each output line is tab-separated: a record type, then its values.
-read -r -d '' QUERY <<'EOF' || true
-query($owner: String!, $repo: String!, $number: Int!, $project: Int!) {
-  user(login: $owner) {
-    projectV2(number: $project) {
-      id
-      fields(first: 50) {
-        nodes {
-          ... on ProjectV2SingleSelectField { id name options { id name } }
-          ... on ProjectV2IterationField {
-            id name
-            configuration { iterations { id title } completedIterations { id title } }
-          }
-        }
-      }
-    }
-  }
-  repository(owner: $owner, name: $repo) {
-    issueTypes(first: 25) { nodes { id name isEnabled } }
-    issue(number: $number) {
-      id url title
-      issueType { name }
-      labels(first: 100) { nodes { name } }
-      projectItems(first: 50) {
-        nodes {
-          id
-          project { id }
-          fieldValues(first: 50) {
-            nodes {
-              ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
-              ... on ProjectV2ItemFieldIterationValue { title field { ... on ProjectV2FieldCommon { name } } }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-EOF
-read -r -d '' FILTER <<'EOF' || true
-(.data.user.projectV2 // {fields: {nodes: []}}) as $p
-| (select($p.id) | ["project", $p.id]),
-  ($p.fields.nodes[] | select(.options) | . as $f
-    | .options[] | ["option", $f.name, $f.id, "select", .id, .name]),
-  ($p.fields.nodes[] | select(.configuration) | . as $f
-    | (.configuration.iterations + .configuration.completedIterations)[]
-    | ["option", $f.name, $f.id, "iteration", .id, .title]),
-  (.data.repository.issueTypes.nodes // [] | .[] | select(.isEnabled)
-    | ["option", "Type", "-", "type", .id, .name]),
-  (.data.repository.issue // empty | ["issue", .url, .id]),
-  (.data.repository.issue.issueType.name // empty | ["value", "Type", .]),
-  (.data.repository.issue.labels.nodes // [] | .[] | ["label", .name]),
-  (.data.repository.issue.projectItems.nodes // [] | .[] | select(.project.id == $p.id)
-    | ["item", .id],
-      (.fieldValues.nodes[] | select(.field) | ["value", .field.name, (.name // .title)]))
-| @tsv
-EOF
+# --- the lookup ---------------------------------------------------------------------------------
+# All REST (docs/agents/github-rest.md): the issue (its id, native type and labels) and the
+# repo's issue types from repos/<owner>/<repo>; the Project's fields and the issue's item from
+# the REST Projects API. Each output line is tab-separated: a record type, then its values. A
+# type is set by its name over REST, so a type's option id is its name.
+ISSUE_FILTER='["issue", .html_url, .id], (.type.name // empty | ["value", "Type", .]),
+  (.labels[] | ["label", .name]) | @tsv'
+TYPES_FILTER='.[] | select(.is_enabled) | ["option", "Type", "-", "type", .name, .name] | @tsv'
+FIELDS_FILTER="$PROJECT_JQ_DEFS"'
+.[] | . as $f
+| if .data_type == "single_select" then
+    .options[] | ["option", $f.name, $f.id, "select", .id, (.name | txt)]
+  elif .data_type == "iteration" then
+    ((.configuration.iterations // []) + (.configuration.completed_iterations // []))[]
+    | ["option", $f.name, $f.id, "iteration", .id, (.title | txt)]
+  else empty end | @tsv'
+# The issue's item: matched by the issue's id; its values for the fields asked for by id.
+ITEM_FILTER="$PROJECT_JQ_DEFS"'
+.[] | select(.content_type == "Issue" and .content.id == $id)
+| ["item", .id], (.fields[]? | select(.name != "Title") | val as $v | select($v != null)
+  | ["value", .name, $v]) | @tsv'
 
-lookup() {
-  gh api graphql -f query="$QUERY" -F owner="$OWNER" -F repo="$REPO" -F number="$issue" \
-    -F project="$PROJECT" --jq "$FILTER"
-}
+project_err=$(mktemp "${TMPDIR:-/tmp}/issue-fields.XXXXXX")
+trap 'rm -f "$project_err"' EXIT
 
-# Read the lookup into globals: project_id, issue_url, issue_id, item_id, labels, the current
-# values (the item's fields and the issue's Type) and the options (parallel arrays opt_*: field
-# name, field id, select/iteration/type, option id, name).
+# Read the lookup into globals: issue_url, issue_id, item_id, labels, project_ok (0 once GitHub
+# refused the Project), the current values (the item's fields and the issue's Type) and the
+# options (parallel arrays opt_*: field name, field id, select/iteration/type, option id, name).
 load() { # what-it-means-on-failure
-  local rows kind a b c d e
-  rows=$(lookup) || die 1 "could not read issue #$issue and the Project from GitHub; $1"
-  project_id="" issue_url="" issue_id="" item_id="" labels=" "
+  local rows fields ids kind a b c d e
+  rows=$(gh api "repos/$OWNER/$REPO/issues/$issue" --jq "$ISSUE_FILTER") ||
+    die 1 "could not read issue #$issue of $OWNER/$REPO from GitHub (does it exist?); $1"
+  issue_id=$(awk -F'\t' '$1 == "issue" { print $3 }' <<<"$rows")
+  [[ $issue_id =~ ^[0-9]+$ ]] || die 1 "unexpected answer from GitHub for issue #$issue, has the API changed?; $1"
+  rows+=$'\n'$(gh api "repos/$OWNER/$REPO/issue-types" --jq "$TYPES_FILTER") ||
+    die 1 "could not read the issue types of $OWNER/$REPO from GitHub; $1"
+  project_ok=1
+  if ! fields=$(gh api "$PROJECT_API/fields?per_page=100" --jq "$FIELDS_FILTER" 2>"$project_err"); then
+    [[ -n ${refusal_shown-} ]] || cat "$project_err" >&2 # once, not again on the read-back
+    refusal_shown=1
+    project_refused "$project_err" || die 1 "could not read Project $PROJECT_NUMBER of $OWNER from GitHub; $1"
+    project_ok=0
+  fi
+  if ((project_ok)); then
+    ids=$(cut -f3 <<<"$fields" | sort -u | paste -sd, -)
+    rows+=$'\n'$fields
+    rows+=$'\n'$(gh api --paginate "$PROJECT_API/items?per_page=100&fields=$ids" \
+      --jq "${ITEM_FILTER//\$id/$issue_id}") ||
+      die 1 "could not read the items of Project $PROJECT_NUMBER from GitHub; $1"
+  fi
+  issue_url="" item_id="" labels=" "
   current_fields=() current_values=()
   opt_fields=() opt_field_ids=() opt_kinds=() opt_ids=() opt_names=()
   while IFS=$'\t' read -r kind a b c d e; do
     case $kind in
-      project) project_id=$a ;;
-      issue)
-        issue_url=$a
-        issue_id=$b
-        ;;
+      issue) issue_url=$a ;;
       item) item_id=$a ;;
       label) labels+="$a " ;;
       value)
@@ -201,8 +188,6 @@ load() { # what-it-means-on-failure
         ;;
     esac
   done <<<"$rows"
-  [[ -n $project_id ]] || die 1 "Project $PROJECT of $OWNER not found; $1"
-  [[ -n $issue_url ]] || die 1 "issue #$issue not found in $OWNER/$REPO; $1"
 }
 
 load "nothing was changed"
@@ -223,17 +208,29 @@ current() { # field -> its value on the item, or nothing
   return 0
 }
 
+join() { # items... -> "a, b, c", or "nothing"
+  local s
+  (($#)) || { printf nothing; return; }
+  s=$(printf '%s, ' "$@")
+  printf '%s' "${s%, }"
+}
+
 # Status defaults to Backlog when the item is new or has none. A Status already set is left
 # alone, so fixing a field on an issue never undoes the admin's move to Ready.
-if [[ " ${req_fields[*]} " != *" Status "* && -z $(current Status) ]]; then
+if ((project_ok)) && [[ " ${req_fields[*]} " != *" Status "* && -z $(current Status) ]]; then
   req_fields=(Status "${req_fields[@]}")
   req_names=(Backlog "${req_names[@]}")
 fi
 
-# Resolve every name to an option before writing anything: plan holds indexes into opt_*.
-plan=()
+# Resolve every name to an option before writing anything: plan holds indexes into opt_*. A
+# Project field can't be checked while the Project is refused: it goes to `skipped`.
+plan=() skipped=()
 for i in "${!req_fields[@]}"; do
   field=${req_fields[i]} found="" valid=()
+  if [[ $field != Type ]] && ((!project_ok)); then
+    skipped+=("$field")
+    continue
+  fi
   for j in "${!opt_fields[@]}"; do
     [[ ${opt_fields[j]} == "$field" ]] || continue
     admin_only "$field" "${opt_names[j]}" && continue
@@ -253,52 +250,52 @@ for i in "${!req_fields[@]}"; do
   plan+=("$found")
 done
 
-if [[ -z $item_id ]]; then
-  item_id=$(gh project item-add "$PROJECT" --owner "$OWNER" --url "$issue_url" --format json --jq .id) ||
+# --- writes -------------------------------------------------------------------------------------
+# The type first, on the issue (REST "Update an issue", `type` by name), then every Project field
+# in one item update (REST "Update project item for user": field ids and option or iteration ids).
+type_plan=() field_plan=()
+for j in "${plan[@]}"; do
+  if [[ ${opt_kinds[j]} == type ]]; then type_plan+=("$j"); else field_plan+=("$j"); fi
+done
+names_of() { local j; for j in "$@"; do printf '%s\n' "${opt_fields[j]}"; done; }
+
+if ((${#field_plan[@]})) && [[ -z $item_id ]]; then
+  item_id=$(gh api -X POST "$PROJECT_API/items" -f type=Issue -F id="$issue_id" --jq .id) ||
     die 1 "could not add $issue_url to the Project; nothing was set"
 fi
 
-join() { # items... -> "a, b, c", or "nothing"
-  local s
-  (($#)) || { printf nothing; return; }
-  s=$(printf '%s, ' "$@")
-  printf '%s' "${s%, }"
-}
-
-# The native type is set on the issue, not the item: updateIssue's issueTypeId (GitHub GraphQL
-# reference, "UpdateIssueInput"). gh has no flag for it (gh 2.89).
-read -r -d '' SET_TYPE <<'EOF' || true
-mutation($issue: ID!, $type: ID!) {
-  updateIssue(input: {id: $issue, issueTypeId: $type}) { issue { number } }
-}
-EOF
-
 done_fields=()
-for k in "${!plan[@]}"; do
-  j=${plan[k]}
-  if [[ ${opt_kinds[j]} == type ]]; then
-    set_one() { gh api graphql -f query="$SET_TYPE" -f issue="$issue_id" -f type="${opt_ids[j]}" >/dev/null; }
-  elif [[ ${opt_kinds[j]} == iteration ]]; then
-    set_one() { gh project item-edit --project-id "$project_id" --id "$item_id" \
-      --field-id "${opt_field_ids[j]}" --iteration-id "${opt_ids[j]}" >/dev/null; }
-  else
-    set_one() { gh project item-edit --project-id "$project_id" --id "$item_id" \
-      --field-id "${opt_field_ids[j]}" --single-select-option-id "${opt_ids[j]}" >/dev/null; }
+for j in "${type_plan[@]}"; do
+  if ! gh api -X PATCH "repos/$OWNER/$REPO/issues/$issue" -f type="${opt_ids[j]}" --silent; then
+    mapfile -t left < <(names_of "${plan[@]}")
+    die 1 "could not set Type. set: nothing; not set: $(join "${left[@]}"). Re-run the same command."
   fi
-  if ! set_one; then
-    left=()
-    for l in "${plan[@]:k}"; do left+=("${opt_fields[l]}"); done
-    die 1 "could not set ${opt_fields[j]}. set: $(join "${done_fields[@]}"); not set: $(join "${left[@]}"). Re-run the same command."
-  fi
-  done_fields+=("${opt_fields[j]}")
+  done_fields+=(Type)
 done
+if ((${#field_plan[@]})); then
+  # Ids are GitHub's: a field id is a number, an option or iteration id a short token. Anything
+  # else would break the JSON, so it stops before writing.
+  body="" sep=""
+  for j in "${field_plan[@]}"; do
+    [[ ${opt_field_ids[j]} =~ ^[0-9]+$ && ${opt_ids[j]} =~ ^[A-Za-z0-9_-]+$ ]] ||
+      die 1 "unexpected id for ${opt_fields[j]} from GitHub (${opt_field_ids[j]}, ${opt_ids[j]}), has the API changed? set: $(join "${done_fields[@]}")"
+    body+="$sep{\"id\":${opt_field_ids[j]},\"value\":\"${opt_ids[j]}\"}"
+    sep=,
+  done
+  body="{\"fields\":[$body]}"
+  if ! gh api -X PATCH "$PROJECT_API/items/$item_id" --input - --silent <<<"$body"; then
+    mapfile -t left < <(names_of "${field_plan[@]}")
+    die 1 "could not set $(join "${left[@]}"). set: $(join "${done_fields[@]}"); not set: $(join "${left[@]}"). Re-run the same command."
+  fi
+fi
 
-# Read the item back, so what's printed is what GitHub stored, and check it against the plan.
+# Read the issue and item back, so what's printed is what GitHub stored, and check it.
 load "the fields were written but couldn't be read back; re-run to check"
 
 # Triage: every issue carries a native type, Priority, Size and Week; `triage` stays on while one
 # is missing and comes off here once all four are set (docs/agents/issue-tracker.md, "Issue
-# fields"). Only removed, never added: new-issue.sh adds it when it files an issue.
+# fields"). Only removed, never added: new-issue.sh adds it when it files an issue. Without the
+# Project, Priority, Size and Week can't be read, so triage is left for the finishing run.
 missing_four() {
   local f
   for f in Type Priority Size Week; do
@@ -308,9 +305,9 @@ missing_four() {
 has_triage() { [[ $labels == *" triage "* ]]; }
 mapfile -t missing < <(missing_four)
 removed=""
-if ((${#missing[@]} == 0)) && has_triage; then
-  gh issue edit "$issue" --repo "$OWNER/$REPO" --remove-label triage >/dev/null ||
-    die 1 "the fields are set, but \`triage\` couldn't be removed. Run: gh issue edit $issue --repo $OWNER/$REPO --remove-label triage"
+if ((project_ok && ${#missing[@]} == 0)) && has_triage; then
+  gh api -X DELETE "repos/$OWNER/$REPO/issues/$issue/labels/triage" --silent ||
+    die 1 "the fields are set, but \`triage\` couldn't be removed. Run: gh api -X DELETE repos/$OWNER/$REPO/issues/$issue/labels/triage"
   removed=1
   load "\`triage\` was removed but the issue couldn't be read back; re-run to check"
 fi
@@ -318,9 +315,12 @@ fi
 printf '%s\n' "$issue_url"
 for field in Type Status Track Mode Size Priority Week; do
   value=$(current "$field")
+  [[ $field != Type ]] && ((!project_ok)) && value="?"
   printf '%-9s %s\n' "$field:" "${value:--}"
 done
-if has_triage; then
+if ((!project_ok)); then
+  triage="? (the Project couldn't be read)"
+elif has_triage; then
   triage="yes"
   ((${#missing[@]})) && triage+=" (missing: $(join "${missing[@]}"))"
 elif [[ -n $removed ]]; then
@@ -332,7 +332,7 @@ fi
 printf '%-9s %s\n' "Triage:" "$triage"
 
 mismatches=()
-if ((${#missing[@]} == 0)) && has_triage; then
+if ((project_ok && ${#missing[@]} == 0)) && has_triage; then
   mismatches+=("triage is still on, though all four are set")
 fi
 for j in "${plan[@]}"; do
@@ -344,4 +344,13 @@ done
 if ((${#mismatches[@]})); then
   list=$(printf '%s; ' "${mismatches[@]}")
   die 1 "the read-back differs from what was set: ${list%; }. GitHub may lag; re-run to check."
+fi
+
+# The skipped step (#346, criterion 3): everything the issue itself holds is done; the Project's
+# part waits for a session that can reach it. Re-running the whole command is safe.
+if ((!project_ok)); then
+  step="add #$issue to Project $PROJECT_NUMBER if it isn't on it, set Status if unset"
+  ((${#skipped[@]})) && step+=", set $(join "${skipped[@]}")"
+  step+=", and remove \`triage\` once the four are set"
+  die "$PROJECT_SKIPPED" "skipped the Project step: GitHub refused the Project here ($PROJECT_REFUSED_WHY), so nothing on it changed$( ((${#type_plan[@]})) && echo "; the type is set"). Skipped: $step. Finish from a local session, or the admin runs: $(project_rerun scripts/issue-fields.sh "${all_args[@]}")"
 fi
