@@ -173,7 +173,7 @@ A check that stalls the agent gets switched off, so the cost of a check decides 
 <!-- prettier-ignore -->
 | Stage | Command | Runs | Budget |
 |---|---|---|---|
-| After each edit | `pnpm check:fast` (agent hook: `PostToolUse` in `.claude/settings.json`, #113) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, formatting check. Boundaries join this row when #41 adds them to `check:fast`, boundaries (`pnpm boundaries`, #41) | under 5 s |
+| After each edit | `pnpm check:fast` (agent hook: `PostToolUse` in `.claude/settings.json`, #113) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, formatting check. Boundaries join this row when #41 adds them to `check:fast`; since #41 it runs them as `pnpm boundaries` | under 5 s |
 | Task end, before the agent opens a PR | `pnpm check:task` | `check:fast`, plus related unit and property tests (fixed seed, capped runs), coverage of changed lines, sim benchmark, duplication in changed files, the determinism gate, and a full lint without the cache (typed rules read other files, and the cache only tracks each file's own content) | ≤ 90 s |
 | Every PR | CI (`pnpm check:full` + scan jobs) | Everything above, plus larger property runs, the determinism gate, gitleaks, `pnpm audit`, Semgrep, Stryker _(warn)_, acceptance tests | unlimited |
 | Every preview deploy | CI against the Vercel preview | Lighthouse, axe, bundle ratchet, latency smoke | unlimited |

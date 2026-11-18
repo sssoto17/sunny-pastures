@@ -18,6 +18,7 @@ export default {
 	plugins: ["@stryker-mutator/vitest-runner"],
 	// Mutants go into the checkout itself, and Stryker puts each file back when it ends. A sandbox
 	// copy fails on the symlinked folders in .claude/skills/ (EISDIR), and `ci / mutation` runs on a
-	// throwaway checkout.
+	// throwaway checkout. Locally, let a run end: one killed mid-run can leave a mutant in a source
+	// file, which `git status` shows and `git restore` undoes.
 	inPlace: true,
 };
