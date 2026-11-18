@@ -22,8 +22,10 @@ until (a) has shown `APPROVED` (#68 asks for that first); then one fresh approva
 (d).
 
 Before you start: the `post-review.sh` change that turns on auto-merge is merged to `main`; the
-review runs from `main`'s copy (`pull_request_target`). `main`'s ruleset has 1 required approval,
-stale-review dismissal and thread resolution (on since 12 Nov); `start 68` checks them.
+review runs from `main`'s copy (`pull_request_target`). So is
+`.github/workflows/check-68-factory-resolve.yml`, which step 5 dispatches. `main`'s ruleset has 1
+required approval, stale-review dismissal and thread resolution (on since 12 Nov); `start 68` checks
+them.
 
 <!-- prettier-ignore -->
 | # | Command or step | By hand? | Wait | Tests |
@@ -43,15 +45,17 @@ stale-review dismissal and thread resolution (on since 12 Nov); `start 68` check
   merges once its checks are green. Keep the window short, and open no other PRs during it.
 - **Follow the reviews** with `gh run list --repo sssoto17/sunny-pastures --workflow review.yml`. A
   row reads "not yet run" until its review has landed.
-- **Step 5** pushes a workflow file, so gh needs the `workflow` scope:
-  `gh auth refresh -h github.com -s workflow` (it prints a one-time code, not a token). As
-  `sunny-factory`, the run resolves the thread, pushes one commit to (e), and waits for the
-  reviewer: it fails unless the reviewer reopened the thread.
+- **Step 5** dispatches `check-68-factory-resolve.yml` on `main` (`gh workflow run`, which needs
+  `actions: write`: your account has it, a lane's token doesn't). The `factory` environment admits
+  `main` only (#336), so the workflow can't run from a throwaway branch. As `sunny-factory`, the run
+  resolves the thread, pushes one commit to (e), and waits for the reviewer: it fails unless the
+  reviewer reopened the thread. `results 68` reads the newest dispatch.
 - **Step 6 before step 7:** (e3) passes when the thread is resolved by you and the App has reviewed
   the newest head. Resolve first, then push; a thread open again after step 7 is a fail.
 - **"Not exercised" is never a pass.** The App never approves (f) (Code-owned path row, in code) and
   you can't approve (e) or (f) (you opened them). (f)'s code-owner hold rests on the ruleset's
   `require_code_owner_review` (`gh api repos/sssoto17/sunny-pastures/rules/branches/main`: `true`).
 - **To run one test again,** fix the cause, then `cleanup 68` and start over from step 1. For step 5
-  alone, delete its branch first:
-  `gh api -X DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/68-factory-resolve`.
+  alone, run it again: `results 68` reads the newest dispatch only.
+- **Afterwards,** once the results comment is on #68, remove
+  `.github/workflows/check-68-factory-resolve.yml` from `main` in a PR of its own (code-owned).

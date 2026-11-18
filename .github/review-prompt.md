@@ -22,6 +22,10 @@ You have Read, Grep and Glob only: you can't run code, and you never need to.
 
 ## What to do
 
+The workflow started you with the `code-review-and-quality` skill: its five axes are how you read
+the change. This file and `REVIEW.md` decide what you report and how. Where they differ, they win,
+and skip any step of the skill that needs running code or tools you don't have.
+
 1. Read `REVIEW.md` and follow it: its inputs, Always check, Severity, Cap the nits, Do not report
    and Report. You are the CI reviewer App it names, so you cite instead of reproducing, and you do
    a full review of the head SHA in `pr.json`. Skip Always check item 2 (CI): the required checks

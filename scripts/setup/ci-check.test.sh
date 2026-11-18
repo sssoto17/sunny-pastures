@@ -66,7 +66,7 @@ case "$*" in
   "api repos/"*"/git/ref/"*)
     ref=${2#repos/*/git/ref/}; grep -qxF "$ref" "$dir/fx/refs" 2>/dev/null; exit ;;
   "pr create "*) n=$(($(grep -c '^pr create' "$dir/calls") + 70)); echo "https://github.com/sssoto17/sunny-pastures/pull/$n"; exit 0 ;;
-  "pr close "* | "api -X DELETE "*) exit 0 ;;
+  "pr close "* | "api -X DELETE "* | "workflow run "*) exit 0 ;;
   *) echo "fake: unexpected gh call: $*" >&2; exit 99 ;;
 esac
 fx=$(cat "$dir/fx/$key.json")
@@ -605,22 +605,38 @@ assert "expected (e) to gain a note file" \
   "docs/spikes/reviewer-app/throwaway-e.md packages/sim/src/content/index.ts "
 assert "expected no decision read for (e)" lacks "$out" "reviewDecision"
 
-# --- resolve 68: pushes the factory's workflow on its own branch, no PR -------------------------
-src_wf="$src/workflows/check-68-factory-resolve.yml"
+# --- resolve 68: dispatches main's factory workflow; no branch, no PR -------------------------
+# The `factory` environment admits main only (#336), so the workflow lives on main and runs by
+# workflow_dispatch, which needs actions: write: the admin's gh has it, a lane's token doesn't.
+wf68="$src/../../.github/workflows/check-68-factory-resolve.yml"
 reset
+echo '[{"number":73,"headRefName":"throwaway/68-e","isCrossRepository":false}]' >"$work/fx/prs.json"
 run resolve 68
 expect_code 0
-b=throwaway/68-factory-resolve
-assert "expected only the workflow added" \
-  test "$(git -C "$work/origin.git" diff --name-only main "$b")" == ".github/workflows/check-68-factory-resolve.yml"
-assert "expected the draft, byte for byte" \
-  test "$(git -C "$work/origin.git" show "$b:.github/workflows/check-68-factory-resolve.yml")" == "$(cat "$src_wf")"
+assert "expected main's workflow dispatched on main" \
+  contains "$calls" "workflow run check-68-factory-resolve.yml --repo sssoto17/sunny-pastures --ref main"
+assert "expected (e)'s PR looked up first" contains "$calls" "--head throwaway/68-e --state open"
+assert "expected no branch pushed" test -z "$(git -C "$work/origin.git" branch --list 'throwaway/*')"
 assert "expected no PR opened" lacks "$calls" "pr create"
-assert "expected the workflow to run in factory, on its throwaway branch only" \
-  contains "$(cat "$src_wf")" $'    branches: [throwaway/68-factory-resolve]'
-assert "expected the factory environment" contains "$(cat "$src_wf")" "environment: factory"
+assert "expected how to follow the run" contains "$out" "gh run list --repo sssoto17/sunny-pastures --workflow check-68-factory-resolve.yml"
+assert "expected the draft gone from scripts/setup/workflows" test ! -e "$src/workflows/check-68-factory-resolve.yml"
+assert "expected the workflow on main" test -f "$wf68"
+assert "expected dispatch as its only trigger" contains "$(sed -n '/^on:/,/^[a-z]/p' "$wf68")" $'on:\n  workflow_dispatch:'
+assert "expected no push trigger" lacks "$(cat "$wf68")" "branches: [throwaway"
+assert "expected the factory environment" contains "$(cat "$wf68")" "environment: factory"
+assert "expected no GITHUB_TOKEN permissions" contains "$(cat "$wf68")" $'permissions: {}'
+assert "expected the App token scoped to what it writes" \
+  contains "$(cat "$wf68")" $'permission-contents: write\n          permission-pull-requests: write'
 assert "expected it to fail unless the reviewer reopened the thread" \
-  contains "$(cat "$src_wf")" '[ "$resolved" = false ]'
+  contains "$(cat "$wf68")" '[ "$resolved" = false ]'
+
+# No open (e) PR: refused before anything is dispatched.
+reset
+echo '[]' >"$work/fx/prs.json"
+run resolve 68
+expect_code 2
+assert "expected the reason" contains "$err" "run start 68 first"
+assert "expected nothing dispatched" lacks "$calls" "workflow run"
 
 # --- results 68 ---------------------------------------------------------------------------------
 fx_view() { # pr decision state auto commits [labels] [head author]
@@ -689,6 +705,8 @@ assert "expected (e)'s thread state" contains "$out" 'escalation thread: resolve
 assert "expected (e)'s label" contains "$out" '- labels: `review:admin`'
 assert "expected the hold thread not taken for an escalation" contains "$out" "- escalation thread: none"
 assert "expected the factory run's RESULT line" contains "$out" "factory-resolve: RESULT thread_after_review resolved=false"
+assert "expected the factory's run read from main's dispatches" \
+  contains "$calls" "run list --repo sssoto17/sunny-pastures --workflow check-68-factory-resolve.yml --branch main --event workflow_dispatch"
 assert "expected no email printed" lacks "$out" "example.com"
 assert "expected (e)'s threads asked by number" contains "$calls" "-F pr=73"
 
@@ -737,13 +755,13 @@ run results 68
 assert "expected (e1) to fail on an approval" row e1 "escalation thread, no approval" fail
 
 # --- cleanup 68 ---------------------------------------------------------------------------------
-printf 'heads/throwaway/68-%s\n' a c e f factory-resolve >"$work/fx/refs"
+printf 'heads/throwaway/68-%s\n' a c e f >"$work/fx/refs"
 : >"$work/calls"
 echo true >"$work/fx/auto"
 run cleanup 68
 expect_code 0
 for pr in 71 72 73 74; do assert "expected PR #$pr closed" contains "$calls" "pr close $pr --repo sssoto17/sunny-pastures --comment"; done
-for l in a c e f factory-resolve; do
+for l in a c e f; do
   assert "expected throwaway/68-$l deleted" contains "$calls" "DELETE repos/sssoto17/sunny-pastures/git/refs/heads/throwaway/68-$l"
 done
 assert "expected no merge" lacks "$calls" "pr merge"

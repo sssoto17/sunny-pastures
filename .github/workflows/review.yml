@@ -8,8 +8,12 @@
 # action, "Using this action with pull_request_target"):
 # - nothing from the PR is checked out or run: the checkout has no `ref` (main), and the PR's
 #   diff and text reach Claude as files of data in $RUNNER_TEMP/review-context;
-# - Claude gets Read, Grep and Glob only (no Bash, no writes, no MCP servers) and the repo's
-#   GITHUB_TOKEN, read-only. It answers with a JSON verdict (--json-schema);
+# - Claude gets Read, Grep and Glob only (no Bash, no writes, no Skill tool, no MCP servers) and
+#   the repo's GITHUB_TOKEN, read-only. It answers with a JSON verdict (--json-schema);
+# - its prompt runs the code-review-and-quality skill, copied from main's checkout into
+#   ~/.claude/skills. `--setting-sources user` keeps the repo's .claude/settings.json (hooks, allow
+#   rules) and .mcp.json unloaded: the action sets enableAllProjectMcpServers, so the project
+#   source would start the repo's MCP servers;
 # - the App's token is minted only after Claude has finished, and only the last step, plain
 #   bash (.github/scripts/post-review.sh), writes to GitHub with it. That script, not the
 #   model, decides the review's event.
@@ -108,6 +112,16 @@ jobs:
           echo "schema=$(jq -c . .github/review-verdict.schema.json)" >>"$GITHUB_OUTPUT"
           echo "head=$(jq -r .head_sha "$CTX/pr.json")" >>"$GITHUB_OUTPUT"
 
+      # The review skill (#68, admin 18 Nov 2026), from main's checkout, into the only skills folder
+      # `--setting-sources user` registers (header; ADR-0002, area 2). No `if:` on the gate
+      # (floor-guard reads a new `if:` as loosening); copying is free when Claude doesn't run.
+      - name: Install the review skill (main's copy)
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.claude/skills"
+          # -L: the repo's entry is a link into .agents/skills/, which would dangle under $HOME.
+          cp -RL .claude/skills/code-review-and-quality "$HOME/.claude/skills/code-review-and-quality"
+
       - id: claude
         if: steps.gather.outputs.run == 'true'
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
@@ -115,8 +129,11 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }} # read-only; the App's token doesn't exist yet
           allowed_bots: ${{ env.FACTORY_APP }} # its pushes start this run too (#37)
+          # A leading /name runs that skill; the rest of the line reaches it as its arguments. The
+          # CLI expands a typed skill itself, so `Skill` stays denied below: the model can't load
+          # another one.
           prompt: >-
-            Read .github/review-prompt.md and follow it. Review PR #${{ github.event.pull_request.number }}.
+            /code-review-and-quality Read .github/review-prompt.md and follow it. Review PR #${{ github.event.pull_request.number }}.
             The context folder is ${{ runner.temp }}/review-context.
           claude_args: >-
             --max-turns 30
@@ -160,5 +177,8 @@ jobs:
           [ "$GATE" != false ] || { echo "RESULT skipped: this head was already reviewed"; exit 0; }
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
           [ -f "$f" ] || { echo "RESULT execution_file=missing"; exit 0; }
+          # Whether the CLI registered the skill (#68): the init message lists its slash commands.
+          jq -r '[.[] | select(.type == "system" and .subtype == "init") | .slash_commands[]?]
+            | "RESULT skill=code-review-and-quality registered=\(index("code-review-and-quality") != null)"' "$f"
           jq -r '.[] | select(.type == "result") | "RESULT subtype=\(.subtype) is_error=\(.is_error)"
             + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f"

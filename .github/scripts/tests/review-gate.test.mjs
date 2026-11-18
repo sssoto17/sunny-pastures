@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -147,5 +147,71 @@ describe("review.yml", () => {
 
 	it("keeps the allowed claude-code-action pin (#290)", () => {
 		expect(yml).toContain("anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe");
+	});
+
+	// #68 (admin, 18 Nov 2026): the review runs the code-review-and-quality skill. A typed /skill
+	// loads only a registered skill, and `--setting-sources user` registers ~/.claude/skills only,
+	// so a step copies main's skill there before Claude runs. `project` stays out: it would load the
+	// repo's .mcp.json (the action sets enableAllProjectMcpServers), hooks and allow rules.
+	describe("the review skill", () => {
+		const claudeArgs = yml.slice(at("claude_args: >-"), at("# Minted after Claude has finished"));
+
+		it("copies main's skill into the user's skills before Claude runs", () => {
+			const step = at("- name: Install the review skill (main's copy)\n");
+			expect(at("uses: actions/checkout@")).toBeLessThan(step);
+			expect(step).toBeLessThan(at("- id: claude\n"));
+		});
+
+		// .claude/skills/code-review-and-quality is a symlink into .agents/skills/ (mode 120000): a
+		// plain `cp -R` copies the link, which dangles under $HOME, and the skill never registers.
+		it("leaves a real SKILL.md under $HOME, not a link", () => {
+			const lines = yml.slice(at("- name: Install the review skill (main's copy)\n")).split("\n");
+			const from = lines.findIndex((l) => l.trim() === "run: |") + 1;
+			const end = lines.findIndex((l, i) => i >= from && l.trim() === "");
+			const script = lines
+				.slice(from, end)
+				.map((l) => l.trim())
+				.join("\n");
+			const home = mkdtempSync(join(tmpdir(), "review-skill-"));
+			try {
+				const root = fileURLToPath(new URL("../../..", import.meta.url));
+				const r = spawnSync("bash", ["-c", script], {
+					cwd: root,
+					env: { ...process.env, HOME: home },
+					encoding: "utf8",
+				});
+				expect(r.status, r.stderr).toBe(0);
+				const dir = join(home, ".claude/skills/code-review-and-quality");
+				expect(lstatSync(dir).isSymbolicLink()).toBe(false);
+				expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toMatch(
+					/^---\nname: code-review-and-quality\n/,
+				);
+			} finally {
+				rmSync(home, { recursive: true, force: true });
+			}
+		});
+
+		it("invokes the skill as the prompt's first word", () => {
+			expect(yml).toMatch(
+				/prompt: >-\n\s+\/code-review-and-quality Read \.github\/review-prompt\.md/,
+			);
+		});
+
+		it("still loads user settings only, with no MCP servers", () => {
+			expect(claudeArgs).toContain("--setting-sources user\n");
+			expect(claudeArgs).not.toMatch(/project|local|--mcp-config/);
+		});
+
+		it("still gives Claude Read, Grep and Glob only, Skill denied", () => {
+			expect(claudeArgs).toContain('--allowedTools "Read,Grep,Glob"');
+			const denied = claudeArgs.match(/--disallowedTools "([^"]*)"/)?.[1].split(",");
+			expect(denied).toEqual(
+				expect.arrayContaining(["Bash", "Edit", "Write", "WebFetch", "WebSearch", "Task", "Skill"]),
+			);
+		});
+
+		it("reports whether the skill was registered, from the init message", () => {
+			expect(yml).toContain("RESULT skill=code-review-and-quality registered=");
+		});
 	});
 });

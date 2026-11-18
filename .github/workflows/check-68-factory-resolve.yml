@@ -1,18 +1,18 @@
-# THROWAWAY: #68 test (e), the factory's step. Never merge into main. `ci-check.sh resolve 68`
-# copies this file to .github/workflows/ on throwaway/68-factory-resolve, a branch of main with no
-# PR, and pushes it; the push runs it (workflow_dispatch would need the file on main). Environment
-# `factory` admits throwaway/* refs only besides main. As sunny-factory it resolves the reviewer's
-# escalation thread on (e)'s PR, then pushes one commit there, since resolving starts no workflow,
-# and waits for the reviewer's review of that commit: the thread must be open again. RESULT lines
-# carry non-secret fields only; `ci-check.sh results 68` prints them. Actions pinned to full SHAs.
+# THROWAWAY: #68 test (e2), the factory's step (ADR-0002, admin checklist step 12). Delete this
+# file once #68's tests (a)-(f) are recorded. `ci-check.sh resolve 68` dispatches it on main: the
+# `factory` environment admits main only (#336), so it can't run from a throwaway branch any more.
+# workflow_dispatch needs actions: write, which the admin's gh has and a lane's token lacks
+# (open-pr.yml's header), so only the admin can start it; it reads no inputs. As sunny-factory it
+# resolves the reviewer's escalation thread on (e)'s PR (head throwaway/68-e), then pushes one
+# commit there, since resolving starts no workflow, and waits for the reviewer's review of that
+# commit: the thread must be open again. RESULT lines carry non-secret fields only;
+# `ci-check.sh results 68` prints them. Actions pinned to full SHAs.
 name: check-68-factory-resolve
 
 on:
-  push:
-    branches: [throwaway/68-factory-resolve]
+  workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: check-68
@@ -27,12 +27,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: factory
+    # GITHUB_TOKEN gets nothing: the App's token is the only identity this job acts through.
+    permissions: {}
     steps:
+      # Only what the test writes: the thread (pull requests) and one commit on (e) (contents).
       - id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
           private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
