@@ -148,4 +148,43 @@ describe("review.yml", () => {
 	it("keeps the allowed claude-code-action pin (#290)", () => {
 		expect(yml).toContain("anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe");
 	});
+
+	// #68 (admin, 18 Nov 2026): the review runs the code-review-and-quality skill. A typed /skill
+	// loads only a registered skill, and `--setting-sources user` registers ~/.claude/skills only,
+	// so a step copies main's skill there before Claude runs. `project` stays out: it would load the
+	// repo's .mcp.json (the action sets enableAllProjectMcpServers), hooks and allow rules.
+	describe("the review skill", () => {
+		const claudeArgs = yml.slice(at("claude_args: >-"), at("# Minted after Claude has finished"));
+
+		it("copies main's skill into the user's skills before Claude runs", () => {
+			const copy = at(
+				'cp -R .claude/skills/code-review-and-quality "$HOME/.claude/skills/code-review-and-quality"',
+			);
+			expect(at("uses: actions/checkout@")).toBeLessThan(copy);
+			expect(copy).toBeLessThan(at("- id: claude\n"));
+		});
+
+		it("invokes the skill as the prompt's first word", () => {
+			expect(yml).toMatch(
+				/prompt: >-\n\s+\/code-review-and-quality Read \.github\/review-prompt\.md/,
+			);
+		});
+
+		it("still loads user settings only, with no MCP servers", () => {
+			expect(claudeArgs).toContain("--setting-sources user\n");
+			expect(claudeArgs).not.toMatch(/project|local|--mcp-config/);
+		});
+
+		it("still gives Claude Read, Grep and Glob only, Skill denied", () => {
+			expect(claudeArgs).toContain('--allowedTools "Read,Grep,Glob"');
+			const denied = claudeArgs.match(/--disallowedTools "([^"]*)"/)?.[1].split(",");
+			expect(denied).toEqual(
+				expect.arrayContaining(["Bash", "Edit", "Write", "WebFetch", "WebSearch", "Task", "Skill"]),
+			);
+		});
+
+		it("reports whether the skill was registered, from the init message", () => {
+			expect(yml).toContain("RESULT skill=code-review-and-quality registered=");
+		});
+	});
 });
