@@ -516,6 +516,7 @@ assert "expected gh's refusal shown once, not again on the read-back" \
   test "$(grep -c 'sessions are bound' <<<"$err")" -eq 1
 expect_err "skipped the Project step: GitHub refused the Project here"
 expect_err "the type is set"
+expect_err "gh auth refresh -h github.com -s project"
 expect_err "Skipped: add #47 to Project 3 if it isn't on it, set Status if unset, set Size, Week, and remove \`triage\` once the four are set."
 expect_err "Finish from a local session, or the admin runs: scripts/issue-fields.sh 47 --type chore --size S --week Wk\\ 2"
 expect_out "Type:     Chore"

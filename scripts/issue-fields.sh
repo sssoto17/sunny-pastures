@@ -352,5 +352,5 @@ if ((!project_ok)); then
   step="add #$issue to Project $PROJECT_NUMBER if it isn't on it, set Status if unset"
   ((${#skipped[@]})) && step+=", set $(join "${skipped[@]}")"
   step+=", and remove \`triage\` once the four are set"
-  die "$PROJECT_SKIPPED" "skipped the Project step: GitHub refused the Project here (HTTP 403, above), so nothing on it changed$( ((${#type_plan[@]})) && echo "; the type is set"). Skipped: $step. Finish from a local session, or the admin runs: $(project_rerun scripts/issue-fields.sh "${all_args[@]}")"
+  die "$PROJECT_SKIPPED" "skipped the Project step: GitHub refused the Project here ($PROJECT_REFUSED_WHY), so nothing on it changed$( ((${#type_plan[@]})) && echo "; the type is set"). Skipped: $step. Finish from a local session, or the admin runs: $(project_rerun scripts/issue-fields.sh "${all_args[@]}")"
 fi
