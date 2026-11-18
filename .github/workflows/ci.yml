@@ -146,6 +146,19 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm determinism
 
+  # CONSTRAINTS.md, the two Boundaries rows (#41): .fallowrc.jsonc's zones, rules and forbidden
+  # calls, over the whole project. ESLint's sim block in `ci / lint` holds the rest of the purity row.
+  boundaries:
+    name: ci / boundaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm boundaries
+
   # #255: the shell scripts' test suites, every *.test.sh under scripts/ and .claude/hooks/, found
   # by the runner so a new suite needs no edit here. Each suite fakes gh on PATH and needs no secret:
   # the job holds no token, persists no credentials, and the runner puts a gh that refuses every
