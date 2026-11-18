@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { readConfig } from "../index";
-
-// Environment names are UPPER_SNAKE, an outside shape the naming rule doesn't allow as keys.
-const envWith = (databaseUrl: string) => Object.fromEntries([["DATABASE_URL", databaseUrl]]);
+import { makeEnv } from "./env";
 
 describe("readConfig", () => {
 	it("reads the database URL from the environment", () => {
-		const config = readConfig(envWith("postgresql://db.test/farm"));
+		const config = readConfig(makeEnv("postgresql://db.test/farm"));
 
 		expect(config).toEqual({ databaseUrl: "postgresql://db.test/farm" });
 	});
@@ -17,6 +15,6 @@ describe("readConfig", () => {
 	});
 
 	it("treats an empty variable as missing", () => {
-		expect(() => readConfig(envWith(""))).toThrow(/DATABASE_URL/);
+		expect(() => readConfig(makeEnv(""))).toThrow(/DATABASE_URL/);
 	});
 });

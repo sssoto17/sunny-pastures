@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { once } from "../once";
+import { memoise } from "../memoise";
 
-describe("once", () => {
+describe("memoise", () => {
 	it("doesn't build until the first call", () => {
 		const build = vi.fn(() => ({}));
 
-		once(build);
+		memoise(build);
 
 		expect(build).not.toHaveBeenCalled();
 	});
 
 	it("builds on the first call and returns the same value after", () => {
 		const build = vi.fn(() => ({}));
-		const get = once(build);
+		const get = memoise(build);
 
 		const first = get();
 
@@ -28,7 +28,7 @@ describe("once", () => {
 				throw new Error("Config error.");
 			})
 			.mockImplementation(() => ({}));
-		const get = once(build);
+		const get = memoise(build);
 
 		expect(get).toThrow("Config error.");
 		expect(get()).toEqual({});

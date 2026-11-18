@@ -1,8 +1,8 @@
 import "server-only";
 
-import { readConfig } from "@/server/config";
+import { readConfig, type Env } from "@/server/config";
 
-import { once } from "./once";
+import { memoise } from "./memoise";
 
 /** What the routes call (#329, decision 2). Each game ticket adds its entry here. */
 export interface Api {
@@ -13,8 +13,6 @@ export interface Api {
 export interface Health {
 	status: "ok";
 }
-
-const getBuiltApi = once(() => createApi(process.env));
 
 /**
  * The composition root (#329, decisions 2 and 5): the one place that wires the server modules
@@ -27,9 +25,12 @@ export function getApi(): Api {
 }
 
 /** Builds the graph from an environment: config → db → rules → store, as each module lands. */
-export function createApi(env: Readonly<Record<string, string | undefined>>): Api {
+export function createApi(env: Env): Api {
 	// The config is the first link (`createDb(config)` takes it, #329 decision 2). Reading it now
 	// makes a deployment with a missing variable fail its health check, not its first game request.
 	readConfig(env);
 	return { health: () => ({ status: "ok" }) };
 }
+
+// Read only when getApi is first called, so it can sit below the interface.
+const getBuiltApi = memoise(() => createApi(process.env));
