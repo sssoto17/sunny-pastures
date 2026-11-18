@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkCodeOwned, ownersOf, parseCodeOwners } from "../code-owned-guard.mjs";
+import { checkCodeOwned, isOwned, ownersOf, parseCodeOwners } from "../code-owned-guard.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../code-owned-guard.mjs", import.meta.url));
 // The real list, so a pattern style added there is matched the way GitHub matches it.
@@ -16,9 +16,9 @@ const RULES = parseCodeOwners(
 const HEAD = "b".repeat(40);
 const OLD = "a".repeat(40);
 
-const event = (head = HEAD) => ({
-	repository: { full_name: "sssoto17/sunny-pastures", default_branch: "main" },
-	pull_request: { number: 337, head: { sha: head } },
+const event = () => ({
+	repository: { full_name: "sssoto17/sunny-pastures" },
+	pull_request: { number: 337, head: { sha: HEAD } },
 });
 const review = (id, state, commit_id = HEAD, login = "sssoto17") => ({
 	id,
@@ -27,7 +27,8 @@ const review = (id, state, commit_id = HEAD, login = "sssoto17") => ({
 	user: { login },
 });
 
-// The REST answers a check reads, and the labels it adds.
+// Stands in for REST, so each case sets only the PR state it's about; `added` records each
+// escalation (the label and its comment). A file is a name, or an entry as REST lists it.
 const github = ({ files, reviews = [], labels = [], head = HEAD, changed = files.length }) => {
 	const added = [];
 	return {
@@ -38,15 +39,15 @@ const github = ({ files, reviews = [], labels = [], head = HEAD, changed = files
 				changed_files: changed,
 				labels: labels.map((name) => ({ name })),
 			}),
-			listFiles: async () => files.map((filename) => ({ filename })),
+			listFiles: async () => files.map((f) => (typeof f === "string" ? { filename: f } : f)),
 			listReviews: async () => reviews,
-			addLabel: async (name) => added.push(name),
+			escalate: async () => added.push("review:admin"),
 		},
 	};
 };
 const check = (gh) => checkCodeOwned(event(), { rules: RULES, ...gh.deps });
 
-describe("ownersOf", () => {
+describe("isOwned and ownersOf", () => {
 	// One path per pattern style in .github/CODEOWNERS.
 	it.each([
 		["/dir/, nested", ".github/workflows/ci.yml"],
@@ -62,6 +63,7 @@ describe("ownersOf", () => {
 		[".gitattributes in any directory", "apps/web/.gitattributes"],
 		["/path/name.* with a wildcard", "packages/sim/src/sim/tests/determinismScript.json"],
 	])("owns a path matched by %s", (_, path) => {
+		expect(isOwned(RULES, path)).toBe(true);
 		expect(ownersOf(RULES, path)).toEqual(["sssoto17"]);
 	});
 
@@ -74,20 +76,34 @@ describe("ownersOf", () => {
 		["a sibling of an owned file", "packages/sim/src/sim/tests/recordScript.ts"],
 		["a docs folder that isn't listed", "docs/plans/m4.md"],
 	])("owns nothing for %s", (_, path) => {
-		expect(ownersOf(RULES, path)).toEqual([]);
+		expect(isOwned(RULES, path)).toBe(false);
+	});
+
+	// GitHub keeps a final single `*` to one folder level; no pattern in CODEOWNERS uses it yet.
+	it("owns only the top level of a folder under a /dir/* pattern", () => {
+		const rules = parseCodeOwners("/docs/*  @sssoto17\n");
+		expect(isOwned(rules, "docs/a.md")).toBe(true);
+		expect(isOwned(rules, "docs/a/b.md")).toBe(false);
 	});
 
 	// GitHub: the last matching pattern wins, and a pattern with no owners leaves a path unowned.
 	it("takes the last matching line, so a later line without owners un-owns a path", () => {
 		const rules = parseCodeOwners("/docs/  @sssoto17\n/docs/plans/\n");
-		expect(ownersOf(rules, "docs/adr/x.md")).toEqual(["sssoto17"]);
-		expect(ownersOf(rules, "docs/plans/x.md")).toEqual([]);
+		expect(isOwned(rules, "docs/adr/x.md")).toBe(true);
+		expect(isOwned(rules, "docs/plans/x.md")).toBe(false);
 	});
 
 	// Only a user can approve: never a bot or App (CODEOWNERS header), and a team can't be resolved.
-	it("keeps only user logins as owners", () => {
+	it("lets only user logins approve", () => {
 		const rules = parseCodeOwners("/x  @sssoto17 @sunny-factory[bot] @org/team me@example.com\n");
 		expect(ownersOf(rules, "x")).toEqual(["sssoto17"]);
+	});
+
+	// Fails closed: a path owned only by a team is still owned, and nobody here can approve it.
+	it("keeps a path owned only by a team owned, with no one to approve it", () => {
+		const rules = parseCodeOwners("/x  @org/team\n");
+		expect(isOwned(rules, "x")).toBe(true);
+		expect(ownersOf(rules, "x")).toEqual([]);
 	});
 });
 
@@ -107,6 +123,12 @@ describe("checkCodeOwned", () => {
 		expect(r.owned).toEqual([".github/CODEOWNERS"]);
 		expect(r.message).toContain(HEAD.slice(0, 7));
 		expect(gh.added).toEqual(["review:admin"]);
+	});
+
+	it("holds a PR with a team-owned path that a user's approval can't clear", async () => {
+		const rules = parseCodeOwners("/CONSTRAINTS.md  @sssoto17\n/x  @org/team\n");
+		const gh = github({ files: ["x"], reviews: [review(1, "APPROVED")] });
+		expect((await checkCodeOwned(event(), { rules, ...gh.deps })).ok).toBe(false);
 	});
 
 	it("doesn't add review:admin again when the PR has it", async () => {
@@ -132,17 +154,16 @@ describe("checkCodeOwned", () => {
 
 	// A rename out of an owned folder changes the owned path too.
 	it("reads a rename's old path", async () => {
-		const gh = github({ files: [] });
-		gh.deps.listFiles = async () => [
-			{ filename: "docs/plans/x.md", previous_filename: "docs/adr/x.md" },
-		];
-		gh.deps.getPull = async () => ({ head: { sha: HEAD }, changed_files: 1, labels: [] });
+		const gh = github({
+			files: [{ filename: "docs/plans/x.md", previous_filename: "docs/adr/x.md" }],
+		});
 		expect((await check(gh)).owned).toEqual(["docs/adr/x.md"]);
 	});
 
 	// What a PR could do to have the bot, or a stale review, stand in for the admin.
 	it.each([
-		["the approval is dismissed", [review(1, "APPROVED"), review(1, "DISMISSED")]],
+		// REST shows a dismissed review in place, with its state changed.
+		["the approval is dismissed", [review(1, "DISMISSED")]],
 		["a later review requests changes", [review(1, "APPROVED"), review(2, "CHANGES_REQUESTED")]],
 		["only the bot approved", [review(1, "APPROVED", HEAD, "sunny-reviewer[bot]")]],
 		["only someone who isn't a code owner approved", [review(1, "APPROVED", HEAD, "someone")]],
@@ -206,35 +227,20 @@ describe("code-owned-guard.mjs", () => {
 		await new Promise((done) => server.listen(0, "127.0.0.1", done));
 		return { seen, url: `http://127.0.0.1:${server.address().port}` };
 	};
-	const run = async (ev, api) => {
-		dir = mkdtempSync(join(tmpdir(), "code-owned-"));
-		const path = join(dir, "event.json");
-		if (ev !== undefined) writeFileSync(path, JSON.stringify(ev));
-		const r = spawnSync(process.execPath, [SCRIPT], {
-			encoding: "utf8",
-			env: {
-				PATH: process.env.PATH,
-				GITHUB_EVENT_PATH: path,
-				GITHUB_API_URL: api ?? "http://127.0.0.1:9",
-				GITHUB_TOKEN: "test",
-			},
-		});
-		return r;
-	};
 	const P = "/repos/sssoto17/sunny-pastures";
 	const routes = (files, reviews) => ({
 		[`GET ${P}/pulls/337`]: { head: { sha: HEAD }, changed_files: files.length, labels: [] },
 		[`GET ${P}/pulls/337/files`]: files.map((filename) => ({ filename })),
 		[`GET ${P}/pulls/337/reviews`]: reviews,
 		[`POST ${P}/issues/337/labels`]: [],
+		[`POST ${P}/issues/337/comments`]: {},
 	});
 
-	// spawnSync blocks the event loop the fake server answers on, so these use an async child.
-	const runAsync = async (ev, api) => {
+	// An async child: spawnSync would block the event loop the fake server answers on.
+	const run = async (ev, api = "http://127.0.0.1:9") => {
 		dir = mkdtempSync(join(tmpdir(), "code-owned-"));
 		const path = join(dir, "event.json");
-		writeFileSync(path, JSON.stringify(ev));
-		const { spawn } = await import("node:child_process");
+		if (ev !== undefined) writeFileSync(path, JSON.stringify(ev));
 		const child = spawn(process.execPath, [SCRIPT], {
 			env: {
 				PATH: process.env.PATH,
@@ -252,7 +258,7 @@ describe("code-owned-guard.mjs", () => {
 
 	it("exits 0 for a PR with no code-owned path", async () => {
 		const api = await serve(routes(["README.md"], []));
-		const r = await runAsync(event(), api.url);
+		const r = await run(event(), api.url);
 		expect(r.status).toBe(0);
 		expect(r.out).toContain("code-owned: pass");
 		expect(api.seen.some((s) => s.startsWith("POST"))).toBe(false);
@@ -260,21 +266,24 @@ describe("code-owned-guard.mjs", () => {
 
 	it("exits 1 and adds review:admin for a code-owned PR the admin hasn't approved", async () => {
 		const api = await serve(routes([".github/workflows/code-owned.yml"], []));
-		const r = await runAsync(event(), api.url);
+		const r = await run(event(), api.url);
 		expect(r.status).toBe(1);
 		expect(r.out).toContain("::error title=guard / code-owned::");
 		expect(r.out).toContain('".github/workflows/code-owned.yml"');
 		expect(api.seen).toContain(`POST ${P}/issues/337/labels {"labels":["review:admin"]}`);
+		expect(api.seen.find((s) => s.startsWith(`POST ${P}/issues/337/comments`))).toContain(
+			"escalated: Code-owned path",
+		);
 	});
 
 	it("exits 0 once the admin approves the head", async () => {
 		const api = await serve(routes(["CONSTRAINTS.md"], [review(1, "APPROVED")]));
-		expect((await runAsync(event(), api.url)).status).toBe(0);
+		expect((await run(event(), api.url)).status).toBe(0);
 	});
 
 	it("exits 2, never a pass, when GitHub can't be read", async () => {
 		const api = await serve({});
-		const r = await runAsync(event(), api.url);
+		const r = await run(event(), api.url);
 		expect(r.status).toBe(2);
 		expect(r.out).toContain("cannot run");
 	});
@@ -282,6 +291,6 @@ describe("code-owned-guard.mjs", () => {
 	it("exits 2, never a pass, without an event", async () => {
 		const r = await run(undefined);
 		expect(r.status).toBe(2);
-		expect(r.stderr).toContain("cannot run");
+		expect(r.out).toContain("cannot run");
 	});
 });

@@ -21,38 +21,48 @@ import { readFileSync } from "node:fs";
 import { CannotRun, isMain, readEvent } from "./diff.mjs";
 
 export const LABEL = "review:admin";
+const ESCALATED =
+	"escalated: Code-owned path\n\n`guard / code-owned` added `review:admin`: the diff touches a path " +
+	"in `main`'s .github/CODEOWNERS, so the check holds the PR until the admin approves its head " +
+	'(CONSTRAINTS.md, "Escalation criteria").';
 
 /**
  * CODEOWNERS as rules, in file order: `{ pattern, rx, owners }`. GitHub's syntax is gitignore's
  * without `!` or `[ ]`: a leading or inner `/` anchors to the root, a trailing `/` means a folder,
- * `*` stays inside one segment and `**` crosses them. Owners are user logins only: a team or an
- * email can't be read here, and a bot is never a code owner (CODEOWNERS header).
+ * `*` stays inside one segment and `**` crosses them. `owners` keeps every owner token, so a line
+ * owned by a team or an email still owns its paths; `users` holds the logins that can approve
+ * here: a team can't be read, and a bot is never a code owner (CODEOWNERS header).
  */
 export const parseCodeOwners = (text) =>
 	text
 		.split("\n")
-		.map((line) => line.replace(/(^|\s)#.*/, "").trim())
+		.map((line) => line.replace(/#.*/, "").trim())
 		.filter(Boolean)
 		.map((line) => {
 			const [pattern, ...owners] = line.split(/\s+/);
 			return {
 				pattern,
 				rx: toRegExp(pattern),
-				owners: owners.filter((o) => /^@[\w-]+$/.test(o)).map((o) => o.slice(1).toLowerCase()),
+				owners,
+				users: owners.filter((o) => /^@[\w-]+$/.test(o)).map((o) => o.slice(1).toLowerCase()),
 			};
 		});
 
-/** The owners of `path`: the last matching rule's, as GitHub decides; [] when none or unowned. */
-export const ownersOf = (rules, path) => rules.findLast((r) => r.rx.test(path))?.owners ?? [];
+/** Whether `path` is code-owned: the last matching rule decides, as on GitHub, and needs owners. */
+export const isOwned = (rules, path) => (lastMatch(rules, path)?.owners.length ?? 0) > 0;
+
+/** The users who can approve `path` for its code owners; [] when it's unowned or owned by a team. */
+export const ownersOf = (rules, path) => lastMatch(rules, path)?.users ?? [];
 
 /**
- * The verdict for a PR event: `{ ok, owned, message }`, after adding `review:admin` to a
- * code-owned PR that lacks it. `getPull`, `listFiles` (every page) and `listReviews` (every page)
- * answer as REST does; `addLabel(name)` adds a label. Throws CannotRun when it can't judge.
+ * The verdict for a PR event: `{ ok, owned, message }`, after calling `escalate()` on a
+ * code-owned PR that lacks `review:admin` (CONSTRAINTS.md, "Escalation criteria": the label and its
+ * one-line comment). `getPull`, `listFiles` (every page) and `listReviews` (every page) answer as
+ * REST does. Throws CannotRun when it can't judge.
  */
 export const checkCodeOwned = async (
 	event,
-	{ rules, getPull, listFiles, listReviews, addLabel },
+	{ rules, getPull, listFiles, listReviews, escalate },
 ) => {
 	const head = event?.pull_request?.head?.sha;
 	if (!head || !event.pull_request.number)
@@ -66,24 +76,25 @@ export const checkCodeOwned = async (
 			owned: [],
 			message: `the head moved to ${pull.head.sha.slice(0, 7)}: the run for that head decides`,
 		};
+
 	// REST lists at most 3000 files; a shorter list than the PR's count could hide an owned path.
 	if (files.length < pull.changed_files)
 		throw new CannotRun(`GitHub listed ${files.length} of the PR's ${pull.changed_files} files`);
 
 	const paths = [...new Set(files.flatMap((f) => [f.filename, f.previous_filename ?? []].flat()))];
-	const owned = paths.filter((p) => ownersOf(rules, p).length);
+	const owned = paths.filter((p) => isOwned(rules, p));
 	if (owned.length === 0) return { ok: true, owned, message: "no code-owned path in the diff" };
 
-	if (!pull.labels.some((l) => l.name === LABEL)) await addLabel(LABEL);
+	if (!pull.labels.some((l) => l.name === LABEL)) await escalate();
 	const approvers = approversOf(await listReviews(), head);
 	const waiting = owned.filter((p) => !ownersOf(rules, p).some((o) => approvers.has(o)));
-	const at = head.slice(0, 7);
+	const short = head.slice(0, 7);
 	if (waiting.length === 0)
-		return { ok: true, owned, message: `a code owner approved ${at}, the head` };
+		return { ok: true, owned, message: `a code owner approved ${short}, the head` };
 	return {
 		ok: false,
 		owned,
-		message: `${waiting.length} code-owned path(s) wait for a code owner to approve ${at}, the head (CODEOWNERS)`,
+		message: `${waiting.length} code-owned path(s) wait for a code owner to approve ${short}, the head (CODEOWNERS)`,
 	};
 };
 
@@ -101,6 +112,13 @@ function approversOf(reviews, head) {
 	);
 }
 
+function lastMatch(rules, path) {
+	return rules.findLast((r) => r.rx.test(path));
+}
+
+// A pattern as a RegExp over a repo-relative path. Unanchored names match in any folder; a match
+// also covers everything under it (a folder named like a file pattern), except after a final
+// single `*`, which GitHub keeps to one level (`/docs/*` owns docs/a.md, not docs/a/b.md).
 function toRegExp(pattern) {
 	const dir = pattern.endsWith("/");
 	const body = pattern.replace(/^\/|\/$/g, "");
@@ -110,7 +128,8 @@ function toRegExp(pattern) {
 		.split(/(\*\*\/|\*\*|\*|\?)/)
 		.map((t) => glob[t] ?? t.replace(/[.+^${}()|[\]\\]/g, "\\$&"))
 		.join("");
-	return new RegExp(`${anchored ? "^" : "(?:^|/)"}${src}${dir ? "/" : "(?:/|$)"}`);
+	const end = dir ? "/" : /(?:^|[^*])\*$/.test(body) ? "$" : "(?:/|$)";
+	return new RegExp(`${anchored ? "^" : "(?:^|/)"}${src}${end}`);
 }
 
 const api = (repo, token) => {
@@ -141,25 +160,28 @@ const api = (repo, token) => {
 
 const main = async () => {
 	const event = readEvent();
-	const i = process.argv.indexOf("--codeowners");
-	const file = i > -1 ? process.argv[i + 1] : ".github/CODEOWNERS";
+	const flag = process.argv.indexOf("--codeowners");
+	const file = flag > -1 ? process.argv[flag + 1] : ".github/CODEOWNERS";
 	let rules;
 	try {
 		rules = parseCodeOwners(readFileSync(file, "utf8"));
 	} catch {
 		throw new CannotRun(`can't read CODEOWNERS at ${file}`);
 	}
-	const n = event?.pull_request?.number;
+	const number = event?.pull_request?.number;
 	const { call, all } = api(
 		event?.repository?.full_name ?? process.env.GITHUB_REPOSITORY,
 		process.env.GITHUB_TOKEN,
 	);
 	const r = await checkCodeOwned(event, {
 		rules,
-		getPull: () => call("GET", `pulls/${n}`),
-		listFiles: () => all(`pulls/${n}/files`),
-		listReviews: () => all(`pulls/${n}/reviews`),
-		addLabel: (name) => call("POST", `issues/${n}/labels`, { labels: [name] }),
+		getPull: () => call("GET", `pulls/${number}`),
+		listFiles: () => all(`pulls/${number}/files`),
+		listReviews: () => all(`pulls/${number}/reviews`),
+		escalate: async () => {
+			await call("POST", `issues/${number}/labels`, { labels: [LABEL] });
+			await call("POST", `issues/${number}/comments`, { body: ESCALATED });
+		},
 	});
 	for (const p of r.owned) console.log(`code-owned: ${JSON.stringify(p)}`);
 	if (r.ok) {
