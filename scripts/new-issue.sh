@@ -58,7 +58,8 @@ command to finish it.
 
 Where GitHub refuses the Project (HTTP 403, as the cloud's GitHub proxy does), the issue is still
 created with its labels, milestone, native type and parent; issue-fields.sh names the Project
-step it skipped and the command that finishes it, and this exits 4.
+step it skipped and the command that finishes it. The issue gets `triage` (Priority, Size and
+Week aren't set yet), which that command removes once all four are set, and this exits 4.
 
 Exit codes: 0 done, 1 a write failed or the read-back differs (stderr says what exists),
 2 bad arguments, an unknown name, or the repo's issue types and the mapping disagree (nothing
@@ -215,7 +216,13 @@ fields=(--type "$issue_type" "${fields[@]}")
 fields_code=0
 fields_out=$("$here/issue-fields.sh" "$number" "${fields[@]}") || fields_code=$?
 if ((fields_code == 4)); then
-  : # the Project step was skipped; issue-fields.sh said so and printed the command. Read back.
+  # The Project step was skipped (issue-fields.sh said so and printed the command), so Priority,
+  # Size and Week aren't set yet: the issue carries `triage` until that command runs, which takes
+  # it off once all four are set. Without it the issue shows in no triage search (#359, 18 Nov).
+  if ((${#missing[@]} == 0)); then
+    gh api -X POST "repos/$OWNER/$REPO/issues/$number/labels" -f "labels[]=triage" --silent ||
+      die 1 "#$number was created ($url) and its Project step skipped, but \`triage\` couldn't be added. Run: gh api -X POST repos/$OWNER/$REPO/issues/$number/labels -f 'labels[]=triage'"
+  fi
 elif ((fields_code)); then
   rerun=$(printf ' %q' "${fields[@]}")
   die 1 "#$number was created ($url), but its Project fields weren't set. Fix the error above, then run: scripts/issue-fields.sh $number${rerun}"
@@ -236,7 +243,7 @@ for want in "$type" "$area"; do
   [[ ",$got_labels," == *",$want,"* ]] || mismatches+=("missing label $want")
 done
 [[ $got_type == "$issue_type" ]] || mismatches+=("issue type is $got_type, expected $issue_type")
-if ((${#missing[@]})); then
+if ((${#missing[@]} || fields_code == 4)); then
   [[ ",$got_labels," == *",triage,"* ]] || mismatches+=("missing label triage")
 else
   [[ ",$got_labels," != *",triage,"* ]] || mismatches+=("triage is on, though all four are set")
@@ -260,6 +267,6 @@ if ((${#missing[@]})); then
   printf '\n' >&2
 fi
 if ((fields_code == 4)); then
-  echo "new-issue: #$number is filed with its labels, milestone, type and parent; its Project step is left (see issue-fields above)" >&2
+  echo "new-issue: #$number is filed with its labels, milestone, type and parent, and carries \`triage\` until its Project step runs (see issue-fields above)" >&2
   exit 4
 fi

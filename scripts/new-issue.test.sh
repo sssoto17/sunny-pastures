@@ -31,6 +31,9 @@ case "$method $path" in
   "POST repos/sssoto17/sunny-pastures/issues")
     printf '%s\n' "$input" >"$st/created"
     out='{"number": 200, "id": 20000, "html_url": "https://github.com/sssoto17/sunny-pastures/issues/200"}' ;;
+  "POST repos/sssoto17/sunny-pastures/issues/200/labels")
+    printf '%s\n' "$(jq -c . <<<"$input")" >"$st/labelled"
+    out='[]' ;;
   "POST repos/sssoto17/sunny-pastures/issues/"*/sub_issues)
     printf '%s %s\n' "${path#repos/sssoto17/sunny-pastures/issues/}" "$(jq -c . <<<"$input")" >"$st/linked"
     out='{}' ;;
@@ -302,17 +305,46 @@ expect_err "scripts/issue-fields.sh 200 --type Chore --priority P2 --size S --we
 assert "issue-fields isn't run" test -z "$fields"
 
 # --- the Project refused (the cloud proxy, #346) -------------------------------------------------
-# issue-fields.sh skips the Project step (exit 4): the issue is filed, read back, and this exits
-# 4 too, after saying what is done.
+# issue-fields.sh skips the Project step (exit 4): the issue is filed, gets `triage` (its
+# Priority, Size and Week aren't on the Project yet), is read back, and this exits 4 too, after
+# saying what is done. Without triage the issue showed in no triage search (#359, 18 Nov).
 reset
 echo 4 >"$work/fail-fields"
+readback chore,area:tools,triage "M2 Sim properties + factory" 73 Chore
 case_ "${base[@]}" "${three[@]}"
 expect_code 4
 expect_out "Status:   ?"
 expect_out "Parent:   #73"
+expect_call "api -X POST $R/issues/200/labels -f labels[]=triage --silent"
+assert "triage is added by name" test "$(cat "$st/labelled" 2>/dev/null)" == '{"labels":["triage"]}'
 expect_err "skipped the Project step"
-expect_err "#200 is filed with its labels, milestone, type and parent; its Project step is left"
+expect_err "#200 is filed with its labels, milestone, type and parent, and carries \`triage\` until its Project step runs"
 expect_no_call "graphql"
+
+# A field left out already put triage on at create: no second label call.
+reset
+echo 4 >"$work/fail-fields"
+readback chore,area:tools,triage "M2 Sim properties + factory" 73 Chore
+case_ "${base[@]}" --size S
+expect_code 4
+expect_created .labels '["chore","area:tools","triage"]'
+expect_no_call "/issues/200/labels"
+
+# The read-back must show triage after a skipped Project step.
+reset
+echo 4 >"$work/fail-fields"
+case_ "${base[@]}" "${three[@]}"
+expect_code 1
+expect_err "missing label triage"
+
+# Adding triage fails: the issue exists, so say so and print the command that finishes it.
+reset
+echo 4 >"$work/fail-fields"
+echo "gh: Server Error (HTTP 502)" >"$st/fail_POST_${R//\//_}_issues_200_labels"
+case_ "${base[@]}" "${three[@]}"
+expect_code 1
+expect_err "#200 was created (https://github.com/sssoto17/sunny-pastures/issues/200) and its Project step skipped, but \`triage\` couldn't be added"
+expect_err "gh api -X POST repos/sssoto17/sunny-pastures/issues/200/labels -f 'labels[]=triage'"
 
 # --- the native issue type ----------------------------------------------------------------------
 # Each type label maps to a native type (triage-labels.md, Types), passed to issue-fields.sh and
