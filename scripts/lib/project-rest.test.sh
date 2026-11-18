@@ -46,6 +46,8 @@ check "a field the item lacks reads as null" - "$(fv Priority)"
 
 check "the endpoints are the user-owned Project's" users/sssoto17/projectsV2/3 "$PROJECT_API"
 check "the skipped-step exit code is its own" 4 "$PROJECT_SKIPPED"
+[[ $PROJECT_REFUSED_WHY == *"gh auth refresh -h github.com -s project"* ]]
+check "the refusal's reason names the local fix too" 0 "$?"
 
 # The cloud proxy's answer, as gh printed it on 18 Nov 2026 from a cloud session.
 echo 'gh: This GitHub API path is not available: sessions are bound to their configured repositories. Use repository-scoped endpoints (repos/{owner}/{repo}/...). (HTTP 403)' >"$work/err"

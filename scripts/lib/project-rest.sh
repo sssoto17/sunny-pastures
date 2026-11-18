@@ -18,6 +18,10 @@ PROJECT_URL=https://github.com/users/$PROJECT_OWNER/projects/$PROJECT_NUMBER
 # (#346, criterion 3). The cloud GitHub proxy answers 403 for any path outside repos/<owner>/<repo>.
 # shellcheck disable=SC2034
 PROJECT_SKIPPED=4
+# What a skip message says about the 403: it isn't always the proxy. Locally, a token without the
+# `project` scope is refused too, and the fix there is the scope, not another session.
+# shellcheck disable=SC2034
+PROJECT_REFUSED_WHY='HTTP 403, above: the cloud proxy refuses it; locally, a token without the `project` scope is refused too, and `gh auth refresh -h github.com -s project` adds it'
 
 # jq definitions for a REST item's field values. A single-select value is an object whose name is
 # {raw, html} (the "Get an item" example); an iteration's title is read the same way; text,
