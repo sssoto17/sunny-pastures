@@ -1348,6 +1348,9 @@ const rowCells = (text) =>
 		.replace(/\|\s*$/, "")
 		.split("|")
 		.map((c) => c.trim());
+// A row's cells as one string, to match a row before and now: padding and the optional outer pipes
+// change no cell, so a re-padded or re-wrapped row is the same row and waives nothing again (#345).
+const rowKey = (text) => rowCells(text).join("|");
 export const parseException = (text) => {
 	const cells = rowCells(text);
 	return {
@@ -1411,7 +1414,7 @@ const spentRows = (baseRows, allNow, addedRows) => {
 		.filter(({ e }) => !rewritten.has(e.id))
 		.map(({ r, e }) => {
 			const re = e.path && !neverMatches(e.path) ? globToRegExp(e.path) : null;
-			const kept = allNow.find((n) => n.text.trim() === r.text.trim());
+			const kept = allNow.find((n) => rowKey(n.text) === rowKey(r.text));
 			return {
 				id: e.id,
 				path: e.path,
@@ -1667,8 +1670,8 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 	const before = constraints
 		? rowLines(oldContent(mergeBase, constraints.oldPath ?? constraints.path) ?? [])
 		: allNow;
-	const rowsBefore = new Set(before.map((r) => r.text.trim()));
-	const addedRows = now.waiving.filter((r) => !rowsBefore.has(r.text.trim()));
+	const rowsBefore = new Set(before.map((r) => rowKey(r.text)));
+	const addedRows = now.waiving.filter((r) => !rowsBefore.has(rowKey(r.text)));
 	// An ID used twice in the file fails, every row of it, and neither one waives (review of #131).
 	// An ID reused after its row was removed in an earlier PR needs the history: a known limit.
 	const ids = allNow.map((r) => ({ line: r.line, id: parseException(r.text).id }));
