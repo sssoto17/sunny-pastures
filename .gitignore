@@ -40,4 +40,4 @@ supabase/.temp/
 
 # Stryker (stryker.config.mjs): its sandbox and reports
 .stryker-tmp/
-reports/
+/reports/mutation/

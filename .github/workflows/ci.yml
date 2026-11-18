@@ -196,8 +196,9 @@ jobs:
       # is in the script, not an `if:`, so the step always runs (the floor guard's check-removed).
       - name: Mutate the changed packages/sim source files
         run: |
-          files=$(git diff --name-only --diff-filter=AMR "$SINCE...HEAD" -- 'packages/sim/src/*.ts' |
-            grep -v -e '/tests/' -e '\.test\.ts$' | paste -sd, -) || true
+          # A ref git can't read fails the step here; only grep's "no match" is allowed.
+          changed=$(git diff --name-only --diff-filter=AMR "$SINCE...HEAD" -- 'packages/sim/src/*.ts')
+          files=$( (grep -v -e '/tests/' -e '\.test\.ts$' <<<"$changed" || true) | paste -sd, -)
           if [[ -z $files ]]; then
             echo "No packages/sim source file changed: nothing to mutate."
             exit 0

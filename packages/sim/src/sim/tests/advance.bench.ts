@@ -10,6 +10,7 @@
 // (#87); and every add-on on every facility with a full silo, so the Loops and Collectors run
 // until the crops or the barn run out (#88, MUST-07.4).
 import { expect, it } from "vitest";
+import type { BenchRegistration } from "vitest";
 
 import type { AddOn, Content } from "../../content/index.js";
 import { createSim, sliceContent } from "../../index.js";
@@ -20,8 +21,14 @@ const content: Content = sliceContent;
 const sim = createSim(content);
 const thirtyDays = 30 * 24 * 60 * 60 * 1000;
 
-/** Every good a list of goods asks for, in storage: crops in the silo, the rest in the barn. */
-function stocked(farm: FarmState, goods: readonly { good: string; amount: number }[]): FarmState {
+/**
+ * Adds every good a list asks for to storage: crops in the silo, the rest in the barn. It skips
+ * storage's capacity check on purpose: a job or a feed takes the goods back out at once.
+ */
+function stockGoods(
+	farm: FarmState,
+	goods: readonly { good: string; amount: number }[],
+): FarmState {
 	return goods.reduce<FarmState>((current, { good, amount }) => {
 		const store = good in content.crops ? "silo" : "barn";
 		const held = current[store][good] ?? 0;
@@ -61,14 +68,14 @@ const working: FarmState = content.facilities.reduce((farm, facility, index) => 
 	const [[recipe, { inputs }] = ["", { inputs: [] }]] = Object.entries(facility.recipes);
 	const start = { type: "startJob", facility: index, recipe } as const;
 	return Array.from({ length: slots }).reduce<FarmState>(
-		(current) => expectAccepted(sim.apply(stocked(current, inputs), start, current.time)),
+		(current) => expectAccepted(sim.apply(stockGoods(current, inputs), start, current.time)),
 		bought,
 	);
 }, planted);
 const fed: FarmState = content.pens.reduce((farm, pen, index) => {
 	const bought = expectAccepted(sim.apply(farm, { type: "buyPen", pen: index }, farm.time));
 	return Array.from({ length: pen.animals + pen.troughCapacity }).reduce<FarmState>((current) => {
-		const feed = stocked(current, [{ good: pen.feed, amount: 1 }]);
+		const feed = stockGoods(current, [{ good: pen.feed, amount: 1 }]);
 		return expectAccepted(sim.apply(feed, { type: "feed", pen: index }, current.time));
 	}, bought);
 }, working);
@@ -129,9 +136,19 @@ const runs = { warmupIterations: 3, warmupTime: 0, iterations: 5, time: 0 };
 
 /**
  * The medians judged against a budget: one set of 5 runs, and a second only when the first is over
- * ("Timing checks", "Over budget"). The check passes when the smaller is within the budget.
+ * ("Timing checks", "Over budget"). The check passes when the smaller is within the budget. Each
+ * median is per call: a run's time divided by the calls it makes.
  */
-async function medians(measure: () => Promise<number>, budget: number): Promise<number[]> {
+async function measureMedians(
+	measured: BenchRegistration<string>,
+	calls: number,
+	budget: number,
+): Promise<number[]> {
+	const measure = async () => {
+		const { latency } = await measured.run(runs);
+		expect(latency.samplesCount).toBe(runs.iterations);
+		return latency.p50 / calls;
+	};
 	const first = await measure();
 	return first <= budget ? [first] : [first, await measure()];
 }
@@ -148,23 +165,15 @@ it("advances 30 days and applies an action within the sim speed budget", async (
 			for (const action of everyAction) sim.apply(lateFarm, action, lateFarm.time);
 		}
 	});
-	const advanceMs = await medians(async () => {
-		const { latency } = await advance.run(runs);
-		expect(latency.samplesCount).toBe(runs.iterations);
-		return latency.p50;
-	}, advanceBudget);
-	const applyMs = await medians(async () => {
-		const { latency } = await apply.run(runs);
-		expect(latency.samplesCount).toBe(runs.iterations);
-		return latency.p50 / applyCalls;
-	}, applyBudget);
+	const advanceMs = await measureMedians(advance, 1, advanceBudget);
+	const applyMs = await measureMedians(apply, applyCalls, applyBudget);
 
-	const shown = (ms: number[]) => ms.map((m) => `${m.toFixed(3)} ms`).join(", then ");
+	const formatMs = (ms: number[]) => ms.map((m) => `${m.toFixed(3)} ms`).join(", then ");
 	await annotate(
-		`advance() 30 days, median of 5: ${shown(advanceMs)} (budget ${String(advanceBudget)} ms)`,
+		`advance() 30 days, median of 5: ${formatMs(advanceMs)} (budget ${String(advanceBudget)} ms)`,
 	);
 	await annotate(
-		`apply() per call, median of 5: ${shown(applyMs)} (budget ${String(applyBudget)} ms)`,
+		`apply() per call, median of 5: ${formatMs(applyMs)} (budget ${String(applyBudget)} ms)`,
 	);
 	expect(Math.min(...advanceMs)).toBeLessThanOrEqual(advanceBudget);
 	expect(Math.min(...applyMs)).toBeLessThanOrEqual(applyBudget);
