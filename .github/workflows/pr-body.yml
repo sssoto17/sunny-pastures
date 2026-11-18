@@ -6,6 +6,8 @@
 # (ADR-0002, area 2). The body is untrusted text: the script reads it from $GITHUB_EVENT_PATH,
 # never through an expression in `run:`. Actions are GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
 name: pr-body
+# The twin gate's key (#358): the event's action and the merge commit it tests, after the title.
+run-name: ${{ format('{0} · {1} {2}', github.event.pull_request.title, github.event.action, github.sha) }}
 
 on:
   pull_request:
@@ -16,14 +18,51 @@ permissions:
 
 # No concurrency group (#264): a push to a stacked part fires two events on one head, and body
 # edits fire more, so any cancelling or queueing left a cancelled twin of a required check on the
-# head, which GitHub read as its latest result (throwaway stack #315). Both jobs take seconds.
+# head, which GitHub read as its latest result (throwaway stack #315). The second `synchronize`
+# repeats the first run's results through the `twin` job, as in ci.yml (#358); an `edited` run is
+# new input and always runs, and a twin that sees one started after the first run runs too.
 
 jobs:
+  # #358: a push to a stacked part fires synchronize twice on one head, and both runs test the
+  # same merge commit. The later run waits for the first and repeats what its jobs concluded:
+  # each job below skips where the first run's passed or skipped, and fails at its first step
+  # otherwise. Every other run skips this job, and the jobs then run as before (`!cancelled()`).
+  twin:
+    name: pr-body / twin
+    if: github.event.action == 'synchronize' && github.event.pull_request.stack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read # this workflow's runs on the head, and the first run's jobs
+    outputs:
+      mirror: ${{ steps.twin.outputs.mirror }}
+      source: ${{ steps.twin.outputs.source }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - id: twin
+        uses: ./.github/actions/twin
+        with:
+          token: ${{ github.token }}
+
   pr-body:
     name: guard / pr-body
+    needs: [twin]
+    if: ${{ !cancelled() && !contains(fromJSON('["success","skipped"]'), fromJSON(needs.twin.outputs.mirror || '{}')['pr-body']) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Repeat the first run's result (#358)
+        if: fromJSON(needs.twin.outputs.mirror || '{}')[github.job]
+        env:
+          RESULT: ${{ fromJSON(needs.twin.outputs.mirror || '{}')[github.job] }}
+          SOURCE: ${{ needs.twin.outputs.source }}
+        run: |
+          echo "::error title=twin::$RESULT in $SOURCE, which tested this merge commit; this twin repeats it (#358)"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -37,12 +76,22 @@ jobs:
   # the read-only pull-requests scope and the token in env, never in a `run:` expression.
   stack-base:
     name: guard / stack-base
+    needs: [twin]
+    if: ${{ !cancelled() && !contains(fromJSON('["success","skipped"]'), fromJSON(needs.twin.outputs.mirror || '{}')['stack-base']) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
     steps:
+      - name: Repeat the first run's result (#358)
+        if: fromJSON(needs.twin.outputs.mirror || '{}')[github.job]
+        env:
+          RESULT: ${{ fromJSON(needs.twin.outputs.mirror || '{}')[github.job] }}
+          SOURCE: ${{ needs.twin.outputs.source }}
+        run: |
+          echo "::error title=twin::$RESULT in $SOURCE, which tested this merge commit; this twin repeats it (#358)"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
