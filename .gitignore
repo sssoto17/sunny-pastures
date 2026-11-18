@@ -41,3 +41,5 @@ supabase/.temp/
 # Stryker (stryker.config.mjs): its sandbox and reports
 .stryker-tmp/
 /reports/mutation/
+# A local run leaves its Vitest setup files in the root when it ends early or on large files
+/stryker-setup-*.js

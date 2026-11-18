@@ -476,7 +476,8 @@ describe.each(contents)("the sim's properties, over %s", (_name, content) => {
 						expect(after.time).toBe(at);
 					}
 					// Refused for its time, not for another reason such as an occupied plot (#41, PR #156's
-					// review), and never vacuous: a harvest joins the log's actions when the log is empty.
+					// review), and never vacuous: a harvest always joins the log's actions, so an empty log
+					// still checks one.
 					const early = [...log.map(({ action }) => action), { type: "harvest", plot: 0 } as const];
 					for (const action of early) {
 						expect(sim.apply(final, action, final.time - back)).toEqual({

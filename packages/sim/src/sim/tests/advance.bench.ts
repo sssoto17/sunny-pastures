@@ -12,9 +12,8 @@
 import { expect, it } from "vitest";
 import type { BenchRegistration } from "vitest";
 
-import type { AddOn, Content } from "../../content/index.js";
 import { createSim, sliceContent } from "../../index.js";
-import type { Action, FarmState } from "../../index.js";
+import type { Action, AddOn, Content, FarmState } from "../../index.js";
 import { expectAccepted } from "./expectAccepted.js";
 
 const content: Content = sliceContent;
