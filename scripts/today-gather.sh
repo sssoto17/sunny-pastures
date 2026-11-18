@@ -310,6 +310,6 @@ add_section strays "$(printf '%s' "$strays" | LC_ALL=C sort)"
 
 printf '%s' "$report"
 if ((!board_ok)); then
-  echo "today-gather: skipped the board: GitHub refused Project $PROJECT_NUMBER here (HTTP 403, above), so week is - and ready and week are empty; orphans, worktrees and strays are whole. Run it again from a local session for the board: scripts/today-gather.sh --date $today" >&2
+  echo "today-gather: skipped the board: GitHub refused Project $PROJECT_NUMBER here ($PROJECT_REFUSED_WHY), so week is - and ready and week are empty; orphans, worktrees and strays are whole. Run it again where the Project can be reached for the board: scripts/today-gather.sh --date $today" >&2
   exit "$PROJECT_SKIPPED"
 fi

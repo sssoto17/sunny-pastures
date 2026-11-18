@@ -482,7 +482,8 @@ expect_section orphans "#7${T}Lonely"
 expect_section worktrees ".claude/worktrees/9-merged${T}chore/9-merged${T}merged${T}#114${T}-"
 expect_err "(HTTP 403)"
 expect_err "today-gather: skipped the board: GitHub refused Project 3 here"
-expect_err "Run it again from a local session for the board: scripts/today-gather.sh --date 2026-11-09"
+expect_err "Run it again where the Project can be reached for the board: scripts/today-gather.sh --date 2026-11-09"
+expect_err "gh auth refresh -h github.com -s project"
 assert "expected no 'no Week iteration' warning when the board was skipped" test "${err/no Week iteration/}" == "$err"
 
 # --- the script's own --jq filters, over answers in GitHub's shape ------------------------------

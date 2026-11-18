@@ -12,7 +12,11 @@ scripts below already use them.
   issue type, milestone, parent and Project fields in one checked command (`--help`; tests:
   `bash scripts/new-issue.test.sh`). Whoever files an issue sets its four fields as **Issue fields**
   below says.
-- **Read an issue**: `gh issue view <number> --json number,title,body,labels,comments`.
+- **Read an issue**:
+  `gh api repos/sssoto17/sunny-pastures/issues/<number> --jq '{number, title, body, labels: [.labels[].name]}'`,
+  and its comments with
+  `gh api repos/sssoto17/sunny-pastures/issues/<number>/comments --jq '.[].body'` (REST, so it works
+  in a cloud lane too).
 - **List issues**:
   `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`
   with appropriate `--label` and `--state` filters.
@@ -59,7 +63,7 @@ equivalents:
   `gh pr close`.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with
-`gh pr view 42` and fall back to `gh issue view 42`.
+`gh api repos/sssoto17/sunny-pastures/issues/42 --jq 'has("pull_request")'`, which answers for both.
 
 ## When a skill says "publish to the issue tracker"
 
