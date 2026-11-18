@@ -3,7 +3,8 @@
 # native issue type, a milestone, a body file, under its workstream parent, on the Project in
 # Backlog, with `triage` while the type, Priority, Size or Week is missing. The coordinator
 # files issues only through this script (#153). Names are checked against GitHub before the
-# first write, so a typo creates nothing. Tests: scripts/new-issue.test.sh.
+# first write, so a typo creates nothing. REST only (`gh api`), local and cloud alike (#346;
+# docs/agents/github-rest.md). Tests: scripts/new-issue.test.sh.
 # Needs bash 4.4+ and an authenticated gh with the `project` scope (for issue-fields.sh).
 set -euo pipefail
 
@@ -55,9 +56,15 @@ the parent, and stops on an unknown name. issue-fields.sh checks the field names
 exists: a bad one there leaves the issue created without fields, and the error prints the
 command to finish it.
 
+Where GitHub refuses the Project (HTTP 403, as the cloud's GitHub proxy does), the issue is still
+created with its labels, milestone, native type and parent; issue-fields.sh names the Project
+step it skipped and the command that finishes it. The issue gets `triage` (Priority, Size and
+Week aren't set yet), which that command removes once all four are set, and this exits 4.
+
 Exit codes: 0 done, 1 a write failed or the read-back differs (stderr says what exists),
 2 bad arguments, an unknown name, or the repo's issue types and the mapping disagree (nothing
-created), 3 GitHub couldn't be read before the first write (nothing created).
+created), 3 GitHub couldn't be read before the first write (nothing created), 4 the issue is
+filed but its Project step was skipped: run the printed command where the Project can be reached.
 
 example: scripts/new-issue.sh --title "Bench advance in CI" --type chore --area ci-cd \
            --milestone "M3 Actions persist end to end" --body-file .scratch/issue-bench.md --parent 58 \
@@ -154,7 +161,7 @@ for pair in --priority=Priority --size=Size --week=Week; do
 done
 
 # --- reads: every name checked before the first write -------------------------------------------
-labels=$(gh label list --repo "$OWNER/$REPO" --limit 500 --json name --jq '.[].name') ||
+labels=$(gh api --paginate "repos/$OWNER/$REPO/labels?per_page=100" --jq '.[].name') ||
   die 3 "could not read the repo's labels; nothing was created"
 grep -qxF -- "$type" <<<"$labels" ||
   die 2 "the type label \"$type\" doesn't exist in $OWNER/$REPO. Nothing was created."
@@ -163,20 +170,18 @@ if ! grep -qxF -- "$area" <<<"$labels"; then
   die 2 "unknown area \"$area\". Valid areas: $(join "${areas[@]}"). Nothing was created."
 fi
 
-# The repo's issue types are read with GraphQL (repository.issueTypes); REST lists them only for
-# an organisation, and this repo is user-owned.
-types=$(gh api graphql -F owner="$OWNER" -F repo="$REPO" -f query='
-  query($owner: String!, $repo: String!) {
-    repository(owner: $owner, name: $repo) { issueTypes(first: 25) { nodes { name isEnabled } } }
-  }' --jq '.data.repository.issueTypes.nodes[] | select(.isEnabled) | .name') ||
+# The repo's enabled issue types (REST "List issue types for a repository").
+types=$(gh api "repos/$OWNER/$REPO/issue-types" --jq '.[] | select(.is_enabled) | .name') ||
   die 3 "could not read the repo's issue types; nothing was created"
 # The whole mapping is checked, not only this --type, so a rename is caught on the next filing.
 why=$(check_native_types "$types") || die 2 "$why. Nothing was created."
 
-milestones=$(gh api "repos/$OWNER/$REPO/milestones?state=open&per_page=100" --jq '.[].title') ||
+# "number<TAB>title" per open milestone: REST creates an issue in a milestone by its number.
+milestones=$(gh api "repos/$OWNER/$REPO/milestones?state=open&per_page=100" --jq '.[] | [.number, .title] | @tsv') ||
   die 3 "could not read the open milestones; nothing was created"
-if ! grep -qxF -- "$milestone" <<<"$milestones"; then
-  mapfile -t open_milestones <<<"$milestones"
+milestone_number=$(awk -F'\t' -v t="$milestone" '$2 == t { print $1; exit }' <<<"$milestones")
+if [[ -z $milestone_number ]]; then
+  mapfile -t open_milestones < <(cut -f2- <<<"$milestones")
   die 2 "unknown milestone \"$milestone\". Open milestones: $(join "${open_milestones[@]}"). Nothing was created."
 fi
 
@@ -190,18 +195,35 @@ if [[ -n $parent ]]; then
 fi
 
 # --- writes -------------------------------------------------------------------------------------
-create=(gh issue create --repo "$OWNER/$REPO" --title "$title" --body-file "$body_file"
-  --label "$type" --label "$area" --milestone "$milestone")
-((${#missing[@]})) && create+=(--label triage)
-[[ -n $parent ]] && create+=(--parent "$parent")
-url=$("${create[@]}") ||
-  die 1 "gh issue create failed. It may have created the issue without its parent link: check \`gh issue list --search \"$title in:title\"\` before re-running."
-url=$(tail -n1 <<<"$url")
-number=${url##*/}
-[[ $number =~ ^[1-9][0-9]*$ ]] || die 1 "gh issue create printed no issue URL (got \"$url\"); check the repo before re-running"
+# REST "Create an issue": labels, milestone (by number) and the native type (by name) in one call;
+# -F body=@file reads the body from the file. Then the parent link (REST "Add sub-issue", by the
+# new issue's id).
+create=(gh api -X POST "repos/$OWNER/$REPO/issues" -f title="$title" -F body=@"$body_file"
+  -f "labels[]=$type" -f "labels[]=$area" -F milestone="$milestone_number" -f type="$issue_type")
+((${#missing[@]})) && create+=(-f "labels[]=triage")
+row=$("${create[@]}" --jq '[.number, .id, .html_url] | @tsv') ||
+  die 1 "creating the issue failed. Check whether it exists before re-running: gh api \"repos/$OWNER/$REPO/issues?state=open&per_page=5\" --jq '.[].title'"
+IFS=$'\t' read -r number issue_id url <<<"$row"
+[[ $number =~ ^[1-9][0-9]*$ && $issue_id =~ ^[1-9][0-9]*$ ]] ||
+  die 1 "GitHub's answer to the create had no issue number (got \"$row\"); check the repo before re-running"
+
+if [[ -n $parent ]]; then
+  gh api -X POST "repos/$OWNER/$REPO/issues/$parent/sub_issues" -F sub_issue_id="$issue_id" --silent ||
+    die 1 "#$number was created ($url), but not linked under #$parent. Run: gh api -X POST repos/$OWNER/$REPO/issues/$parent/sub_issues -F sub_issue_id=$issue_id, then scripts/issue-fields.sh $number$(printf ' %q' --type "$issue_type" "${fields[@]}")"
+fi
 
 fields=(--type "$issue_type" "${fields[@]}")
-if ! fields_out=$("$here/issue-fields.sh" "$number" "${fields[@]}"); then
+fields_code=0
+fields_out=$("$here/issue-fields.sh" "$number" "${fields[@]}") || fields_code=$?
+if ((fields_code == 4)); then
+  # The Project step was skipped (issue-fields.sh said so and printed the command), so Priority,
+  # Size and Week aren't set yet: the issue carries `triage` until that command runs, which takes
+  # it off once all four are set. Without it the issue shows in no triage search (#359, 18 Nov).
+  if ((${#missing[@]} == 0)); then
+    gh api -X POST "repos/$OWNER/$REPO/issues/$number/labels" -f "labels[]=triage" --silent ||
+      die 1 "#$number was created ($url) and its Project step skipped, but \`triage\` couldn't be added. Run: gh api -X POST repos/$OWNER/$REPO/issues/$number/labels -f 'labels[]=triage'"
+  fi
+elif ((fields_code)); then
   rerun=$(printf ' %q' "${fields[@]}")
   die 1 "#$number was created ($url), but its Project fields weren't set. Fix the error above, then run: scripts/issue-fields.sh $number${rerun}"
 fi
@@ -221,7 +243,7 @@ for want in "$type" "$area"; do
   [[ ",$got_labels," == *",$want,"* ]] || mismatches+=("missing label $want")
 done
 [[ $got_type == "$issue_type" ]] || mismatches+=("issue type is $got_type, expected $issue_type")
-if ((${#missing[@]})); then
+if ((${#missing[@]} || fields_code == 4)); then
   [[ ",$got_labels," == *",triage,"* ]] || mismatches+=("missing label triage")
 else
   [[ ",$got_labels," != *",triage,"* ]] || mismatches+=("triage is on, though all four are set")
@@ -243,4 +265,8 @@ if ((${#missing[@]})); then
     "$number" "$(join "${missing[@]}")" "$number" >&2
   for f in "${missing[@]}"; do printf ' --%s <%s>' "${f,,}" "$f" >&2; done
   printf '\n' >&2
+fi
+if ((fields_code == 4)); then
+  echo "new-issue: #$number is filed with its labels, milestone, type and parent, and carries \`triage\` until its Project step runs (see issue-fields above)" >&2
+  exit 4
 fi

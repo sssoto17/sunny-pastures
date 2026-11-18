@@ -14,33 +14,30 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
 
 # --- fake gh ----------------------------------------------------------------------------------
-# Each call appends its arguments to $work/calls, one per line, then a "--" line. The types
-# query serves $work/types; the mutation records "node<TAB>type id" in $work/set; the issue list
-# serves $work/rows (or its --jq filter over $work/page.json); the read-back of #N serves
-# $work/readback.N, else the name of the type set on I_N, else "-". $work/fail-types,
-# fail-set.<node> and fail-list make those calls exit 1.
+# Each call appends its arguments to $work/calls, one per line, then a "--" line. Only `gh api`
+# over REST is answered (#346): the issue types serve $work/types (enabled names, as the --jq
+# filter prints them); PATCH .../issues/<N> records "N<TAB>type name" in $work/set; the issue
+# list serves $work/rows (or its --jq filter over $work/page.json); the read-back of #N serves
+# $work/readback.N, else the name of the type set on #N, else "-". $work/fail-types,
+# fail-set.<N> and fail-list make those calls exit 1.
 cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 dir=$(dirname "$0")/..
 for a in "$@"; do printf '%s\n' "$a"; done >>"$dir/calls"
 printf -- '--\n' >>"$dir/calls"
-if [[ $1 == api && $2 == graphql ]]; then
-  if [[ $* == *"query=mutation"* ]]; then
-    for a in "$@"; do
-      case $a in
-        issue=*) node=${a#issue=} ;;
-        type=*) type=${a#type=} ;;
-      esac
-    done
-    [[ -f $dir/fail-set.$node ]] && { echo "fake: updateIssue failed" >&2; exit 1; }
-    printf '%s\t%s\n' "$node" "$type" >>"$dir/set"
-    exit
-  fi
-  [[ -f $dir/fail-types ]] && { echo "fake: graphql failed" >&2; exit 1; }
+if [[ $1 == api && $2 == -X && $3 == PATCH && $4 =~ /issues/([0-9]+)$ ]]; then
+  n=${BASH_REMATCH[1]}
+  [[ $5 == -f && $6 == type=* ]] || { echo "fake: unexpected PATCH: $*" >&2; exit 99; }
+  [[ -f $dir/fail-set.$n ]] && { echo "gh: Validation Failed (HTTP 422)" >&2; exit 1; }
+  printf '%s\t%s\n' "$n" "${6#type=}" >>"$dir/set"
+  exit
+fi
+if [[ $1 == api && $2 == */issue-types ]]; then
+  [[ -f $dir/fail-types ]] && { echo "gh: Server Error (HTTP 502)" >&2; exit 1; }
   cat "$dir/types"
   exit
 fi
-if [[ $1 == api && $2 == -X ]]; then
+if [[ $1 == api && $2 == -X && $3 == GET ]]; then
   [[ -f $dir/fail-list ]] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
   if [[ -f $dir/page.json ]]; then
     while (($#)) && [[ $1 != --jq ]]; do shift; done
@@ -53,8 +50,7 @@ fi
 if [[ $1 == api && $2 =~ /issues/([0-9]+)$ ]]; then
   n=${BASH_REMATCH[1]}
   [[ -f $dir/readback.$n ]] && { cat "$dir/readback.$n"; exit; }
-  id=$(awk -F'\t' -v n="I_$n" '$1 == n { t = $2 } END { print t }' "$dir/set" 2>/dev/null)
-  name=$(awk -F'\t' -v i="$id" '$1 == i { print $2 }' "$dir/types")
+  name=$(awk -F'\t' -v n="$n" '$1 == n { t = $2 } END { print t }' "$dir/set" 2>/dev/null)
   echo "${name:--}"
   exit
 fi
@@ -64,16 +60,15 @@ FAKE
 chmod +x "$work/bin/gh"
 
 # --- fixtures ---------------------------------------------------------------------------------
-# A filter row: number, kind, node id, native type or "-", labels joined by \x1f (written "|").
+# A filter row: number, kind, native type or "-", labels joined by \x1f (written "|").
 T=$'\t'
 US=$'\x1f'
 row() { # number kind type labels
-  printf '%s%s%s%sI_%s%s%s%s%s\n' "$1" "$T" "$2" "$T" "$1" "$T" "$3" "$T" "${4//|/$US}"
+  printf '%s%s%s%s%s%s%s\n' "$1" "$T" "$2" "$T" "$3" "$T" "${4//|/$US}"
 }
 reset() { # rows... -> a fresh state serving those rows
   rm -f "$work"/calls "$work"/rows "$work"/set "$work"/fail-* "$work"/readback.* "$work"/page.json
-  printf 'IT_chore%sChore\nIT_bug%sBug\nIT_feature%sFeature\nIT_design%sDesign\n' "$T" "$T" "$T" "$T" \
-    >"$work/types"
+  printf '%s\n' Chore Bug Feature Design >"$work/types"
   printf '%s' "$*" >"$work/rows"
 }
 
@@ -99,7 +94,7 @@ expect_err() { assert "expected stderr to contain: $1" contains "$err" "$1"; }
 expect_out_is() { assert "expected stdout to be exactly: $1" test "$out" == "$1"; }
 expect_no_gh() { assert "expected no gh calls at all" test -z "$calls"; }
 expect_no_writes() {
-  if grep -q '^query=mutation' <<<"$calls"; then bad "expected no writes"; else ok; fi
+  if grep -qx PATCH <<<"$calls"; then bad "expected no writes"; else ok; fi
 }
 # The gh calls joined into one line each.
 call_lines() { awk '$0 == "--" { print line; line = ""; next } { line = line (line == "" ? "" : " ") $0 }' <<<"$calls"; }
@@ -172,7 +167,7 @@ reset "$(row 17 issue Chore 'design|area:docs')"
 case_ --apply
 expect_code 0
 expect_out_is "#17${T}design${T}Chore -> Design${T}set"
-expect_call "-f issue=I_17 -f type=IT_design"
+expect_call "api -X PATCH repos/sssoto17/sunny-pastures/issues/17 -f type=Design --silent"
 
 # --- apply: writes each by id, reads each back --------------------------------------------------
 reset "$mixed"
@@ -185,12 +180,14 @@ expect_out_is "#1${T}idea${T}Chore${T}set
 #102${T}spike${T}Chore${T}set
 #154${T}feature${T}Feature${T}set"
 expect_err "set 6, failed 0, skipped 0, already right 0"
-expect_call "-f issue=I_154 -f type=IT_feature"
+expect_call "api -X PATCH repos/sssoto17/sunny-pastures/issues/154 -f type=Feature --silent"
+expect_call "api repos/sssoto17/sunny-pastures/issue-types --jq"
+assert "expected no graphql call" test "$(grep -c graphql <<<"$calls")" -eq 0
 expect_call "api repos/sssoto17/sunny-pastures/issues/41 --jq .type.name // \"-\""
 
 # A failed write and a read-back that differs are listed; the rest still run.
 reset "$mixed"
-touch "$work/fail-set.I_28"
+touch "$work/fail-set.28"
 echo Chore >"$work/readback.154"
 case_ --apply
 expect_code 1
@@ -212,7 +209,7 @@ expect_no_writes
 
 # The repo's types and the mapping must agree, so a rename stops the run before it lists (#266).
 reset "$mixed"
-printf 'IT_task%sTask\nIT_bug%sBug\nIT_feature%sFeature\nIT_design%sDesign\n' "$T" "$T" "$T" "$T" >"$work/types"
+printf '%s\n' Task Bug Feature Design >"$work/types"
 case_ --apply
 expect_code 3
 expect_out_is ""
