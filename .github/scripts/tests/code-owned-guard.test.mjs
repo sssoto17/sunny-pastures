@@ -182,11 +182,13 @@ describe("checkCodeOwned", () => {
 	});
 
 	// The check reports on the event's head; files and reviews for a newer head can't judge it.
-	it("holds a run whose head has moved", async () => {
+	// No run follows a push (#379), so the new head waits for its next review.
+	it("holds a run whose head has moved, leaving the new head to its next review", async () => {
 		const gh = github({ files: ["README.md"], head: OLD });
 		const r = await check(gh);
 		expect(r.ok).toBe(false);
 		expect(r.message).toContain("moved");
+		expect(r.message).toContain("next review");
 	});
 
 	it("can't run on a file list GitHub cut short", async () => {
@@ -199,6 +201,51 @@ describe("checkCodeOwned", () => {
 		await expect(
 			checkCodeOwned(event(), { rules: parseCodeOwners("# none\n"), ...gh.deps }),
 		).rejects.toThrow("CODEOWNERS");
+	});
+});
+
+// #379: the check runs on `pull_request_review` only, and every review ends in a pass or a fail on
+// the PR's reviews as REST lists them, whatever review the event carries.
+describe("checkCodeOwned on a review event", () => {
+	const onReview = (state, commit_id = HEAD, login = "sssoto17") => ({
+		...event(),
+		action: state === "DISMISSED" ? "dismissed" : "submitted",
+		review: { id: 9, state: state.toLowerCase(), commit_id, user: { login } },
+	});
+	const verdict = async (ev, files, reviews) =>
+		(await checkCodeOwned(ev, { rules: RULES, ...github({ files, reviews }).deps })).ok;
+
+	it("passes the bot's approval of a PR with no code-owned path", async () => {
+		const bot = review(1, "APPROVED", HEAD, "sunny-reviewer[bot]");
+		expect(await verdict(onReview("APPROVED", HEAD, bot.user.login), ["README.md"], [bot])).toBe(
+			true,
+		);
+	});
+
+	it("fails a code-owned PR on the bot's approval", async () => {
+		const bot = review(1, "APPROVED", HEAD, "sunny-reviewer[bot]");
+		const ev = onReview("APPROVED", HEAD, bot.user.login);
+		expect(await verdict(ev, ["CONSTRAINTS.md"], [bot])).toBe(false);
+	});
+
+	it("passes a code-owned PR on the admin's approval of the head", async () => {
+		const ev = onReview("APPROVED");
+		expect(await verdict(ev, ["CONSTRAINTS.md"], [review(1, "APPROVED")])).toBe(true);
+	});
+
+	it("fails a code-owned PR on a COMMENTED review, rather than skipping", async () => {
+		const ev = onReview("COMMENTED");
+		expect(await verdict(ev, ["CONSTRAINTS.md"], [review(1, "COMMENTED")])).toBe(false);
+	});
+
+	it("fails a code-owned PR when the admin's approval is dismissed", async () => {
+		const ev = onReview("DISMISSED");
+		expect(await verdict(ev, ["CONSTRAINTS.md"], [review(1, "DISMISSED")])).toBe(false);
+	});
+
+	it("fails a code-owned PR on an approval of an older head", async () => {
+		const ev = onReview("APPROVED", OLD);
+		expect(await verdict(ev, ["CONSTRAINTS.md"], [review(1, "APPROVED", OLD)])).toBe(false);
 	});
 });
 
@@ -292,5 +339,42 @@ describe("code-owned-guard.mjs", () => {
 		const r = await run(undefined);
 		expect(r.status).toBe(2);
 		expect(r.out).toContain("cannot run");
+	});
+});
+
+// #379: a required check that a `pull_request` run and a review run both report on reads the
+// `pull_request` suite (PR #377), so the check runs on reviews only, once per review.
+describe("code-owned.yml", () => {
+	const yml = readFileSync(
+		fileURLToPath(new URL("../../workflows/code-owned.yml", import.meta.url)),
+		"utf8",
+	);
+	const code = yml.replace(/^\s*#.*$/gm, "");
+	const block = (key) => code.match(new RegExp(`^${key}:\\n((?:[ \\t]+.*\\n|\\n)*)`, "m"))?.[1];
+
+	it("runs on a submitted or dismissed review only", () => {
+		const on = block("on");
+		expect(on).toBeDefined();
+		expect(on.match(/^ {2}[\w_]+:/gm)).toEqual(["  pull_request_review:"]);
+		expect(on).toMatch(/types: \[submitted, dismissed\]/);
+	});
+
+	// A skipped required check reads as passing (ADR-0002, #312), so a COMMENTED review would pass.
+	it("never skips the job", () => {
+		expect(block("jobs")).not.toMatch(/^\s+if:/m);
+	});
+
+	it("keeps one run per PR, cancelling an older one", () => {
+		const group = block("concurrency");
+		expect(group).toMatch(/group: .*github\.event\.pull_request\.number/);
+		expect(group).toMatch(/cancel-in-progress: true/);
+	});
+
+	// #337: a PR can't switch off the check that judges it or drop a path from its list.
+	it("runs the default branch's script and CODEOWNERS", () => {
+		expect(code).toContain("ref: ${{ github.event.repository.default_branch }}");
+		expect(code).toContain(
+			'node "$RUNNER_TEMP/code-owned/code-owned-guard.mjs" --codeowners "$RUNNER_TEMP/code-owned/CODEOWNERS"',
+		);
 	});
 });

@@ -6,6 +6,10 @@
 // ADR-0002 (area 2, "Code-owner review on stacks") hands #68 turning GitHub's code-owner review off
 // once this check is required; until then both hold.
 //
+// It runs on reviews only (#379): each submitted or dismissed review runs it once, on the PR's
+// reviews as REST lists them, so the review that fired the run is one input among the others and a
+// COMMENTED one fails a code-owned PR the admin hasn't approved rather than skipping the check.
+//
 // Which review counts: per reviewer, the latest review that isn't a comment, as GitHub reads it.
 // It must be APPROVED, on the head this run reports on (`commit_id`), by a user CODEOWNERS lists
 // as an owner of each code-owned path. So a dismissed or stale approval, a later Request changes,
@@ -55,7 +59,7 @@ export const isOwned = (rules, path) => (lastMatch(rules, path)?.owners.length ?
 export const ownersOf = (rules, path) => lastMatch(rules, path)?.users ?? [];
 
 /**
- * The verdict for a PR event: `{ ok, owned, message }`, after calling `escalate()` on a
+ * The verdict for a review event on a PR: `{ ok, owned, message }`, after calling `escalate()` on a
  * code-owned PR that lacks `review:admin` (CONSTRAINTS.md, "Escalation criteria": the label and its
  * one-line comment). `getPull`, `listFiles` (every page) and `listReviews` (every page) answer as
  * REST does. Throws CannotRun when it can't judge.
@@ -74,7 +78,7 @@ export const checkCodeOwned = async (
 		return {
 			ok: false,
 			owned: [],
-			message: `the head moved to ${pull.head.sha.slice(0, 7)}: the run for that head decides`,
+			message: `the head moved to ${pull.head.sha.slice(0, 7)}: its next review runs this check`,
 		};
 
 	// REST lists at most 3000 files; a shorter list than the PR's count could hide an owned path.

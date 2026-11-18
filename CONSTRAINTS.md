@@ -210,10 +210,10 @@ bot asks for a split. Auto-merge stays off until this section is merged (ADR-000
 A PR that meets any row carries `review:admin`. An agent that knows it adds the label at
 `gh pr create --label review:admin`. The reviewer bot checks every row on each review and adds the
 label when it's missing. For the Code-owned path row, the check `guard / code-owned` adds it from
-the diff as well (#337). Whoever adds it also posts a one-line comment that names every row the PR
-meets, for example "escalated: interface (sim exports)". Those comments are the tuning data (below).
-The bot checks these rows before the [split size](#split-size), so on a PR it escalates, the size is
-only a note.
+the diff as well, on the PR's first review, since it runs on reviews only (#337, #379). Whoever adds
+it also posts a one-line comment that names every row the PR meets, for example "escalated:
+interface (sim exports)". Those comments are the tuning data (below). The bot checks these rows
+before the [split size](#split-size), so on a PR it escalates, the size is only a note.
 
 <!-- prettier-ignore -->
 | Criterion | Applies when | Who adds the label | Why |

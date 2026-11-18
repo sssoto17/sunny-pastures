@@ -6,21 +6,28 @@
 # GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
 name: code-owned
 
+# Reviews only (#379): when a `pull_request` run and a review run both reported on one head, the
+# merge gate kept the `pull_request` run's failure after the review run passed (PR #377). `main`
+# needs an approval, so every PR gets a review, and with it this check, before it can merge. A push
+# leaves the new head without the check ("Expected") until its next review, which blocks, as it
+# should. A dismissed approval runs it again, red.
 on:
-  pull_request:
-    # `edited` covers a base change, which changes the diff.
-    types: [opened, edited, synchronize, reopened]
-  # An approval turns it green without a push; a dismissed one turns it red again.
   pull_request_review:
     types: [submitted, dismissed]
 
 permissions:
   contents: read
 
-# No concurrency group (#264): a cancelled twin of a required check on one head reads as its latest
-# result (throwaway stack #315). Each run reads the PR's state when it starts, so the last run on a
-# head judges the latest reviews. It takes seconds.
+# One run per PR (admin, 19 Nov): a review that lands while an older run is going cancels it, and
+# the newer run, which reads the PR's state when it starts, reports for the head. Each run takes
+# seconds, so the overlap is rare.
+concurrency:
+  group: code-owned-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
+# The job has no `if:`, on the review's state or anything else (#379): a skipped required check
+# reads as passing (ADR-0002, #312), so a COMMENTED review would turn it green. It always runs, and
+# the script passes or fails it.
 jobs:
   code-owned:
     name: guard / code-owned

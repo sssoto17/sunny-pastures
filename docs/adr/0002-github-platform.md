@@ -646,6 +646,21 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   and a flaky job gets two draws at turning a head red. On `150dbda`, `ci / test` timed out on one
   twin and passed on the other, and `ci / scripts`' `issue-fields.test.sh` failed on one and passed
   on the other.
+- **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). It ran on `pull_request`
+  and on `pull_request_review`, and on PR #377 the admin's approval didn't unblock the merge: the
+  review run passed in its own check suite, but the merge stayed blocked on the `pull_request` run's
+  earlier failure until that run was re-run by hand. So `code-owned.yml` triggers on
+  `pull_request_review` (`submitted`, `dismissed`) alone, one run per review, with nothing that
+  re-runs another run. `main` needs an approval, so no PR merges without a review, and so without
+  this check. A push leaves the new head without it ("Expected") until its next review, which
+  blocks, as it should. The job has no `if:`: a skipped required check reads as passing (above), so
+  a COMMENTED review would turn it green; it always runs and passes or fails on the diff and the
+  reviews. Unlike `ci`, `security` and `pr-body` (above), it has a `concurrency` group per PR with
+  `cancel-in-progress` (admin, 19 Nov): reviews don't come in twins on one push, and a run that a
+  newer review cancels is followed by the newer run on the same head. The workflow comes from the
+  PR's merge ref, as for `pull_request`; the script and CODEOWNERS still come from the default
+  branch (#337). The label `review:admin` it adds now lands at the first review, not at open; the
+  agent and the reviewer bot still add it earlier (CONSTRAINTS.md, "Escalation criteria").
 - **The floor guard compares the whole stack below a part with the stack's base**, not each part
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the guard
   from the lower part's branch, so a part could swap the guard that judges the part above, and a
