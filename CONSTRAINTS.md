@@ -432,10 +432,10 @@ Decided in the review of PR #45 (7 Nov):
 Decided in the interview on #47 (7 Nov), for
 [Admin review](#admin-review-escalation-and-split-size):
 
-- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS, so the label
-  is the one queue of PRs waiting for the admin. A new dependency, an Exceptions row and a loosened
-  tool config fall under that row. Until `guard / floor` reports, the bot escalates a weakened bar
-  on any path.
+- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS and by
+  `guard / code-owned` at the PR's first review (#337, #379), so the label is the one queue of PRs
+  waiting for the admin. A new dependency, an Exceptions row and a loosened tool config fall under
+  that row. Until `guard / floor` reports, the bot escalates a weakened bar on any path.
 - **Feature slice, interface, security:** a feature slice is a PR that closes a `feature` issue. An
   interface change includes additions to `packages/*` exports, the game API's schemas and the sim's
   state and action types. Security-sensitive code escalates.

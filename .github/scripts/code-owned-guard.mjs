@@ -78,7 +78,7 @@ export const checkCodeOwned = async (
 		return {
 			ok: false,
 			owned: [],
-			message: `the head moved to ${pull.head.sha.slice(0, 7)}: its next review runs this check`,
+			message: `the head moved to ${pull.head.sha.slice(0, 7)}: a review of it runs this check`,
 		};
 
 	// REST lists at most 3000 files; a shorter list than the PR's count could hide an owned path.

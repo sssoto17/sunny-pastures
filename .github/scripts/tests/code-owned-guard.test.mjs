@@ -182,13 +182,13 @@ describe("checkCodeOwned", () => {
 	});
 
 	// The check reports on the event's head; files and reviews for a newer head can't judge it.
-	// No run follows a push (#379), so the new head waits for its next review.
-	it("holds a run whose head has moved, leaving the new head to its next review", async () => {
+	// Runs come from reviews only (#379), so the new head waits for a review of it.
+	it("holds a run whose head has moved, leaving the new head to a review of it", async () => {
 		const gh = github({ files: ["README.md"], head: OLD });
 		const r = await check(gh);
 		expect(r.ok).toBe(false);
 		expect(r.message).toContain("moved");
-		expect(r.message).toContain("next review");
+		expect(r.message).toContain("a review of it");
 	});
 
 	it("can't run on a file list GitHub cut short", async () => {
@@ -204,48 +204,26 @@ describe("checkCodeOwned", () => {
 	});
 });
 
-// #379: the check runs on `pull_request_review` only, and every review ends in a pass or a fail on
-// the PR's reviews as REST lists them, whatever review the event carries.
+// #379: the check runs on `pull_request_review` only. The review that fired the run is not the
+// verdict: the PR's reviews as REST lists them are, so every review ends in a pass or a fail.
 describe("checkCodeOwned on a review event", () => {
-	const onReview = (state, commit_id = HEAD, login = "sssoto17") => ({
+	const onReview = (state, login = "sssoto17") => ({
 		...event(),
-		action: state === "DISMISSED" ? "dismissed" : "submitted",
-		review: { id: 9, state: state.toLowerCase(), commit_id, user: { login } },
-	});
-	const verdict = async (ev, files, reviews) =>
-		(await checkCodeOwned(ev, { rules: RULES, ...github({ files, reviews }).deps })).ok;
-
-	it("passes the bot's approval of a PR with no code-owned path", async () => {
-		const bot = review(1, "APPROVED", HEAD, "sunny-reviewer[bot]");
-		expect(await verdict(onReview("APPROVED", HEAD, bot.user.login), ["README.md"], [bot])).toBe(
-			true,
-		);
+		action: state === "dismissed" ? "dismissed" : "submitted",
+		review: { id: 1, state, commit_id: HEAD, user: { login } },
 	});
 
-	it("fails a code-owned PR on the bot's approval", async () => {
-		const bot = review(1, "APPROVED", HEAD, "sunny-reviewer[bot]");
-		const ev = onReview("APPROVED", HEAD, bot.user.login);
-		expect(await verdict(ev, ["CONSTRAINTS.md"], [bot])).toBe(false);
+	it("fails a code-owned PR on a COMMENTED review with no approval, rather than skipping", async () => {
+		const gh = github({ files: ["CONSTRAINTS.md"], reviews: [review(1, "COMMENTED")] });
+		const r = await checkCodeOwned(onReview("commented"), { rules: RULES, ...gh.deps });
+		expect(r.ok).toBe(false);
 	});
 
-	it("passes a code-owned PR on the admin's approval of the head", async () => {
-		const ev = onReview("APPROVED");
-		expect(await verdict(ev, ["CONSTRAINTS.md"], [review(1, "APPROVED")])).toBe(true);
-	});
-
-	it("fails a code-owned PR on a COMMENTED review, rather than skipping", async () => {
-		const ev = onReview("COMMENTED");
-		expect(await verdict(ev, ["CONSTRAINTS.md"], [review(1, "COMMENTED")])).toBe(false);
-	});
-
-	it("fails a code-owned PR when the admin's approval is dismissed", async () => {
-		const ev = onReview("DISMISSED");
-		expect(await verdict(ev, ["CONSTRAINTS.md"], [review(1, "DISMISSED")])).toBe(false);
-	});
-
-	it("fails a code-owned PR on an approval of an older head", async () => {
-		const ev = onReview("APPROVED", OLD);
-		expect(await verdict(ev, ["CONSTRAINTS.md"], [review(1, "APPROVED", OLD)])).toBe(false);
+	// An event delivered late, or replayed, can say "approved" after the approval was dismissed.
+	it("trusts the PR's reviews over the event's own review", async () => {
+		const gh = github({ files: ["CONSTRAINTS.md"], reviews: [review(1, "DISMISSED")] });
+		const r = await checkCodeOwned(onReview("approved"), { rules: RULES, ...gh.deps });
+		expect(r.ok).toBe(false);
 	});
 });
 

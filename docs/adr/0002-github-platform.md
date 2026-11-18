@@ -652,12 +652,15 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   earlier failure until that run was re-run by hand. So `code-owned.yml` triggers on
   `pull_request_review` (`submitted`, `dismissed`) alone, one run per review, with nothing that
   re-runs another run. `main` needs an approval, so no PR merges without a review, and so without
-  this check. A push leaves the new head without it ("Expected") until its next review, which
-  blocks, as it should. The job has no `if:`: a skipped required check reads as passing (above), so
-  a COMMENTED review would turn it green; it always runs and passes or fails on the diff and the
-  reviews. Unlike `ci`, `security` and `pr-body` (above), it has a `concurrency` group per PR with
-  `cancel-in-progress` (admin, 19 Nov): reviews don't come in twins on one push, and a run that a
-  newer review cancels is followed by the newer run on the same head. The workflow comes from the
+  this check. A push leaves the new head without it ("Expected"), which blocks, until a review of
+  that head runs it; whether the stale-approval dismissal on a push fires `dismissed`, and so runs
+  it at once, is checked on #379's throwaway PRs. The job has no `if:`: a skipped required check
+  reads as passing (above), so a COMMENTED review would turn it green; it always runs and passes or
+  fails on the diff and the reviews. Unlike `ci`, `security` and `pr-body` (above), it has a
+  `concurrency` group per PR with `cancel-in-progress` (admin, 19 Nov): reviews don't come in twins
+  on one push, and a run that a newer review cancels is followed by the newer run on the same head.
+  Whether GitHub then reads the cancelled run as the head's result, as on #313, is unproven for
+  review runs; #379's throwaway PRs check two reviews seconds apart. The workflow comes from the
   PR's merge ref, as for `pull_request`; the script and CODEOWNERS still come from the default
   branch (#337). The label `review:admin` it adds now lands at the first review, not at open; the
   agent and the reviewer bot still add it earlier (CONSTRAINTS.md, "Escalation criteria").
