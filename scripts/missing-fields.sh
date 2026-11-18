@@ -125,7 +125,7 @@ done <<<"$rows"
 
 if ((!project_ok)); then
   ((found == 0)) || printf '%s' "$listed" | sort -n -k1,1 | sed 's/^/#/'
-  echo "missing-fields: $found open issue$( ((found == 1)) || echo s) without a type. Skipped: the Priority, Size and Week checks and \"triage, though its fields are set\": GitHub refused the Project here (HTTP 403, above). Run it again from a local session: scripts/missing-fields.sh" >&2
+  echo "missing-fields: $found open issue$( ((found == 1)) || echo s) without a type. Skipped: the Priority, Size and Week checks and \"triage, though its fields are set\": GitHub refused the Project here ($PROJECT_REFUSED_WHY). Run it again where the Project can be reached: scripts/missing-fields.sh" >&2
   exit "$PROJECT_SKIPPED"
 fi
 if ((found == 0)); then

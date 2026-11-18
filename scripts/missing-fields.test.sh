@@ -154,7 +154,8 @@ expect_out_is "#10${T}missing: Type${T}No type
 #14${T}missing: Type; no triage${T}No type, no triage"
 expect_err "(HTTP 403)"
 expect_err "2 open issues without a type. Skipped: the Priority, Size and Week checks"
-expect_err "Run it again from a local session: scripts/missing-fields.sh"
+expect_err "Run it again where the Project can be reached: scripts/missing-fields.sh"
+expect_err "gh auth refresh -h github.com -s project"
 
 reset "$(ok_row 15 Fine)"
 touch "$st/refuse_projects"
