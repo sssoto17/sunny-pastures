@@ -37,3 +37,7 @@ supabase/.temp/
 
 # GitHub App private keys: save them outside the repo; this stops one being committed by accident
 *.pem
+
+# Stryker (stryker.config.mjs): its sandbox and reports
+.stryker-tmp/
+reports/

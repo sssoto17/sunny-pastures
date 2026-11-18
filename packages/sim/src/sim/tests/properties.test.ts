@@ -475,8 +475,14 @@ describe.each(contents)("the sim's properties, over %s", (_name, content) => {
 						expect(at).toBeGreaterThanOrEqual(before.time);
 						expect(after.time).toBe(at);
 					}
-					for (const { action } of log) {
-						expect(sim.apply(final, action, final.time - back).ok).toBe(false);
+					// Refused for its time, not for another reason such as an occupied plot (#41, PR #156's
+					// review), and never vacuous: a harvest joins the log's actions when the log is empty.
+					const early = [...log.map(({ action }) => action), { type: "harvest", plot: 0 } as const];
+					for (const action of early) {
+						expect(sim.apply(final, action, final.time - back)).toEqual({
+							ok: false,
+							reason: expect.stringContaining("before the farm's time") as string,
+						});
 					}
 				},
 			),

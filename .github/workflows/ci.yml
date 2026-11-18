@@ -173,6 +173,47 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm bench --reporter=github-actions
 
+  # CONSTRAINTS.md, "Assertion strength (warn)" (#41): Stryker on the packages/sim source files this
+  # change touches, and nothing when it touches none (the CI cost rule). A score under 60% is a
+  # warning annotation the weekly retro reads; it never fails the job, and the job isn't required.
+  # A stacked part is judged on its own diff, from the branch below it.
+  mutation:
+    name: ci / mutation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SINCE: >-
+        ${{ github.event_name == 'push' && github.event.before || format('origin/{0}',
+        github.base_ref) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the changed files are read from the merge base
+      - uses: ./.github/actions/setup
+      # Stryker's score: detected (killed or timed out) over valid (those plus survived and
+      # uncovered) mutants. 60% is CONSTRAINTS.md's floor for the warning. The decision to mutate
+      # is in the script, not an `if:`, so the step always runs (the floor guard's check-removed).
+      - name: Mutate the changed packages/sim source files
+        run: |
+          files=$(git diff --name-only --diff-filter=AMR "$SINCE...HEAD" -- 'packages/sim/src/*.ts' |
+            grep -v -e '/tests/' -e '\.test\.ts$' | paste -sd, -) || true
+          if [[ -z $files ]]; then
+            echo "No packages/sim source file changed: nothing to mutate."
+            exit 0
+          fi
+          echo "Mutating: $files"
+          pnpm mutation --mutate "$files"
+          score=$(jq -r '[.files[].mutants[].status] as $s
+            | ($s | map(select(. == "Killed" or . == "Timeout")) | length) as $detected
+            | ($s | map(select(. == "Killed" or . == "Timeout" or . == "Survived" or . == "NoCoverage")) | length) as $valid
+            | if $valid == 0 then "none" else ($detected * 1000 / $valid | floor) / 10 end' \
+            reports/mutation/mutation.json)
+          echo "Mutation score on the changed packages/sim files: $score%" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ $score != none ]] && awk -v s="$score" 'BEGIN { exit !(s < 60) }'; then
+            echo "::warning title=ci / mutation::Mutation score $score% on the changed packages/sim files is under 60% (CONSTRAINTS.md, Assertion strength). The survivors are in this step's log."
+          fi
+
   # #255: the shell scripts' test suites, every *.test.sh under scripts/ and .claude/hooks/, found
   # by the runner so a new suite needs no edit here. Each suite fakes gh on PATH and needs no secret:
   # the job holds no token, persists no credentials, and the runner puts a gh that refuses every
