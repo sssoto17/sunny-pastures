@@ -11,8 +11,6 @@ PROJECT_OWNER=sssoto17
 PROJECT_NUMBER=3
 # shellcheck disable=SC2034
 PROJECT_API=users/$PROJECT_OWNER/projectsV2/$PROJECT_NUMBER
-# shellcheck disable=SC2034
-PROJECT_URL=https://github.com/users/$PROJECT_OWNER/projects/$PROJECT_NUMBER
 
 # Exit code a script uses when it did every other part but GitHub refused the Project here
 # (#346, criterion 3). The cloud GitHub proxy answers 403 for any path outside repos/<owner>/<repo>.

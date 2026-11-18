@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A test helper, never run outside a suite: a fake `gh` that answers `gh api` over REST from JSON
-# files, for the scripts that #346 moved off GraphQL (issue-fields, new-issue, missing-fields,
-# backfill-issue-types, today-gather, after-merge). A suite copies it to $work/bin/gh, puts that
+# files, for the suites of scripts #346 moved off GraphQL (issue-fields, new-issue and
+# missing-fields; the others keep their own fakes). A suite copies it to $work/bin/gh, puts that
 # first on PATH and keeps its state in $work/gh. It never reaches GitHub, and it refuses every
 # subcommand but `api`, so a call that would go through GraphQL fails the suite.
 #
