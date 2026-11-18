@@ -4,3 +4,10 @@ packages:
 
 # Refuse versions published less than 7 days ago (minutes), so a hijacked release has time to be caught.
 minimumReleaseAge: 10080
+
+# `pnpm audit` skips these advisories. Each one needs an Exceptions row in CONSTRAINTS.md; remove it
+# with its row.
+auditConfig:
+  ignoreGhsas:
+    # picomatch ReDoS, no patched version yet; dev tooling only (CONSTRAINTS.md E9, #368).
+    - GHSA-fc5q-39xc-vjpf

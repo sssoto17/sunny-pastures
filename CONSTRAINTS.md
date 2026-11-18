@@ -403,6 +403,7 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 <!-- prettier-ignore -->
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
+| E9 | config-loosened | pnpm-workspace.yaml | `auditConfig.ignoreGhsas` skips GHSA-fc5q-39xc-vjpf (high: picomatch ReDoS through repeated extglobs, `<=4.0.7`), so `ci / audit` passes; no patched picomatch exists. It reaches only dev tooling (ESLint plugins, typescript-eslint and vitest, through micromatch and tinyglobby), which match globs written in this repo's configs, never untrusted input (#368; admin, 18 Nov). Remove the ignore and this row once a patched picomatch is in the lockfile, or renew it | Soto | 2026-12-18 |
 
 ## Interview record
 
