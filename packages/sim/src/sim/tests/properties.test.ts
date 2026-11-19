@@ -18,6 +18,12 @@ import { richContent, richFeedSeconds, richJobXp } from "./richContent.js";
 const params = requireProvided("fastCheck", inject("fastCheck"));
 // #200: the timeout scales with the run count; Vitest resets it after this file.
 vi.setConfig({ testTimeout: inject("propertyTimeout") });
+/**
+ * #357: D10 compares every farm of a run, so over the rich content it takes about half the
+ * property timeout on CI (median 8.0 s of 15 s over 48 runs) and timed out in 5 of them on slow
+ * runners (15.0 to 15.6 s). Twice the timeout leaves slow runners about 2x and keeps every run.
+ */
+const roundTripTimeout = 2 * inject("propertyTimeout");
 const { wheat } = sliceContent.crops;
 
 // The slice's approved Level table and plot prices (admin, 11 Nov, #83), written out rather than
@@ -505,17 +511,21 @@ describe.each(contents)("the sim's properties, over %s", (_name, content) => {
 		);
 	});
 
-	it("every farm survives a JSON round trip (D10)", () => {
-		fc.assert(
-			fc.property(farmId, timedActions, delay, (id, played, wait) => {
-				const { farms, final } = play(sim, id, played);
-				for (const farm of [...farms, sim.advance(final, addDelay(final, wait))]) {
-					expect(JSON.parse(JSON.stringify(farm))).toEqual(farm);
-				}
-			}),
-			params,
-		);
-	});
+	it(
+		"every farm survives a JSON round trip (D10)",
+		() => {
+			fc.assert(
+				fc.property(farmId, timedActions, delay, (id, played, wait) => {
+					const { farms, final } = play(sim, id, played);
+					for (const farm of [...farms, sim.advance(final, addDelay(final, wait))]) {
+						expect(JSON.parse(JSON.stringify(farm))).toEqual(farm);
+					}
+				}),
+				params,
+			);
+		},
+		roundTripTimeout,
+	);
 });
 
 /** Checks every accepted action of the generated runs over `sim`, as a property. */
