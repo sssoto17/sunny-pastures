@@ -10,5 +10,10 @@ declare module "vitest" {
 		 * file applies it with `vi.setConfig`, which Vitest resets after the file.
 		 */
 		propertyTimeout: number;
+		/**
+		 * The local stack's connection strings, provided only by vitest.stack.config.mjs to the
+		 * `*.stack.ts` tests (#372): game_api's, and postgres's for setting up and as other roles.
+		 */
+		stack?: { databaseUrl: string; adminDatabaseUrl: string };
 	}
 }

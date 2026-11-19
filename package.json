@@ -13,6 +13,7 @@
 		"db:env": "supabase/db.sh env",
 		"db:generate": "pnpm --dir apps/web exec drizzle-kit generate --config drizzle.config.json",
 		"db:check": "supabase/drift.sh",
+		"test:stack:db": "node --env-file-if-exists=.env node_modules/vitest/vitest.mjs run --config vitest.stack.config.mjs",
 		"typecheck": "tsc -b && node .github/scripts/typecheck-reach.mjs",
 		"lint": "eslint .",
 		"lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
