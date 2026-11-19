@@ -1,34 +1,61 @@
-// The sim speed row (CONSTRAINTS.md; ADR-0003, section 8): advance across 30 days on the largest
-// content farm, and one apply. Reported in the PR, not gating yet (#41). The largest farm is every
-// plot the Level table allows bought (#83) and planted, each ripening at a different time, every
-// facility bought at its highest tier with that tier's queue full of jobs (#84, #85), every pen
-// bought with each animal producing and its trough full (#86), every order slot of the top Level
-// discarded, so the whole board refills (#87), and every add-on on every facility with a full silo,
-// so the Loops and Collectors run until the wheat or the barn runs out (#88, MUST-07.4).
+// The sim speed row (CONSTRAINTS.md; ADR-0003, section 8), gating since #41: `pnpm bench` runs
+// this in `check:task` and `ci / bench`. Each budget is judged as "Timing checks" requires: 3
+// warm-up runs discarded, then the median of 5 measured runs; over budget, one full re-measure, and
+// the check fails only if both medians are over.
+//
+// The largest farm is read from the content, never written here: every plot the Level table allows
+// bought and planted, each ripening at a different time (#83); every facility at its highest tier
+// with that tier's queue full of jobs (#84, #85); every pen bought with each animal producing and
+// its trough full (#86); every order slot of the top Level discarded, so the whole board refills
+// (#87); and every add-on on every facility with a full silo, so the Loops and Collectors run
+// until the crops or the barn run out (#88, MUST-07.4).
 import { expect, it } from "vitest";
+import type { BenchRegistration } from "vitest";
 
 import { createSim, sliceContent } from "../../index.js";
-import type { FarmState } from "../../index.js";
+import type { Action, AddOn, Content, FarmState } from "../../index.js";
 import { expectAccepted } from "./expectAccepted.js";
 
-const sim = createSim(sliceContent);
+const content: Content = sliceContent;
+const sim = createSim(content);
 const thirtyDays = 30 * 24 * 60 * 60 * 1000;
 
-const topLevel = sliceContent.levels[sliceContent.levels.length - 1];
-const mostPlots =
-	sliceContent.start.plots + sliceContent.levels.reduce((sum, level) => sum + level.plots, 0);
-const rich: FarmState = { ...sim.newFarm("bench"), xp: topLevel?.xp ?? 0, coins: 1_000_000 };
-const planted: FarmState = Array.from({ length: mostPlots })
-	.map((_plot, plot) => plot)
-	.reduce<FarmState>((farm, plot) => {
+/**
+ * Adds every good a list asks for to storage: crops in the silo, the rest in the barn. It skips
+ * storage's capacity check on purpose: a job or a feed takes the goods back out at once.
+ */
+function stockGoods(
+	farm: FarmState,
+	goods: readonly { good: string; amount: number }[],
+): FarmState {
+	return goods.reduce<FarmState>((current, { good, amount }) => {
+		const store = good in content.crops ? "silo" : "barn";
+		const held = current[store][good] ?? 0;
+		return { ...current, [store]: { ...current[store], [good]: held + amount } };
+	}, farm);
+}
+
+const topLevel = content.levels[content.levels.length - 1];
+const crops = content.levels.flatMap((level) => level.crops);
+const mostPlots = content.start.plots + content.levels.reduce((sum, level) => sum + level.plots, 0);
+// As rich as a safe integer allows twice over, so no purchase or payout is refused for coins.
+const rich: FarmState = {
+	...sim.newFarm("bench"),
+	xp: topLevel?.xp ?? 0,
+	coins: Math.floor(Number.MAX_SAFE_INTEGER / 2),
+};
+const planted: FarmState = Array.from({ length: mostPlots }, (_plot, plot) => plot).reduce(
+	(farm, plot) => {
 		const owned =
 			plot < farm.plots.length
 				? farm
 				: expectAccepted(sim.apply(farm, { type: "buyPlot", plot }, farm.time));
-		const plant = { type: "plant", plot, crop: "wheat" } as const;
-		return expectAccepted(sim.apply(owned, plant, farm.time + 1_000));
-	}, rich);
-const working: FarmState = sliceContent.facilities.reduce<FarmState>((farm, facility, index) => {
+		const crop = crops[plot % crops.length] ?? "";
+		return expectAccepted(sim.apply(owned, { type: "plant", plot, crop }, farm.time + 1_000));
+	},
+	rich,
+);
+const working: FarmState = content.facilities.reduce((farm, facility, index) => {
 	const bought = facility.tiers.reduce(
 		(current, _tier, i) =>
 			expectAccepted(
@@ -37,70 +64,116 @@ const working: FarmState = sliceContent.facilities.reduce<FarmState>((farm, faci
 		expectAccepted(sim.apply(farm, { type: "buyFacility", facility: index }, farm.time)),
 	);
 	const { slots } = facility.tiers[facility.tiers.length - 1] ?? facility;
-	const [recipe = ""] = Object.keys(facility.recipes);
+	const [[recipe, { inputs }] = ["", { inputs: [] }]] = Object.entries(facility.recipes);
 	const start = { type: "startJob", facility: index, recipe } as const;
 	return Array.from({ length: slots }).reduce<FarmState>(
-		(current) =>
-			expectAccepted(sim.apply({ ...current, silo: { wheat: 10 } }, start, current.time)),
+		(current) => expectAccepted(sim.apply(stockGoods(current, inputs), start, current.time)),
 		bought,
 	);
 }, planted);
-const feedEveryAnimal = sliceContent.pens.flatMap((pen, index) =>
-	Array.from(
-		{ length: pen.animals + pen.troughCapacity },
-		() => ({ type: "feed", pen: index }) as const,
-	),
-);
-const fed: FarmState = [
-	...sliceContent.pens.map((_pen, pen) => ({ type: "buyPen", pen }) as const),
-	...feedEveryAnimal,
-].reduce(
-	(farm, action) =>
-		expectAccepted(sim.apply({ ...farm, barn: { chickenFeed: 10 } }, action, farm.time)),
-	working,
-);
+const fed: FarmState = content.pens.reduce((farm, pen, index) => {
+	const bought = expectAccepted(sim.apply(farm, { type: "buyPen", pen: index }, farm.time));
+	return Array.from({ length: pen.animals + pen.troughCapacity }).reduce<FarmState>((current) => {
+		const feed = stockGoods(current, [{ good: pen.feed, amount: 1 }]);
+		return expectAccepted(sim.apply(feed, { type: "feed", pen: index }, current.time));
+	}, bought);
+}, working);
 const fullFarm: FarmState = fed.board.reduce(
 	(farm, _slot, slot) => expectAccepted(sim.apply(farm, { type: "discard", slot }, farm.time)),
 	fed,
 );
-
+const addOns = Object.keys(content.addOns) as AddOn[];
 /** Every add-on on every facility (MUST-07.4), and a full silo for the Loops to run on (#88). */
 const automatedFarm: FarmState = {
-	...sliceContent.facilities.reduce<FarmState>(
+	...content.facilities.reduce<FarmState>(
 		(farm, _facility, facility) =>
-			(["collector", "loop"] as const).reduce(
+			addOns.reduce(
 				(current, addOn) =>
 					expectAccepted(sim.apply(current, { type: "buyAddOn", facility, addOn }, current.time)),
 				farm,
 			),
 		fullFarm,
 	),
-	silo: { wheat: sliceContent.silo.capacity },
+	silo: Object.fromEntries(
+		crops.map((crop) => [crop, Math.floor(content.silo.capacity / crops.length)]),
+	),
 };
 
-// The budgets, in ms (CONSTRAINTS.md, "Sim speed"). Checked only when `vitest bench` runs.
+/**
+ * The farm 30 days on, and one of every action on every plot, facility, pen and slot: each call
+ * starts from the same farm, so about half are accepted (harvests, discards, a collect, the feeds)
+ * and the rest take a refusal path (a plot already planted, too few goods, a full barn).
+ */
+const lateFarm = sim.advance(automatedFarm, automatedFarm.time + thirtyDays);
+const everyAction: readonly Action[] = [
+	...lateFarm.plots.flatMap((_plot, plot) => [
+		{ type: "harvest", plot } as const,
+		...crops.map((crop) => ({ type: "plant", plot, crop }) as const),
+	]),
+	...content.facilities.flatMap((facility, index) => [
+		{ type: "collect", facility: index } as const,
+		...Object.keys(facility.recipes).map(
+			(recipe) => ({ type: "startJob", facility: index, recipe }) as const,
+		),
+	]),
+	...content.pens.flatMap((_pen, pen) => [
+		{ type: "feed", pen } as const,
+		{ type: "collectProducts", pen } as const,
+	]),
+	...lateFarm.board.flatMap((_slot, slot) => [
+		{ type: "deliver", slot } as const,
+		{ type: "discard", slot } as const,
+	]),
+];
+const rounds = Math.ceil(1_000 / everyAction.length);
+const applyCalls = rounds * everyAction.length;
+
+// The budgets, in ms (CONSTRAINTS.md, "Sim speed"), and the runs ("Timing checks").
 const advanceBudget = 50;
 const applyBudget = 1;
+const runs = { warmupIterations: 3, warmupTime: 0, iterations: 5, time: 0 };
+
+/**
+ * The medians judged against a budget: one set of 5 runs, and a second only when the first is over
+ * ("Timing checks", "Over budget"). The check passes when the smaller is within the budget. Each
+ * median is per call: a run's time divided by the calls it makes.
+ */
+async function measureMedians(
+	measured: BenchRegistration<string>,
+	calls: number,
+	budget: number,
+): Promise<number[]> {
+	const measure = async () => {
+		const { latency } = await measured.run(runs);
+		expect(latency.samplesCount).toBe(runs.iterations);
+		return latency.p50 / calls;
+	};
+	const first = await measure();
+	return first <= budget ? [first] : [first, await measure()];
+}
 
 it("advances 30 days and applies an action within the sim speed budget", async ({
-	bench: measure,
+	annotate,
+	bench,
 }) => {
-	const results = await measure.compare(
-		measure(
-			"advance 30 days, every plot planted, every queue full, every pen fed, the board refilling, every add-on",
-			() => {
-				sim.advance(automatedFarm, automatedFarm.time + thirtyDays);
-			},
-		),
-		measure("apply one harvest after 30 days", () => {
-			sim.apply(automatedFarm, { type: "harvest", plot: 0 }, automatedFarm.time + thirtyDays);
-		}),
-	);
+	const advance = bench("advance 30 days on the largest farm", () => {
+		sim.advance(automatedFarm, automatedFarm.time + thirtyDays);
+	});
+	const apply = bench(`apply ${String(applyCalls)} varied actions after 30 days`, () => {
+		for (let round = 0; round < rounds; round += 1) {
+			for (const action of everyAction) sim.apply(lateFarm, action, lateFarm.time);
+		}
+	});
+	const advanceMs = await measureMedians(advance, 1, advanceBudget);
+	const applyMs = await measureMedians(apply, applyCalls, applyBudget);
 
-	expect(
-		results.get(
-			"advance 30 days, every plot planted, every queue full, every pen fed, the board refilling, every add-on",
-		).latency.mean,
-	).toBeLessThan(advanceBudget);
-	expect(results.get("apply one harvest after 30 days").latency.mean).toBeLessThan(applyBudget);
+	const formatMs = (ms: number[]) => ms.map((m) => `${m.toFixed(3)} ms`).join(", then ");
+	await annotate(
+		`advance() 30 days, median of 5: ${formatMs(advanceMs)} (budget ${String(advanceBudget)} ms)`,
+	);
+	await annotate(
+		`apply() per call, median of 5: ${formatMs(applyMs)} (budget ${String(applyBudget)} ms)`,
+	);
+	expect(Math.min(...advanceMs)).toBeLessThanOrEqual(advanceBudget);
+	expect(Math.min(...applyMs)).toBeLessThanOrEqual(applyBudget);
 });
