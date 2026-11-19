@@ -272,7 +272,8 @@ Optimistic client prediction, reconciled with the server's result.
 Survives concurrent actions and retries. ADR-0001 chose store B100: an append-only action log per
 farm, with a snapshot after every 100th action. Its verdict holds up to about 200 concurrent players
 (about 37 requests/s). Before real load approaches the stress level (about 1,450 requests/s on the
-load VM), B100 is measured against A again, as the ADR's revisit trigger says.
+load VM), B100 is measured against A again, as the ADR's revisit trigger says. M3's load run checks
+the response-time limits in MUST-13.8 to 13.10.
 
 <!-- prettier-ignore -->
 | # | Criterion | Verified by |
@@ -284,6 +285,9 @@ load VM), B100 is measured against A again, as the ADR's revisit trigger says.
 | MUST-13.5 | The spike's concurrency check runs against the real store: 1,000 gift-and-harvest pairs fired at one farm at the same moment, with no lost update. | `accept` |
 | MUST-13.6 | Logs written under an earlier rules or content version still load after a release, including a release that only tunes content numbers. Each farm rebuilds to the same farm it had before the release. CI replays a set of recorded logs under the new version. How: every log row and snapshot records its rules version, and the rules-version check replays them (decided in #31, [ADR-0006](../adr/0006-rules-versions-and-replay.md)). | `ci` |
 | MUST-13.7 | Every query in a commit runs inside its transaction. A saturating stress run shows 0 `UNSAFE_TRANSACTION` errors and 0 lost updates (#28). | `accept`, `metric` |
+| MUST-13.8 | **Action latency at 200 players**: p95 < 28 ms for `POST /api/farm/actions`, as Locust measures it. This client time decides pass or fail. It bounds the whole response, `Server-Timing` `total` plus whatever runs outside it. The server's `total` p95 must also be < 28 ms, and the run reports its `load`, `sim` and `commit` p50 and p95 beside it, so a miss names its phase. | `metric` |
+| MUST-13.9 | **Worst-case load**: p95 < 50 ms for the server's `load` (`Server-Timing`, both routes) on requests whose farm had a 99-action tail: a snapshot plus 99 actions to read and replay. It bounds `load` only. On a POST, `load` includes the idempotency lookup, which errs against the limit. | `metric` |
+| MUST-13.10 | **How to read MUST-13.8 and 13.9**: ADR-0001's Method on the load VM, in M3's load run (#388), never in CI. Each normal run is 1 min warm-up plus 5 min measured, 3 runs per player count. The client p95 pools the three 200-player runs' histograms. The worst-case load pools every normal run at 50 and 200 players, with the tail rebuilt from each farm's seeded seq plus its accepted actions, so seeding must spread tails across 0 to 99. The limits are ADR-0001's decision rule, fixed before measuring (max(2 × 8, 8 + 20) = 28 ms, and 50 ms). They leave room over the spike's 8 ms and 2.46 ms because the full sim is heavier than the spike's tiny one, and a sim 10× as costly still projects to about 5.4 ms on the worst case. The stress run (200 players, no wait) is reported, not judged: its split is compared with the spike's B100 baseline (action `total` p95 24.07 ms: `load` 15.14, `sim` 0.15, `commit` 16.29; read `total` 13.08; worst-case load 13.44). | `metric` |
 
 ### MUST-14 Property tests for the simulation
 
