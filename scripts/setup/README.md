@@ -2,6 +2,28 @@
 
 Scripts the admin runs by hand; each header says what it does. Runbooks of several commands:
 
+## #106: the factory's kill switch
+
+`scripts/setup/factory-switch.sh`, on your own machine, after #106's PR has merged (it dispatches
+`main`'s `check-106-factory-switch.yml`, which needs `actions: write`). While `FACTORY_ENABLED`
+doesn't exist yet it runs the throwaway once with it unset; then it sets the variable to `false`
+(after asking) and runs it again. Each run must log `SWITCH off` with the stand-in for the factory's
+work skipped. It writes both runs to `.scratch/106-results.md`; post it with
+`gh issue comment 106 --repo sssoto17/sunny-pastures --body-file .scratch/106-results.md` and add
+the run links to the PR. Then remove `.github/workflows/check-106-factory-switch.yml` from `main` in
+a PR of its own (code-owned).
+
+To check one run by hand instead:
+
+```sh
+gh workflow run check-106-factory-switch.yml --repo sssoto17/sunny-pastures --ref main
+gh run list --repo sssoto17/sunny-pastures --workflow check-106-factory-switch.yml --limit 1
+gh run view <run-id> --repo sssoto17/sunny-pastures --log | grep 'SWITCH'
+gh run view <run-id> --repo sssoto17/sunny-pastures --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
+```
+
+Flipping the switch later: ADR-0002, area 2, "The kill switch, built (#106)".
+
 ## #336: lanes open PRs as sunny-factory
 
 `scripts/setup/factory.sh`, on your own machine, before merging #336's PR: it checks that #101's
