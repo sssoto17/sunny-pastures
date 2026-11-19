@@ -16,6 +16,7 @@
 		"lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
 		"test": "vitest run --coverage",
 		"test:related": "vitest run --changed origin/main --coverage",
+		"test:stack": "node --env-file-if-exists=.env node_modules/vitest/vitest.mjs run --config vitest.config.stack.mjs",
 		"guard:floor": "node .github/scripts/floor-guard.mjs",
 		"coverage:gate": "node .github/scripts/coverage-gate.mjs",
 		"determinism": "node .github/scripts/determinism-gate.mjs",

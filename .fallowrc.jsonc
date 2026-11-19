@@ -17,9 +17,10 @@
   // route imports api/, only api/ wires the server modules together, and client code (pages)
   // reaches the sim's package entry and nothing in src/server/ (ADR-0006). Zones for modules that
   // don't exist yet are declared now, so each lands inside its rule. `allowTypeOnly` admits
-  // `import type` only: game/ sees the store's interface, never its code; store/ sees the sim's
-  // types, never its values (ADR-0001). The sim (CONSTRAINTS.md, "Boundaries: sim purity
-  // (MUST-10.1)") imports no other zone, tests included, and calls nothing in `calls.forbidden`.
+  // `import type` only: game/ sees the store's interface, never its code, and auth's `PlayerId`,
+  // never `readPlayer` (#332 decision 4); store/ sees the sim's types, never its values
+  // (ADR-0001). The sim (CONSTRAINTS.md, "Boundaries: sim purity (MUST-10.1)") imports no other
+  // zone, tests included, and calls nothing in `calls.forbidden`.
   // Fallow sees zones and callees only, so ESLint's sim block (eslint.config.mjs) holds the rest of
   // the row: no package and no `node:*` import (a rule pack can't glob `node:*`), and no `Date`
   // outside `new Date(value)`, `Date.UTC` and `Date.parse`, so argument-less `new Date()` too.
@@ -48,7 +49,7 @@
       {
         "from": "game",
         "allow": ["rules", "timing", "sim"],
-        "allowTypeOnly": ["store"]
+        "allowTypeOnly": ["store", "auth"]
       },
       { "from": "store", "allow": [], "allowTypeOnly": ["db", "sim"] },
       { "from": "rules", "allow": ["sim"] },
