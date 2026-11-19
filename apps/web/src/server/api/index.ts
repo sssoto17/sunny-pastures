@@ -1,6 +1,9 @@
 import "server-only";
 
+import { sliceContent } from "@sunny-pastures/sim";
+
 import { readConfig, type Env } from "@/server/config";
+import { createRules } from "@/server/rules";
 
 import { memoise } from "./memoise";
 
@@ -29,6 +32,8 @@ export function createApi(env: Env): Api {
 	// The config is the first link (`createDb(config)` takes it, #329 decision 2). Reading it now
 	// makes a deployment with a missing variable fail its health check, not its first game request.
 	readConfig(env);
+	// Once per process with the graph; the store takes newFarm and replay when it lands (#373).
+	createRules(sliceContent);
 	return { health: () => ({ status: "ok" }) };
 }
 

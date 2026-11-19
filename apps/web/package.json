@@ -9,6 +9,7 @@
 		"start": "next start"
 	},
 	"dependencies": {
+		"@sunny-pastures/sim": "workspace:*",
 		"next": "16.4.6",
 		"react": "19.3.1",
 		"react-dom": "19.3.1"
