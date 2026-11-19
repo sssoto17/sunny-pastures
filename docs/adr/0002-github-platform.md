@@ -807,7 +807,9 @@ one `SWITCH off: FACTORY_ENABLED is …` line. The factory workflow (#107) and t
 never starts, so the `factory` environment never hands it the App's key: nothing mints a token or
 calls Claude. The switch job itself holds no secret and no environment, only `contents: read` for
 the checkout. Its cost is one more runner minute a run while the repo is private. The reviewer
-doesn't call it.
+doesn't call it. Neither does `open-pr.yml`: lanes opening their PRs as `sunny-factory` don't obey
+the switch, only the factory jobs (the sweep, the chain and the factory job) do (admin, 19 Nov
+2026).
 
 - **Turn the factory off or on** (only the admin: a repo variable needs the admin's token). In the
   UI: Settings → Secrets and variables → Actions → Variables → `FACTORY_ENABLED` → edit (New
