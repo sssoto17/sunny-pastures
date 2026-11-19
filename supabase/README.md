@@ -21,9 +21,9 @@ Run them from the repo root (or a worktree's root).
 | ------ | --------------------------- | ---------------------------------------------------------------------- |
 | Start  | `pnpm db:start`             | First run pulls the images. Prints the URLs; every key is hidden.      |
 | Info   | `pnpm db:status`            | Same list again.                                                       |
-| `.env` | `pnpm db:env`               | Writes `DATABASE_URL`, `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` to `./.env` without printing them. |
+| `.env` | `pnpm db:env`               | Sets `game_api`'s password; writes `DATABASE_URL`, `ADMIN_DATABASE_URL`, `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` to `./.env` without printing them. |
 | Stop   | `supabase stop`             | Keeps the data in Docker volumes.                                      |
-| Reset  | `supabase db reset`         | Recreates the local database and reruns migrations and seed.           |
+| Reset  | `supabase db reset`         | Recreates the local database and reruns migrations and seed. Then `pnpm db:env`. |
 | Wipe   | `supabase stop --no-backup` | Stops and deletes the local data.                                      |
 
 **Don't run `supabase start` or `supabase status` directly.** They print the local keys, S3
@@ -43,12 +43,20 @@ custom migration: `pnpm db:generate --custom --name <name>`, then write the SQL.
   migration (CONSTRAINTS.md, "Migrations").
 - `pnpm db:check` (CI, `ci / lint`) fails on an edited migration, and on drift: a `schema.ts` change
   with no migration. It needs no database.
+- `pnpm test:stack:db` runs the `*.stack.ts` tests (grants, RLS, the transaction round trip) against
+  the local stack, after `supabase db reset` and `pnpm db:env`.
 
 ## Connection: `DATABASE_URL`
 
-Code reads the connection string from `DATABASE_URL` only, never from a literal in the repo. Run
-`pnpm db:env` in each worktree that needs it: it appends `DATABASE_URL` to `.env` (ignored by git)
-unless one is already set. `.env.example` shows the shape.
+Code reads the connection string from `DATABASE_URL` only, never from a literal in the repo. The app
+connects as `game_api`, which may only read and append to the `game` tables. The migration creates
+it with no password, so run `pnpm db:env` once after `supabase db reset`, then copy `.env` into
+other worktrees: every worktree shares one local stack and one `game_api` password. It sets the
+password (`alter role`, over `psql`'s stdin): the one in `.env`'s `game_api` `DATABASE_URL` if there
+is one, otherwise a new random one. It writes `DATABASE_URL` (`game_api`) and `ADMIN_DATABASE_URL`
+(`postgres`, for `pnpm test:stack:db` only) to `.env` (ignored by git), replacing earlier values. It
+prints neither. `.env.example` shows the shape. It uses a local `psql` if there is one, or the one
+in the stack's Postgres image.
 
 Check it is reachable:
 

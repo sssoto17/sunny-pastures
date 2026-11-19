@@ -1993,11 +1993,12 @@ an item someone will tick (#214): the Review section's two yes/no checkboxes bec
 /supabase/config.toml   @sssoto17
 /supabase/migrations/   @sssoto17
 # Drizzle (#372): the schema the migrations are generated from (its RLS included), the client,
-# drizzle-kit's config and the drift check.
+# drizzle-kit's config, the drift check, and the config of the tests that run against the stack.
 /apps/web/src/server/store/schema.ts @sssoto17
 /apps/web/src/server/db/ @sssoto17
 /apps/web/drizzle.config.json @sssoto17
 /supabase/drift.sh      @sssoto17
+/vitest.stack.config.mjs @sssoto17
 
 # Configs that can weaken a check (CONSTRAINTS.md, "Guarding the bar"), in any directory.
 eslint.config.*         @sssoto17
