@@ -72,13 +72,16 @@ export function makeClaims(issuer: string): Record<string, unknown> {
 /**
  * Stands in for Supabase Auth at `url`, the network boundary `getClaims` reaches: the JWKS endpoint
  * serves `keys`, and every other call (the `getUser` fallback for a token without a usable `kid`) is
- * refused with 401, as Auth refuses a token it didn't sign. Undo with `vi.unstubAllGlobals()`.
+ * refused with 401, as Auth refuses a token it didn't sign. Returns the URLs called, in order.
+ * Undo with `vi.unstubAllGlobals()`.
  */
-export function stubAuthServer(url: string, keys: readonly JsonWebKey[]): void {
+export function stubAuthServer(url: string, keys: readonly JsonWebKey[]): string[] {
+	const calls: string[] = [];
 	vi.stubGlobal(
 		"fetch",
 		vi.fn((input: RequestInfo | URL) => {
 			const target = input instanceof Request ? input.url : String(input);
+			calls.push(target);
 			if (target === `${url}/auth/v1/.well-known/jwks.json`) {
 				return Promise.resolve(Response.json({ keys }));
 			}
@@ -88,4 +91,5 @@ export function stubAuthServer(url: string, keys: readonly JsonWebKey[]): void {
 			);
 		}),
 	);
+	return calls;
 }

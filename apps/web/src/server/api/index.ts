@@ -32,7 +32,8 @@ export function createApi(env: Env): Api {
 	// The config is the first link (`createDb(config)` takes it, #329 decision 2). Reading it now
 	// makes a deployment with a missing variable fail its health check, not its first game request.
 	const config = readConfig(env);
-	// Built here, so once per process with the graph: one Supabase client and one JWKS cache.
+	// Built here, so once per process with the graph: one Supabase client and one JWKS cache (#332
+	// decision 4).
 	const auth = createAuth(config);
 	return { health: () => ({ status: "ok" }), readPlayer: auth.readPlayer };
 }

@@ -8,7 +8,7 @@ import { readStackConfig, signUpAnonymous } from "./anonymous";
 const config = readStackConfig(process.env);
 const auth = createAuth(config);
 
-function bearer(token: string): Request {
+function makeBearerRequest(token: string): Request {
 	return new Request("http://app.test/api/farm", { headers: { authorization: `Bearer ${token}` } });
 }
 
@@ -16,7 +16,7 @@ describe("readPlayer against the local stack", () => {
 	it("accepts a real anonymous player's token and returns its sub", async () => {
 		const player = await signUpAnonymous(config);
 
-		expect(await auth.readPlayer(bearer(player.accessToken))).toStrictEqual({
+		expect(await auth.readPlayer(makeBearerRequest(player.accessToken))).toStrictEqual({
 			ok: true,
 			playerId: player.playerId,
 		});

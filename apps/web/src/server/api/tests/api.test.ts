@@ -6,7 +6,8 @@ import { createApi } from "../index";
 
 const supabase = vi.hoisted(() => ({ clients: 0 }));
 
-// Counts the Supabase clients built, so a test can see auth is built once with the graph.
+// Counts the Supabase clients built, so a test can see auth is built once with the graph (#371,
+// #332 decision 4).
 vi.mock("@supabase/supabase-js", async (importOriginal) => {
 	const actual = await importOriginal<typeof Supabase>();
 	return {
@@ -33,7 +34,7 @@ describe("createApi", () => {
 		const api = createApi(makeEnv("postgresql://db.test/farm"));
 		const request = new Request("http://app.test/api/farm");
 
-		const results = [await api.readPlayer(request), await api.readPlayer(request)];
+		const results = await Promise.all([api.readPlayer(request), api.readPlayer(request)]);
 
 		expect(results).toStrictEqual([{ ok: false }, { ok: false }]);
 		expect(supabase.clients - before).toBe(1);

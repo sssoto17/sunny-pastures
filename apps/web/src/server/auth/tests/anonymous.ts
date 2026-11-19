@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 
 import { readConfig, type Config, type Env } from "@/server/config";
 
+import type { AuthConfig } from "../index";
+
 /** A fresh anonymous player on the local stack. The token is a secret: never print or log it. */
 export interface AnonymousPlayer {
 	accessToken: string;
@@ -29,9 +31,7 @@ export function readStackConfig(env: Env): Config {
  * publishable key (#332 decision 3), through the same supabase-js call the browser client makes.
  * A failure reports Auth's status and error code only, never the token or the key.
  */
-export async function signUpAnonymous(
-	config: Pick<Config, "supabaseUrl" | "supabasePublishableKey">,
-): Promise<AnonymousPlayer> {
+export async function signUpAnonymous(config: AuthConfig): Promise<AnonymousPlayer> {
 	const client = createClient(config.supabaseUrl, config.supabasePublishableKey, {
 		auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 	});

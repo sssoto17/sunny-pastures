@@ -18,7 +18,8 @@
   // reaches the sim's package entry and nothing in src/server/ (ADR-0006). Zones for modules that
   // don't exist yet are declared now, so each lands inside its rule. `allowTypeOnly` admits
   // `import type` only: game/ sees the store's interface, never its code, and auth's `PlayerId`,
-  // never `readPlayer` (#332 decision 4); store/ sees the sim's types, never its values (ADR-0001). `ci / boundaries` runs this (#41).
+  // never `readPlayer` (#332 decision 4); store/ sees the sim's types, never its values
+  // (ADR-0001). `ci / boundaries` runs this (#41).
   "boundaries": {
     "zones": [
       { "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
