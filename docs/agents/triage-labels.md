@@ -63,7 +63,7 @@ Set them by hand (a labeler is an automation candidate below).
 | `area:ui` | `apps/web/` outside `src/server/`: pages, components, client state |
 | `area:api` | `apps/web/src/server/`, route handlers |
 | `area:sim` | `packages/sim/` |
-| `area:db` | `supabase/`, the Drizzle schema, migrations, RLS |
+| `area:db` | `supabase/` (migrations in `supabase/migrations/`), the Drizzle schema (`apps/web/src/server/store/schema.ts`), the client (`apps/web/src/server/db/`), `apps/web/drizzle.config.json`, RLS |
 | `area:ci-cd` | `.github/`, deploy config, root config (`package.json`, `pnpm-workspace.yaml`, lockfile…) |
 | `area:tools` | All dev tooling: `tools/` (`load/`, `analysis/`), `scripts/`, `.claude/` (hooks, skills, agents, settings), `.agents/` (vendored skills) |
 | `area:docs` | `docs/`, `GLOSSARY.md`, `AGENTS.md`, `CLAUDE.md`, `README.md` |

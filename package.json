@@ -11,6 +11,8 @@
 		"db:start": "supabase/db.sh start",
 		"db:status": "supabase/db.sh status",
 		"db:env": "supabase/db.sh env",
+		"db:generate": "pnpm --dir apps/web exec drizzle-kit generate --config drizzle.config.json",
+		"db:check": "supabase/drift.sh",
 		"typecheck": "tsc -b && node .github/scripts/typecheck-reach.mjs",
 		"lint": "eslint .",
 		"lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
@@ -28,7 +30,7 @@
 		"mutation": "stryker run",
 		"dupes": "fallow dupes packages/sim --fail-on-issues --quiet",
 		"check:task": "pnpm check:fast && pnpm lint && pnpm format:md && pnpm dupes --changed-since origin/main && node .github/scripts/sim-changed.mjs SIM_PROPERTY_RUNS=1000 -- pnpm test:related && pnpm coverage:gate --skip-ratchet && pnpm bench && pnpm determinism",
-		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm format:md && pnpm dupes --changed-since origin/main && pnpm guard:floor && pnpm boundaries && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate && pnpm bench && pnpm determinism"
+		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm format:md && pnpm dupes --changed-since origin/main && pnpm guard:floor && pnpm boundaries && pnpm db:check && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate && pnpm bench && pnpm determinism"
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",

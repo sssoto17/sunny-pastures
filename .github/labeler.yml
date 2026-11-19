@@ -19,13 +19,13 @@
   - changed-files:
       - any-glob-to-any-file: "packages/sim/**"
 
-"area:db":        # supabase/, the Drizzle schema, migrations, RLS (Drizzle paths: fix at M3)
+"area:db":        # supabase/, the Drizzle schema, migrations, RLS (real paths since #372)
   - changed-files:
       - any-glob-to-any-file:
           - "supabase/**"
-          - "apps/web/drizzle/**"
           - "apps/web/src/server/db/**"
-          - "**/drizzle.config.*"
+          - "apps/web/src/server/store/schema.ts"
+          - "apps/web/drizzle.config.json"
 
 "area:ci-cd":     # .github/, deploy config, root config
   - changed-files:

@@ -1312,10 +1312,11 @@ The labeler's limits:
 
 - `tests/acceptance/` and `prototypes/<name>/` take the area of what they test, which a path can't
   say. They get no label from the labeler; the author adds one.
-- `area:db` covers "the Drizzle schema, migrations, RLS". Those paths don't exist yet. The config
-  guesses `apps/web/drizzle/**` and `apps/web/src/server/db/**`; fix them at M3. A schema file under
-  `src/server/db/` gets both `area:api` and `area:db`, which is what "one area per area touched"
-  means.
+- `area:db` covers "the Drizzle schema, migrations, RLS": `supabase/**` (migrations in
+  `supabase/migrations/`), `apps/web/src/server/db/**`, `apps/web/src/server/store/schema.ts` and
+  `apps/web/drizzle.config.json` (#372 replaced the guesses). The schema and the client sit under
+  `src/server/`, so they get both `area:api` and `area:db`, which is what "one area per area
+  touched" means.
 - `sync-labels` stays off, so the labeler adds and never removes. A label the admin removed by hand
   comes back only if new matching files are pushed.
 
@@ -1902,13 +1903,13 @@ Paths exactly as `triage-labels.md` defines each area. `sync-labels` is left off
   - changed-files:
       - any-glob-to-any-file: "packages/sim/**"
 
-"area:db": # supabase/, the Drizzle schema, migrations, RLS (Drizzle paths: fix at M3)
+"area:db": # supabase/, the Drizzle schema, migrations, RLS (real paths since #372)
   - changed-files:
       - any-glob-to-any-file:
           - "supabase/**"
-          - "apps/web/drizzle/**"
           - "apps/web/src/server/db/**"
-          - "**/drizzle.config.*"
+          - "apps/web/src/server/store/schema.ts"
+          - "apps/web/drizzle.config.json"
 
 "area:ci-cd": # .github/, deploy config, root config
   - changed-files:
@@ -1991,7 +1992,12 @@ an item someone will tick (#214): the Review section's two yes/no checkboxes bec
 /pnpm-lock.yaml         @sssoto17
 /supabase/config.toml   @sssoto17
 /supabase/migrations/   @sssoto17
-# Drizzle migrations and RLS: add the folder at M3, when it exists.
+# Drizzle (#372): the schema the migrations are generated from (its RLS included), the client,
+# drizzle-kit's config and the drift check.
+/apps/web/src/server/store/schema.ts @sssoto17
+/apps/web/src/server/db/ @sssoto17
+/apps/web/drizzle.config.json @sssoto17
+/supabase/drift.sh      @sssoto17
 
 # Configs that can weaken a check (CONSTRAINTS.md, "Guarding the bar"), in any directory.
 eslint.config.*         @sssoto17

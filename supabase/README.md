@@ -31,6 +31,19 @@ credentials and the database password on stdout _and_ stderr (even when piped), 
 often gets pasted into a session. `supabase/db.sh` captures both streams and hides every value
 except URLs, which keep the password hidden.
 
+## Migrations
+
+The `game` schema's tables are Drizzle code in `apps/web/src/server/store/schema.ts` (#331, #372).
+`pnpm db:generate` writes a migration for a change to it into `supabase/migrations/`, named the way
+the Supabase CLI reads (`<timestamp>_<name>.sql`), beside drizzle-kit's `meta/` folder.
+`supabase db reset` applies them. Grants, roles and anything else drizzle-kit can't express go in a
+custom migration: `pnpm db:generate --custom --name <name>`, then write the SQL.
+
+- **Forward-only.** Never edit, rename or delete a migration once it's on `main`; a fix is a new
+  migration (CONSTRAINTS.md, "Migrations").
+- `pnpm db:check` (CI, `ci / lint`) fails on an edited migration, and on drift: a `schema.ts` change
+  with no migration. It needs no database.
+
 ## Connection: `DATABASE_URL`
 
 Code reads the connection string from `DATABASE_URL` only, never from a literal in the repo. Run

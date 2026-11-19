@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAuth, type Auth } from "@/server/auth";
 import { readConfig, type Env } from "@/server/config";
+import { createDb } from "@/server/db";
 
 import { memoise } from "./memoise";
 
@@ -35,6 +36,9 @@ export function createApi(env: Env): Api {
 	// Built here, so once per process with the graph: one Supabase client and one JWKS cache (#332
 	// decision 4).
 	const auth = createAuth(config);
+	// Built here too, so once per process through getApi; postgres.js connects on the first query,
+	// so building it touches no network (#372). The store takes it when it lands (#373).
+	createDb(config);
 	return { health: () => ({ status: "ok" }), readPlayer: auth.readPlayer };
 }
 
