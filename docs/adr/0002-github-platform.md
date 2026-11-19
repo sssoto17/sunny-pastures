@@ -290,7 +290,9 @@ and the JSON are in A8.
 `CONSTRAINTS.md`'s "Enforced with numbers" table (on `main` since #45), which owns every threshold.
 The bundle ratchet has no row in that table yet; it reports as `preview / bundle`.
 `guard / pr-title`, `guard / protected-paths` and `guard / no-prototype` are this ADR's own. The
-CI/CD step builds the checks (#40, #42).
+CI/CD step builds the checks (#40, #42). (Amended 19 Nov: `guard / protected-paths` is built as
+`guard / acceptance`, which fails a `[bot]`-authored PR that touches `tests/acceptance/**`;
+[ADR-0007](0007-apps-web-and-game-api.md), section 6.)
 
 <!-- prettier-ignore -->
 | Check | Covers |
@@ -312,7 +314,7 @@ CI/CD step builds the checks (#40, #42).
 | `guard / code-scan` | Semgrep (area 8) |
 | `preview / lighthouse`, `preview / axe`, `preview / bundle`, `preview / latency` | page performance, BASE-03 (axe), the bundle ratchet and BASE-04 (latency smoke), measured on the Vercel preview (below; #43) |
 | `guard / pr-title` | the Conventional Commit prefix (`triage-labels.md`, automation candidate): a few lines of bash, no third-party action (area 9) |
-| `guard / protected-paths` | fails an agent PR that touches `tests/acceptance/**` (MUST-15.2) |
+| `guard / protected-paths` | fails an agent PR that touches `tests/acceptance/**` (MUST-15.2). Built as `guard / acceptance`, keyed on a `[bot]` author (amended 19 Nov, [ADR-0007](0007-apps-web-and-game-api.md), section 6) |
 | `guard / no-prototype` | fails a PR into `main` whose head is `prototype/*` (rulesets can't block a head branch) |
 
 `ci / mutation` (Stryker) also runs and reports, but it is **not required**. Nor is `ci / stack`,
@@ -646,6 +648,24 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   and a flaky job gets two draws at turning a head red. On `150dbda`, `ci / test` timed out on one
   twin and passed on the other, and `ci / scripts`' `issue-fields.test.sh` failed on one and passed
   on the other.
+- **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). It ran on `pull_request`
+  and on `pull_request_review`, and on PR #377 the admin's approval didn't unblock the merge: the
+  review run passed in its own check suite, but the merge stayed blocked on the `pull_request` run's
+  earlier failure until that run was re-run by hand. So `code-owned.yml` triggers on
+  `pull_request_review` (`submitted`, `dismissed`) alone, one run per review, with nothing that
+  re-runs another run. `main` needs an approval, so no PR merges without a review, and so without
+  this check. A push leaves the new head without it ("Expected"), which blocks, until a review of
+  that head runs it; whether the stale-approval dismissal on a push fires `dismissed`, and so runs
+  it at once, is checked on #379's throwaway PRs. The job has no `if:`: a skipped required check
+  reads as passing (above), so a COMMENTED review would turn it green; it always runs and passes or
+  fails on the diff and the reviews. Unlike `ci`, `security` and `pr-body` (above), it has a
+  `concurrency` group per PR with `cancel-in-progress` (admin, 19 Nov): reviews don't come in twins
+  on one push, and a run that a newer review cancels is followed by the newer run on the same head.
+  Whether GitHub then reads the cancelled run as the head's result, as on #313, is unproven for
+  review runs; #379's throwaway PRs check two reviews seconds apart. The workflow comes from the
+  PR's merge ref, as for `pull_request`; the script and CODEOWNERS still come from the default
+  branch (#337). The label `review:admin` it adds now lands at the first review, not at open; the
+  agent and the reviewer bot still add it earlier (CONSTRAINTS.md, "Escalation criteria").
 - **The floor guard compares the whole stack below a part with the stack's base**, not each part
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the guard
   from the lower part's branch, so a part could swap the guard that judges the part above, and a
@@ -799,7 +819,10 @@ bypass too. **The interim rule (decided 8 Nov): no unattended factory runs until
   counts (area 2). Only the admin's own approval is blocked, on sensitive and escalated PRs.
 - `guard / protected-paths` can't tell an agent from the admin by author, so it reads the
   `Co-Authored-By: Claude` / `Claude-Session:` trailers that agents add by instruction. With the
-  App, it checks the author.
+  App, it checks the author. (Amended 19 Nov: the App opens agent PRs, so the check, built as
+  `guard / acceptance`, reads only the PR's author: a `[bot]` author fails it, and trailers aren't
+  read, because they would also catch the admin's own commissioned runs;
+  [ADR-0007](0007-apps-web-and-game-api.md), section 6.)
 
 **No merge guard for unattended sessions (decided 8 Nov).** On 7 Nov the admin allowed one only
 "once #37 shows how to detect them", and map #59 kept it open in case the factory got no App of its

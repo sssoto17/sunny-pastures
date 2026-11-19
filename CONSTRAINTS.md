@@ -92,7 +92,7 @@ thresholds).
 | Duplication (ADR-0005) | 0 clones in the changed files of `packages/sim`, source and tests: exact copies of 50 tokens and 5 lines or more | A rule written twice drifts apart; a repeated rule becomes a shared module at its second occurrence | `fallow dupes --changed-since <merge base>`, settings in `.fallowrc.jsonc` | task end, CI | `ci / lint` | #125 |
 | Coverage: `packages/sim` | Changed lines ≥ 90% covered | The sim is the research contribution, and a pure module with no I/O is cheap to cover | Vitest coverage (v8) lcov ∩ `git diff` | task end, CI | `ci / test` | #40 |
 | Coverage: rest of `apps/` and `packages/` | Changed lines ≥ 80% covered | High enough that new logic needs a test; the rest leaves room for defensive branches that unit tests can't reach without contortions | Vitest coverage (v8) lcov ∩ `git diff` | task end, CI | `ci / test` | #40 |
-| Boundaries: sim purity (MUST-10.1) | 0 violations. `packages/sim` imports nothing outside itself and no `node:*`, and calls none of `Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `crypto.randomUUID`, `fetch`, `setTimeout`, `setInterval`, `setImmediate`. `new Date()` with no arguments is banned too; test files in `packages/sim` (`*.test.ts`) may also import `vitest` and `fast-check` and nothing else from outside the sim, and stay banned from `node:*` and from the calls above (admin, 9 Nov, #81); every file in a module's `tests/` folder counts as a test file here, test helpers included | The determinism claim depends on it, and the spec asks for a check, not review | Fallow boundaries with `boundaries.calls.forbidden`; ESLint `no-restricted-syntax` for argument-less `new Date()`, since Fallow checks direct callees, not constructors | edit, CI | `ci / boundaries` | #41 |
+| Boundaries: sim purity (MUST-10.1) | 0 violations. `packages/sim` imports nothing outside itself and no `node:*`, and calls none of `Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `crypto.randomUUID`, `fetch`, `setTimeout`, `setInterval`, `setImmediate`. `new Date()` with no arguments is banned too; test files in `packages/sim` (`*.test.ts`) may also import `vitest` and `fast-check` and nothing else from outside the sim, and stay banned from `node:*` and from the calls above (admin, 9 Nov, #81); every file in a module's `tests/` folder counts as a test file here, test helpers included | The determinism claim depends on it, and the spec asks for a check, not review | Fallow boundaries with `boundaries.calls.forbidden`; ESLint `no-restricted-syntax` for argument-less `new Date()`, since Fallow checks direct callees, not constructors; ESLint `no-restricted-imports` for packages and `node:*`, since Fallow's rule packs can't match a `node:*` prefix | edit, CI | `ci / boundaries`; `ci / lint` for the ESLint parts | #41 |
 | Boundaries: server-only (`AGENTS.md`) | 0 violations: client code never imports `apps/web/src/server/`; the zones in `.fallowrc.jsonc` (#329 decision 3): `routes` (`src/app/**/route.ts`) → `api`; `pages` (rest of `src/app/**`) → `sim` only; `api` → every server module and `sim`; `game` → `rules`, `timing`, `sim`, type-only `store`; `store` → type-only `db` and `sim`; `rules` → `sim`; `auth` → `config`; `db` → type-only `config`; `config` and `timing` are leaves; every file in `apps/web/src` is in a zone (`coverage.requireAllFiles`), and every `src/server/*/index.ts` starts with `import "server-only"` | `AGENTS.md` makes `src/server/` server-only; only the composition root wires modules together | Fallow boundaries; `server-only` fails `next build` on a client import | edit, CI | `ci / boundaries` | #41 (once `apps/web` exists, M3) |
 | Sim speed | `advance()` across 30 days on the largest content farm ≤ 50 ms; `apply()` ≤ 1 ms per call | Offline catch-up runs inside a request with a 300 ms p95 budget (BASE-04), so the sim may use at most a sixth of it | `vitest bench` (built in), farm read from content data; see [Timing checks](#timing-checks) | task end, CI | `ci / bench` | #41 |
 | Determinism (MUST-17.1) | The same recorded action script gives the same state hash in two separate runs | The research question's core claim | ADR-0001's step-0 gate, run in CI | task end, CI | `ci / determinism` | #48 |
@@ -173,7 +173,7 @@ A check that stalls the agent gets switched off, so the cost of a check decides 
 <!-- prettier-ignore -->
 | Stage | Command | Runs | Budget |
 |---|---|---|---|
-| After each edit | `pnpm check:fast` (agent hook: `PostToolUse` in `.claude/settings.json`, #113) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, formatting check. Boundaries join this row when #41 adds them to `check:fast` | under 5 s |
+| After each edit | `pnpm check:fast` (agent hook: `PostToolUse` in `.claude/settings.json`, #113) | Incremental typecheck (`tsc -b`), lint on changed files, floor guard, formatting check. Boundaries join this row when #41 adds them to `check:fast`; since #41 it runs them as `pnpm boundaries` | under 5 s |
 | Task end, before the agent opens a PR | `pnpm check:task` | `check:fast`, plus related unit and property tests (fixed seed, capped runs), coverage of changed lines, sim benchmark, duplication in changed files, the determinism gate, and a full lint without the cache (typed rules read other files, and the cache only tracks each file's own content) | ≤ 90 s |
 | Every PR | CI (`pnpm check:full` + scan jobs) | Everything above, plus larger property runs, the determinism gate, gitleaks, `pnpm audit`, Semgrep, Stryker _(warn)_, acceptance tests | unlimited |
 | Every preview deploy | CI against the Vercel preview | Lighthouse, axe, bundle ratchet, latency smoke | unlimited |
@@ -210,10 +210,10 @@ bot asks for a split. Auto-merge stays off until this section is merged (ADR-000
 A PR that meets any row carries `review:admin`. An agent that knows it adds the label at
 `gh pr create --label review:admin`. The reviewer bot checks every row on each review and adds the
 label when it's missing. For the Code-owned path row, the check `guard / code-owned` adds it from
-the diff as well (#337). Whoever adds it also posts a one-line comment that names every row the PR
-meets, for example "escalated: interface (sim exports)". Those comments are the tuning data (below).
-The bot checks these rows before the [split size](#split-size), so on a PR it escalates, the size is
-only a note.
+the diff as well, on the PR's first review, since it runs on reviews only (#337, #379). Whoever adds
+it also posts a one-line comment that names every row the PR meets, for example "escalated:
+interface (sim exports)". Those comments are the tuning data (below). The bot checks these rows
+before the [split size](#split-size), so on a PR it escalates, the size is only a note.
 
 <!-- prettier-ignore -->
 | Criterion | Applies when | Who adds the label | Why |
@@ -432,10 +432,10 @@ Decided in the review of PR #45 (7 Nov):
 Decided in the interview on #47 (7 Nov), for
 [Admin review](#admin-review-escalation-and-split-size):
 
-- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS, so the label
-  is the one queue of PRs waiting for the admin. A new dependency, an Exceptions row and a loosened
-  tool config fall under that row. Until `guard / floor` reports, the bot escalates a weakened bar
-  on any path.
+- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS and by
+  `guard / code-owned` at the PR's first review (#337, #379), so the label is the one queue of PRs
+  waiting for the admin. A new dependency, an Exceptions row and a loosened tool config fall under
+  that row. Until `guard / floor` reports, the bot escalates a weakened bar on any path.
 - **Feature slice, interface, security:** a feature slice is a PR that closes a `feature` issue. An
   interface change includes additions to `packages/*` exports, the game API's schemas and the sim's
   state and action types. Security-sensitive code escalates.

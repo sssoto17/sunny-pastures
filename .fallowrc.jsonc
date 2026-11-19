@@ -19,7 +19,12 @@
   // don't exist yet are declared now, so each lands inside its rule. `allowTypeOnly` admits
   // `import type` only: game/ sees the store's interface, never its code, and auth's `PlayerId`,
   // never `readPlayer` (#332 decision 4); store/ sees the sim's types, never its values
-  // (ADR-0001). `ci / boundaries` runs this (#41).
+  // (ADR-0001). The sim (CONSTRAINTS.md, "Boundaries: sim purity (MUST-10.1)") imports no other
+  // zone, tests included, and calls nothing in `calls.forbidden`.
+  // Fallow sees zones and callees only, so ESLint's sim block (eslint.config.mjs) holds the rest of
+  // the row: no package and no `node:*` import (a rule pack can't glob `node:*`), and no `Date`
+  // outside `new Date(value)`, `Date.UTC` and `Date.parse`, so argument-less `new Date()` too.
+  // `pnpm boundaries` runs this in `check:fast` and `ci / boundaries` (#41).
   "boundaries": {
     "zones": [
       { "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
@@ -51,8 +56,28 @@
       { "from": "auth", "allow": ["config"] },
       { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
       { "from": "config", "allow": [] },
-      { "from": "timing", "allow": [] }
+      { "from": "timing", "allow": [] },
+      { "from": "sim", "allow": [] }
     ],
+    // A pattern matches a call and a constructor call, also through an import or a namespace.
+    "calls": {
+      "forbidden": [
+        {
+          "from": "sim",
+          "callee": [
+            "Date.now",
+            "Math.random",
+            "performance.now",
+            "crypto.getRandomValues",
+            "crypto.randomUUID",
+            "fetch",
+            "setTimeout",
+            "setInterval",
+            "setImmediate"
+          ]
+        }
+      ]
+    },
     // Every file in apps/web/src and packages/sim/src is in a zone. The CI scripts and the root
     // tool configs are not app code; a new folder of code needs a zone, not an entry here.
     "coverage": {

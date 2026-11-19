@@ -22,14 +22,19 @@
 		"determinism": "node .github/scripts/determinism-gate.mjs",
 		"format:check": "prettier --check --log-level warn \"**/*.{ts,tsx,mts,mjs,js,json}\"",
 		"format:md": "prettier --check --log-level warn \"**/*.md\" && node .github/scripts/md-tables.mjs",
-		"check:fast": "pnpm typecheck && pnpm lint:changed && pnpm format:check && pnpm guard:floor",
+		"check:fast": "pnpm typecheck && pnpm lint:changed && pnpm format:check && pnpm guard:floor && pnpm boundaries",
+		"boundaries": "RUST_LOG=error fallow architecture --boundaries --quiet",
+		"bench": "vitest bench --run --reporter=verbose",
+		"mutation": "stryker run",
 		"dupes": "fallow dupes packages/sim --fail-on-issues --quiet",
-		"check:task": "pnpm check:fast && pnpm lint && pnpm format:md && pnpm dupes --changed-since origin/main && node .github/scripts/sim-changed.mjs SIM_PROPERTY_RUNS=1000 -- pnpm test:related && pnpm coverage:gate --skip-ratchet && pnpm determinism",
-		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm format:md && pnpm dupes --changed-since origin/main && pnpm guard:floor && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate && pnpm determinism"
+		"check:task": "pnpm check:fast && pnpm lint && pnpm format:md && pnpm dupes --changed-since origin/main && node .github/scripts/sim-changed.mjs SIM_PROPERTY_RUNS=1000 -- pnpm test:related && pnpm coverage:gate --skip-ratchet && pnpm bench && pnpm determinism",
+		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm format:md && pnpm dupes --changed-since origin/main && pnpm guard:floor && pnpm boundaries && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate && pnpm bench && pnpm determinism"
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",
 		"@ianvs/prettier-plugin-sort-imports": "4.7.1",
+		"@stryker-mutator/core": "10.1.1",
+		"@stryker-mutator/vitest-runner": "10.1.1",
 		"@vitest/coverage-v8": "5.1.0",
 		"@vitest/eslint-plugin": "1.6.28",
 		"eslint": "10.14.0",

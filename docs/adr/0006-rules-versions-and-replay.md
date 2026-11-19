@@ -297,7 +297,10 @@ client never replays an old log.
   when a new version is added, never for a released one.
 - **The sim tickets store an end time for all work in flight** (#82, #84, #86, #87, #88), and #82's
   `createSim(content)` is what the registry calls per version. The registry, `upgrade` and the
-  rules-version check are built before the first release (M3); a build issue carries them.
+  rules-version check are built before the first release (M3); a build issue carries them. (Amended
+  19 Nov: the first persistent deploy is M4's, so the registry and the check move to M4; M3 writes
+  `rules_version = 1` and never crosses a version; [ADR-0007](0007-apps-web-and-game-api.md),
+  sections 1 and 2.)
 - **#89's content check runs on every version in the registry**, not only the current one.
 - **Content changes after the first release are new versions.** `CONSTRAINTS.md`'s "Content change"
   row waited on this decision. Its reason now cites this ADR, and it still escalates every content
