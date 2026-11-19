@@ -1,0 +1,20 @@
+{
+	"version": "7",
+	"dialect": "postgresql",
+	"entries": [
+		{
+			"idx": 0,
+			"version": "7",
+			"when": 1795066513291,
+			"tag": "20261119053513_game_tables",
+			"breakpoints": true
+		},
+		{
+			"idx": 1,
+			"version": "7",
+			"when": 1795066545321,
+			"tag": "20261119053545_game_api_role",
+			"breakpoints": true
+		}
+	]
+}

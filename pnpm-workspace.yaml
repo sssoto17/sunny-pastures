@@ -4,3 +4,8 @@ packages:
 
 # Refuse versions published less than 7 days ago (minutes), so a hijacked release has time to be caught.
 minimumReleaseAge: 10080
+
+# Install scripts stay off unless the admin allows one (CLAUDE.md). drizzle-kit pulls in esbuild,
+# whose postinstall only checks its platform binary; denied explicitly so installs don't fail on it (#372).
+allowBuilds:
+  esbuild: false

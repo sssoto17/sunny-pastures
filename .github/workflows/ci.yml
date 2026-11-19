@@ -108,6 +108,10 @@ jobs:
       - run: pnpm format:md
       # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
       - run: pnpm dupes --changed-since "$SINCE"
+      # CONSTRAINTS.md, migrations row (#372): no applied migration edited since the base, and
+      # `drizzle-kit check` plus a generate that writes nothing. No database: the Supabase stack in
+      # CI, and `pnpm db:env` and `pnpm test:stack` after `supabase db reset`, are #49's.
+      - run: pnpm db:check "$SINCE"
 
   test:
     name: ci / test

@@ -27,7 +27,12 @@
 # process checks. recordScript.ts only makes recordings, which land in the owned JSON.
 /packages/sim/src/sim/tests/determinismScript.* @sssoto17
 /packages/sim/src/sim/tests/playScript.ts @sssoto17
-# Drizzle migrations and RLS: add the folder at M3, when it exists.
+# Drizzle (#372): the schema the migrations are generated from (its RLS included), the client,
+# drizzle-kit's config and the drift check.
+/apps/web/src/server/store/schema.ts @sssoto17
+/apps/web/src/server/db/ @sssoto17
+/apps/web/drizzle.config.json @sssoto17
+/supabase/drift.sh      @sssoto17
 
 # Configs that can weaken a check (CONSTRAINTS.md, "Guarding the bar"), in any directory.
 eslint.config.*         @sssoto17

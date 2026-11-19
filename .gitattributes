@@ -1,3 +1,8 @@
 # Written by tools, not by hand, so not counted toward the split size (CONSTRAINTS.md, "Split size").
 # The determinism gate's recorded script (#48): `node .github/scripts/determinism-gate.mjs --record`.
 packages/sim/src/sim/tests/determinismScript.json linguist-generated=true
+# drizzle-kit's output (#372): its snapshots and journal, and the migrations it generates from
+# apps/web/src/server/store/schema.ts (`pnpm db:generate`). A custom migration is written by hand
+# and counts.
+supabase/migrations/meta/** linguist-generated=true
+supabase/migrations/20261119053513_game_tables.sql linguist-generated=true

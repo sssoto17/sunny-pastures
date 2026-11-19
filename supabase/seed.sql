@@ -1,0 +1,2 @@
+-- No seed rows (#331 decision 8): tests set up their own data, users in auth.users included.
+-- This file exists so [db.seed]'s sql_paths in config.toml points at a real file.
