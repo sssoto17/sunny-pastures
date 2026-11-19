@@ -18,11 +18,10 @@ import { richContent, richFeedSeconds, richJobXp } from "./richContent.js";
 const params = requireProvided("fastCheck", inject("fastCheck"));
 // #200: the timeout scales with the run count; Vitest resets it after this file.
 vi.setConfig({ testTimeout: inject("propertyTimeout") });
-/**
- * #357: D10 compares every farm of a run, so over the rich content it takes about half the
- * property timeout on CI (median 8.0 s of 15 s over 48 runs) and timed out in 5 of them on slow
- * runners (15.0 to 15.6 s). Twice the timeout leaves slow runners about 2x and keeps every run.
- */
+// #357: D10 compares every farm of a run, so over the rich content it takes about half the
+// property timeout on CI (median 8.0 s of 15 s over 48 runs) and timed out in 5 of them on slow
+// runners (cut off at 15.0 to 15.6 s). Twice the timeout gives those runners about 2x without
+// lowering the run count; it applies to both contents, as the test does.
 const roundTripTimeout = 2 * inject("propertyTimeout");
 const { wheat } = sliceContent.crops;
 
