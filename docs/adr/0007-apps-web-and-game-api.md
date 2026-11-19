@@ -639,6 +639,9 @@ Actions minutes are tight.
   so the zones run in CI before those layers exist (admin, 17 Nov).
 - **ADR-0005 is amended** where `apps/web` extends it: the web layout, import groups, `handleX` and
   the `*.db.test.ts` name point to sections 2 and 6.
+- **ADR-0002 is amended:** its `guard / protected-paths` (MUST-15.2) is built as
+  `guard / acceptance` and reads the PR's author, not agent trailers (section 6). **ADR-0006 is
+  amended** to point to the timetable change below.
 - **The spec changes in four rows:** T2 (rejected with 400, not "ignored"), T5 (another farm can't
   be named; a try is a 400), T8 (adds 413 and 415) and MUST-15.2 (the detector is the PR's author,
   not its branch).
