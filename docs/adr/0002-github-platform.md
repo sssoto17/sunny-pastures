@@ -290,7 +290,9 @@ and the JSON are in A8.
 `CONSTRAINTS.md`'s "Enforced with numbers" table (on `main` since #45), which owns every threshold.
 The bundle ratchet has no row in that table yet; it reports as `preview / bundle`.
 `guard / pr-title`, `guard / protected-paths` and `guard / no-prototype` are this ADR's own. The
-CI/CD step builds the checks (#40, #42).
+CI/CD step builds the checks (#40, #42). (Amended 19 Nov: `guard / protected-paths` is built as
+`guard / acceptance`, which fails a `[bot]`-authored PR that touches `tests/acceptance/**`;
+[ADR-0007](0007-apps-web-and-game-api.md), section 6.)
 
 <!-- prettier-ignore -->
 | Check | Covers |
@@ -312,7 +314,7 @@ CI/CD step builds the checks (#40, #42).
 | `guard / code-scan` | Semgrep (area 8) |
 | `preview / lighthouse`, `preview / axe`, `preview / bundle`, `preview / latency` | page performance, BASE-03 (axe), the bundle ratchet and BASE-04 (latency smoke), measured on the Vercel preview (below; #43) |
 | `guard / pr-title` | the Conventional Commit prefix (`triage-labels.md`, automation candidate): a few lines of bash, no third-party action (area 9) |
-| `guard / protected-paths` | fails an agent PR that touches `tests/acceptance/**` (MUST-15.2) |
+| `guard / protected-paths` | fails an agent PR that touches `tests/acceptance/**` (MUST-15.2). Built as `guard / acceptance`, keyed on a `[bot]` author (amended 19 Nov, [ADR-0007](0007-apps-web-and-game-api.md), section 6) |
 | `guard / no-prototype` | fails a PR into `main` whose head is `prototype/*` (rulesets can't block a head branch) |
 
 `ci / mutation` (Stryker) also runs and reports, but it is **not required**. Nor is `ci / stack`,
@@ -817,7 +819,10 @@ bypass too. **The interim rule (decided 8 Nov): no unattended factory runs until
   counts (area 2). Only the admin's own approval is blocked, on sensitive and escalated PRs.
 - `guard / protected-paths` can't tell an agent from the admin by author, so it reads the
   `Co-Authored-By: Claude` / `Claude-Session:` trailers that agents add by instruction. With the
-  App, it checks the author.
+  App, it checks the author. (Amended 19 Nov: the App opens agent PRs, so the check, built as
+  `guard / acceptance`, reads only the PR's author: a `[bot]` author fails it, and trailers aren't
+  read, because they would also catch the admin's own commissioned runs;
+  [ADR-0007](0007-apps-web-and-game-api.md), section 6.)
 
 **No merge guard for unattended sessions (decided 8 Nov).** On 7 Nov the admin allowed one only
 "once #37 shows how to detect them", and map #59 kept it open in case the factory got no App of its

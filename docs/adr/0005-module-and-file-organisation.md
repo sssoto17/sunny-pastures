@@ -26,7 +26,8 @@ change to `CONSTRAINTS.md` is listed under [Consequences](#consequences).
 `packages/*` and to `apps/web/src/`, except folders whose file names a framework dictates (Next's
 `app/`: `page.tsx`, `layout.tsx`, `route.ts`). Web-specific layout (route groups, `_components/`,
 where `src/server/` sits) is decided when `apps/web` is created in M3. `.github/scripts/` is CI
-tooling and stays flat (Q9).
+tooling and stays flat (Q9). (Amended 19 Nov: `apps/web`'s layout, its server modules and their
+Fallow zones are [ADR-0007](0007-apps-web-and-game-api.md), section 2.)
 
 ## 1. A module is a folder with one entry file (Q1, Q2, Q7, Q8)
 
@@ -191,7 +192,9 @@ with internal seams open to the module's own tests.
   camelCase when a name needs more words (`addOns/`, `canonicalJson.ts`); PascalCase for React
   component files and folders in `apps/web` (C19; resolves conflict 1).
 - `.test.ts` is the only suffix: no `.spec.ts`, and no `*.types.ts`, since a module's types live in
-  its `index.ts` or a `types.ts` sibling.
+  its `index.ts` or a `types.ts` sibling. (Amended 19 Nov: in `apps/web/src/server/`, a test that
+  needs the local database is named `*.db.test.ts`, which selects the Vitest project `db`;
+  [ADR-0007](0007-apps-web-and-game-api.md), section 6.)
 - Never rename by case alone: case-insensitive filesystems (macOS, Windows) confuse git.
 - **Enforced by `eslint-plugin-check-file`** (`filename-naming-convention`,
   `folder-naming-convention`), a new dev dependency the admin approved. The structure rules of
@@ -247,8 +250,11 @@ can't check.
   already does), and **a line-length check only** (it flags, never fixes; #231).
 - **Import order** (Q20; C8): `@ianvs/prettier-plugin-sort-imports`, so sorting is part of
   formatting. Groups today: packages, a blank line, relative. `apps/web` adds `@/` and its layers in
-  M3. Rejected: **`eslint-plugin-simple-import-sort`** (a second tool doing a formatting job) and
-  **no sorting** (the admin's most deliberate setup, at work, sorted imports through Prettier).
+  M3. (Amended 19 Nov: the groups are packages, `@sunny-pastures/*`, `@/`, relative, and
+  cross-module imports in `apps/web/src/server/` go through `@/server/<module>`;
+  [ADR-0007](0007-apps-web-and-game-api.md), section 2, Q5.) Rejected:
+  **`eslint-plugin-simple-import-sort`** (a second tool doing a formatting job) and **no sorting**
+  (the admin's most deliberate setup, at work, sorted imports through Prettier).
 - **New dependencies** (resolves conflict 17), each approved by the admin in this grill:
   `eslint-plugin-check-file`, `prettier`, `@ianvs/prettier-plugin-sort-imports`,
   `@vitest/eslint-plugin`, plus Fallow, which `CONSTRAINTS.md` already lists.
@@ -297,7 +303,7 @@ tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's p
 | Outside shapes | snake_case only where data mirrors one (DB columns, API fields); sim state and actions are camelCase | same: object-literal and type properties may be camelCase or snake_case, everything else camelCase; in `packages/sim` properties are camelCase only (it mirrors no outside shape); whether a snake_case property really mirrors an outside shape: doc |
 | Booleans | `is`, `has`, `can` prefix | same (type-aware selector, Q22) |
 | Domain words | `GLOSSARY.md` terms, never its *Avoid* words | doc |
-| Handlers (`apps/web`) | `handleX` inside, `onX` props | doc (M3) |
+| Handlers (`apps/web`) | `handleX` inside, `onX` props, for component handlers only; server functions are verb-first (`submitAction`) ([ADR-0007](0007-apps-web-and-game-api.md), section 2, Q5) | doc |
 
 ### Errors, absence, async (Q23)
 

@@ -13,6 +13,9 @@ server. _Avoid_: engine, game logic, reducer
 **Farm**: Everything one player owns and has produced: plots, buildings, goods and their timers.
 _Avoid_: game state, save, account
 
+**Player**: The person who owns one farm, known to the server by their sign-in. Every player has
+exactly one farm. _Avoid_: user, account
+
 **Action**: Something a player chooses to do to their farm (plant, harvest, bake), stamped with the
 server time at which it takes effect. An action the rules refuse is rejected and leaves no trace.
 _Avoid_: command, event, move, input

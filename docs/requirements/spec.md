@@ -309,7 +309,7 @@ Agent PRs can't modify them.
 | # | Criterion | Verified by |
 | --- | --- | --- |
 | MUST-15.1 | A PR that changes `tests/acceptance/**` can't merge without the admin's approval. A CODEOWNERS entry and a ruleset on `main` requiring code-owner review enforce it. | `ci` |
-| MUST-15.2 | A CI check fails any PR from an agent branch that touches `tests/acceptance/**`. | `ci` |
+| MUST-15.2 | A CI check (`guard / acceptance`) fails any PR authored by a bot (`[bot]`) that touches `tests/acceptance/**`. The author is set by the App's token, so an agent can't change it ([ADR-0007](../adr/0007-apps-web-and-game-api.md), section 6). | `ci` |
 | MUST-15.3 | The acceptance tests run on every PR against a fresh stack, and they treat the app as a black box over HTTP. | `ci` |
 
 MUST-15.1 is met in mechanism once CODEOWNERS (ADR-0002, appendix A3) and the `main` ruleset are in
@@ -332,13 +332,13 @@ to MUST-16.5.
 | Threat | Attack | Expected result | OWASP 2025 |
 | --- | --- | --- | --- |
 | T1 | Forged or skewed client clock | Server time decides. Nothing ripens early. | A06 Insecure Design |
-| T2 | Client sends a result or a quantity | Ignored or rejected. The server computes every outcome. | A08 Software or Data Integrity Failures |
+| T2 | Client sends a result or a quantity | Rejected (400): the request may carry no result or quantity. The server computes every outcome. | A08 Software or Data Integrity Failures |
 | T3 | Replayed or duplicated request | The first answer comes back. Nothing applies twice. | A08 Software or Data Integrity Failures |
 | T4 | Concurrent requests racing on one farm | No lost update, no double spend | A06 Insecure Design |
-| T5 | Acting on or reading another player's farm | 403/404. Nothing changes. | A01 Broken Access Control |
+| T5 | Acting on or reading another player's farm | The caller's own farm comes from their sign-in and can't be named: a request that names another farm is refused (400), and nothing is read or changed. A later route that reads another farm (a visit, SHOULD-01) has its own friend check ([ADR-0007](../adr/0007-apps-web-and-game-api.md), section 3). | A01 Broken Access Control |
 | T6 | Claiming someone else's gift, or one gift twice | Refused | A01 Broken Access Control |
 | T7 | Action spam | Over the per-farm rate limit → 429. Nothing committed. | A06 Insecure Design |
-| T8 | Malformed or oversized input | 400/422, no 500, no partial write | A05 Injection, A10 Mishandling of Exceptional Conditions |
+| T8 | Malformed or oversized input | 400/413/415/422, no 500, no partial write | A05 Injection, A10 Mishandling of Exceptional Conditions |
 | T9 | Alt accounts funnelling goods by gifts | Capped by friends-only gifting, goods-only gifts and the daily limit | A06 Insecure Design |
 | T10 | Editing a log or snapshot row directly in the database | The audit flags the farm | A08 Software or Data Integrity Failures |
 
