@@ -210,10 +210,10 @@ bot asks for a split. Auto-merge stays off until this section is merged (ADR-000
 A PR that meets any row carries `review:admin`. An agent that knows it adds the label at
 `gh pr create --label review:admin`. The reviewer bot checks every row on each review and adds the
 label when it's missing. For the Code-owned path row, the check `guard / code-owned` adds it from
-the diff as well (#337). Whoever adds it also posts a one-line comment that names every row the PR
-meets, for example "escalated: interface (sim exports)". Those comments are the tuning data (below).
-The bot checks these rows before the [split size](#split-size), so on a PR it escalates, the size is
-only a note.
+the diff as well, on the PR's first review, since it runs on reviews only (#337, #379). Whoever adds
+it also posts a one-line comment that names every row the PR meets, for example "escalated:
+interface (sim exports)". Those comments are the tuning data (below). The bot checks these rows
+before the [split size](#split-size), so on a PR it escalates, the size is only a note.
 
 <!-- prettier-ignore -->
 | Criterion | Applies when | Who adds the label | Why |
@@ -432,10 +432,10 @@ Decided in the review of PR #45 (7 Nov):
 Decided in the interview on #47 (7 Nov), for
 [Admin review](#admin-review-escalation-and-split-size):
 
-- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS, so the label
-  is the one queue of PRs waiting for the admin. A new dependency, an Exceptions row and a loosened
-  tool config fall under that row. Until `guard / floor` reports, the bot escalates a weakened bar
-  on any path.
+- **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS and by
+  `guard / code-owned` at the PR's first review (#337, #379), so the label is the one queue of PRs
+  waiting for the admin. A new dependency, an Exceptions row and a loosened tool config fall under
+  that row. Until `guard / floor` reports, the bot escalates a weakened bar on any path.
 - **Feature slice, interface, security:** a feature slice is a PR that closes a `feature` issue. An
   interface change includes additions to `packages/*` exports, the game API's schemas and the sim's
   state and action types. Security-sensitive code escalates.
