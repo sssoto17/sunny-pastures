@@ -350,6 +350,12 @@ expose it. Only the server reaches it, over `DATABASE_URL`.
 - The app connects as a **`game_api` login role** with `usage` on `game` and only `select` and
   `insert` on `actions` and `snapshots`. With no `update` or `delete`, the log is append-only by
   grant, not by convention (ADR-0001, T10).
+- **`game_api` has `BYPASSRLS`** (admin, 19 Nov 2026, #372). RLS with no policies refuses every row
+  to a role that doesn't bypass it, `game_api` included, so without it the app could read and write
+  nothing. The pattern: a least-privilege role limited by its grants, with RLS as deny-all for the
+  API roles (`anon`, `authenticated`). Alternative considered: policies `to game_api` on both
+  tables, without `BYPASSRLS`. Rejected: they would allow every row, since the app checks the farm
+  owner in code (section 4), so they add SQL without adding protection.
 - Migrations run as `postgres`, which owns the tables, so `on delete cascade` from `auth.users`
   works.
 - The migration creates the role with `LOGIN` and **no password**. `pnpm db:env` generates a random
@@ -410,7 +416,9 @@ comment makes `[db.seed]`'s path real.
 
 **Q9. Where the tables live, and what carries over from the spike.**
 
-- The store owns its tables (`server/store/schema.ts`), and `drizzle.config.ts` points there.
+- The store owns its tables (`server/store/schema.ts`), and `drizzle.config.json` points there
+  (JSON, not `.ts`: drizzle-kit reads a default export, which ADR-0005 C6 bans outside `src/app/`;
+  admin, 19 Nov 2026, #372).
 - `server/db/` builds the Drizzle client over postgres.js. The store receives it as an argument and
   imports only its type, so `store` → type-only `db` holds.
 - No DDL at runtime: the spike's `create table if not exists` moves into the migrations.
@@ -627,7 +635,7 @@ Actions minutes are tight.
 | Event Sourcing with Snapshots (ADR-0001, ADR-0006) | `game.actions`, `game.snapshots` | The log is the truth; snapshots are a cache keyed by version | — (ADR-0001) |
 | Optimistic Offline Lock | the conditional insert | The row for `expectedSeq + 1` is written once, and only after its predecessor | a `prev_seq` self-reference |
 | Repository | `store/` owns `schema.ts` behind `GameStore` | SQL stays behind one interface | the tables in `db/` |
-| Least privilege, defence in depth | `game_api` grants, RLS with no policies, an unexposed schema | Append-only is enforced by the database; three layers keep PostgREST out | tables in `public`, connecting as `postgres` |
+| Least privilege, defence in depth: a least-privilege role limited by grants, RLS as deny-all for the API roles | `game_api` grants (and `BYPASSRLS`), RLS with no policies, an unexposed schema | Append-only is enforced by the database; three layers keep PostgREST out | tables in `public`, connecting as `postgres`, policies `to game_api` (they'd allow every row) |
 | Schema as code, generated forward-only migrations | Drizzle → drizzle-kit → `supabase/migrations` | One typed definition, a reviewable SQL history and a drift check between them | Supabase declarative schemas, Drizzle 1.0 rc |
 | Test pyramid by I/O boundary | `unit`, `db`, acceptance, load | Each level runs only where its dependency exists | a separate integration job, acceptance-only store tests |
 | Contract test | `describeGameStore` over the fake and B100 | The fake can't drift from the store without failing the same suite | per-test stubs |
