@@ -798,6 +798,29 @@ the week. Every factory and review run logs `total_cost_usd` (a client-side esti
 minutes, as report data. A weekly budget is set from the first week of that data, together with the
 map's cap on CI cost (#59).
 
+**The kill switch, built (#106).** `.github/workflows/factory-switch.yml` is a reusable workflow
+(`workflow_call`) that runs `.github/scripts/factory-enabled.sh`: only the exact value `true` gives
+`run=true`; unset (which reads as empty), `false`, `TRUE` and anything else give `run=false` and log
+one `SWITCH off: FACTORY_ENABLED is …` line. The factory workflow (#107) and the sweep and chain
+(#108) call it as their first job, and every other job `needs` it with
+`if: needs.switch.outputs.run == 'true'` (the snippet is in the workflow's header). A skipped job
+never starts, so the `factory` environment never hands it the App's key: nothing mints a token or
+calls Claude. The switch job itself holds no secret and no environment, only `contents: read` for
+the checkout. Its cost is one more runner minute a run while the repo is private. The reviewer
+doesn't call it. Neither does `open-pr.yml`: lanes opening their PRs as `sunny-factory` don't obey
+the switch, only the factory jobs (the sweep, the chain and the factory job) do (admin, 19 Nov
+2026).
+
+- **Turn the factory off or on** (only the admin: a repo variable needs the admin's token). In the
+  UI: Settings → Secrets and variables → Actions → Variables → `FACTORY_ENABLED` → edit (New
+  repository variable the first time). Or:
+  `gh variable set FACTORY_ENABLED --repo sssoto17/sunny-pastures --body false` (`true` to turn it
+  on). Read it with `gh variable get FACTORY_ENABLED --repo sssoto17/sunny-pastures`. The next run
+  reads the new value; a job already past the switch finishes, and `gh run cancel <id>` stops it.
+- **Its first value** is set by `scripts/setup/factory-switch.sh`, which also dispatches the
+  throwaway `check-106-factory-switch.yml` with the switch unset and then `false`, and writes both
+  runs' results for #106 (`scripts/setup/README.md`).
+
 **Until the factory App runs, every session acts as `sssoto17`.** Elsewhere in this ADR, "until #37"
 means until then: the build issues under #58, after the checks #101–#103. Cloud and local sessions
 alike, factory or not, use the admin's account, so they hold the admin's "For pull requests only"
