@@ -33,7 +33,7 @@ Nov, and each resolution comment was written to become one section here:
 The research the grills started from:
 [Research: Supabase anonymous sign-in verified in Next.js route handlers](https://github.com/sssoto17/sunny-pastures/issues/328)
 (`getClaims` verifies locally, `getUser` makes a round trip; the admin role belongs in server-only
-data; linking an email keeps the user id),
+data; linking an email keeps the same id, so the player keeps their farm),
 [Research: Postgres from Next.js on Vercel, driver, pooling and transactions](https://github.com/sssoto17/sunny-pastures/issues/326)
 (Vercel reaches Supabase through Supavisor; a module-scope pool is reused under Fluid compute) and
 [Research: what raises postgres.js UNSAFE_TRANSACTION inside sql.begin](https://github.com/sssoto17/sunny-pastures/issues/327)
@@ -56,11 +56,12 @@ stack; the first page is M4's.
   error shapes.
 - **The threat model** is the spec's T1–T10 table in MUST-16 (MUST-16.1). There is no separate
   document.
-- **Later:** the display name and the unlock-curve metrics table (M4); the
+- **Later:** the display name (MUST-08.1), the unlock-curve metrics table (MUST-19.3) and
+  reconciliation telemetry (MUST-19.2) (M4); the
   [Rules-version registry and the rules-version check](https://github.com/sssoto17/sunny-pastures/issues/154)
-  (M4, before the first persistent deploy); gifts, the inbox and friends, the audit route and the
-  admin role, the T7 rate limit and the attack tests T6, T7, T9 and T10 (M6); the OWASP 2025 mapping
-  check (M8).
+  (M4, before the first persistent deploy); gifts, the inbox and friends (MUST-08, MUST-11.4,
+  MUST-13.4, MUST-13.5), the audit route and the admin role (MUST-16.2–16.5), the T7 rate limit and
+  the attack tests T6, T7, T9 and T10 (M6); the OWASP 2025 mapping check (M8).
 
 **Rejected:** a stub identity for M3 (throwaway work that leaves T5 unproven until M4); a minimal
 page that sends an action (the prediction UI is M4's, and a page now would be rebuilt); a separate
@@ -85,15 +86,15 @@ threat-model document (the spec's table already is one).
 | `config/` | `readConfig(env)`: typed config; a missing variable is a config error |
 | `db/` | `createDb(config)`: the Drizzle client over postgres.js (section 5) |
 | `rules/` | `createRules(content)` → `{ sim, newFarm, replay, rulesVersion }`. `replay` folds `apply` over the actions at their `at` (and throws on a refusal, ADR-0001), then `advance`s to `to`. M3 has one version (`rulesVersion = 1`); the M4 registry replaces the implementation behind the same interface |
-| `store/` | the `GameStore` type and `createStore({ db, newFarm, replay })`: B100 |
+| `store/` | the `GameStore` type and `createStore({ db, newFarm, replay })`: B100. The layout grill wrote `sql`; section 5, Q9 hands the store the Drizzle client instead |
 | `auth/` | `createAuth(config)` → `{ readPlayer(request) }` (section 4) |
 | `timing/` | `withTiming(name, fn)` and the `Server-Timing` header |
 | `game/` | `submitAction(deps, playerId, body)` and `loadFarm(deps, playerId)`: ADR-0001's loop and the 422 re-check. Returns results, never `Response`s |
 | `api/` | the composition root: `getApi()` builds config → db → rules → store → auth → deps, and exposes what the routes call |
 
-Only `api/` wires modules together, and only a `route.ts` imports `api/`. `game/` sees `GameStore`,
-`PlayerId` and the sim's types as types only, so it is tested against a fake store. There is no
-`inbox/` in M3 (gifts are M6).
+Only `api/` wires modules together, and only a `route.ts` imports `api/`. `game/` sees `GameStore`
+and `PlayerId` as types only, so it is tested against a fake store. There is no `inbox/` in M3
+(gifts are M6).
 
 **Q4. Enforcement.**
 
@@ -121,7 +122,9 @@ Only `api/` wires modules together, and only a `route.ts` imports `api/`. `game/
 
 - Client code imports only the sim's package entry, which is the current content (ADR-0006, "The
   client"). The registry lives in `server/rules/`, out of the client's reach.
-- `CONSTRAINTS.md`'s "Boundaries: server-only" row names these zones; there is no new row.
+- `CONSTRAINTS.md`'s "Boundaries: server-only" row widens to these zones in the build ticket that
+  adds them; there is no new row. The scaffold wrote the layout's zones into it; the auth module's
+  ticket adds `game` → type-only `auth`, and the test tickets add their allowances.
 
 **Q5. ADR-0005 in `apps/web`.** Cross-module imports go through `@/server/<module>` (the entry
 only); inside a module they are relative and without `.js` (bundler resolution). Import sort groups
@@ -191,9 +194,11 @@ first action writes its first row.
   → 415; a body over **4 KiB** → 413 (from `Content-Length`, then by capping the bytes read, so a
   chunked body can't get past it); invalid JSON, a bad shape or a bad key → 400. `GET /api/farm`
   refuses any query parameter with 400. Authentication runs before all of them (section 4, Q4).
-- **Where they live:** `route.ts` stays a thin adapter (section 2, Q1), so the request guards, the
-  error builder and the headers live in a server module the routes reach through `server/api`, where
-  they are unit-tested. Which module holds them is the build ticket's call.
+- **Where they live** (a note the contract grill left on
+  [Build tickets for game API persistence from ADR-0007](https://github.com/sssoto17/sunny-pastures/issues/335)):
+  `route.ts` stays a thin adapter (section 2, Q1), so the request guards, the error builder and the
+  headers live in a server module the routes reach through `server/api`, where they are unit-tested.
+  Which module holds them is the build ticket's call.
 
 ### Response
 
@@ -233,9 +238,9 @@ M4 client to switch on exhaustively. One builder makes every error, so no stack 
 | 401 | `unauthorized` | a missing, expired or invalid token | refresh the session, then retry |
 | 413 | `too_large` | a body over 4 KiB | don't retry |
 | 415 | `unsupported_media_type` | not `application/json` | don't retry |
-| 422 | `refused` | the sim refused; `message` is the sim's reason word for word, a sentence a player reads (ADR-0003 §4, MUST-12.3) | undo the prediction, show `message` |
+| 422 | `refused` | the sim (or, from M6, the inbox) refused; `message` is the sim's reason word for word, a sentence a player reads (ADR-0003 section 4, MUST-12.3) | undo the prediction, show `message` |
 | 429 | `rate_limited` | reserved; the limit itself is T7, in M6 | retry after `Retry-After` |
-| 503 | `busy` | still conflicting after 3 retries (MUST-13.3), or a store error such as an unknown rules version (ADR-0006 §5) | retry with the same key after `Retry-After: 1` |
+| 503 | `busy` | still conflicting after 3 retries (MUST-13.3), and, per ADR-0006 (sections 5 and 8), a store error such as an unknown rules version | retry with the same key after `Retry-After: 1` |
 | 500 | `internal` | a bug; a generic message | retry with the same key |
 
 There are no 403 or 404 responses in M3: with no ids in the path, there is nothing to forbid and
@@ -256,13 +261,7 @@ Requiring `application/json` means a cross-site form can't post without a CORS p
 API sends no CORS headers (same origin only). With a bearer token and no cookie (section 4, Q1),
 there is no CSRF exposure.
 
-### What the attack tests check
-
-- **T1, T2:** a body with `at`, a result or a quantity → 400, nothing written.
-- **T3:** a resent key → the first `answer`, unchanged, even when the action would now be refused.
-- **T5:** A's token with `?farm=B` or a body `farmId` → 400, and B's farm is unchanged.
-- **T8:** one case per rule (415, 413 with and without `Content-Length`, bad JSON, bad shape, extra
-  keys, a bad key) → never a 500, nothing written.
+The contract sets the attack-test cases for T1, T2, T3, T5 and T8; section 6 lists them with T4.
 
 **Rejected:**
 
@@ -271,7 +270,8 @@ there is no CSRF exposure.
 - **A schema library such as Zod or Valibot:** a new dependency and a second definition of `Action`
   to keep in step with the sim. Worth revisiting if M6's gift actions grow the guards a lot.
 - **Returning only `Answer` plus `at`:** the client would recompute and compare hashes, and each
-  rebase, action in another tab or bonus-roll difference would cost a second round trip.
+  stale `expectedSeq`, action in another tab or bonus-roll difference would cost a second round
+  trip.
 
 ## 4. Auth: from a request to a player
 
@@ -324,8 +324,8 @@ database call, "checks before any query" still holds. Fallow gains `game` → ty
 - **`jose` `jwtVerify` against the JWKS:** explicit `iss`, `aud` and algorithm checks, but a second
   auth dependency beside the supabase-js that M4's client needs anyway. The four claim checks cover
   the gap.
-- **Minted test tokens (`supabase gen bearer-jwt`):** the users don't exist in `auth.users`, which
-  the schema references, and the tests would depend on key material.
+- **Minted test tokens (`supabase gen bearer-jwt`):** those identities don't exist in `auth.users`,
+  which the schema references, and the tests would depend on key material.
 - **A test-only bypass** (a header or a `NODE_ENV` switch): a backdoor that would have to be proven
   absent in production. Rejected outright.
 - **Next middleware for auth:** it runs on every route, can't reach `getApi()`'s graph, and hides
@@ -383,7 +383,7 @@ it needs one.
 `unique (farm_id, idempotency_key)` (serves `processed` and catches a duplicate on insert).
 `snapshots`: primary key `(farm_id, seq, rules_version)`; `load` reads
 `order by seq desc, rules_version desc limit 1`, so at the same seq the higher version wins
-(ADR-0006 §5).
+(ADR-0006 section 5).
 
 **Q6. Gap-free sequence numbers.** The spike's conditional insert
 (`insert … select … where expectedSeq = 0 or exists (row at expectedSeq) on conflict do nothing returning`)
@@ -421,14 +421,15 @@ comment makes `[db.seed]`'s path real.
   100th-action snapshot. Dropped: the `schema` parameter, the B1/B25 branches and the `inbox`
   option. M6 adds an inbox write inside `commit`'s transaction, with its own migration, so the room
   left for it is the transaction, not a table.
-- Base snapshots (ADR-0006 §3) are never written in M3, which has one version, but reads already
-  apply the tie-break.
+- Base snapshots (ADR-0006 section 3) are never written in M3, which has one version, but reads
+  already apply the tie-break.
 
-**Q11. Dependencies** (approved by the admin, 18 Nov): `drizzle-orm@0.45.4`, `drizzle-kit@0.31.11`
-(dev) and `postgres@4.1.1`, the 4.x upgrade that fixes the `UNSAFE_TRANSACTION` race. esbuild's
-`postinstall` (pulled in by drizzle-kit) stays disallowed. _To confirm:_ `drizzle-kit generate` runs
-without it, and Drizzle works on postgres.js 4.x (untested anywhere); the first store test against
-the local stack proves it, and a failure goes back to the admin.
+**Q11. Dependencies** (approved by the admin, 18 Nov; the resolution records no separate Q10):
+`drizzle-orm@0.45.4`, `drizzle-kit@0.31.11` (dev) and `postgres@4.1.1`, the 4.x upgrade that fixes
+the `UNSAFE_TRANSACTION` race. esbuild's `postinstall` (pulled in by drizzle-kit) stays disallowed.
+_To confirm:_ `drizzle-kit generate` runs without it, and Drizzle works on postgres.js 4.x (untested
+anywhere); the first store test against the local stack proves it. If it fails, the fallback
+(postgres.js 3.4.x plus a workaround for the race) is decided with the admin then.
 
 **Rejected:**
 
@@ -599,13 +600,13 @@ Actions minutes are tight.
 <!-- prettier-ignore -->
 | Pattern | Where | Why | Alternatives considered |
 | --- | --- | --- | --- |
-| Composition Root, dependency injection by argument | `server/api` (`getApi()`), the `deps` parameter | One place knows the whole graph; tests swap collaborators as values | a DI container, a service locator, module-scope singletons |
+| Composition Root, dependency injection by argument | `server/api` (`getApi()`), the `deps` parameter | One place knows the whole graph; tests swap collaborators as values | a DI container, a service locator |
 | Lazy initialisation, memoised | `getApi()` | Built once per process, never at build time | eager construction at module scope |
-| Humble Object (thin adapter) | `route.ts` | Framework code that is hard to test holds no logic | logic in routes, Next middleware, a `withPlayer` wrapper |
+| Humble Object (thin adapter) | `route.ts` | Framework code that is hard to test holds no logic | Next middleware, a `withPlayer` wrapper |
 | Functional core, imperative shell (ADR-0001) | `game/` with the sim | `game/` returns results; the routes and the store do the I/O | — |
 | Facade with a Strategy slot | `rules/` | One interface over content → sim, `newFarm`, `replay`; M4's registry swaps the implementation | `replay` in the sim, `replay` in `game/` |
 | Decorator | `timing/` (`withTiming`) | Times a step without editing it | — |
-| Layered architecture, enforced | Fallow zones, `server-only` | The direction of dependencies is checked, not reviewed | ESLint `no-restricted-imports`, dependency-cruiser, review only |
+| Layered architecture, enforced | Fallow zones, `server-only` | The direction of dependencies is checked, not reviewed | ESLint `no-restricted-imports`, dependency-cruiser |
 | Resource scoped to the caller ("me" resource) | `/api/farm` | Ownership comes from identity, so there is no ownership check to forget (T5) | — |
 | Idempotent Receiver | `Idempotency-Key`, `unique (farm_id, idempotency_key)` and the stored `answer` | A retry gets the first answer, stored in the row that claims the seq | the key in the body (the spike) |
 | Parse, don't validate | the request guards return the sim's `Action`; the branded `PlayerId` | Handlers only see checked values, and a raw string can't stand in for a verified id | a schema library (Zod, Valibot) |
@@ -645,8 +646,9 @@ Actions minutes are tight.
   (section 5, Q7), `guard / acceptance` and the attack tests in the acceptance row (section 6). The
   "Security-sensitive code" row says its paths become globs once `apps/web/src/server/` exists;
   sections 2 and 3 fix those paths (`auth/`, the request guards, `game/`, the store's commit).
-- **Not yet placed:** the types the M4 client needs (`FarmEnvelope`, `ErrorCode`). The `pages` zone
-  imports only the sim, so where these types live is M4's decision, with the client.
+- **Open, for the admin:** no grill placed the types the M4 client needs (`FarmEnvelope`,
+  `ErrorCode`). The `pages` zone imports only the sim, so where these types live is M4's decision,
+  with the client.
 - **ADR-0006's timetable moves.** ADR-0006 expected the registry and the rules-version check before
   the first release in M3; section 1 moves them to M4, before the first persistent deploy. M3 writes
   `rules_version = 1` everywhere and never crosses a version, and `rules/` is the slot the registry
