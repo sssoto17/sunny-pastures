@@ -78,11 +78,12 @@
         }
       ]
     },
-    // Every file in apps/web/src and packages/sim/src is in a zone. The CI scripts and the root
-    // tool configs are not app code; a new folder of code needs a zone, not an entry here.
+    // Every file in apps/web/src and packages/sim/src is in a zone. The CI scripts and the tool
+    // configs (the root ones, and Next's, which sits beside apps/web/package.json; #393) are not
+    // app code; a new folder of code needs a zone, not an entry here.
     "coverage": {
       "requireAllFiles": true,
-      "allowUnmatched": [".github/scripts/**", "*.mjs", "*.mts", "*.d.ts"]
+      "allowUnmatched": [".github/scripts/**", "*.mjs", "*.mts", "*.d.ts", "apps/web/next.config.mjs"]
     }
   }
 }
