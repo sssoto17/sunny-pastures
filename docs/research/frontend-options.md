@@ -1,5 +1,7 @@
 # Frontend options
 
+The meeting was held on 19 Nov 2026, and its outcomes are on #127.
+
 Research for #128: the resource shortlist for the frontend meeting on Thu 19 Nov 2026. It covers the
 rendering approach, UI libraries, styling, animation, icons, fonts and art assets for `apps/web`
 (Next.js 16.4.6, React 19.3.1, App Router, TypeScript). Every package named here is a candidate
