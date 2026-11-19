@@ -474,6 +474,12 @@ anywhere); the first store test against the local stack proves it. If it fails, 
   PR touches `apps/web/src/server/**` or `supabase/**`**. Otherwise it runs `--project unit`, and
   the gate runs `--skip-ratchet`, because untested store files would read 0% (as `check:task`
   already does for partial runs).
+- **The ratchet runs in full on `main`** (admin, 19 Nov, an addendum to the test-architecture
+  resolution). Every push to `main` always starts the stack and runs both projects with the full
+  gate, ratchet included. A drop that merges through a PR without the stack turns `main` red on that
+  merge, so nothing drifts unseen. PRs that touch `apps/web/src/server/**` or `supabase/**` still
+  check the ratchet before merging, and the changed-line floors (90%/80%) apply to every PR as
+  before.
 - **No conditional skips.** A `db` test without a stack **fails** with "run `pnpm db:start`"; it
   never `skipIf`s, because a runtime skip is a silent pass the floor guard can't see. The only
   switch is the project selection in `ci.yml`, from the changed paths, where a reviewer sees it.
@@ -577,6 +583,9 @@ Actions minutes are tight.
 **Rejected:**
 
 - **A separate `ci / integration` job with its own lcov:** a second stack and a merged-lcov gate.
+- **A nightly full-gate run instead of every push to `main`:** cheaper, but a drop is found up to a
+  day later and is mixed across merges. **The stack on every PR:** no loosening at all, but 1–2 more
+  runner minutes on every PR.
 - **Store behaviour tested only through acceptance tests:** store code would fail the coverage floor
   by construction.
 - **Real Auth sign-ups in `db` tests:** couples store tests to Auth and its rate limit. **Truncating
@@ -658,6 +667,10 @@ Actions minutes are tight.
   fills.
 - **Accepted trade-off: a token stays valid until it expires** (section 4, Q2), up to an hour after
   sign-out.
+- **Accepted trade-off: a PR without the stack skips the coverage ratchet** (section 6). Every push
+  to `main` runs the full gate, so a drop turns `main` red on the merge that caused it.
+  [Vitest db project and a Supabase stack in ci / test](https://github.com/sssoto17/sunny-pastures/issues/382)
+  builds both.
 - **Accepted trade-off: the acceptance tests' protection rests on identity.** A lane that pushes as
   the admin is the admin's act; `guard / acceptance` can't tell what such a run wrote.
 - **Accepted trade-off: some checks are confirmed only when built** (section 5): `supabase db reset`
