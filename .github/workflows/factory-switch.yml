@@ -1,0 +1,51 @@
+# The factory's kill switch (#106; ADR-0002, area 2, "Caps"): the first job of every workflow that
+# starts factory work, the factory workflow (#107) and the sweep and chain (#108). The reviewer never
+# calls it, so open PRs are still reviewed while the factory is off. The repo variable
+# FACTORY_ENABLED must read exactly `true`; anything else, unset included, gives run=false and a
+# SWITCH off line in this job's log. A caller wires it in as its first job:
+#
+#   jobs:
+#     switch:
+#       uses: ./.github/workflows/factory-switch.yml
+#       permissions:
+#         contents: read
+#     factory:
+#       needs: switch
+#       if: needs.switch.outputs.run == 'true'
+#       environment: factory
+#       ...
+#
+# A skipped job never starts: the `factory` environment never hands it the App's key, so nothing
+# mints a token or calls Claude. This job holds no secret and no environment. Flipping the switch:
+# ADR-0002, "Caps", and scripts/setup/README.md. Actions pinned to full SHAs.
+name: factory-switch
+
+on:
+  workflow_call:
+    outputs:
+      run:
+        description: "'true' only when FACTORY_ENABLED is exactly true"
+        value: ${{ jobs.switch.outputs.run }}
+
+permissions: {}
+
+jobs:
+  switch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    # Only the checkout of the script below.
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.switch.outputs.run }}
+    steps:
+      # The caller's commit: main for a dispatch, a schedule and workflow_run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - id: switch
+        env:
+          FACTORY_ENABLED: ${{ vars.FACTORY_ENABLED }}
+        run: bash .github/scripts/factory-enabled.sh
