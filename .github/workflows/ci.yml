@@ -1,226 +1,49 @@
-# The checks every PR runs (CONSTRAINTS.md, "Enforced with numbers" and "Floor"; #40). The
-# security scans (gitleaks, pnpm audit, Semgrep) are in security.yml (#42).
-# Required checks are matched by job name, so each `name:` is exactly the check name in
-# ADR-0002, area 2. No path filters: a required check must report on every PR.
-# Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
-# Stacks (#264; ADR-0002, area 2, "Stacks"): typecheck, lint and test run once per stack, on its
-# top part, diffing from the stack's base, so they cover every part below; `ci / stack` says which
-# part is the top. Every other job runs on each part. GitHub documents a required job skipped by
-# its `if:` as passing; #264's throwaway ruleset checks it here. `push` to main runs the suite on
-# exactly what landed, so a partial stack merge that breaks main shows at once.
+# Throwaway stub for #358's cancel-in-progress test (test-358/*, never merged).
 name: ci
 
 on:
   pull_request:
-  push:
-    branches: [main]
+    types: [opened, edited, synchronize, reopened]
 
 permissions:
   contents: read
 
-# No concurrency group (#264): a push to a stacked part fires two pull_request events on one
-# head, and a group that cancels, or queues and then cancels, left a cancelled twin of a required
-# check there, which GitHub read as the latest result and blocked the merge (throwaway stack
-# #315). The cost: runs for a superseded head finish too.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
-  # Whether this PR is a stack's lower part. The event can't say so on `opened`, since
-  # scripts/stack.sh links the stack after opening the PRs, so the script asks GitHub (read-only
-  # token). It writes top=false only for a lower part: if it fails, the jobs below still run.
   stack:
     name: ci / stack
     runs-on: ubuntu-24.04
     timeout-minutes: 3
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      top: ${{ steps.top.outputs.top }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: .github/scripts
-      # Run the default branch's script, not the PR's, so a PR can't switch off the checks that
-      # judge it (as the floor job does, #99). A sparse checkout leaves other refs' blobs off the
-      # runner, so the default branch gets a checkout of its own. The PR's copy runs only while
-      # the default branch has none; if it has one that can't be read, the step fails.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.event.repository.default_branch }}
-          path: .stack-base
-          sparse-checkout: .github/scripts
-      - name: Take the script from the default branch
-        run: |
-          dir="$RUNNER_TEMP/stack-guard"
-          mkdir -p "$dir"
-          listed=$(git -C .stack-base ls-tree HEAD -- .github/scripts/stack-base-guard.mjs) || exit 1
-          if [[ -n $listed ]]; then
-            cp .stack-base/.github/scripts/stack-base-guard.mjs .stack-base/.github/scripts/diff.mjs "$dir/"
-          else
-            echo "::warning::the default branch has no stack-base-guard.mjs yet; using this PR's copy"
-            cp .github/scripts/stack-base-guard.mjs .github/scripts/diff.mjs "$dir/"
-          fi
-      - id: top
-        run: node "$RUNNER_TEMP/stack-guard/stack-base-guard.mjs" --top
+      - name: The event this run got
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-  typecheck:
-    name: ci / typecheck
-    needs: stack
-    # Once per stack: skipped only when `ci / stack` said this is a lower part.
-    if: ${{ !cancelled() && needs.stack.outputs.top != 'false' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: pnpm typecheck
-
-  lint:
-    name: ci / lint
-    needs: stack
-    # Once per stack: skipped only when `ci / stack` said this is a lower part.
-    if: ${{ !cancelled() && needs.stack.outputs.top != 'false' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      # What changed: since the stack's base for a PR (every part below the top included; the
-      # default branch while GitHub hasn't linked the stack yet), since the commit before a push.
-      SINCE: >-
-        ${{ github.event_name == 'push' && github.event.before || format('origin/{0}',
-        github.event.pull_request.stack.base.ref || github.event.repository.default_branch) }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0 # fallow dupes reports clones in the files changed since the merge base
-      - uses: ./.github/actions/setup
-      - run: pnpm lint
-      # CONSTRAINTS.md, formatting row.
-      - run: pnpm format:check
-      # Markdown (#344; ADR-0005, section 6): Prettier's prose wrap, and every top-level table keeps
-      # `<!-- prettier-ignore -->` on the line before it. Not in check:fast, for its 5 s budget.
-      - run: pnpm format:md
-      # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
-      - run: pnpm dupes --changed-since "$SINCE"
-
+          ACTION: ${{ github.event.action }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          MERGE: ${{ github.sha }}
+          SENDER: ${{ github.event.sender.login }}
+        run: |
+          echo "probe action=$ACTION before=$BEFORE after=$AFTER head=$HEAD base=$BASE merge=$MERGE sender=$SENDER run=$GITHUB_RUN_ID"
+      - run: sleep 45
   test:
     name: ci / test
-    needs: stack
-    # Once per stack: skipped only when `ci / stack` said this is a lower part.
-    if: ${{ !cancelled() && needs.stack.outputs.top != 'false' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      # CONSTRAINTS.md, Stages: CI runs larger property runs. Local runs leave it unset (100).
-      SIM_PROPERTY_RUNS: '1000'
-      # What changed: since the stack's base for a PR (every part below the top included; the
-      # default branch while GitHub hasn't linked the stack yet), since the commit before a push.
-      SINCE: >-
-        ${{ github.event_name == 'push' && github.event.before || format('origin/{0}',
-        github.event.pull_request.stack.base.ref || github.event.repository.default_branch) }}
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0 # the coverage gate diffs against the merge base
-      - uses: ./.github/actions/setup
-      - run: pnpm test
-      - run: node .github/scripts/coverage-gate.mjs --base "$SINCE"
-
-  # CONSTRAINTS.md, Determinism row (#48): the recorded script through packages/sim in two
-  # processes, against the recorded state hash. No path filter: the hash covers every rules change.
-  determinism:
-    name: ci / determinism
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: pnpm determinism
-
-  # #255: the shell scripts' test suites, every *.test.sh under scripts/ and .claude/hooks/, found
-  # by the runner so a new suite needs no edit here. Each suite fakes gh on PATH and needs no secret:
-  # the job holds no token, persists no credentials, and the runner puts a gh that refuses every
-  # call ahead of the real one. The setup step fits the runner to the suites' headers.
-  scripts:
-    name: ci / scripts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # zsh: issue-fields.test.sh calls the script from zsh, and the ubuntu-24.04 image has none.
-      # The identity is a fallback for a suite that forgets its own; today each sets one (git -c,
-      # or GIT_CONFIG_GLOBAL), which wins over this. bash, jq, git 2.36+ and GNU date are on the
-      # image: the versions print below.
-      - name: Set up the runner for the suites
+      - name: The event this run got
         env:
-          DEBIAN_FRONTEND: noninteractive
+          ACTION: ${{ github.event.action }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          MERGE: ${{ github.sha }}
+          SENDER: ${{ github.event.sender.login }}
         run: |
-          command -v zsh >/dev/null || {
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq --no-install-recommends zsh >/dev/null
-          }
-          git config --global user.name "ci / scripts"
-          git config --global user.email "ci-scripts@example.invalid"
-          bash --version | head -n1; jq --version; git --version; date --version | head -n1
-          zsh --version
-      - name: Run the suites
-        env:
-          TMPDIR: ${{ runner.temp }} # unset on the image; the suites build throwaway repos under it
-        run: bash .github/scripts/shell-suites.sh
-
-  floor:
-    name: guard / floor
-    # A PR guard: on every part of a stack, never on main after a merge.
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    env:
-      # The stack's base, or the default branch, never the part below (ADR-0002, area 2,
-      # "Stacks"): the guard always comes from main, never from a lower part's branch, and judges
-      # the whole stack below this part, so an Exceptions row in a lower part covers those above.
-      BASE_REF: ${{ github.event.pull_request.stack.base.ref || github.event.repository.default_branch }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0 # the guard diffs against the merge base
-      # Node from a pinned action, and pnpm through Corepack. A local action such as
-      # ./.github/actions/setup is read from the PR's checkout, so a PR could change what runs here
-      # before the base branch's guard starts (#99).
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-      # Run the base branch's guard, not the PR's, so a PR can't weaken the guard that judges it.
-      # It runs with its own dependencies, from the base branch too (#132: a Markdown parser): a
-      # worktree of the base outside the checkout, installed from the base's lockfile with every
-      # install script off. A PR can't swap what the guard imports, and the guard's diff of the
-      # checkout doesn't see the install. The PR's own copy is used only while the base has no guard
-      # yet (the PR that adds it).
-      - name: Take the guard from the base branch
-        run: |
-          ref="origin/$BASE_REF"
-          if ! git cat-file -e "$ref:.github/scripts/floor-guard.mjs" 2>/dev/null; then
-            ref=HEAD
-            echo "::warning::origin/$BASE_REF has no floor guard yet; using this PR's copy"
-          fi
-          git worktree add --detach "$RUNNER_TEMP/floor-guard" "$ref"
-          echo "Using the floor guard from $ref"
-      - name: Install the guard's dependencies from the base branch
-        env:
-          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
-        run: |
-          corepack enable
-          cd "$RUNNER_TEMP/floor-guard"
-          pnpm install --frozen-lockfile --ignore-scripts
-      - run: node "$RUNNER_TEMP/floor-guard/.github/scripts/floor-guard.mjs" --base "origin/$BASE_REF"
+          echo "probe action=$ACTION before=$BEFORE after=$AFTER head=$HEAD base=$BASE merge=$MERGE sender=$SENDER run=$GITHUB_RUN_ID"
+      - run: sleep 45
