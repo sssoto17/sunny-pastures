@@ -21,7 +21,7 @@ Run them from the repo root (or a worktree's root).
 | ------ | --------------------------- | ---------------------------------------------------------------------- |
 | Start  | `pnpm db:start`             | First run pulls the images. Prints the URLs; every key is hidden.      |
 | Info   | `pnpm db:status`            | Same list again.                                                       |
-| `.env` | `pnpm db:env`               | Writes `DATABASE_URL` to `./.env` without printing it.                 |
+| `.env` | `pnpm db:env`               | Writes `DATABASE_URL`, `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` to `./.env` without printing them. |
 | Stop   | `supabase stop`             | Keeps the data in Docker volumes.                                      |
 | Reset  | `supabase db reset`         | Recreates the local database and reruns migrations and seed.           |
 | Wipe   | `supabase stop --no-backup` | Stops and deletes the local data.                                      |

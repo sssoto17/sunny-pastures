@@ -1,9 +1,19 @@
 import type { Env } from "../index";
 
+/** The Supabase settings the tests use unless they pass their own. */
+export const testSupabase = {
+	url: "http://supabase.test",
+	publishableKey: "publishable-key-for-tests",
+};
+
 /**
- * An environment holding `DATABASE_URL`. Environment names are UPPER_SNAKE, an outside shape the
- * naming rule doesn't allow as object keys, so the entry is built as a pair.
+ * An environment holding every variable the config reads. Environment names are UPPER_SNAKE, an
+ * outside shape the naming rule doesn't allow as object keys, so the entries are built as pairs.
  */
-export function makeEnv(databaseUrl: string): Env {
-	return Object.fromEntries([["DATABASE_URL", databaseUrl]]);
+export function makeEnv(databaseUrl: string, supabase = testSupabase): Env {
+	return Object.fromEntries([
+		["DATABASE_URL", databaseUrl],
+		["SUPABASE_URL", supabase.url],
+		["SUPABASE_PUBLISHABLE_KEY", supabase.publishableKey],
+	]);
 }

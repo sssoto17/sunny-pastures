@@ -1,7 +1,22 @@
-import { describe, expect, it } from "vitest";
+import type * as Supabase from "@supabase/supabase-js";
+import { describe, expect, it, vi } from "vitest";
 
 import { makeEnv } from "../../config/tests/env";
 import { createApi } from "../index";
+
+const supabase = vi.hoisted(() => ({ clients: 0 }));
+
+// Counts the Supabase clients built, so a test can see auth is built once with the graph.
+vi.mock("@supabase/supabase-js", async (importOriginal) => {
+	const actual = await importOriginal<typeof Supabase>();
+	return {
+		...actual,
+		createClient: (...args: Parameters<typeof actual.createClient>) => {
+			supabase.clients += 1;
+			return actual.createClient(...args);
+		},
+	};
+});
 
 // Tests build the graph from their own environment and never call getApi (#329, decision 5).
 describe("createApi", () => {
@@ -11,5 +26,16 @@ describe("createApi", () => {
 
 	it("fails to build when the config is incomplete", () => {
 		expect(() => createApi({})).toThrow(/DATABASE_URL/);
+	});
+
+	it("builds auth once with the graph, not once per request (#371)", async () => {
+		const before = supabase.clients;
+		const api = createApi(makeEnv("postgresql://db.test/farm"));
+		const request = new Request("http://app.test/api/farm");
+
+		const results = [await api.readPlayer(request), await api.readPlayer(request)];
+
+		expect(results).toStrictEqual([{ ok: false }, { ok: false }]);
+		expect(supabase.clients - before).toBe(1);
 	});
 });

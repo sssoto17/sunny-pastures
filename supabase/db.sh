@@ -3,7 +3,8 @@
 # The CLI prints keys and the database password on stdout and stderr, so both are captured.
 #   start   start the local stack, then show `status`
 #   status  list the stack's variables: URLs with the password hidden, every other value hidden
-#   env     write DATABASE_URL into ./.env without printing it (skipped if already set)
+#   env     write DATABASE_URL, SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY into ./.env without
+#           printing them (each skipped if already set)
 set -euo pipefail
 
 # Hide anything that looks like a credential in free-form output (errors, warnings).
@@ -39,19 +40,30 @@ status() {
   done
 }
 
-write_env() {
-  if grep -qs '^DATABASE_URL=' .env; then
-    echo "DATABASE_URL is already set in .env; not changed."
+# Copy one value of `supabase status -o env` ($3) into ./.env as $1, from its field $2. Prints the
+# name only, never the value.
+copy_variable() {
+  local name=$1 field=$2 values=$3 value
+  if grep -qs "^$name=" .env; then
+    echo "$name is already set in .env; not changed."
     return
   fi
-  local url
-  url=$(run status -o env | sed -n -E 's/^DB_URL="?([^"]*)"?$/\1/p' | head -n 1)
-  if [[ -z $url ]]; then
-    echo "supabase status gave no DB_URL; is the stack running? Try: pnpm db:start" >&2
+  value=$(printf '%s\n' "$values" | sed -n -E "s/^$field=\"?([^\"]*)\"?\$/\1/p" | head -n 1)
+  if [[ -z $value ]]; then
+    echo "supabase status gave no $field; is the stack running? Try: pnpm db:start" >&2
     exit 1
   fi
-  printf 'DATABASE_URL=%s\n' "$url" >> .env
-  echo "Wrote DATABASE_URL to .env."
+  printf '%s=%s\n' "$name" "$value" >> .env
+  echo "Wrote $name to .env."
+}
+
+write_env() {
+  local values
+  values=$(run status -o env)
+  copy_variable DATABASE_URL DB_URL "$values"
+  # The auth module and the anonymous sign-up test helper read these two (#371).
+  copy_variable SUPABASE_URL API_URL "$values"
+  copy_variable SUPABASE_PUBLISHABLE_KEY PUBLISHABLE_KEY "$values"
 }
 
 case "${1:-}" in
