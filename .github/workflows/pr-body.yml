@@ -5,22 +5,28 @@
 # only, not all of ci. No path filter, so each reports on every PR and can be a required check
 # (ADR-0002, area 2). The body is untrusted text: the script reads it from $GITHUB_EVENT_PATH,
 # never through an expression in `run:`. Actions are GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
+# One run per head (#358; ADR-0002, area 2, "Stacks"): both jobs skip on a draft, and the run
+# comes from `ready_for_review`, as in ci.yml.
 name: pr-body
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
-# No concurrency group (#264): a push to a stacked part fires two events on one head, and body
-# edits fire more, so any cancelling or queueing left a cancelled twin of a required check on the
-# head, which GitHub read as its latest result (throwaway stack #315). Both jobs take seconds.
+# The backstop (#358, admin decision (c)), as in ci.yml: a newer run for the same PR cancels the
+# older one, so two runs never go in parallel. A body edit cancels a run still checking the old
+# body, and the newer run judges the new one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   pr-body:
     name: guard / pr-body
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -37,6 +43,7 @@ jobs:
   # the read-only pull-requests scope and the token in env, never in a `run:` expression.
   stack-base:
     name: guard / stack-base
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

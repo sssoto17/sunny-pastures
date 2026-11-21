@@ -6,22 +6,27 @@
 # Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
 # No third-party action: each scanner is a pinned download checked against a hash written here
 # (ADR-0002, areas 8 and 9). Its suppressions and config files are the floor guard's (#40).
+# One run per head (#358; ADR-0002, area 2, "Stacks"): every job skips on a draft, and the run
+# comes from `ready_for_review`, as in ci.yml.
 name: security
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
-# No concurrency group (#264): a push to a stacked part fires two pull_request events on one
-# head, and a group that cancels, or queues and then cancels, left a cancelled twin of a required
-# check there, which GitHub read as the latest result and blocked the merge (throwaway stack
-# #315). The cost: runs for a superseded head finish too.
+# The backstop (#358, admin decision (c)), as in ci.yml: a newer run for the same PR cancels the
+# older one, so two runs never go in parallel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   secrets:
     name: guard / secrets
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -56,6 +61,7 @@ jobs:
 
   audit:
     name: ci / audit
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -72,6 +78,7 @@ jobs:
 
   code-scan:
     name: guard / code-scan
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
