@@ -49,6 +49,16 @@ describe("replay", () => {
 		expect(replayed.plots[0]).toEqual({ status: "ready", crop: "wheat" });
 	});
 
+	it("applies each logged action at its own `at`", () => {
+		// `to` is the last row's `at`, so no later advance hides a row applied at another time.
+		const lastAt = 200_000;
+
+		const replayed = replay(newFarm(farmId), log, lastAt);
+
+		expect(stateHash(replayed)).toBe(stateHash(playLive(log)));
+		expect(replayed.time).toBe(lastAt);
+	});
+
 	it("throws when the rules refuse a logged action, naming its seq and the reason", () => {
 		// Plot 2 was never planted, so the rules refuse to harvest it: a corrupt or forged log.
 		const forged = [...log, { seq: 6, at: 210_000, action: { type: "harvest", plot: 2 } } as const];

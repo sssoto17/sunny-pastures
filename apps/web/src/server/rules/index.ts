@@ -1,7 +1,12 @@
 import "server-only";
 
-import { createSim } from "@sunny-pastures/sim";
-import type { Action, Content, FarmState, Sim } from "@sunny-pastures/sim";
+import {
+	createSim,
+	type Action,
+	type Content,
+	type FarmState,
+	type Sim,
+} from "@sunny-pastures/sim";
 
 /**
  * The rules for the rest of the server (ADR-0007, section 2): a Facade over content → sim,
@@ -16,14 +21,15 @@ export interface Rules {
 	/** A new farm for `farmId`, its random streams seeded from the id (MUST-10.3; ADR-0003, D9). */
 	readonly newFarm: (farmId: string) => FarmState;
 	/**
-	 * Rebuilds a farm from its log (ADR-0001, "Store interface"): applies `actions` to `state` in
+	 * Replays a farm's log (ADR-0001, "Store interface"): applies `actions` to `state` in
 	 * order, each at its own `at`, then advances to `to`. `state` is a snapshot's farm, or
 	 * `newFarm` when the farm has none, and `actions` are the rows logged after it.
 	 *
 	 * Throws if the rules refuse a logged action, and never skips one: every row was accepted once,
-	 * so a refusal means a corrupt log or other rules, and skipping it would rebuild another farm
+	 * so a refusal means a corrupt log or other rules, and skipping it would replay into another farm
 	 * (ADR-0001; ADR-0006, section 5, step 3). Throws too if `actions` aren't in seq order with no
-	 * gaps. The store treats either throw as a store error.
+	 * gaps; the first row isn't checked against the snapshot's seq, which `state` doesn't carry, so
+	 * the store hands in the rows after it. The store treats either throw as a store error.
 	 */
 	readonly replay: (state: FarmState, actions: readonly LoggedAction[], to: number) => FarmState;
 }
@@ -56,7 +62,7 @@ function applyLogged(sim: Sim, state: FarmState, actions: readonly LoggedAction[
 	for (const [i, { seq, action, at }] of actions.entries()) {
 		const previous = actions[i - 1];
 		if (previous !== undefined && seq !== previous.seq + 1) {
-			// A gap is a lost action and a step back is a reordered log: either rebuilds another farm.
+			// A gap is a lost action and a step back is a reordered log: either replays into another farm.
 			throw new Error(
 				`Replay error: the log has seq ${String(seq)} after seq ${String(previous.seq)}.`,
 			);

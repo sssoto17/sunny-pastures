@@ -1,5 +1,5 @@
-// A `.mjs` file, so it sits in no type-checked program and ESLint lints it untyped, as the other
-// root configs (eslint.config.mjs).
+// A `.mjs` file, so it sits in no type-checked program and ESLint lints it untyped, as the root
+// tool configs are (eslint.config.mjs).
 
 /** @type {import("next").NextConfig} */
 const config = {
