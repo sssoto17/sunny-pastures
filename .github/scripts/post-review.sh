@@ -14,11 +14,22 @@
 #
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
 # App's slug), ADMIN, FACTORY_APP (the factory App's slug), CTX (holds files.json), VERDICT,
-# THREADS_QUERY, RUNNER_TEMP, DEFAULT_BRANCH; CODEOWNERS (default .github/CODEOWNERS, main's copy).
+# THREADS_QUERY, RUNNER_TEMP, DEFAULT_BRANCH, BASE and BASE_SHA (the base gather judged); CODEOWNERS
+# (default .github/CODEOWNERS, main's copy).
 # shellcheck disable=SC2016 # single-quoted jq programs, by design
 set -euo pipefail
 
-: "${DEFAULT_BRANCH:?}" # a missing one must not read as "every PR is a stacked part"
+: "${DEFAULT_BRANCH:?}" "${BASE:?}" # a missing one must not read as "every PR is a stacked part"
+# A stacked part (#404): claude-code-action fetched origin/<base> and restored config from it
+# after gather's gate read the base's files at BASE_SHA. If the part below moved in between, the
+# review ran with config the gate never saw: nothing is posted, and the run fails so it shows.
+if [[ $BASE != "$DEFAULT_BRANCH" ]]; then
+  restored=$(git rev-parse --verify --quiet "refs/remotes/origin/$BASE^{commit}") || restored=none
+  if [[ $restored != "${BASE_SHA-}" ]]; then
+    echo "::error::the action restored config from $BASE at $restored, not ${BASE_SHA:-unknown} as the gate read: nothing posted"
+    exit 1
+  fi
+fi
 r="repos/$GITHUB_REPOSITORY" v="$RUNNER_TEMP/verdict.json" t="$RUNNER_TEMP/threads.json"
 printf '%s' "$VERDICT" >"$v"
 # The whole shape, or nothing is posted: a missing or null field must never read as "none".

@@ -201,6 +201,19 @@ describe("review-gate.sh", () => {
 			expect(gate("synchronize", byAdmin, { ...PART2, baseFiles: [] }).run).toBe("false");
 		});
 
+		// #468's review: `gh api` cuts a URL at `#`, and post-review.sh reads origin/<base> by
+		// name, so a base outside git's plainest characters gets no review.
+		it.each(["main#x", "part1?x", "part 1", "part1;x"])(
+			"skips a stacked part on the odd base name %s",
+			(base) => {
+				const g = gate("synchronize", [], { ...PART2, base, baseFiles: [] });
+				expect(g.code).toBe(0);
+				expect(g.run).toBe("false");
+				expect(g.out).toContain("GATE skip: odd base name");
+				expect(g.out).not.toContain(base);
+			},
+		);
+
 		it("skips a hand-chained PR: based on another branch, in no stack", () => {
 			const g = gate("synchronize", [], { base: "lane-part1", stack: null, baseFiles: [] });
 			expect(g.code).toBe(0);
@@ -316,14 +329,27 @@ describe("review.yml", () => {
 			expect(gather).toMatch(/head_sha: \.head\.sha, stack, labels/);
 			expect(gather).toContain("ADMIN: ${{ github.repository_owner }}");
 			expect(gather).toContain("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}");
-			const compare = at('gh api "$r/compare/$DEFAULT_BRANCH...$base"');
+			// By the base's SHA, only for a base that isn't the default branch, with renames' old paths.
+			expect(gather).toMatch(/base_sha: \.base\.sha, head_sha/);
+			expect(gather).toContain(
+				`base_sha=$(jq -er '.base_sha | select(test("^[0-9a-f]{40}$"))' "$CTX/pr.json")`,
+			);
+			expect(gather).toContain(
+				'if [[ $base != "$DEFAULT_BRANCH" ]]; then\n            gh api "$r/compare/$DEFAULT_BRANCH...$base_sha" --jq \'[.files[]? | .filename,\n              (.previous_filename // empty)]\' >"$CTX/base-files.json"\n          fi\n',
+			);
+			expect(gather).not.toContain('...$base"');
+			const compare = at('gh api "$r/compare/$DEFAULT_BRANCH...$base_sha"');
 			expect(compare).toBeLessThan(at("bash .github/scripts/review-gate.sh"));
 			expect(gather).toContain("BASE_FILES=$CTX/base-files.json");
 		});
 
-		it("tells post-review.sh the default branch, so a stacked part gets no auto-merge", () => {
+		it("tells post-review.sh the default branch and the base the gate read", () => {
 			const post = yml.slice(at("- name: Post the review as sunny-reviewer"), at("- name: Report"));
 			expect(post).toContain("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}");
+			expect(post).toContain("BASE: ${{ steps.gather.outputs.base }}");
+			expect(post).toContain("BASE_SHA: ${{ steps.gather.outputs.base_sha }}");
+			expect(gather).toContain('echo "base=$base" >>"$GITHUB_OUTPUT"');
+			expect(gather).toContain('echo "base_sha=$base_sha" >>"$GITHUB_OUTPUT"');
 		});
 
 		// Exactly one review of a head (#404): a draft never runs, the ready mark does, and a newer

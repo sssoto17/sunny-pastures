@@ -109,15 +109,20 @@ jobs:
           mkdir -p "$CTX"
           r="repos/$GITHUB_REPOSITORY"
           gh api "$r/pulls/$PR" --jq '{number, title, body, author: .user.login, base: .base.ref,
-            head_sha: .head.sha, stack, labels: [.labels[].name], additions, deletions}' >"$CTX/pr.json"
+            base_sha: .base.sha, head_sha: .head.sha, stack, labels: [.labels[].name], additions,
+            deletions}' >"$CTX/pr.json"
           gh api --paginate "$r/pulls/$PR/reviews?per_page=100" --jq '.[] | {id,
             author: .user.login, state, submitted_at, body, commit_id}' | jq -s . >"$CTX/reviews.json"
-          # A stacked part's base: the paths its stack below changes since the default branch.
+          # A stacked part's base: the paths its stack below changes since the default branch. By
+          # SHA, never the name: `gh api` cuts a path at `#`, so `main#x` would compare main (#468).
           base=$(jq -r .base "$CTX/pr.json")
+          base_sha=$(jq -er '.base_sha | select(test("^[0-9a-f]{40}$"))' "$CTX/pr.json")
           if [[ $base != "$DEFAULT_BRANCH" ]]; then
-            gh api "$r/compare/$DEFAULT_BRANCH...$base" --jq '[.files[]? | .filename,
+            gh api "$r/compare/$DEFAULT_BRANCH...$base_sha" --jq '[.files[]? | .filename,
               (.previous_filename // empty)]' >"$CTX/base-files.json"
           fi
+          echo "base=$base" >>"$GITHUB_OUTPUT"
+          echo "base_sha=$base_sha" >>"$GITHUB_OUTPUT"
           PR_JSON=$CTX/pr.json REVIEWS=$CTX/reviews.json BASE_FILES=$CTX/base-files.json \
             bash .github/scripts/review-gate.sh
           if grep -qx 'run=false' "$GITHUB_OUTPUT"; then exit 0; fi
@@ -190,6 +195,10 @@ jobs:
           ADMIN: ${{ github.repository_owner }}
           HEAD: ${{ steps.gather.outputs.head }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }} # no auto-merge off it (#404)
+          # The base gather judged: the action restores config from origin/<base>, so a stacked
+          # part's review posts only if that ref is still the commit the gate read (#404).
+          BASE: ${{ steps.gather.outputs.base }}
+          BASE_SHA: ${{ steps.gather.outputs.base_sha }}
         run: bash .github/scripts/post-review.sh
 
       # Report data (ADR-0002, "Caps"): cost, turns and the job's seconds. Non-secret fields only.

@@ -674,15 +674,23 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
     `src/github/operations/restore-config.ts` at the pinned SHA). Above part 1, that is the part
     below's branch, which nobody has merged. `--setting-sources user` already keeps those settings,
     hooks and MCP servers unloaded, but the gate doesn't lean on it: when the stack below changes
-    one of those paths (REST compare of `main...<base>`; 300 files, the compare's cap, counts as
-    "may"), it skips the part with a warning, and the coordinator dispatches a reviewer.
+    one of those paths (REST compare of `main...<base sha>`; 300 files, the compare's cap, counts as
+    "may"), it skips the part with a warning, and the coordinator dispatches a reviewer. The compare
+    takes the base's SHA, never its name: `gh api` cuts a path at `#`, so `main#x` compared `main`
+    (PR #468's review). A base name outside `[A-Za-z0-9._/-]` gets no review at all;
+  - the action fetches `origin/<base>` 20 to 60 s after the gate read it, so the part below can move
+    in between. `post-review.sh` checks that `refs/remotes/origin/<base>` is still the commit the
+    gate read, and otherwise posts nothing and fails the run. Claude has already run by then, with
+    `--setting-sources user` keeping that config's settings, hooks and MCP servers unloaded; only
+    the review is withheld.
 
   The coordinator dispatches a reviewer only when the App can't: a part the gate skipped for
-  restored config, a PR opened before #404 landed, or a run that failed. _Alternatives:_ keeping
-  `branches: [main]` and listing each stack's base (bases are lane branches, unknown ahead of time);
-  a `branches-ignore` list (the same problem); calling `stack-base-guard.mjs` from the gate (its
-  one-minute retry exists for `opened`, which the draft flow no longer needs, and it would add a
-  Node step ahead of every review); reading the event's `pull_request.stack` (`null` on `opened`).
+  restored config or an odd base name, a run that posted nothing because the base moved, a PR opened
+  before #404 landed, or a run that failed. _Alternatives:_ keeping `branches: [main]` and listing
+  each stack's base (bases are lane branches, unknown ahead of time); a `branches-ignore` list (the
+  same problem); calling `stack-base-guard.mjs` from the gate (its one-minute retry exists for
+  `opened`, which the draft flow no longer needs, and it would add a Node step ahead of every
+  review); reading the event's `pull_request.stack` (`null` on `opened`).
 
 - **Code-owner review on stacks: a finding, not a decision** (the admin took the decision out of
   #264, 16 Nov 2026). On a PR the admin's account opened, code-owner review showed no gate of its

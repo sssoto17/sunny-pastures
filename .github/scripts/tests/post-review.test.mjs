@@ -36,6 +36,16 @@ case "$*" in
 esac
 `;
 
+// A fake git for post-review.sh's base check (#404): `rev-parse` answers FAKE_ORIGIN, the commit
+// origin/<base> points at after the action's fetch, or fails as for a ref it never fetched.
+const FAKE_GIT = `#!/usr/bin/env bash
+printf 'git %s\\n' "$*" >>"$(dirname "$0")/calls"
+[[ $1 == rev-parse && -n $FAKE_ORIGIN ]] && echo "$FAKE_ORIGIN"
+`;
+const SHA = "b".repeat(40);
+// A stacked part whose base the action restored at the commit the gate read.
+const STACKED = { FAKE_BASE: "lane-part1", BASE: "lane-part1", BASE_SHA: SHA, FAKE_ORIGIN: SHA };
+
 const thread = (id, body, { author = "sunny-reviewer", resolved = false, by = null } = {}) => ({
 	id,
 	isResolved: resolved,
@@ -67,6 +77,8 @@ function run(v, { threads = [], labels = ["false"], reviews = [], files = FILES,
 	mkdirSync(join(dir, "bin"));
 	writeFileSync(join(dir, "bin/gh"), FAKE_GH);
 	chmodSync(join(dir, "bin/gh"), 0o755);
+	writeFileSync(join(dir, "bin/git"), FAKE_GIT);
+	chmodSync(join(dir, "bin/git"), 0o755);
 	writeFileSync(join(dir, "bin/labels"), `${labels.join("\n")}\n`);
 	writeFileSync(join(dir, "bin/threads.json"), JSON.stringify(threads));
 	writeFileSync(join(dir, "bin/reviews.json"), JSON.stringify(reviews));
@@ -86,6 +98,7 @@ function run(v, { threads = [], labels = ["false"], reviews = [], files = FILES,
 			RUNNER_TEMP: dir,
 			THREADS_QUERY: "q",
 			DEFAULT_BRANCH: "main",
+			BASE: "main",
 			CODEOWNERS,
 			VERDICT: v,
 			...env,
@@ -451,23 +464,60 @@ describe("post-review.sh", () => {
 	// #404: the reviewer now approves stacked parts. Auto-merge on a part based on the part below
 	// would merge it into that branch on its own, and a stack merges whole (CONSTRAINTS.md).
 	it("approves a stacked part but never leaves its auto-merge on", () => {
-		const r = run(verdict(), { env: { FAKE_BASE: "lane-part1" } });
+		const r = run(verdict(), { env: STACKED });
 		expect(r.code).toBe(0);
 		expect(r.calls).toContain("-f event=APPROVE");
 		expect(r.calls).not.toContain("AutoMerge");
 		expect(r.out).toContain("auto_merge=stacked");
 
 		// Someone turned it on before: the approval turns it off rather than let the part merge.
-		const on = run(verdict(), { env: { FAKE_BASE: "lane-part1", FAKE_AUTO: "true" } });
+		const on = run(verdict(), { env: { ...STACKED, FAKE_AUTO: "true" } });
 		expect(on.calls).toMatch(/event=APPROVE[\s\S]*disablePullRequestAutoMerge/);
 		expect(on.calls).not.toContain("enablePullRequestAutoMerge");
 		expect(on.out).toContain("auto_merge=stacked");
 
 		const findings = [{ path: "a.ts", line: 3, body: "bug" }];
 		const held = run(verdict({ findings }), {
-			env: { FAKE_BASE: "lane-part1", FAKE_AUTO: "true" },
+			env: { ...STACKED, FAKE_AUTO: "true" },
 		});
 		expect(held.calls).toContain("disablePullRequestAutoMerge");
+	});
+
+	// #404 (admin, 21 Nov 2026): the gate read the base's files at BASE_SHA, and the action fetched
+	// origin/<base> 20-60 s later to restore config from it. A part below that moved in between
+	// means the review ran with config the gate never saw.
+	it.each([
+		["the part below moved", { FAKE_ORIGIN: "c".repeat(40) }],
+		["the action fetched no base", { FAKE_ORIGIN: "" }],
+		["gather recorded no base commit", { BASE_SHA: "" }],
+	])("posts nothing on a stacked part when %s", (_name, env) => {
+		const r = run(verdict(), { env: { ...STACKED, ...env } });
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("nothing posted");
+		expect(r.calls).not.toMatch(/^api /m);
+	});
+
+	it("reads origin/<base> by its full ref, and never on a PR on main", () => {
+		expect(run(verdict(), { env: STACKED }).calls).toContain(
+			`git rev-parse --verify --quiet refs/remotes/origin/lane-part1^{commit}`,
+		);
+		const onMain = run(verdict());
+		expect(onMain.code).toBe(0);
+		expect(onMain.calls).not.toContain("git ");
+	});
+
+	// `set -u` alone would let an empty one through, and an empty DEFAULT_BRANCH reads every PR
+	// as a stacked part.
+	it.each([
+		["DEFAULT_BRANCH", undefined],
+		["DEFAULT_BRANCH", ""],
+		["BASE", undefined],
+		["BASE", ""],
+	])("posts nothing when %s is %j", (name, value) => {
+		const r = run(verdict(), { env: { [name]: value } });
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain(`${name}: parameter null or not set`);
+		expect(r.calls).toBe("");
 	});
 
 	it("never turns on auto-merge without an approval, and turns off one that is on", () => {

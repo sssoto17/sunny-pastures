@@ -7,7 +7,7 @@
 # Env: ACTION (github.event.action, for the log), BOT (the App's slug), ADMIN (the admin's login),
 # DEFAULT_BRANCH, PR_JSON and REVIEWS (the PR and its reviews as gather writes them: head_sha,
 # base, stack and labels; author, state, body, commit_id), BASE_FILES (read only when the base
-# isn't DEFAULT_BRANCH: the paths the base changes since DEFAULT_BRANCH, from REST compare),
+# isn't DEFAULT_BRANCH: the paths the base's commit changes since DEFAULT_BRANCH, REST compare),
 # GITHUB_OUTPUT. An unreadable file fails the step rather than guess.
 set -euo pipefail
 
@@ -27,6 +27,8 @@ labelled=$(jq '.labels | index("review:admin") != null' "$PR_JSON")
 # the event: the event's is null on `opened` (ADR-0002, "Stacks"). Parts open as drafts and are
 # marked ready once linked (#358), so a ready part already has its stack.
 if [[ $base != "$DEFAULT_BRANCH" ]]; then
+  # A name only git's plainest characters make up: post-review.sh reads origin/<base> by name.
+  [[ $base =~ ^[A-Za-z0-9._/-]+$ ]] || skip "odd base name: ${base//[^A-Za-z0-9._\/-]/%}"
   stacked=$(jq -e 'has("stack") and .stack != null' "$PR_JSON") || [[ $stacked == false ]]
   [[ $stacked == true ]] || skip "hand-chained: based on $base, not $DEFAULT_BRANCH, and in no native stack"
   # claude-code-action restores these paths from origin/<base.ref> before Claude starts
