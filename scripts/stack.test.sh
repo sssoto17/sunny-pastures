@@ -368,6 +368,7 @@ STACK_WAIT_TIMEOUT=0 case_ update 403
 expect_code 1
 expect_err "after 0 s GitHub doesn't show the pushed heads of #400 #401 #403"
 expect_err "they stay drafts"
+expect_err "scripts/pr-draft.sh ready 400 401 403"
 expect_eq "pushed" "$(remote_sha 7-p3)" "$(git -C "$repo" rev-parse 7-p3)"
 expect_eq "still drafts" "$(drafts)" "400,401,403"
 rm "$work/gh/stale_heads" "$work/gh/events"

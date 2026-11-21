@@ -163,7 +163,8 @@ wait_github() { # head...
     done
     ((${#left[@]})) || return 0
     ((SECONDS - start < WAIT)) || die 1 "after $WAIT s GitHub doesn't show the pushed heads of ${left[*]}: \
-they stay drafts, so no run reports on an old head. Run this again to mark them ready once it does"
+they stay drafts, so no run reports on an old head. Run this again to mark them ready once it does, \
+or mark them by hand: scripts/pr-draft.sh ready ${left[*]//#/}"
     sleep "$POLL"
   done
 }
