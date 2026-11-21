@@ -60,9 +60,9 @@ starts a stack (`.github/actions/supabase-stack`) when a PR touches `apps/web/sr
 
 **Without Docker** (a cloud lane, say), there is no stack, so `pnpm test` and `pnpm check:task` fail
 whenever a `db` test is queued: `check:task` queues the `db` tests related to the change,
-`pnpm test` all of them. A lane that changes `server/store/` or `server/auth/` there runs
-`pnpm test --project unit` locally, leaves the `db` tests to `ci / test`'s stack run, and says so in
-its PR.
+`pnpm test` all of them. A lane there that makes a change which queues a `db` test (in
+`server/store/`, `server/auth/` or `server/db/`, say) runs `pnpm test --project unit` locally,
+leaves the `db` tests to `ci / test`'s stack run, and says so in its PR.
 
 ## Connection: `DATABASE_URL`
 

@@ -483,13 +483,16 @@ anywhere); the first store test against the local stack proves it. If it fails, 
   only be reached with a database, so leaving `db` out of coverage would fail the 80% floor by
   construction.
 - `ci / test` starts a stack (`supabase start`, `supabase db reset`, `pnpm db:env`) **only when the
-  PR touches `apps/web/src/server/**` or `supabase/**`**. Otherwise it runs `--project unit`, and
-  the gate runs `--skip-ratchet`, because untested store files would read 0% (as `check:task`
-  already does for partial runs).
+  PR touches `apps/web/src/server/**`, `supabase/**`, `.github/actions/supabase-stack/**` or
+  `vitest.config.mts`** (the last two added by the admin, 21 Nov; #439 review: what runs the `db`
+  tests is checked on the PR too). Otherwise it runs `--project unit`, and the gate runs
+  `--skip-ratchet`, because untested store files would read 0% (as `check:task` already does for
+  partial runs).
 - **The ratchet runs in full on `main`** (admin, 19 Nov, an addendum to the test-architecture
   resolution). Every push to `main` always starts the stack and runs both projects with the full
   gate, ratchet included. A drop that merges through a PR without the stack turns `main` red on that
-  merge, so nothing drifts unseen. PRs that touch `apps/web/src/server/**` or `supabase/**` still
+  merge, so nothing drifts unseen. PRs that touch `apps/web/src/server/**`, `supabase/**`,
+  `.github/actions/supabase-stack/**` or `vitest.config.mts` (admin, 21 Nov; #439 review) still
   check the ratchet before merging, and the changed-line floors (90%/80%) apply to every PR as
   before.
 - **No conditional skips.** A `db` test without a stack **fails** with "run `pnpm db:start`"; it

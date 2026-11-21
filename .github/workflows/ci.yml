@@ -144,8 +144,9 @@ jobs:
       # ADR-0007 section 6, "The `db` project" (#382). The `db` project's tests need the Supabase
       # stack, which costs runner time, so a PR starts it only when it changes apps/web/src/server/
       # or supabase/, or what runs the `db` tests: the stack action or vitest.config.mts (admin,
-      # 21 Nov, #439 review). Every push to main starts it, so main runs both projects and the full coverage
-      # gate, ratchet included (admin, 19 Nov), and a drop merged without the stack turns main red.
+      # 21 Nov, #439 review). Every push to main starts it, so main runs both projects and the full
+      # coverage gate, ratchet included (admin, 19 Nov), and a drop merged without the stack turns
+      # main red.
       # Without the stack only the `unit` project runs, and the gate skips the whole-project ratchet,
       # since the untested store files would read 0% (as `check:task` does). The changed-line
       # floors apply either way. The decision is this step, not a skip in a test.
