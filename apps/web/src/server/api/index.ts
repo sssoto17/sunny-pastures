@@ -1,8 +1,11 @@
 import "server-only";
 
+import { sliceContent } from "@sunny-pastures/sim";
+
 import { createAuth, type Auth } from "@/server/auth";
 import { readConfig, type Env } from "@/server/config";
 import { createDb } from "@/server/db";
+import { createRules } from "@/server/rules";
 
 import { memoise } from "./memoise";
 
@@ -39,6 +42,8 @@ export function createApi(env: Env): Api {
 	// Built here too, so once per process through getApi; postgres.js connects on the first query,
 	// so building it touches no network (#372). The store takes it when it lands (#373).
 	createDb(config);
+	// Once per process with the graph; the store takes newFarm and replay when it lands (#373).
+	createRules(sliceContent);
 	return { health: () => ({ status: "ok" }), readPlayer: auth.readPlayer };
 }
 
