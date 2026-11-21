@@ -25,11 +25,21 @@ afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
 // ADMIN marks a PR that carries review:admin, as gather's pr.json lists its labels.
 const ADMIN = { labels: ["review:admin"] };
+// Part 2 of a native stack: based on part 1's branch, with the live `stack` GET pulls/<n> gives.
+const PART2 = {
+	base: "lane-part1",
+	stack: { number: 9, position: 2, size: 2, base: { ref: "main" } },
+};
 
-function gate(action, reviews, { labels = [], files = {} } = {}) {
+function gate(
+	action,
+	reviews,
+	{ labels = [], files = {}, base = "main", stack = null, baseFiles } = {},
+) {
 	dir = mkdtempSync(join(tmpdir(), "review-gate-"));
 	writeFileSync(join(dir, "reviews.json"), JSON.stringify(reviews));
-	writeFileSync(join(dir, "pr.json"), JSON.stringify({ head_sha: "abc", labels }));
+	writeFileSync(join(dir, "pr.json"), JSON.stringify({ head_sha: "abc", base, stack, labels }));
+	if (baseFiles) writeFileSync(join(dir, "base-files.json"), JSON.stringify(baseFiles));
 	writeFileSync(join(dir, "out"), "");
 	const res = spawnSync("bash", [SCRIPT], {
 		cwd: dir,
@@ -38,8 +48,11 @@ function gate(action, reviews, { labels = [], files = {} } = {}) {
 			PATH: process.env.PATH,
 			ACTION: action,
 			BOT: "sunny-reviewer",
+			ADMIN: "sssoto17",
+			DEFAULT_BRANCH: "main",
 			PR_JSON: join(dir, files.pr ?? "pr.json"),
 			REVIEWS: join(dir, files.reviews ?? "reviews.json"),
+			BASE_FILES: join(dir, files.baseFiles ?? "base-files.json"),
 			GITHUB_OUTPUT: join(dir, "out"),
 		},
 	});
@@ -70,7 +83,15 @@ describe("review-gate.sh", () => {
 			[review("COMMENTED", { body: "" })],
 		],
 		["a review of an older head", [review("APPROVED", { commit: "old" })]],
-		["someone else's review of this head", [review("APPROVED", { author: "sssoto17" })]],
+		["another writer's approval of this head", [review("APPROVED", { author: "a-writer" })]],
+		[
+			"the admin's approval of an older head",
+			[review("APPROVED", { author: "sssoto17", commit: "old" })],
+		],
+		[
+			"only the App's Request changes on this head, with no summary",
+			[review("CHANGES_REQUESTED", { body: "" })],
+		],
 		["another App's review of this head", [review("COMMENTED", { author: "sunny-factory[bot]" })]],
 	])("reviews a head after %s", (_name, reviews) => {
 		const g = gate("synchronize", reviews);
@@ -114,6 +135,124 @@ describe("review-gate.sh", () => {
 		expect(gate("labeled", [], ADMIN).run).toBe("true");
 	});
 
+	// #404: a head somebody who counts has approved needs no review. The admin's approval or the
+	// App's own, on this very head; a dismissed approval reads DISMISSED and doesn't count.
+	it.each(["synchronize", "ready_for_review", "opened", "reopened"])(
+		"skips a %s run on a head the admin approved",
+		(action) => {
+			const g = gate(action, [review("APPROVED", { author: "sssoto17", body: "" })]);
+			expect(g.code).toBe(0);
+			expect(g.run).toBe("false");
+			expect(g.out).toContain("GATE skip: approved");
+		},
+	);
+
+	it("skips a head the App approved, even with an empty body", () => {
+		const g = gate("synchronize", [review("APPROVED", { body: "" })]);
+		expect(g.run).toBe("false");
+		expect(g.out).toContain("GATE skip: approved");
+	});
+
+	it("reviews a head whose approval was dismissed", () => {
+		expect(gate("synchronize", [review("DISMISSED", { author: "sssoto17", body: "" })]).run).toBe(
+			"true",
+		);
+	});
+
+	it.each([
+		["the admin", "sssoto17"],
+		["the App", "sunny-reviewer[bot]"],
+	])("reviews a new push after %s approved the head before it", (_who, author) => {
+		const g = gate("synchronize", [
+			review("COMMENTED", { commit: "old" }),
+			review("APPROVED", { author, commit: "old" }),
+		]);
+		expect(g.run).toBe("true");
+		expect(g.out).toContain("GATE run");
+	});
+
+	// Test (e) still wins over the admin's approval: the App's own approval must be withdrawn.
+	it("still withdraws the App's approval under review:admin when the admin approved the head too", () => {
+		const reviews = [
+			review("APPROVED", { commit: "old" }),
+			review("APPROVED", { author: "sssoto17" }),
+		];
+		expect(gate("labeled", reviews, ADMIN).run).toBe("true");
+	});
+
+	// #404 (admin, 21 Nov 2026): a part of a native stack is reviewed whatever its base. A PR on
+	// another base outside a stack is the hand-chained PR `guard / stack-base` refuses: no review.
+	describe("stacked parts", () => {
+		it.each(["ready_for_review", "synchronize", "opened"])(
+			"reviews a %s run on part 2 of a native stack",
+			(action) => {
+				const g = gate(action, [], { ...PART2, baseFiles: ["src/a.ts"] });
+				expect(g.code).toBe(0);
+				expect(g.run).toBe("true");
+				expect(g.out).toContain("GATE run");
+			},
+		);
+
+		it("skips a stacked part's head already reviewed or approved, as on main", () => {
+			expect(gate("synchronize", [review("COMMENTED")], { ...PART2, baseFiles: [] }).run).toBe(
+				"false",
+			);
+			const byAdmin = [review("APPROVED", { author: "sssoto17" })];
+			expect(gate("synchronize", byAdmin, { ...PART2, baseFiles: [] }).run).toBe("false");
+		});
+
+		it("skips a hand-chained PR: based on another branch, in no stack", () => {
+			const g = gate("synchronize", [], { base: "lane-part1", stack: null, baseFiles: [] });
+			expect(g.code).toBe(0);
+			expect(g.run).toBe("false");
+			expect(g.out).toContain("GATE skip: hand-chained");
+		});
+
+		// claude-code-action restores .claude/, CLAUDE.md, .mcp.json and the like from
+		// origin/<base.ref> before Claude starts (restore-config.ts at the pinned SHA). On a part
+		// above 1 that's the part below's branch, which nobody has merged yet.
+		it.each([
+			".claude/settings.json",
+			".claude",
+			"CLAUDE.md",
+			"CLAUDE.local.md",
+			".mcp.json",
+			".claude.json",
+			".gitmodules",
+			".ripgreprc",
+			".husky/pre-commit",
+		])("skips a part whose stack below changes %s, which the action would restore", (path) => {
+			const g = gate("synchronize", [], { ...PART2, baseFiles: ["src/a.ts", path] });
+			expect(g.code).toBe(0);
+			expect(g.run).toBe("false");
+			expect(g.out).toContain("GATE skip: restored config");
+		});
+
+		it.each(["docs/CLAUDE.md", ".claude-pr/x", "apps/.claude/x", ".mcp.jsonc"])(
+			"still reviews a part whose stack below changes only %s",
+			(path) => {
+				expect(gate("synchronize", [], { ...PART2, baseFiles: [path] }).run).toBe("true");
+			},
+		);
+
+		it("skips a part whose stack below may hold more files than the compare lists", () => {
+			const many = Array.from({ length: 300 }, (_, i) => `src/f${i}.ts`);
+			const g = gate("synchronize", [], { ...PART2, baseFiles: many });
+			expect(g.run).toBe("false");
+			expect(g.out).toContain("GATE skip: restored config");
+		});
+
+		it("fails, rather than guess, when a stacked part's base files can't be read", () => {
+			const g = gate("synchronize", [], PART2);
+			expect(g.code).not.toBe(0);
+			expect(g.run).toBeUndefined();
+		});
+
+		it("never reads the base files for a PR on main", () => {
+			expect(gate("synchronize", []).run).toBe("true");
+		});
+	});
+
 	it.each(["reviews", "pr"])("fails, rather than guess, when %s can't be read", (which) => {
 		const g = gate("synchronize", [], { files: { [which]: "missing.json" } });
 		expect(g.code).not.toBe(0);
@@ -134,7 +273,7 @@ describe("review.yml", () => {
 	};
 
 	it("asks the gate in gather, before the diff, the threads and Claude", () => {
-		const gate = at("REVIEWS=$CTX/reviews.json bash .github/scripts/review-gate.sh");
+		const gate = at("bash .github/scripts/review-gate.sh");
 		expect(at('"$CTX/pr.json"')).toBeLessThan(gate);
 		expect(at("submitted_at, body, commit_id}")).toBeLessThan(gate);
 		expect(at("if grep -qx 'run=false' \"$GITHUB_OUTPUT\"; then exit 0; fi")).toBeGreaterThan(gate);
@@ -143,6 +282,61 @@ describe("review.yml", () => {
 		expect(at("- id: claude\n        if: steps.gather.outputs.run == 'true'\n")).toBeGreaterThan(
 			gate,
 		);
+	});
+
+	// #404: the trigger takes every base, and the gate decides which. Main's copy and main's
+	// checkout still run, whatever the base (the header quotes GitHub's docs).
+	describe("every base (#404)", () => {
+		const trigger = yml.slice(at("on:\n  pull_request_target:\n"), at("\npermissions: {}"));
+		const gather = yml.slice(at("- id: gather\n"), at("- name: Install the review skill"));
+
+		it("has no branches filter on pull_request_target", () => {
+			expect(trigger).not.toMatch(/^\s*branches(-ignore)?:/m);
+		});
+
+		it("still runs on pull_request_target only, never on pull_request", () => {
+			expect(yml).not.toMatch(/^\s+pull_request:/m);
+			expect(yml).not.toMatch(/^\s+(push|workflow_run|issue_comment):/m);
+		});
+
+		it("never checks out anything but the default branch", () => {
+			const checkouts = yml.match(/uses: actions\/checkout@[^\n]*\n(\s+with:\n(\s{10}.*\n)*)?/g);
+			expect(checkouts).toHaveLength(1);
+			expect(checkouts[0]).not.toMatch(/\bref:|repository:/);
+			expect(yml).not.toMatch(/pull_request\.head\.(sha|ref)|refs\/pull\//);
+			expect(yml).not.toMatch(/gh pr checkout|git (fetch|checkout|switch)/);
+		});
+
+		it("stops when the run's ref isn't the default branch", () => {
+			expect(gather).toContain('if [[ $GITHUB_REF != "refs/heads/$DEFAULT_BRANCH" ]]; then');
+			expect(gather.indexOf("GITHUB_REF")).toBeLessThan(gather.indexOf("gh api"));
+		});
+
+		it("hands the gate the PR's live stack, the base's files, the admin and the default branch", () => {
+			expect(gather).toMatch(/head_sha: \.head\.sha, stack, labels/);
+			expect(gather).toContain("ADMIN: ${{ github.repository_owner }}");
+			expect(gather).toContain("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}");
+			const compare = at('gh api "$r/compare/$DEFAULT_BRANCH...$base"');
+			expect(compare).toBeLessThan(at("bash .github/scripts/review-gate.sh"));
+			expect(gather).toContain("BASE_FILES=$CTX/base-files.json");
+		});
+
+		it("tells post-review.sh the default branch, so a stacked part gets no auto-merge", () => {
+			const post = yml.slice(at("- name: Post the review as sunny-reviewer"), at("- name: Report"));
+			expect(post).toContain("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}");
+		});
+
+		// Exactly one review of a head (#404): a draft never runs, the ready mark does, and a newer
+		// run for the PR cancels the older one; the gate then skips the head a finished run reviewed.
+		it("reviews a part on its ready mark, skips drafts and keeps one run per PR", () => {
+			expect(trigger).toMatch(
+				/types: \[opened, synchronize, reopened, ready_for_review, labeled\]/,
+			);
+			expect(yml).toContain("!github.event.pull_request.draft &&");
+			expect(yml).toMatch(
+				/concurrency:\n\s+group: review-\$\{\{ github\.event\.pull_request\.number \}\}\n\s+cancel-in-progress: true/,
+			);
+		});
 	});
 
 	it("keeps the allowed claude-code-action pin (#290)", () => {

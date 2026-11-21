@@ -525,7 +525,8 @@ seat (#37; "The factory's identity" below).
 
 **The review workflow (#68 step 2, 12 Nov): `.github/workflows/review.yml`.** On
 `pull_request_target` from `main`, in the `review` environment, for non-draft PRs from this repo's
-branches. The pattern is _propose, then apply_: Claude proposes and plain code applies.
+branches, to `main` or in a native stack on any base (#404, "Stacks"). The pattern is _propose, then
+apply_: Claude proposes and plain code applies.
 
 - **Propose.** Claude reads the PR as files of data (diff, reviews, threads, linked issues) next to
   `main`'s checkout. It has Read, Grep and Glob only, and the read-only `GITHUB_TOKEN`. It follows
@@ -586,13 +587,26 @@ branches. The pattern is _propose, then apply_: Claude proposes and plain code a
   again while the PR carries `review:admin` and an approval of the App's still stands (state
   `APPROVED`, not yet dismissed), whatever the event, since a `reopened` at the same head can cancel
   the `labeled` run. Tests: `.github/scripts/tests/review-gate.test.mjs`.
+- **An approved head isn't reviewed (#404; admin, 21 Nov 2026).** The gate also skips a head that
+  carries an `APPROVED` review from the admin or from `sunny-reviewer[bot]` on that very commit. A
+  head with only the bot's Request changes or comments is still reviewed, a push after an approval
+  is a new head and is reviewed, and a dismissed approval reads `DISMISSED`, so it doesn't count.
+  The test (e) exception comes first: the bot's standing approval under `review:admin` is withdrawn
+  even when the admin approved the head too. So the App reviews every head nobody has approved yet,
+  and a factory fix round is re-reviewed on its own push. Opening a PR still gets one review of its
+  first head: it opens as a draft (#358), which the job skips, the ready mark starts the review, a
+  newer run for the PR cancels an older one (the job's `concurrency`), and the gate skips a head a
+  finished run already reviewed.
 - **Auto-merge (step 3 of the flow; #68 step 4, 12 Nov).** After an Approve, the script turns on
   auto-merge, squash, for the head it reviewed (`enablePullRequestAutoMerge` with
   `expectedHeadOid`). When a run doesn't approve, it turns off auto-merge that is on. It never
   merges: `gh pr merge --auto` was rejected because it merges at once when the PR is already
   mergeable, whatever `allow_auto_merge` says. So Q16 still holds at the repo setting: while
   `allow_auto_merge` is off, GitHub refuses, the approval stands and the log reads
-  `auto_merge=refused`. Squash only for now; the PR template's merge-commit choice isn't read.
+  `auto_merge=refused`. Squash only for now; the PR template's merge-commit choice isn't read. On a
+  PR based on anything but `main`, a stacked part, it never turns auto-merge on (#404): that would
+  squash the part into the part below on its own, and a stack merges whole. The log reads
+  `auto_merge=stacked`.
 - **Alternatives considered.** Claude writing to GitHub itself with the App's token, through `gh` or
   the action's comment tools: rejected, because the model that reads the PR's text would then hold a
   token that can approve. A Bash allow-list (`gh pr view:*` and the like): rejected, because Bash
@@ -636,8 +650,40 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   than the last pusher" met, and so #68's App. After a partial merge GitHub retargets the next part
   to the base and keeps the stack, but doesn't rebase it ("This stack is out-of-date with its base
   branch"): `scripts/stack.sh refresh` does. Whether approvals survive that restack, or
-  `stack.sh refresh`, can't be seen off `main`, where the reviewer doesn't run (below); it's a
-  criterion on #68, checked on the first stack after `main` goes to 1 approval.
+  `stack.sh refresh`, is a criterion on #68, checked on the first stack after `main` goes to 1
+  approval.
+- **The reviewer covers every part (#404; admin, 21 Nov 2026).** `review.yml` has no `branches:`
+  filter any more. GitHub matches that filter against the PR's base (events-that-trigger-workflows,
+  "Running your `pull_request_target` workflow based on the head or base branch"), so
+  `branches: [main]` never ran for a PR on another base: neither #312 to #314 (a throwaway stack on
+  `test-264/base`) nor #402 (part 2, on part 1's branch) got a review. The workflow and its checkout
+  still come from `main` whatever the base: for `pull_request_target` on github.com, `GITHUB_REF` is
+  "Default branch" and `GITHUB_SHA` "Last commit on default branch", and the workflow "is taken from
+  the base repository's default branch" (the same page, and securely-using-pull_request_target; read
+  from `github/docs` `main`, 21 Nov 2026). The `gather` step stops on any other `GITHUB_REF`, so a
+  change there fails loudly. The gate (`review-gate.sh`) then decides by base, from `GET pulls/<n>`,
+  never the event:
+  - a PR on `main` is reviewed as before;
+  - a PR on another base is reviewed only when its live `stack` is set, the same test as
+    `guard / stack-base`, so a hand-chained PR the guard refuses gets no review. The event's `stack`
+    is `null` on `opened`, but parts open as drafts and are marked ready once linked (#358), so the
+    run that reviews a part already sees its stack. There is no retry: a part that isn't linked yet
+    is skipped, and its ready mark reviews it;
+  - `claude-code-action` restores `.claude/`, `CLAUDE.md`, `.mcp.json` and a few other config paths
+    from `origin/<base.ref>` before Claude starts (`SENSITIVE_PATHS` in
+    `src/github/operations/restore-config.ts` at the pinned SHA). Above part 1, that is the part
+    below's branch, which nobody has merged. `--setting-sources user` already keeps those settings,
+    hooks and MCP servers unloaded, but the gate doesn't lean on it: when the stack below changes
+    one of those paths (REST compare of `main...<base>`; 300 files, the compare's cap, counts as
+    "may"), it skips the part with a warning, and the coordinator dispatches a reviewer.
+
+  The coordinator dispatches a reviewer only when the App can't: a part the gate skipped for
+  restored config, a PR opened before #404 landed, or a run that failed. _Alternatives:_ keeping
+  `branches: [main]` and listing each stack's base (bases are lane branches, unknown ahead of time);
+  a `branches-ignore` list (the same problem); calling `stack-base-guard.mjs` from the gate (its
+  one-minute retry exists for `opened`, which the draft flow no longer needs, and it would add a
+  Node step ahead of every review); reading the event's `pull_request.stack` (`null` on `opened`).
+
 - **Code-owner review on stacks: a finding, not a decision** (the admin took the decision out of
   #264, 16 Nov 2026). On a PR the admin's account opened, code-owner review showed no gate of its
   own: #313, code-owned, showed only "At least 1 approving review is required by reviewers with
@@ -751,10 +797,11 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   answered HTTP 422 "Invalid rule 'merge_queue'" (admin, 16 Nov). So `ci` also runs on `push` to
   `main`, which detects rather than prevents, and the standard is that a stack merges whole
   (`CONSTRAINTS.md`, "Split size"; admin, 15 Nov).
-- **The reviewer only sees stacks on `main`.** `pull_request_target` runs `main`'s `review.yml`,
-  whose `branches: [main]` matches a stacked part when the stack's base is `main`: #303 was reviewed
-  while stacked on #302. It doesn't match a stack on another base, even with the filter widened on
-  that base branch: #312 to #314 got no review run.
+- **Until #404 the reviewer only saw PRs based on `main`.** `pull_request_target` runs `main`'s
+  `review.yml`, whose `branches: [main]` matched a part only when its base was `main`: #303 (base
+  `main`, part 2 of stack #304) was reviewed while #302 was open. A part based on the part below
+  wasn't, even with the filter widened on that base branch: #312 to #314, and #402, got no review
+  run. #404 dropped the filter ("The reviewer covers every part", above).
 
 **A weakened bar is blocked, or goes to the admin (decided 7 Nov).** The ways a bar gets lowered are
 listed once, in `CONSTRAINTS.md`, "Guarding the bar". `guard / floor` fails a PR that weakens the

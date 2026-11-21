@@ -1,10 +1,14 @@
-# The reviewer App, sunny-reviewer (ADR-0002, area 2; #68). It reviews every non-draft PR to main
-# by REVIEW.md and posts as sunny-reviewer[bot]: Required findings become line comments plus
+# The reviewer App, sunny-reviewer (ADR-0002, area 2; #68). It reviews every non-draft PR to main,
+# and every part of a native stack whatever its base (#404), by REVIEW.md and posts as sunny-reviewer[bot]: Required findings become line comments plus
 # Request changes, Optional and Nit go in the review's summary, and a clean PR gets Approve. A PR
 # that meets a CONSTRAINTS.md escalation row, or carries review:admin, never gets Approve.
 #
 # Why pull_request_target: the run takes this file and its checkout from main, so a PR can't
-# change how it is reviewed. That hands this job secrets on a PR, so (docs/security.md of the
+# change how it is reviewed. On github.com that holds whatever the PR's base: GitHub's docs give
+# GITHUB_REF "Default branch" and GITHUB_SHA "Last commit on default branch" for this event, and
+# "the workflow, and any subsequent actions/checkout call that does not specify a ref, is taken from
+# the base repository's default branch" (events-that-trigger-workflows.md, pull_request_target;
+# securely-using-pull_request_target.md). A stacked part's base branch never supplies this file. That hands this job secrets on a PR, so (docs/security.md of the
 # action, "Using this action with pull_request_target"):
 # - nothing from the PR is checked out or run: the checkout has no `ref` (main), and the PR's
 #   diff and text reach Claude as files of data in $RUNNER_TEMP/review-context;
@@ -19,8 +23,10 @@
 #   model, decides the review's event.
 # Environment `review`, never `factory`: on this event the run's ref is main, so any job here
 # would get its environment's secrets on every PR (#227).
-# Once per head (#274): the gate in `gather` skips a head this App has already reviewed, before
-# Claude runs, except review:admin on the PR while its approval stands (.github/scripts/review-gate.sh).
+# Once per head (#274, #404): the gate in `gather` skips, before Claude runs, a head this App has
+# already reviewed or that the admin or this App approved, except review:admin on the PR while its
+# approval stands; and a PR on another base unless it's a native stack's part whose stack below
+# leaves the config the action restores from the base alone (.github/scripts/review-gate.sh).
 # Caps: 30 turns and 15 minutes. #103's runs took 26-34 s a job; a review reads about six rule
 # files plus one file per touched area. Actions pinned to full SHAs, each at least 7 days old.
 name: review
@@ -30,7 +36,9 @@ on:
     # labeled: adding review:admin after an approval re-runs the review, which then holds it
     # (ADR-0002, test (e)). Other labels are filtered out by the job's `if:`.
     types: [opened, synchronize, reopened, ready_for_review, labeled]
-    branches: [main]
+    # No `branches:` filter (#404). It matches the PR's base, so `branches: [main]` never ran for a
+    # stacked part above part 1 (#312-#314, #402). The gate filters bases instead: a native stack's
+    # part is reviewed, a hand-chained PR isn't.
 
 permissions: {}
 
@@ -83,18 +91,33 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ACTION: ${{ github.event.action }}
           BOT: sunny-reviewer # the App's slug, as in the job's `if:`
+          ADMIN: ${{ github.repository_owner }} # as post-review.sh's ADMIN
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          # The trigger takes every base (#404), so check the premise the header quotes: this run,
+          # and the checkout above, are the default branch's.
+          if [[ $GITHUB_REF != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "::error::this run's ref is $GITHUB_REF, not $DEFAULT_BRANCH: nothing reviewed"
+            exit 1
+          fi
           echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
           CTX=$RUNNER_TEMP/review-context # `runner` isn't allowed in a job's env
           echo "CTX=$CTX" >>"$GITHUB_ENV"
           mkdir -p "$CTX"
           r="repos/$GITHUB_REPOSITORY"
           gh api "$r/pulls/$PR" --jq '{number, title, body, author: .user.login, base: .base.ref,
-            head_sha: .head.sha, labels: [.labels[].name], additions, deletions}' >"$CTX/pr.json"
+            head_sha: .head.sha, stack, labels: [.labels[].name], additions, deletions}' >"$CTX/pr.json"
           gh api --paginate "$r/pulls/$PR/reviews?per_page=100" --jq '.[] | {id,
             author: .user.login, state, submitted_at, body, commit_id}' | jq -s . >"$CTX/reviews.json"
-          PR_JSON=$CTX/pr.json REVIEWS=$CTX/reviews.json bash .github/scripts/review-gate.sh
+          # A stacked part's base: the paths its stack below changes since the default branch.
+          base=$(jq -r .base "$CTX/pr.json")
+          if [[ $base != "$DEFAULT_BRANCH" ]]; then
+            gh api "$r/compare/$DEFAULT_BRANCH...$base" --jq '[.files[]? | .filename,
+              (.previous_filename // empty)]' >"$CTX/base-files.json"
+          fi
+          PR_JSON=$CTX/pr.json REVIEWS=$CTX/reviews.json BASE_FILES=$CTX/base-files.json \
+            bash .github/scripts/review-gate.sh
           if grep -qx 'run=false' "$GITHUB_OUTPUT"; then exit 0; fi
 
           gh api --paginate "$r/pulls/$PR/files?per_page=100" --jq '.[] | {filename, status,
@@ -164,6 +187,7 @@ jobs:
           BOT: ${{ steps.app.outputs.app-slug }}
           ADMIN: ${{ github.repository_owner }}
           HEAD: ${{ steps.gather.outputs.head }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }} # no auto-merge off it (#404)
         run: bash .github/scripts/post-review.sh
 
       # Report data (ADR-0002, "Caps"): cost, turns and the job's seconds. Non-secret fields only.
@@ -178,7 +202,7 @@ jobs:
           GATE: ${{ steps.gather.outputs.run }}
         run: |
           echo "RESULT job_seconds=$(($(date +%s) - ${JOB_START:-$(date +%s)})) reviewed=${GATE:-unknown}"
-          [ "$GATE" != false ] || { echo "RESULT skipped: this head was already reviewed"; exit 0; }
+          [ "$GATE" != false ] || { echo "RESULT skipped: the gate's GATE line says why"; exit 0; }
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
           if [ ! -f "$f" ]; then
             echo "RESULT execution_file=missing"

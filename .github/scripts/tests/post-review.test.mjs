@@ -24,7 +24,7 @@ const FAKE_GH = `#!/usr/bin/env bash
 d=$(dirname "$0")
 a="$*"; printf '%s\\n' "\${a//$'\\n'/\\\\n}" >>"$d/calls"
 case "$*" in
-  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-abc}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" "\${FAKE_AUTHOR_TYPE:-User}" ;;
+  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-abc}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" "\${FAKE_AUTHOR_TYPE:-User}" "\${FAKE_BASE:-main}" ;;
   "api -X POST repos/o/r/issues/7/labels"*) [ -n "$FAKE_NO_LABEL" ] || echo true >"$d/labels" ;;
   *"enablePullRequestAutoMerge"*) [ -z "$FAIL_AUTO" ] ;;
   *"disablePullRequestAutoMerge"*) [ -z "$FAIL_DISABLE" ] ;;
@@ -85,6 +85,7 @@ function run(v, { threads = [], labels = ["false"], reviews = [], files = FILES,
 			CTX: dir,
 			RUNNER_TEMP: dir,
 			THREADS_QUERY: "q",
+			DEFAULT_BRANCH: "main",
 			CODEOWNERS,
 			VERDICT: v,
 			...env,
@@ -351,13 +352,18 @@ describe("post-review.sh", () => {
 		const gate = (action, labels = []) => {
 			const d = mkdtempSync(join(tmpdir(), "gate-"));
 			writeFileSync(join(d, "reviews.json"), JSON.stringify(asGathered));
-			writeFileSync(join(d, "pr.json"), JSON.stringify({ head_sha: "abc", labels }));
+			writeFileSync(
+				join(d, "pr.json"),
+				JSON.stringify({ head_sha: "abc", base: "main", stack: null, labels }),
+			);
 			writeFileSync(join(d, "out"), "");
 			spawnSync("bash", [GATE], {
 				env: {
 					PATH: process.env.PATH,
 					ACTION: action,
 					BOT: "sunny-reviewer",
+					ADMIN: "sssoto17",
+					DEFAULT_BRANCH: "main",
 					PR_JSON: join(d, "pr.json"),
 					REVIEWS: join(d, "reviews.json"),
 					GITHUB_OUTPUT: join(d, "out"),
@@ -440,6 +446,22 @@ describe("post-review.sh", () => {
 		const still = run(verdict(), { env: { FAKE_AUTO: "true" } });
 		expect(still.calls).not.toContain("AutoMerge");
 		expect(still.out).toContain("auto_merge=on");
+	});
+
+	// #404: the reviewer now approves stacked parts. Auto-merge on a part based on the part below
+	// would merge it into that branch on its own, and a stack merges whole (CONSTRAINTS.md).
+	it("approves a stacked part but never turns on its auto-merge", () => {
+		const r = run(verdict(), { env: { FAKE_BASE: "lane-part1" } });
+		expect(r.code).toBe(0);
+		expect(r.calls).toContain("-f event=APPROVE");
+		expect(r.calls).not.toContain("AutoMerge");
+		expect(r.out).toContain("auto_merge=stacked");
+
+		const findings = [{ path: "a.ts", line: 3, body: "bug" }];
+		const held = run(verdict({ findings }), {
+			env: { FAKE_BASE: "lane-part1", FAKE_AUTO: "true" },
+		});
+		expect(held.calls).toContain("disablePullRequestAutoMerge");
 	});
 
 	it("never turns on auto-merge without an approval, and turns off one that is on", () => {

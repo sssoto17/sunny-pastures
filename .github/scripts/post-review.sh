@@ -8,12 +8,13 @@
 # withholds (ADR-0002 area 2, #264, #322). After an approval it turns on auto-merge (squash) for
 # the reviewed head, and when it doesn't approve it turns off auto-merge that is on (ADR-0002 area
 # 2, flow step 3). It never merges: with the repo's allow_auto_merge off, GitHub refuses, and the
-# review still stands (Q16).
+# review still stands (Q16). On a PR based on anything but DEFAULT_BRANCH, a stacked part (#404), it
+# never turns auto-merge on: that would merge the part into the part below, and a stack merges whole.
 # Tests: .github/scripts/tests/post-review.test.mjs.
 #
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
 # App's slug), ADMIN, FACTORY_APP (the factory App's slug), CTX (holds files.json), VERDICT,
-# THREADS_QUERY, RUNNER_TEMP; CODEOWNERS (default .github/CODEOWNERS, main's copy).
+# THREADS_QUERY, RUNNER_TEMP, DEFAULT_BRANCH; CODEOWNERS (default .github/CODEOWNERS, main's copy).
 # shellcheck disable=SC2016 # single-quoted jq programs, by design
 set -euo pipefail
 
@@ -34,8 +35,8 @@ if grep -qE 'sk-ant-|gh[opsu]_[A-Za-z0-9]{20}|github_pat_|-----BEGIN' "$v"; then
   echo "::error::the verdict looks like it holds a credential: nothing posted"
   exit 1
 fi
-now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null), .user.type] | @tsv')
-IFS=$'\t' read -r head_now author node auto_on author_type <<<"$now"
+now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null), .user.type, .base.ref] | @tsv')
+IFS=$'\t' read -r head_now author node auto_on author_type base_ref <<<"$now"
 if [[ $head_now != "$HEAD" ]]; then
   echo "the head moved to $head_now: the newer run reviews it"
   exit 0
@@ -192,7 +193,10 @@ body=$(jq -r .summary "$v")
 body+=$note
 gh api -X POST "$r/pulls/$PR/reviews" --silent -f commit_id="$HEAD" -f event="$event" -f body="$body"
 auto=off
-if [[ $event == APPROVE ]]; then
+if [[ $event == APPROVE && $base_ref != "${DEFAULT_BRANCH:?}" ]]; then
+  [[ $auto_on != true ]] || auto=on # someone else turned it on: left as it is
+  [[ $auto_on == true ]] || auto=stacked
+elif [[ $event == APPROVE ]]; then
   # Refused while allow_auto_merge is off (or the PR merges as it is): the approval stands.
   if [[ $auto_on == true ]] || set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi
 fi
