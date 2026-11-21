@@ -180,8 +180,17 @@ jobs:
           echo "RESULT job_seconds=$(($(date +%s) - ${JOB_START:-$(date +%s)})) reviewed=${GATE:-unknown}"
           [ "$GATE" != false ] || { echo "RESULT skipped: this head was already reviewed"; exit 0; }
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
-          [ -f "$f" ] || { echo "RESULT execution_file=missing"; exit 0; }
-          jq -r '.[] | select(.type == "result") | "RESULT subtype=\(.subtype) is_error=\(.is_error)"
-            + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f"
+          if [ ! -f "$f" ]; then
+            echo "RESULT execution_file=missing"
+            # Claude was due to run and left no record, so nothing proves the skill reached it.
+            [ "$GATE" != true ] || { echo "::error title=Review skill not loaded::no execution file (#381)"; exit 1; }
+            exit 0
+          fi
+          # The proof first, so a malformed file still gets its annotation; its exit code last, so
+          # the cost line prints either way.
+          proof=0
           node .github/scripts/skill-proof.mjs "$f" "$HOME/.claude/projects" \
-            code-review-and-quality '# Code Review and Quality'
+            code-review-and-quality '# Code Review and Quality' || proof=$?
+          jq -r '.[] | select(.type == "result") | "RESULT subtype=\(.subtype) is_error=\(.is_error)"
+            + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" || true
+          exit "$proof"

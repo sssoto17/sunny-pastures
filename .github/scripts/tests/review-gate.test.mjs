@@ -212,10 +212,10 @@ describe("review.yml", () => {
 
 		it("proves in the Report step that the skill's text reached the model (#381)", () => {
 			const report = yml.slice(at("- name: Report"));
-			expect(report).toContain(
-				`node .github/scripts/skill-proof.mjs "$f" "$HOME/.claude/projects" \\\n` +
-					"            code-review-and-quality '# Code Review and Quality'",
+			expect(report).toMatch(
+				/node \.github\/scripts\/skill-proof\.mjs "\$f" "\$HOME\/\.claude\/projects" \\\s+code-review-and-quality '# Code Review and Quality' \|\| proof=\$\?/,
 			);
+			expect(report).toMatch(/exit "\$proof"\s*$/);
 			// The line it counts is SKILL.md's own heading, so a renamed heading fails here first.
 			const skill = readFileSync(
 				fileURLToPath(

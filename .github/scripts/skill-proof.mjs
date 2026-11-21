@@ -65,6 +65,7 @@ export const countLoads = (records, skill, line) => {
 // directory, so it is looked up rather than rebuilt.
 const findTranscript = (projects, session) => {
 	if (!existsSync(projects)) return null;
+
 	for (const d of readdirSync(projects, { withFileTypes: true })) {
 		const f = join(projects, d.name, `${session}.jsonl`);
 		if (d.isDirectory() && existsSync(f)) return f;
@@ -107,7 +108,10 @@ const main = () => {
 	if (!init?.session_id) why = "the execution file has no init message with a session id";
 	else {
 		const transcript = findTranscript(projects, init.session_id);
-		if (!transcript) why = `no transcript for session ${init.session_id} under ${projects}`;
+		if (!transcript)
+			why =
+				`no transcript for session ${init.session_id} under ${projects}` +
+				" (the CLI may not have saved the session, which is not the same as the skill not loading)";
 		else loads = countLoads(readJsonl(transcript), skill, line);
 	}
 	console.log(

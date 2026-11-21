@@ -542,9 +542,9 @@ branches. The pattern is _propose, then apply_: Claude proposes and plain code a
   `# Code Review and Quality` heading in that transcript, in records from the skill's own folder
   (the model reading `SKILL.md` with Read doesn't count). It logs
   `RESULT skill=code-review-and-quality registered=<bool> loaded=<n> cli=<version> from=<dir>`, and
-  with `loaded=0`, or no transcript, it fails the step with an `::error::` annotation after the
-  review is posted. Failing, not warning: a green job with a warning goes unread, and `review` isn't
-  a required check, so the red job blocks no merge.
+  with `loaded=0`, no transcript or no execution file, it fails the step with an `::error::`
+  annotation after the review is posted. Failing, not warning: a green job with a warning goes
+  unread, and `review` isn't a required check, so the red job blocks no merge.
 - **Apply.** Only after Claude has finished does the job mint the App's token, scoped to contents
   and pull requests. `.github/scripts/post-review.sh` (tested by
   `.github/scripts/tests/post-review.test.mjs`) then posts the review and applies the rules above in
