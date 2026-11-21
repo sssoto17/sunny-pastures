@@ -2,8 +2,7 @@
 # Setup wizard for the factory's kill switch (#106; ADR-0002, area 2, "The kill switch, built
 # (#106)"): sets the repo variable FACTORY_ENABLED to `false` (after asking) and reads it back.
 # Only the admin runs it: creating or changing a repo variable needs the admin's token, which a
-# lane lacks. #106's check of a run with the switch off is done and posted on #106, and its
-# throwaway workflow is removed, so this wizard dispatches nothing.
+# lane lacks.
 # Nothing it prints is secret: the variable's value is `true`, `false` or unset.
 # Tests: scripts/setup/factory-switch.test.sh. Run with --help for usage and exit codes.
 #

@@ -2,7 +2,8 @@
 # Tests for factory-switch.sh through its command line. The wizard reads its answers from stdin
 # (no terminal, so no screen clearing). `gh` is a fake on PATH: it logs its arguments to
 # $work/calls and keeps FACTORY_ENABLED in $work/var (no file: a 404; $work/var-broken: a 500;
-# $work/set-broken fails the write). The wizard's --jq filter runs over JSON shaped like GitHub's.
+# $work/set-broken fails the write; $work/set-lost accepts it but keeps the old value). The
+# wizard's --jq filter runs over JSON shaped like GitHub's.
 # Browser openers are no-ops.
 # Run: bash scripts/setup/factory-switch.test.sh
 set -uo pipefail
@@ -28,7 +29,7 @@ case "$*" in
     jq -n --arg v "$(cat "$d/var")" '{name: "FACTORY_ENABLED", value: $v}' | jq -r "${*: -1}"; exit 0 ;;
   "variable set FACTORY_ENABLED --repo $R --body "*)
     [[ -f $d/set-broken ]] && { echo "gh: Forbidden (HTTP 403)" >&2; exit 1; }
-    echo "${*: -1}" >"$d/var"; exit 0 ;;
+    [[ -f $d/set-lost ]] || echo "${*: -1}" >"$d/var"; exit 0 ;;
 esac
 echo "fake: unexpected gh call: $*" >&2
 exit 99
@@ -36,7 +37,7 @@ FAKE
 chmod +x "$work/bin/gh"
 
 reset() {
-  rm -f "$work"/calls "$work"/var "$work"/signed-out "$work"/var-broken "$work"/set-broken
+  rm -f "$work"/calls "$work"/var "$work"/signed-out "$work"/var-broken "$work"/set-broken "$work"/set-lost
 }
 run() { # stdin-text args... -> code, out, err, calls
   out=$(cd "$work" && printf '%s' "$1" | PATH="$work/bin:$PATH" bash "$script" "${@:2}" 2>"$work/err")
@@ -113,6 +114,14 @@ touch "$work/set-broken"
 run "$SET"
 expect_code 1
 assert "names the write" contains "$err" "gh variable set FACTORY_ENABLED failed"
+
+# The write succeeds but the value doesn't read back as false: stop.
+reset
+echo true >"$work/var"
+touch "$work/set-lost"
+run "$SET"
+expect_code 1
+assert "names the read-back" contains "$err" "doesn't read back as false"
 
 # gh signed out: nothing read or set.
 reset
