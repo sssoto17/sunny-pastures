@@ -130,9 +130,11 @@ guidance, not a security boundary. The sandbox and the hooks are what enforce.
 
 An `ask` rule prompts in auto mode too, so each one can stop an unattended lane until the admin
 answers (<https://code.claude.com/docs/en/permission-modes.md>, "How the classifier evaluates
-actions"). Add one only for an action the admin must confirm. Don't pair a wildcard allow with ask
-rules for its write flags: drop both, so auto mode's classifier decides and Manual mode prompts
-(#434: `prettier --write` stopped a lane for over an hour).
+actions"). Add one only for an action the admin must confirm. A wildcard allow paired with ask rules
+for its write flags prompts on every write: keep the pair only when the admin wants each write
+confirmed (vitest's snapshot flags, admin, 21 Nov). Otherwise drop both, so auto mode's classifier
+decides; Manual mode then prompts, or runs the command inside the sandbox when sandbox auto-allow is
+on (#434: `prettier --write` stopped the #382 lane for over an hour).
 
 ## Working directory
 
