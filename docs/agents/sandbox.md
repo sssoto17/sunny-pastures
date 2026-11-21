@@ -22,6 +22,7 @@ Write each Bash call so a rule in `.claude/settings.json` can match it, or it pr
 | What | Symptom inside the sandbox | Why |
 |---|---|---|
 | Git commands that write `.git/config` or `.git/hooks`: `git push -u` / `--set-upstream`, `git worktree add` from a remote branch with tracking, `git remote set-url`, `gh pr checkout` | `could not lock config file` | The sandbox protects `.git/config` and `.git/hooks`, so a session can't plant a hook or a `core.fsmonitor` program. Avoid these commands rather than leaving the sandbox; see "Git inside the sandbox". |
+| `git worktree add`, `git worktree remove`, `git worktree move` | A failed write under `.git/worktrees` (a read-only mount), or `Device or resource busy` | `.git/worktrees` is writable only for the session's own worktree: the sandbox mounts the other admin folders read-only. Run these outside; a reviewer can use the `git archive` copy instead (see "Git inside the sandbox"). |
 | Every bare `supabase` command, even `supabase --version` | `EROFS: read-only file system` | The CLI writes telemetry to `~/.supabase`, and home is read-only. `HOME=$TMPDIR supabase …` also works. The `pnpm db:*` scripts and `pnpm supabase:check` run outside the sandbox on their own (`sandbox.excludedCommands` in `.claude/settings.json`). |
 | Anything that connects to a service on the host: local Postgres (55322), the Supabase API (55321), a spike server started in an earlier command | `Connection refused` | The sandbox has its own network namespace, so `127.0.0.1` inside it isn't the host's loopback. Checked on 6 Nov: port 55322 refused inside, open outside. |
 | `pnpm test`, `pnpm check:task` or `--project db` whenever a `db` test (`*.db.test.ts`) is queued (#382) | `EACCES` on `.env`, or "The db tests need the local Supabase stack" | The `db` project's global setup reads `.env` and connects to the host's Postgres, and both are blocked here. Run it outside. With no Docker at all, run `pnpm test --project unit` and leave the `db` tests to CI (`supabase/README.md`, "Without Docker"). |
@@ -33,15 +34,21 @@ commands, run both outside.
 
 ## Git inside the sandbox
 
-Sandboxed commands can write `.git`: objects, refs, the index and `.git/worktrees`, including a
-worktree's shared `.git`. Only `.git/config` and `.git/hooks` are protected (checked 7 Nov with
-`test -w`, and by `git worktree add` run inside the sandbox). So `git add`, `commit`, `fetch`,
-`switch`, `merge`, `worktree add` and `push` all run sandboxed. Don't add
-`dangerouslyDisableSandbox` to `git` or `gh`, except for the cases under "When git does need the
-host" below. These habits keep `.git/config` out of it:
+Sandboxed commands can write `.git`: objects, refs, the index, and the session's own worktree's
+admin folder under `.git/worktrees`. The rest of `.git/worktrees` is not writable: the sandbox
+mounts the other worktrees' admin folders read-only, and from a main-folder session all of them
+(seen 7 and 9 Nov, and in #466's review and 30+ review runs on 21 Nov). `.git/config` and
+`.git/hooks` are protected too. So `git add`, `commit`, `fetch`, `switch`, `merge` and `push` run
+sandboxed, but `git worktree add`, `git worktree remove` and `git worktree move` fail there: run
+them outside the sandbox. Don't add `dangerouslyDisableSandbox` to other `git` or `gh` commands,
+except for the cases under "When git does need the host" below. These habits keep `.git/config` out
+of it:
 
-- Create worktrees without tracking:
-  `git worktree add --no-track -b <branch> .claude/worktrees/<N>-<slug> origin/main`.
+- Create worktrees without tracking, outside the sandbox:
+  `git worktree add --no-track -b <branch> .claude/worktrees/<N>-<slug> origin/main`. A reviewer who
+  only needs a PR's files doesn't need a worktree: `REVIEW.md`, "Reproduce, then report", describes
+  the fallback, a plain copy made with
+  `git archive refs/review/<N> | tar -x -C "$TMPDIR/review-<N>-<short sha>"`.
 - Push with `git push origin <branch>`, never `-u`. Then open the PR with
   `scripts/open-pr.sh [--label <name>]... <branch> <body-file>` (a stack with `scripts/stack.sh`),
   never `gh pr create`: the `open-pr` workflow opens it as `sunny-factory[bot]`, and neither needs

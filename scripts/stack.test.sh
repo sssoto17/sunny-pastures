@@ -192,6 +192,19 @@ printf '\n' >"$work/bodies/empty.md"
 case_ open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$work/bodies/empty.md"
 expect_code 2
 expect_err "no title"
+# #471: each part's title is a conventional one, checked before anything is pushed or opened
+case_ open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$(body 7-p2 'Part of #264.')"
+expect_code 2
+expect_err "7-p2: the title is the body file's first line, which here is the link \"Part of #264.\""
+expect_eq "nothing pushed" "$(remote_sha 7-p1)" none
+expect_eq "no PR" "$(cat "$work/gh/next")" 400
+case_ open 7-p1="$(body 7-p1 'Closes #264')" 7-p2="$(body 7-p2 'feat: two')"
+expect_code 2
+expect_err "7-p1: the title is the body file's first line, which here is the link"
+case_ open 7-p1="$(body 7-p1 'Add the stack')" 7-p2="$(body 7-p2 'feat: two')"
+expect_code 2
+expect_err "7-p1: the title \"Add the stack\" doesn't start with a conventional type"
+expect_eq "nothing pushed" "$(remote_sha 7-p1)" none
 case_ open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$work/bodies/missing.md"
 expect_code 2
 expect_err "can't read"
@@ -297,6 +310,10 @@ part 7-p4 7-p1 d.txt
 case_ add 400 7-p4="$(body 7-p4 'feat: four')"
 expect_code 2
 expect_err "7-p4 is not built on 7-p2"
+case_ add 401 7-p3="$(body 7-p3 'Closes #264')"
+expect_code 2
+expect_err "7-p3: the title is the body file's first line, which here is the link"
+expect_eq "no new part" "$(remote_sha 7-p3)" none
 case_ add 999 7-p3="$(body 7-p3 'feat: three')"
 expect_code 1
 expect_err "#999"
