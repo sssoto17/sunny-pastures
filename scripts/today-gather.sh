@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Gather what /today needs (#78), read-only: no gh write, no git write, no file written but one
-# temp file for gh's error, removed on exit. Prints plain sections that the /today skill (.claude/skills/today/SKILL.md) reads; /today stage 2
-# (#109) is to reuse it. REST only (`gh api`; #346, docs/agents/github-rest.md): the board through
-# the REST Projects API, PRs and parents through repos/<owner>/<repo>.
+# temp file for gh's error, removed on exit. Prints plain sections that the user-scoped /today
+# skill (~/.claude/skills/today/) reads; /today stage 2 (#109) is to reuse it. REST only (`gh api`;
+# #346, docs/agents/github-rest.md): the board through the REST Projects API, PRs and parents
+# through repos/<owner>/<repo>.
 # Tests: scripts/today-gather.test.sh.
 # Needs bash 4.4+, git 2.36+, GNU date and an authenticated gh with the `project` scope.
 set -euo pipefail
