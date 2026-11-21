@@ -94,6 +94,42 @@ describe("submitAction", () => {
 		});
 	});
 
+	it("resends a used key's first answer unchanged, even when the action would now be refused (MUST-13.2)", async () => {
+		const playerId = newPlayerId();
+		const store = newStore();
+		const key = crypto.randomUUID();
+		const first = await submitAction(
+			makeDeps({ store }),
+			playerId,
+			buildRequest(plantWheat(0), 0, key),
+		);
+		await submitAction(
+			makeDeps({ store, serverTime: () => 2_000 }),
+			playerId,
+			buildRequest(plantWheat(1), 1),
+		);
+
+		let ticks = 0;
+		const timing = createTiming(() => ticks++);
+		const resent = await submitAction(
+			makeDeps({ store, serverTime: () => 3_000, timing }),
+			playerId,
+			buildRequest(plantWheat(0), 0, key),
+		);
+
+		// Plot 1 is growing now, so the rules would refuse the action; the farm is a fresh load.
+		const reloaded = await loadFarm(makeDeps({ store }), playerId);
+		expect(first).toMatchObject({ kind: "answered", answer: { seq: 1, retries: 0 } });
+		expect(resent).toStrictEqual({
+			kind: "answered",
+			answer: answerOf(first),
+			farm: farmOf(reloaded),
+		});
+		expect(reloaded).toMatchObject({ farm: { seq: 2, at: 2_000 } });
+		// Asked first, so the rules never ran: `processed`, then the fresh load.
+		expect(timing.renderServerTiming()).toBe("load;dur=2");
+	});
+
 	it("refuses an action the rules refuse with the sim's reason word for word, and writes nothing", async () => {
 		const playerId = newPlayerId();
 		const store = newStore();
@@ -213,6 +249,35 @@ describe("submitAction", () => {
 		expect((await store.load(playerId)).at).toBe(1_000);
 	});
 
+	it("answers a resend that raced its first commit with the first answer, not a refusal", async () => {
+		const playerId = newPlayerId();
+		const store = newStore();
+		const key = crypto.randomUUID();
+		const first = await submitAction(
+			makeDeps({ store }),
+			playerId,
+			buildRequest(plantWheat(0), 0, key),
+		);
+		// `processed` ran before the first commit landed; the load after it sees the commit.
+		let asked = 0;
+		const racing: GameStore = {
+			...store,
+			processed: async (id, idempotencyKey) => {
+				asked++;
+				return asked === 1 ? null : await store.processed(id, idempotencyKey);
+			},
+		};
+
+		const resent = await submitAction(
+			makeDeps({ store: racing, serverTime: () => 2_000 }),
+			playerId,
+			buildRequest(plantWheat(0), 0, key),
+		);
+
+		expect(resent).toMatchObject({ kind: "answered", farm: { seq: 1 } });
+		expect(answerOf(resent)).toStrictEqual(answerOf(first));
+	});
+
 	it("answers a key the commit finds already used with the stored answer", async () => {
 		const playerId = newPlayerId();
 		const store = newStore();
@@ -235,7 +300,7 @@ describe("submitAction", () => {
 		expect(answerOf(resent)).toStrictEqual(answerOf(first));
 	});
 
-	it.each(["load", "commit"] as const)(
+	it.each(["processed", "load", "commit"] as const)(
 		"answers busy when the store's %s throws, with nothing committed (ADR-0006, section 8)",
 		async (method) => {
 			const playerId = newPlayerId();
@@ -265,8 +330,8 @@ describe("submitAction", () => {
 			buildRequest(plantWheat(0), 0),
 		);
 
-		// load, sim and commit: once per attempt.
-		expect(timing.renderServerTiming()).toBe("load;dur=2, sim;dur=2, commit;dur=2");
+		// load: processed, then a load per attempt; sim and commit: once per attempt.
+		expect(timing.renderServerTiming()).toBe("load;dur=3, sim;dur=2, commit;dur=2");
 	});
 });
 

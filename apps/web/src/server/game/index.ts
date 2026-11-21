@@ -71,8 +71,8 @@ const maxRetries = 3;
 /**
  * Runs one action on the player's farm (`POST /api/farm/actions`): ADR-0001's loop, processed →
  * load → advance → apply → commit, retried on a conflict. A key the farm has used gets its stored
- * answer unchanged (MUST-13.2), with a fresh load as its farm. On `answered` for a new commit, the
- * farm is the one committed, at the action's `at`.
+ * answer unchanged, even when the action would now be refused (MUST-13.2), with a fresh load as its
+ * farm. On `answered` for a new commit, the farm is the one committed, at the action's `at`.
  */
 export async function submitAction(
 	deps: GameDeps,
@@ -84,6 +84,10 @@ export async function submitAction(
 	// Server time, read once per request and never taken from the client (T1, MUST-11.1): every
 	// attempt below starts from it.
 	const stampedAt = deps.serverTime();
+
+	// Asked before the rules run, as a resent action may no longer be valid (ADR-0001).
+	const resent = await findResend(deps, playerId, idempotencyKey);
+	if (resent !== null) return resent;
 
 	for (let retries = 0; retries <= maxRetries; retries++) {
 		const loaded = await callStore(deps, "load", () => store.load(playerId));
@@ -97,7 +101,17 @@ export async function submitAction(
 		// the player as a refusal about time.
 		const at = Math.max(stampedAt, farm.state.time);
 		const step = timing.withTiming("sim", () => runStep(rules, farm, request, at, retries));
-		if (!step.ok) return { kind: "refused", reason: step.reason };
+		if (!step.ok) {
+			// Asked again before a refusal: a resend that raced its first commit missed it above, then
+			// loaded that commit, so the rules refused the action a second time. It gets its first
+			// answer, not a 422 (ADR-0001, amended 6 Nov after #8).
+			return (
+				(await findResend(deps, playerId, idempotencyKey)) ?? {
+					kind: "refused",
+					reason: step.reason,
+				}
+			);
+		}
 
 		const { next, answer } = step;
 		const committed = await callStore(deps, "commit", () =>
@@ -114,7 +128,7 @@ export async function submitAction(
 			};
 		}
 
-		// A request with the same key committed first.
+		// A request with the same key committed between `processed` and this commit.
 		if (outcome.kind === "duplicate") return await answerResend(deps, playerId, outcome.answer);
 
 		// `conflict`: another action took the seq and nothing was written, so load it and run again.
@@ -172,6 +186,24 @@ async function answerResend(
 ): Promise<SubmitResult> {
 	const loaded = await loadFarm(deps, playerId);
 	return loaded.kind === "loaded" ? { kind: "answered", answer, farm: loaded.farm } : loaded;
+}
+
+/**
+ * The result for a key the farm has used: its stored answer, unchanged, with the farm as it is now
+ * (MUST-13.2; ADR-0007, section 3). `null` when no commit has used the key.
+ */
+async function findResend(
+	deps: GameDeps,
+	playerId: PlayerId,
+	idempotencyKey: string,
+): Promise<SubmitResult | null> {
+	const processed = await callStore(deps, "load", () =>
+		deps.store.processed(playerId, idempotencyKey),
+	);
+	if (!processed.ok) return processed.busy;
+	if (processed.value === null) return null;
+
+	return await answerResend(deps, playerId, processed.value);
 }
 
 /** A store call's value, or the `busy` its throw becomes. */
