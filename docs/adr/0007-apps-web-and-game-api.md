@@ -119,7 +119,8 @@ and `PlayerId` as types only, so it is tested against a fake store. There is no 
 
   `game` → type-only `auth` (for `PlayerId`) was added by the auth grill (section 4, Q4).
   `coverage.requireAllFiles` puts every file under `apps/web/src` in a zone. Section 6 adds a
-  test-files-only allowance (`game/**/tests/**` → `store/tests/**`) and an `acceptance` zone with no
+  test-files-only allowance (`game/**/tests/**` → `store/tests/**`), a second one for the API route
+  files' tests (`routeTests` → `routes` and `api`, #397) and an `acceptance` zone with no
   allowances. The store gate's one file (`store/tests/storeGate.db.test.ts`) is a zone of its own
   that may also run `rules` and `sim`, since it plays the script with the real rules (#383).
 
@@ -531,6 +532,15 @@ sim type-only (#383).
 - `game/` tests import the fake through one Fallow allowance for **test files only**
   (`game/**/tests/**` → `store/tests/**`), as ADR-0005 section 4 allows for a helper owned by
   another module's `tests/`. Production `game` code still reaches `store` only for types.
+- **The route files' tests** (#397; admin, 21 Nov 2026) sit in a test-files-only zone, `routeTests`
+  (`src/app/api/**/tests/*.test.ts` → `routes` and `api`). A test under `src/app/**` is otherwise in
+  `pages`, which reaches only the sim, so no unit test could import a `route.ts`, and the route
+  files' lines, reached only by the acceptance tests, pulled the project coverage ratchet down. The
+  tests check `runtime` and that each export hands its request to `getApi()`, which they mock
+  (`vi.mock("@/server/api")`, which Fallow reads as an import of `api`). The handlers stay tested in
+  `server/api`; the acceptance tests still prove the routes over HTTP. Rejected: excluding the route
+  files from coverage (a moved threshold), and relying on the acceptance tests alone (they don't
+  count for coverage).
 
 ### Acceptance tests
 
