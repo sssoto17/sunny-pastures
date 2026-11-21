@@ -115,7 +115,7 @@ and `PlayerId` as types only, so it is tested against a fake store. There is no 
   | `auth` | `config` |  |
   | `db` | nothing | `config` |
   | `config`, `timing` | nothing |  |
-  | `http` (#395) | `timing` | `sim` |
+  | `http` (#395) | nothing | `sim` |
 
   `game` → type-only `auth` (for `PlayerId`) was added by the auth grill (section 4, Q4).
   `coverage.requireAllFiles` puts every file under `apps/web/src` in a zone. Section 6 adds a
