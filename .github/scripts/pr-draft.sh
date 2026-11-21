@@ -43,9 +43,11 @@ want=false
 todo=() ids=()
 for n in "${prs[@]}"; do
   [[ " ${todo[*]-} " != *" $n "* ]] || continue
-  info=$(gh api "$R/pulls/$n" --jq '[.state, .draft, .head.repo.full_name // "", .head.ref, .node_id] | @tsv') ||
+  # Fields split on the unit separator, which `read` never collapses (a tab run would merge an
+  # empty field into the next).
+  info=$(gh api "$R/pulls/$n" --jq '[.state, .draft, .head.repo.full_name // "", .head.ref, .node_id] | map(tostring) | join("\u001f")') ||
     refuse "can't read PR #$n"
-  IFS=$'\t' read -r state draft repo head id <<<"$info"
+  IFS=$'\x1f' read -r state draft repo head id <<<"$info"
   [[ $state == open ]] || refuse "#$n isn't open"
   [[ $repo == "$GITHUB_REPOSITORY" ]] || refuse "#$n comes from another repository"
   is_lane "$head" || refuse "#$n's head $head isn't a lane branch (<N>-<slug> or claude/<name>)"

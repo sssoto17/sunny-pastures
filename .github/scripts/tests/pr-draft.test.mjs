@@ -16,7 +16,8 @@ import { afterEach, describe, expect, it } from "vitest";
 const SCRIPT = fileURLToPath(new URL("../pr-draft.sh", import.meta.url));
 
 // A fake gh: logs each call on one line and answers from files in its folder. pr.<n> holds PR #n's
-// "<state>\t<draft>\t<repo>\t<head ref>\t<node id>" line, as the script's --jq @tsv reads it; a
+// "<state>␟<draft>␟<repo>␟<head ref>␟<node id>" line (␟ is the unit separator, U+001F), as the
+// script's --jq join reads it; a
 // missing file is a 404. POST graphql logs its variables and, with FAIL_GRAPHQL, refuses.
 const FAKE_GH = `#!/usr/bin/env bash
 d=$(dirname "$0")
@@ -34,7 +35,7 @@ afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
 const read = (f) => (existsSync(f) ? readFileSync(f, "utf8") : "");
 const pr = (draft, { state = "open", repo = "o/r", head = "358-ci", id = "PR_x" } = {}) =>
-	[state, String(draft), repo, head, id].join("\t");
+	[state, String(draft), repo, head, id].join("\u001f");
 
 function run(env, prs) {
 	dir = mkdtempSync(join(tmpdir(), "pr-draft-"));
