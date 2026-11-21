@@ -140,6 +140,47 @@ jobs:
             jq -s . >"$ctx/comments.json"
           echo "RESULT trusted_comments=$(jq length "$ctx/comments.json")"
 
+      # Bubblewrap for the subprocess env scrub below (#107's live test, 21 Nov 2026): Claude Code
+      # 2.1.319 refuses to start with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 and no bwrap. From
+      # Ubuntu's archive, with socat, as the action's own isolation step installs them (action.yml
+      # at the pinned SHA, "Install subprocess isolation dependencies", which runs only with
+      # allowed_non_write_users). Ubuntu 24.04's AppArmor denies unprivileged user namespaces, so
+      # first the narrowest fix: a profile that lets /usr/bin/bwrap alone create them, in the form
+      # of Ubuntu's example (ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces).
+      # Only if bwrap still fails, the action's own fix: the sysctl, for this runner. The smoke
+      # runs bwrap with a PID namespace, as the scrub does, so a broken install stops here and
+      # says why, before Claude starts.
+      - name: Install bubblewrap for the env scrub
+        run: |
+          set -euo pipefail
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends bubblewrap socat && break
+            echo "apt-get attempt $i failed, retrying"
+            sleep 5
+          done
+          command -v bwrap >/dev/null || { echo "::error::bubblewrap didn't install"; exit 1; }
+          smoke() { bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true; }
+          if [ -d /etc/apparmor.d ]; then
+            printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
+              '/usr/bin/bwrap flags=(default_allow) {' '  userns,' '}' |
+              sudo tee /etc/apparmor.d/bwrap >/dev/null
+            sudo apparmor_parser -r /etc/apparmor.d/bwrap || echo "the bwrap AppArmor profile didn't load"
+          fi
+          if smoke 2>"$RUNNER_TEMP/bwrap.err"; then
+            echo "RESULT bwrap=ok via=apparmor-profile restrict=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo none) $(bwrap --version)"
+            exit 0
+          fi
+          echo "bwrap with the profile: $(head -c 300 "$RUNNER_TEMP/bwrap.err")"
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0 ||
+              { echo "::error::sysctl failed: AppArmor still restricts user namespaces"; exit 1; }
+          fi
+          smoke 2>"$RUNNER_TEMP/bwrap.err" || {
+            echo "::error::bwrap can't create its namespaces: $(head -c 300 "$RUNNER_TEMP/bwrap.err")"
+            exit 1
+          }
+          echo "RESULT bwrap=ok via=sysctl $(bwrap --version)"
+
       # No write credential: only the read-only GITHUB_TOKEN, as github_token (the action also
       # hands it to git and its GitHub tools), and subprocesses get a scrubbed environment (the
       # setup-token stays out of Bash's env). Bash still has open network access. A

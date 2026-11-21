@@ -918,11 +918,11 @@ its dispatch isn't the admin's choice.
    `claude-code-action` runs on the setup-token with `--max-turns` from the gate (100 unless
    lowered, the Claude step stopped at 55 minutes), only the read-only `GITHUB_TOKEN` (as
    `github_token`, which the action also hands to git and its GitHub tools), and
-   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. The prompt is `/implement #N` plus
-   `.github/factory-prompt.md`. Claude commits locally and writes the branch name, PR body and
-   labels to files, and a plain step packs them with a git bundle of the new commits into the job's
-   output (the hand-off, under 900 kB). The project's settings load, so an `ask` rule denies (no one
-   can answer it) and the hooks run; web tools are off.
+   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, with bubblewrap installed and smoke-tested first (below).
+   The prompt is `/implement #N` plus `.github/factory-prompt.md`. Claude commits locally and writes
+   the branch name, PR body and labels to files, and a plain step packs them with a git bundle of
+   the new commits into the job's output (the hand-off, under 900 kB). The project's settings load,
+   so an `ask` rule denies (no one can answer it) and the hooks run; web tools are off.
 4. **`publish`** runs on a fresh runner that never ran the model, with `main`'s checkout.
    `.github/scripts/factory-publish.sh` refuses (`PUBLISH refused: …`, a failed job) a hand-off with
    any entry but the four files, a branch that isn't `<n>-<slug>`, a body without `Closes #<n>`, a
@@ -943,6 +943,26 @@ job runs in `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN` and is nam
 the factory, so `review.yml` can share it later. The App's key stays in `factory`, which only
 `publish` (and `open-pr.yml`) enters, so nothing on Claude's runner can reach the key, whatever
 GitHub hands a job.
+
+**Bubblewrap for the scrub (admin, 21 Nov 2026, option a).** The scrub runs Claude's subprocesses
+under bubblewrap, and Claude Code 2.1.319 refuses to start with the scrub on and no `bwrap`
+("bubblewrap is required for subprocess env scrubbing and isolation"; #107's live test, three runs).
+PR #448's body read the action as setting the isolation up only with `allowed_non_write_users`; that
+was wrong for this CLI, which needs bubblewrap whenever the scrub is on. At the pinned SHA that
+input makes the action install bubblewrap itself (its "Install subprocess isolation dependencies"
+step), turn the scrub on by default and put `/usr/bin` first on the `PATH`, among other things, none
+of which the factory uses (`action.yml`, read 21 Nov 2026). So the factory job installs `bubblewrap`
+and `socat` from Ubuntu's archive before the Claude step, as that action step does; the scrub stays
+on, never `0`. Ubuntu 24.04's AppArmor denies unprivileged user namespaces
+(`kernel.apparmor_restrict_unprivileged_userns=1`), which bwrap needs. The step first loads the
+narrowest fix, an AppArmor profile that lets `/usr/bin/bwrap` alone create them
+(`/usr/bin/bwrap flags=(default_allow) { userns, }`, the form of Ubuntu's per-program example in
+[Restricted unprivileged user namespaces](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces),
+read 21 Nov 2026), and only if `bwrap` still fails sets that sysctl to `0` for this runner, as the
+action's step does. A smoke run of `bwrap` with a PID namespace follows, so a broken install fails
+the job before Claude starts, and `RESULT bwrap=ok via=…` records which fix was needed. The runner
+user has sudo either way, so the sysctl takes no boundary away from Claude's runner.
+`sandbox.bwrapPath` in managed settings isn't needed: `apt-get` puts `bwrap` on the `PATH`.
 
 **Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
 environment, but the runner user has sudo, so a prompt injection could still read it from the
