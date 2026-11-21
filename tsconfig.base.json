@@ -4,6 +4,7 @@
 		"target": "ES2024",
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
+		"customConditions": ["@sunny-pastures/source"],
 		"composite": true,
 		"incremental": true,
 		"declaration": true,

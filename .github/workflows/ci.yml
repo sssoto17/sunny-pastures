@@ -80,6 +80,13 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: pnpm typecheck
+      # #433: Next bundles the sim from its built dist/, and the build must need no database
+      # variables (ADR-0007, Q6). No step sets DATABASE_URL, so this checks both, and a client
+      # import of src/server/ fails here on `server-only` (CONSTRAINTS.md, "Boundaries: server-only").
+      - name: Build the app (sim, then next build)
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: pnpm --filter @sunny-pastures/web build
 
   lint:
     name: ci / lint
