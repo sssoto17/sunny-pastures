@@ -143,7 +143,8 @@ jobs:
       - uses: ./.github/actions/setup
       # ADR-0007 section 6, "The `db` project" (#382). The `db` project's tests need the Supabase
       # stack, which costs runner time, so a PR starts it only when it changes apps/web/src/server/
-      # or supabase/. Every push to main starts it, so main runs both projects and the full coverage
+      # or supabase/, or what runs the `db` tests: the stack action or vitest.config.mts (admin,
+      # 21 Nov, #439 review). Every push to main starts it, so main runs both projects and the full coverage
       # gate, ratchet included (admin, 19 Nov), and a drop merged without the stack turns main red.
       # Without the stack only the `unit` project runs, and the gate skips the whole-project ratchet,
       # since the untested store files would read 0% (as `check:task` does). The changed-line
@@ -156,13 +157,14 @@ jobs:
             why="a push to main always starts the stack"
           else
             # A base git can't read fails the step: only an empty list means nothing was touched.
-            changed=$(git diff --name-only "$SINCE...HEAD" -- apps/web/src/server supabase)
+            changed=$(git diff --name-only "$SINCE...HEAD" -- apps/web/src/server supabase \
+              .github/actions/supabase-stack vitest.config.mts)
             if [[ -n $changed ]]; then
               stack=true
-              why="the change touches apps/web/src/server/ or supabase/"
+              why="the change touches apps/web/src/server/, supabase/, .github/actions/supabase-stack/ or vitest.config.mts"
             else
               stack=false
-              why="the change touches neither apps/web/src/server/ nor supabase/"
+              why="the change touches none of apps/web/src/server/, supabase/, .github/actions/supabase-stack/ or vitest.config.mts"
             fi
           fi
           if [[ $stack == true ]]; then

@@ -9,7 +9,7 @@ import { inject, type ProvidedContext } from "vitest";
 export type Stack = NonNullable<ProvidedContext["stack"]>;
 
 /**
- * The local stack's settings, as the `db` project's global setup (./setup.ts) found them. Throws
+ * The local stack's settings, as the `db` project's global setup (./stackSetup.ts) found them. Throws
  * outside that project, since only it provides them: a stack test belongs in a `*.db.test.ts` file.
  */
 export function readStack(): Stack {
