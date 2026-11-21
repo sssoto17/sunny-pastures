@@ -1,8 +1,9 @@
 import type { Auth } from "@/server/auth";
-import { loadFarm, type Busy, type GameDeps } from "@/server/game";
+import { loadFarm, submitAction, type Busy, type GameDeps } from "@/server/game";
 import {
 	buildErrorResponse,
 	buildJsonResponse,
+	readActionRequest,
 	readFarmRequest,
 	type Problem,
 	type ResponseMeta,
@@ -19,17 +20,19 @@ export interface FarmRouteDeps extends Omit<GameDeps, "timing"> {
 	readonly logError: (error: unknown) => void;
 }
 
-/** The game routes, each from a `Request` to its `Response` (ADR-0007, section 3). */
+/** The two game routes, each from a `Request` to its `Response` (ADR-0007, section 3). */
 export interface FarmRoutes {
 	/** `GET /api/farm`: 200 `{ farm }`. Never writes (MUST-11.5). */
 	getFarm(request: Request): Promise<Response>;
+	/** `POST /api/farm/actions`: 200 `{ answer, farm }`, or 422 with the sim's reason. */
+	postAction(request: Request): Promise<Response>;
 }
 
 /**
  * The game routes' handlers (#397). Each runs in the order #332 (Q4) sets: `readPlayer` first, so
  * any failure is 401 and says nothing about the request; then `http/`'s checks (415 → 413 → 400);
  * then `game/`. No store call happens before the checks pass. The farm is the verified `PlayerId`
- * only: a query naming a farm is 400 (T5).
+ * only: a query on either route is 400, and the body's exact keys leave no room for a `farmId` (T5).
  * Every response, errors included, is built by `http/`, so it carries `Rules-Version`,
  * `Cache-Control: no-store` and `Server-Timing`, rendered after `total` is recorded (MUST-19.1).
  */
@@ -47,6 +50,29 @@ export function createFarmRoutes(deps: FarmRouteDeps): FarmRoutes {
 				if (loaded.kind === "busy") return answerBusy(deps, loaded);
 
 				return { ok: true, body: { farm: loaded.farm } };
+			}),
+
+		postAction: async (request) =>
+			await respond(deps, async (game) => {
+				const player = await deps.readPlayer(request);
+				if (!player.ok) return unauthorized;
+
+				const checked = await readActionRequest(request);
+				if (!checked.ok) return { ok: false, problem: checked.problem };
+
+				// After the body's checks, so 415 and 413 still come first: a query is a 400 (T5).
+				const query = readFarmRequest(request);
+				if (!query.ok) return { ok: false, problem: query.problem };
+
+				const result = await submitAction(game, player.playerId, checked.value);
+				switch (result.kind) {
+					case "answered":
+						return { ok: true, body: { answer: result.answer, farm: result.farm } };
+					case "refused":
+						return { ok: false, problem: { error: "refused", reason: result.reason } };
+					case "busy":
+						return answerBusy(deps, result);
+				}
 			}),
 	};
 }

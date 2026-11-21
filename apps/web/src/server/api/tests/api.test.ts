@@ -39,4 +39,25 @@ describe("createApi", () => {
 		expect(results).toStrictEqual([{ ok: false }, { ok: false }]);
 		expect(supabase.clients - before).toBe(1);
 	});
+
+	it("wires the game routes so a request without a token is 401 before the database (#397)", async () => {
+		// Nothing listens at db.test: a store call would reject, and the route would answer 503.
+		const api = createApi(makeEnv("postgresql://db.test/farm"));
+		const post = new Request("http://app.test/api/farm/actions", {
+			method: "POST",
+			body: "{}",
+		});
+
+		const responses = await Promise.all([
+			api.getFarm(new Request("http://app.test/api/farm")),
+			api.postAction(post),
+		]);
+
+		for (const response of responses) {
+			expect(response.status).toBe(401);
+			expect(response.headers.get("Rules-Version")).toBe("1");
+			expect(response.headers.get("Cache-Control")).toBe("no-store");
+			expect(response.headers.get("Server-Timing")).toMatch(/^total;dur=/);
+		}
+	});
 });
