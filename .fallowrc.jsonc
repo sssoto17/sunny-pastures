@@ -31,6 +31,13 @@
       { "name": "pages", "patterns": ["apps/web/src/app/**"] },
       { "name": "api", "patterns": ["apps/web/src/server/api/**"] },
       { "name": "config", "patterns": ["apps/web/src/server/config/**"] },
+      // Test-file zones (#382; ADR-0007 section 6, an allowance for test files only): the db
+      // module's tests/ holds the `db` project's global setup, `readStack` and `createPlayer`,
+      // which the store's and auth's stack tests use. Each sits before its module's zone, so it
+      // takes the module's tests/ folder only, and the module's source keeps its own rule.
+      { "name": "dbTests", "patterns": ["apps/web/src/server/db/tests/**"] },
+      { "name": "storeTests", "patterns": ["apps/web/src/server/store/tests/**"] },
+      { "name": "authTests", "patterns": ["apps/web/src/server/auth/tests/**"] },
       { "name": "db", "patterns": ["apps/web/src/server/db/**"] },
       { "name": "rules", "patterns": ["apps/web/src/server/rules/**"] },
       { "name": "store", "patterns": ["apps/web/src/server/store/**"] },
@@ -61,7 +68,11 @@
       // The HTTP contract (#395; admin, 21 Nov): the request checks, the error builder and the
       // headers. It sees the sim's types, never its code; the timing value is passed in.
       { "from": "http", "allow": [], "allowTypeOnly": ["sim"] },
-      { "from": "sim", "allow": [] }
+      { "from": "sim", "allow": [] },
+      // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
+      { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
+      { "from": "storeTests", "allow": ["store", "dbTests"], "allowTypeOnly": ["db", "sim"] },
+      { "from": "authTests", "allow": ["auth", "config", "dbTests"] }
     ],
     // A pattern matches a call and a constructor call, also through an import or a namespace.
     "calls": {

@@ -116,8 +116,8 @@ jobs:
       # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
       - run: pnpm dupes --changed-since "$SINCE"
       # CONSTRAINTS.md, migrations row (#372): no applied migration edited since the base, and
-      # `drizzle-kit check` plus a generate that writes nothing. No database: the Supabase stack in
-      # CI, and `pnpm db:env` and `pnpm test:stack` after `supabase db reset`, are #49's.
+      # `drizzle-kit check` plus a generate that writes nothing. No database: the stack is
+      # `ci / test`'s (#382), when a change can reach it.
       - run: pnpm db:check "$SINCE"
 
   test:
@@ -141,8 +141,61 @@ jobs:
           persist-credentials: false
           fetch-depth: 0 # the coverage gate diffs against the merge base
       - uses: ./.github/actions/setup
-      - run: pnpm test
-      - run: node .github/scripts/coverage-gate.mjs --base "$SINCE"
+      # ADR-0007 section 6, "The `db` project" (#382). The `db` project's tests need the Supabase
+      # stack, which costs runner time, so a PR starts it only when it changes apps/web/src/server/
+      # or supabase/, or what runs the `db` tests: the stack action or vitest.config.mts (admin,
+      # 21 Nov, #439 review). Every push to main starts it, so main runs both projects and the full
+      # coverage gate, ratchet included (admin, 19 Nov), and a drop merged without the stack turns
+      # main red.
+      # Without the stack only the `unit` project runs, and the gate skips the whole-project ratchet,
+      # since the untested store files would read 0% (as `check:task` does). The changed-line
+      # floors apply either way. The decision is this step, not a skip in a test.
+      - name: Choose the Vitest projects
+        id: projects
+        run: |
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            stack=true
+            why="a push to main always starts the stack"
+          else
+            # A base git can't read fails the step: only an empty list means nothing was touched.
+            changed=$(git diff --name-only "$SINCE...HEAD" -- apps/web/src/server supabase \
+              .github/actions/supabase-stack vitest.config.mts)
+            if [[ -n $changed ]]; then
+              stack=true
+              why="the change touches apps/web/src/server/, supabase/, .github/actions/supabase-stack/ or vitest.config.mts"
+            else
+              stack=false
+              why="the change touches none of apps/web/src/server/, supabase/, .github/actions/supabase-stack/ or vitest.config.mts"
+            fi
+          fi
+          if [[ $stack == true ]]; then
+            summary="Projects unit and db, with the Supabase stack, and the full coverage gate: $why."
+          else
+            summary="Project unit only, no stack, and the coverage gate with --skip-ratchet: $why."
+          fi
+          echo "stack=$stack" >> "$GITHUB_OUTPUT"
+          echo "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Start the Supabase stack
+        if: steps.projects.outputs.stack == 'true'
+        uses: ./.github/actions/supabase-stack
+      - name: Run the tests
+        env:
+          STACK: ${{ steps.projects.outputs.stack }}
+        run: |
+          if [[ $STACK == true ]]; then
+            pnpm test
+          else
+            pnpm test --project unit
+          fi
+      - name: Check coverage
+        env:
+          STACK: ${{ steps.projects.outputs.stack }}
+        run: |
+          if [[ $STACK == true ]]; then
+            node .github/scripts/coverage-gate.mjs --base "$SINCE"
+          else
+            node .github/scripts/coverage-gate.mjs --base "$SINCE" --skip-ratchet
+          fi
 
   # CONSTRAINTS.md, Determinism row (#48): the recorded script through packages/sim in two
   # processes, against the recorded state hash. No path filter: the hash covers every rules change.

@@ -1,7 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 
-import { readConfig, type Config, type Env } from "@/server/config";
-
 import type { AuthConfig } from "../index";
 
 /** A fresh anonymous player on the local stack. The token is a secret: never print or log it. */
@@ -9,21 +7,6 @@ export interface AnonymousPlayer {
 	accessToken: string;
 	/** The token's `sub`, as Auth reports it. */
 	playerId: string;
-}
-
-/**
- * Reads the stack's settings for `pnpm test:stack`. Without them it throws a message that says how
- * to get them, naming variables only, never a value.
- */
-export function readStackConfig(env: Env): Config {
-	try {
-		return readConfig(env);
-	} catch (error) {
-		throw new Error(
-			"pnpm test:stack needs the local Supabase stack: run pnpm db:start, then pnpm db:env.",
-			{ cause: error },
-		);
-	}
 }
 
 /**
