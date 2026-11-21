@@ -4,190 +4,36 @@ import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createPlayer, readStack } from "../../db/tests/stack";
-import { createStore, type GameStore, type StoreDeps } from "../index";
+import { createStore } from "../index";
 import { actions, snapshots } from "../schema";
+import { describeGameStore, playActions, type MakeStore } from "./contract";
 import { makeEntry, newFarm, recordReplay, replay } from "./farms";
 
-// B100 against the local stack (Vitest's db project; #373, ADR-0007 section 6). The store connects
-// as game_api, over a client built as createDb builds it (the store's tests may import `db` only as a
-// type, .fallowrc.jsonc); each test makes its own player, so tests share no farm and nothing is
-// truncated ("Isolation by farm").
+// B100 against the local stack (Vitest's db project; #373, ADR-0007 section 6): the store contract
+// (./contract.ts, which memoryStore.test.ts runs on the fake too), then what only B100 does. The
+// store connects as game_api, over a client built as createDb builds it (the store's tests may
+// import `db` only as a type, .fallowrc.jsonc); each test makes its own player, so tests share no
+// farm and nothing is truncated ("Isolation by farm").
 const db = drizzle(postgres(readStack().databaseUrl));
 
 afterAll(async () => {
 	await db.$client.end();
 });
 
-/** Builds a store with the stand-in rules, or with the `replay` a test hands in. */
-type MakeStore = (rules?: Partial<Pick<StoreDeps, "replay">>) => GameStore;
-
 const makeB100: MakeStore = (rules = {}) => createStore({ db, newFarm, replay, ...rules });
 
 const checkViolation = { cause: { code: "23514" } };
 
-/**
- * Commits `count` actions to `farmId` from seq 1, one a second, and returns the farm after each
- * (index 0 is the new farm), as the game loop computed it.
- */
-async function play(store: GameStore, farmId: string, count: number) {
-	let farm = newFarm();
-	const farms = [farm];
-	for (let seq = 1; seq <= count; seq++) {
-		const entry = makeEntry(farm, seq - 1, seq * 1_000);
-		expect(await store.commit(farmId, entry)).toEqual({ kind: "committed", seq });
-		farm = entry.next;
-		farms.push(farm);
-	}
-	return farms;
-}
-
-// The store contract (ADR-0001, "Store interface"): written against `makeStore` so the cases move
-// as they are into #383's `describeGameStore(makeStore)`, which also runs them on the in-memory
-// store (#333's comment on #373).
-function describeGameStore(name: string, makeStore: MakeStore) {
-	describe(name, () => {
-		it("loads a farm with no action as a new farm at seq 0", async () => {
-			const farmId = await createPlayer();
-
-			expect(await makeStore().load(farmId)).toEqual({ state: newFarm(), seq: 0, at: 0 });
-		});
-
-		it("loads a committed farm back as it was committed, types included", async () => {
-			const farmId = await createPlayer();
-			const store = makeStore();
-			const entry = makeEntry(newFarm(), 0, 1_000);
-
-			expect(await store.commit(farmId, entry)).toEqual({ kind: "committed", seq: 1 });
-			expect(await store.load(farmId)).toStrictEqual({ state: entry.next, seq: 1, at: 1_000 });
-		});
-
-		it("gives each commit the next seq, with no gaps (MUST-13.1)", async () => {
-			const farmId = await createPlayer();
-			const store = makeStore();
-
-			const farms = await play(store, farmId, 5);
-
-			expect(await store.load(farmId)).toStrictEqual({ state: farms[5], seq: 5, at: 5_000 });
-		});
-
-		it("conflicts on a stale or skipped expectedSeq, and writes nothing (MUST-13.3)", async () => {
-			const farmId = await createPlayer();
-			const store = makeStore();
-			const [, first] = await play(store, farmId, 1);
-			const stale = makeEntry(newFarm(), 0, 2_000);
-			const ahead = makeEntry(newFarm(), 2, 2_000);
-
-			expect(await store.commit(farmId, stale)).toEqual({ kind: "conflict" });
-			expect(await store.commit(farmId, ahead)).toEqual({ kind: "conflict" });
-			expect(await store.load(farmId)).toStrictEqual({ state: first, seq: 1, at: 1_000 });
-			expect(await store.processed(farmId, stale.idempotencyKey)).toBeNull();
-			expect(await store.processed(farmId, ahead.idempotencyKey)).toBeNull();
-		});
-
-		it.each([-1, 1.5, Number.NaN, 2 ** 53])(
-			"refuses an expectedSeq of %s, and writes nothing",
-			async (expectedSeq) => {
-				const farmId = await createPlayer();
-				const store = makeStore();
-				const entry = { ...makeEntry(newFarm(), 0, 1_000), expectedSeq };
-
-				await expect(store.commit(farmId, entry)).rejects.toThrow(RangeError);
-				expect((await store.load(farmId)).seq).toBe(0);
-			},
-		);
-
-		it("refuses an expectedSeq that is a string, as an unchecked request body could send", async () => {
-			const farmId = await createPlayer();
-			const store = makeStore();
-			await play(store, farmId, 5);
-			const entry = { ...makeEntry(newFarm(), 5, 6_000), expectedSeq: "5" as unknown as number };
-
-			await expect(store.commit(farmId, entry)).rejects.toThrow(RangeError);
-			expect((await store.load(farmId)).seq).toBe(5);
-		});
-
-		it("answers a resent key with the first answer, and writes nothing (MUST-13.2)", async () => {
-			const farmId = await createPlayer();
-			const store = makeStore();
-			const first = makeEntry(newFarm(), 0, 1_000);
-			await store.commit(farmId, first);
-			const resent = { ...makeEntry(first.next, 1, 2_000), idempotencyKey: first.idempotencyKey };
-
-			expect(await store.processed(farmId, first.idempotencyKey)).toEqual(first.answer);
-			expect(await store.commit(farmId, resent)).toEqual({
-				kind: "duplicate",
-				answer: first.answer,
-			});
-			expect(await store.load(farmId)).toStrictEqual({ state: first.next, seq: 1, at: 1_000 });
-		});
-
-		it("finds no answer for a key the farm never used, even one another farm used", async () => {
-			const [farmId, otherId] = await Promise.all([createPlayer(), createPlayer()]);
-			const store = makeStore();
-			const entry = makeEntry(newFarm(), 0, 1_000);
-			await store.commit(otherId, entry);
-
-			expect(await store.processed(farmId, entry.idempotencyKey)).toBeNull();
-			expect(await store.processed(farmId, crypto.randomUUID())).toBeNull();
-		});
-
-		it("commits one of two concurrent commits at the same expectedSeq; the other conflicts (MUST-13.3)", async () => {
-			const farmId = await createPlayer();
-			const store = makeStore();
-			await play(store, farmId, 2);
-			const { state: farm } = await store.load(farmId);
-			const left = makeEntry(farm, 2, 3_000);
-			const right = makeEntry(farm, 2, 3_001);
-
-			const results = await Promise.all([store.commit(farmId, left), store.commit(farmId, right)]);
-
-			expect(results.map(({ kind }) => kind).sort()).toEqual(["committed", "conflict"]);
-			const [winner, loser] = results[0].kind === "committed" ? [left, right] : [right, left];
-			expect(await store.processed(farmId, loser.idempotencyKey)).toBeNull();
-			expect(await store.load(farmId)).toStrictEqual({
-				state: winner.next,
-				seq: 3,
-				at: winner.at,
-			});
-		});
-
-		it("commits a key sent twice at once only once; the other gets the first answer", async () => {
-			const farmId = await createPlayer();
-			const store = makeStore();
-			const entry = makeEntry(newFarm(), 0, 1_000);
-
-			const results = await Promise.all([store.commit(farmId, entry), store.commit(farmId, entry)]);
-
-			expect(results).toEqual(
-				expect.arrayContaining([
-					{ kind: "committed", seq: 1 },
-					{ kind: "duplicate", answer: entry.answer },
-				]),
-			);
-			expect((await store.load(farmId)).seq).toBe(1);
-		});
-
-		it("loads from the snapshot at seq 100, replaying only the actions after it", async () => {
-			const farmId = await createPlayer();
-			const farms = await play(makeStore(), farmId, 130);
-			const recorded = recordReplay();
-
-			const loaded = await makeStore({ replay: recorded.replay }).load(farmId);
-
-			expect(loaded).toStrictEqual({ state: farms[130], seq: 130, at: 130_000 });
-			expect(recorded.calls).toEqual([Array.from({ length: 30 }, (_, i) => 101 + i)]);
-		});
-	});
-}
-
-describeGameStore("createStore (B100)", makeB100);
+describe("createStore (B100)", () => {
+	describeGameStore(makeB100, createPlayer);
+});
 
 // What only B100 over Postgres does: the rules-version tie-break between snapshots, and the
 // database's own refusals.
 describe("createStore (B100) over the game schema", () => {
 	it("loads from the snapshot with the higher rules version at the same seq (ADR-0006, section 5)", async () => {
 		const farmId = await createPlayer();
-		await play(makeB100(), farmId, 100);
+		await playActions(makeB100(), farmId, 100);
 		// A base snapshot of a later version at seq 100, and one at an earlier seq that loses on seq.
 		const base = { ...newFarm(), xp: 1_000 };
 		await db.insert(snapshots).values([
@@ -233,7 +79,7 @@ describe("createStore (B100) over the game schema", () => {
 
 	it("stamps every row and every 100th-action snapshot with rules version 1", async () => {
 		const farmId = await createPlayer();
-		await play(makeB100(), farmId, 100);
+		await playActions(makeB100(), farmId, 100);
 
 		const [rows, snapshotRows] = await Promise.all([
 			db
