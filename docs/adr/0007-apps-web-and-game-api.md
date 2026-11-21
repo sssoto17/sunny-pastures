@@ -95,7 +95,7 @@ threat-model document (the spec's table already is one).
 | `timing/` | `createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`: one recorder per request; phases `load`, `sim`, `commit`, `total`, summed across retries; the header value, or `null` when no phase ran (#394) |
 | `http/` | the HTTP contract (section 3), added by #395: `readActionRequest` and `readFarmRequest` (the 415 → 413 → 400 checks and the action guards), `buildErrorResponse` and `buildJsonResponse` (the one error builder and the headers on every response). Builds `Response`s, so it isn't `game/` |
 | `game/` | `submitAction(deps, playerId, body)` and `loadFarm(deps, playerId)`: ADR-0001's loop and the 422 re-check. Returns results, never `Response`s |
-| `api/` | the composition root: `getApi()` builds config → db → rules → store → auth → deps, and exposes what the routes call; `farmRoutes.ts` maps each game route from its `Request` to its `Response` (#397) |
+| `api/` | the composition root: `getApi()` wires rules and the routes, and its memoised `connect` builds config → db → store → auth on the first request that needs them (#470); it exposes what the routes call; `farmRoutes.ts` maps each game route from its `Request` to its `Response` (#397) |
 
 Only `api/` wires modules together, and only a `route.ts` imports `api/`. `game/` sees `GameStore`
 and `PlayerId` as types only, so it is tested against a fake store. There is no `inbox/` in M3
@@ -146,19 +146,19 @@ root `references`. ADR-0005 is amended to point here.
 TCP). `getApi()` builds the graph lazily and memoises it per process (Fluid compute reuses it), so
 `next build` needs no `DATABASE_URL`. Tests build `deps` themselves and never call `getApi()`.
 
-**Config errors keep the contract (#470; admin, 21–22 Nov 2026).** `getApi()` itself reads no
-environment: it wires the rules and the routes, which need none. The part that reads it (config → db
-→ store → auth) is `connect`, memoised the same way, and each game handler calls it inside the same
-`try` as its response mapping (`respond` in `farmRoutes.ts`). So a deploy with a missing or bad
-variable answers each game request with the contract's 500 (`internal`, the fixed message,
-`Rules-Version`, `Cache-Control: no-store` and `Server-Timing`), logs the config error to the
-server's log only, and connects on the first request after the variable is set, since a build that
-throws isn't kept. `health()` calls `connect` too and throws, so a deployment with a missing
-variable still fails its health check. Each `route.ts` stays one line, and `next build` still needs
-no database variables. Rejected: a second `try` around `getApi()` in each route (logic in the Humble
-Object, and a second place that builds an error response), and reading the config eagerly in
-`getApi()` (its throw escapes every route as Next's bare 500, with none of the contract's headers,
-which #387's attack tests assume on every 500).
+**Config errors keep the contract (#470's criteria).** `getApi()` itself reads no environment: it
+wires the rules and the routes, which need none. The part that reads it (config → db → store → auth)
+is `connect`, memoised the same way, and each game handler calls it inside the same `try` as its
+response mapping (`respond` in `farmRoutes.ts`). So a deploy with a missing or bad variable answers
+each game request with the contract's 500 (`internal`, the fixed message, `Rules-Version`,
+`Cache-Control: no-store` and `Server-Timing`), logs the config error to the server's log only, and
+connects on the first request after the variable is set, since a build that throws isn't kept.
+`health()` calls `connect` too and throws, so a deployment with a missing variable still fails its
+health check. Each `route.ts` stays one line, and `next build` still needs no database variables.
+Rejected: a second `try` around `getApi()` in each route (logic in the Humble Object, and a second
+place that builds an error response), and reading the config eagerly in `getApi()` (its throw
+escapes every route as Next's bare 500, with none of the contract's headers, which #387's attack
+tests assume on every 500).
 
 **Rejected:**
 
@@ -560,17 +560,17 @@ sim type-only (#383).
   `server/api`; the acceptance tests still prove the routes over HTTP. Rejected: excluding the route
   files from coverage (a moved threshold), and relying on the acceptance tests alone (they don't
   count for coverage).
-- **`api`'s tests** (#470; admin, 22 Nov 2026) run the game routes on `createMemoryStore`, the same
-  fake that `game/`'s tests use and the contract suite holds to B100, instead of a fake store of
-  their own (the deleted `api/tests/fakeStore.ts`, which nothing held to the contract). They reach
-  it through a test-files-only zone, `apiTests` (`server/api/tests/*.test.ts` → `api`'s own rule,
-  `api` and `store/tests/**`). Like `routeTests`, the pattern takes the test files only, so a helper
-  beside them stays in `api`, and production `api` still builds B100 through `store`. A test sees
-  which store calls a route made through spies on the store's methods, injects a store error by
-  making one reject, and scripts conflicts with the store's `conflicts` array, one entry per
-  conflict the case needs (four for `busy` after MUST-13.3's three retries), so a retry too many
-  writes and fails the test. Deleting the old fake needed an Exceptions row (`test-deleted`, E14),
-  since the floor guard counts every file in a `tests/` folder as a test.
+- **`api`'s tests** (#470's criteria) run the game routes on `createMemoryStore`, the same fake that
+  `game/`'s tests use and the contract suite holds to B100, instead of a fake store of their own
+  (the deleted `api/tests/fakeStore.ts`, which nothing held to the contract). They reach it through
+  a test-files-only zone, `apiTests` (`server/api/tests/*.test.ts` → `api`'s own rule, `api` and
+  `store/tests/**`). Like `routeTests`, the pattern takes the test files only, so a helper beside
+  them stays in `api`, and production `api` still builds B100 through `store`. A test sees which
+  store calls a route made through spies on the store's methods, injects a store error by making one
+  reject, and scripts conflicts with the store's `conflicts` array, one entry per conflict the case
+  needs (four for `busy` after MUST-13.3's three retries), so a retry too many writes and fails the
+  test. Deleting the old fake needed an Exceptions row (`test-deleted`, E14), since the floor guard
+  counts every file in a `tests/` folder as a test.
 
 ### Acceptance tests
 
@@ -669,7 +669,7 @@ Actions minutes are tight.
 | Pattern | Where | Why | Alternatives considered |
 | --- | --- | --- | --- |
 | Composition Root, dependency injection by argument | `server/api` (`getApi()`), the `deps` parameter | One place knows the whole graph; tests swap collaborators as values | a DI container, a service locator |
-| Lazy initialisation, memoised | `getApi()` | Built once per process, never at build time | eager construction at module scope |
+| Lazy initialisation, memoised | `getApi()`, and `connect` for the parts that read the environment (#470) | Built once per process, never at build time; a config error is built inside the request's `try`, so it keeps the contract | eager construction at module scope, reading the config in `getApi()` |
 | Humble Object (thin adapter) | `route.ts`, one call into `server/api/farmRoutes.ts` (#470) | Framework code that is hard to test holds no logic; the mapping is tested without Next | Next middleware, a `withPlayer` wrapper, the mapping inside `route.ts` |
 | Functional core, imperative shell (ADR-0001) | `game/` with the sim | `game/` returns results; the routes and the store do the I/O | — |
 | Facade with a Strategy slot | `rules/` | One interface over content → sim, `newFarm`, `replay`; M4's registry swaps the implementation | `replay` in the sim, `replay` in `game/` |

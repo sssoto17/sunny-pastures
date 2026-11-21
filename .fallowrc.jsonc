@@ -34,7 +34,7 @@
       { "name": "routeTests", "patterns": ["apps/web/src/app/api/**/tests/*.test.ts"] },
       { "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
       { "name": "pages", "patterns": ["apps/web/src/app/**"] },
-      // The composition root's tests (#470; ADR-0007 section 6; admin, 22 Nov 2026), before `api`,
+      // The composition root's tests (#470's criteria; ADR-0007 section 6), before `api`,
       // so they take its `tests/*.test.ts` files only, never a helper beside them: they run the
       // routes on the in-memory store (store/tests/memoryStore.ts), which the store contract holds
       // to B100, instead of a fake store of their own.
