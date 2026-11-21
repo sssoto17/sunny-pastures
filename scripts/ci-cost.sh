@@ -171,6 +171,9 @@ usd_add() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.6f", a + b }'; }
 while IFS=$'\t' read -r id name path event branch pr created; do
   [[ -z $id ]] && continue
   [[ $id =~ ^[0-9]+$ ]] || die 3 "unexpected row from the runs list, has the API changed?"
+  # A workflow's row is its file, not the run's name: `run-name:` names each run apart (#358).
+  # Runs with no workflow file (Dependabot's `dynamic/...`) keep their name.
+  if [[ $path =~ ^\.github/workflows/([^/]+)\.ya?ml$ ]]; then name=${BASH_REMATCH[1]}; fi
   if [[ $pr == - && $branch != - ]]; then pr=$(pr_by_branch "$branch" "$created"); fi
   if ((${#want_pr[@]})); then [[ $pr != - && -n ${want_pr[$pr]-} ]] || continue; fi
 

@@ -7,13 +7,18 @@
 # next (the next number: PRs and stacks share it, as on GitHub), labels (the labels that exist,
 # one per line) and calls (each call's arguments, one per line, then "--"). A file
 # fail_<METHOD>_<endpoint with / as _> fails that call with its text; fail_app_<…> fails it only
-# for the App's token, inside a simulated open-pr run. --jq runs through jq. reviews_<n>.json and
+# for the App's token, inside a simulated workflow run. --jq runs through jq. reviews_<n>.json and
 # checks_<sha>.json are canned reviews and check runs. The remote is $work/remote.git.
+# A PR's head.sha and base.sha are its branches' heads on the remote, as GitHub shows them once it
+# has seen a push; stale_heads keeps the shas from when the PR opened (GitHub lagging behind).
+# POST graphql runs the two draft mutations on the PR whose node_id (PR_<n>) it names.
 #
-# POST dispatches stands in for the open-pr workflow: it runs the real .github/scripts/open-pr.sh
-# ($FAKE_WORKFLOW_SCRIPT) with the payload as its environment, as sunny-factory[bot], and records
-# the run under runs/, newest id highest. no_workflow makes the event start nothing;
-# run_pending leaves the run in progress.
+# POST dispatches stands in for the workflows: open-pr runs the real .github/scripts/open-pr.sh
+# ($FAKE_WORKFLOW_SCRIPT) and pr-draft the real pr-draft.sh beside it, each with the payload as its
+# environment, as sunny-factory[bot], and records the run under runs/, newest id highest.
+# events logs, in order, "opened <n> draft=<bool>", each pr-draft request "<state> <prs>" and each
+# mutation "marked <n> draft|ready". no_workflow makes the event start nothing; run_pending leaves
+# the run in progress.
 st=$(cd "$(dirname "$0")/../gh" && pwd)
 for a in "$@"; do printf '%s\n' "$a"; done >>"$st/calls"
 printf -- '--\n' >>"$st/calls"
@@ -47,7 +52,15 @@ if [[ -n ${FAKE_APP:-} && -f $st/fail_app_$key ]]; then cat "$st/fail_app_$key" 
 P=repos/sssoto17/sunny-pastures
 remote=$st/../remote.git
 next() { local n; n=$(cat "$st/next"); echo $((n + 1)) >"$st/next"; echo "$n"; }
-pr() { cat "$st/pulls/$1.json"; }
+pr() { # n -> the PR, its shas live from the remote unless stale_heads
+  local j h b
+  j=$(cat "$st/pulls/$1.json")
+  [[ -f $st/stale_heads ]] && { printf '%s\n' "$j"; return; }
+  h=$(git --git-dir="$remote" rev-parse -q --verify "refs/heads/$(jq -r .head.ref <<<"$j")") || h=""
+  b=$(git --git-dir="$remote" rev-parse -q --verify "refs/heads/$(jq -r .base.ref <<<"$j")") || b=""
+  jq --arg h "$h" --arg b "$b" '(if $h != "" then .head.sha = $h else . end)
+    | (if $b != "" then .base.sha = $b else . end)' <<<"$j"
+}
 stack_json() { # n -> the stack as GET stacks/<n> returns it, parts in order
   local s; s=$(cat "$st/stacks/$1.json")
   jq --slurpfile prs <(for n in $(jq -r '.prs[]' <<<"$s"); do pr "$n"; done) \
@@ -64,26 +77,33 @@ set_stack() { # n -> writes .stack on each of its open PRs
       "$st/pulls/$n.json" >"$st/tmp" && mv "$st/tmp" "$st/pulls/$n.json"
   done
 }
-workflow() { # payload -> runs open-pr.sh as the App and records the run
-  local id status=completed conclusion=success
+workflow() { # name payload -> runs its step script as the App and records the run
+  local id status=completed conclusion=success script fields title
+  case $1 in
+    open-pr) script=$FAKE_WORKFLOW_SCRIPT fields="branch base title body labels ready"
+      title="open-pr $(jq -r .branch <<<"$2")" ;;
+    pr-draft) script=${FAKE_WORKFLOW_SCRIPT%/*}/pr-draft.sh fields="state prs"
+      title="pr-draft $(jq -r '"\(.state) \(.prs)"' <<<"$2")"
+      echo "${title#pr-draft }" >>"$st/events" ;;
+  esac
   id=$(($(cat "$st/run_next" 2>/dev/null || echo 9000) + 1))
   echo "$id" >"$st/run_next"
   if [[ ! -f $st/run_pending ]]; then
     (
       export FAKE_APP=1 FAKE_LOGIN='sunny-factory[bot]' GITHUB_REPOSITORY=sssoto17/sunny-pastures
       export GITHUB_OUTPUT=$st/run_$id.output GITHUB_STEP_SUMMARY=$st/run_$id.summary
-      for f in branch base title body labels; do
-        export "${f^^}=$(jq -r --arg f "$f" '.[$f] // ""' <<<"$1")"
+      for f in $fields; do
+        export "${f^^}=$(jq -r --arg f "$f" '.[$f] // ""' <<<"$2")"
       done
-      bash "$FAKE_WORKFLOW_SCRIPT"
+      bash "$script"
     ) >"$st/run_$id.log" 2>&1 || conclusion=failure
   else
     status=in_progress conclusion=""
   fi
-  jq -n --argjson id "$id" --arg s "$status" --arg c "$conclusion" \
-    --arg t "open-pr $(jq -r .branch <<<"$1")" \
+  jq -n --argjson id "$id" --arg s "$status" --arg c "$conclusion" --arg t "$title" --arg w "$1" \
     '{id: $id, status: $s, conclusion: (if $c == "" then null else $c end), display_title: $t,
-      event: "repository_dispatch", html_url: "https://github.com/runs/\($id)"}' >"$st/runs/$id.json"
+      workflow: $w, event: "repository_dispatch", html_url: "https://github.com/runs/\($id)"}' \
+    >"$st/runs/$id.json"
 }
 out=""
 case "$method $path" in
@@ -95,8 +115,11 @@ case "$method $path" in
     n=$(next)
     sha=$(git --git-dir="$remote" rev-parse "refs/heads/$(jq -r .head <<<"$input")" 2>/dev/null || echo unknown)
     jq --argjson n "$n" --arg sha "$sha" --arg login "${FAKE_LOGIN:-sssoto17}" '{number: $n, state: "open",
-      merged_at: null, title, body, user: {login: $login}, head: {ref: .head, sha: $sha},
-      base: {ref: .base}, stack: null}' <<<"$input" >"$st/pulls/$n.json"
+      merged_at: null, title, body, draft: (.draft // false), node_id: "PR_\($n)",
+      user: {login: $login}, head: {ref: .head, sha: $sha, repo: {full_name: "sssoto17/sunny-pastures"}},
+      base: {ref: .base}, stack: null}' \
+      <<<"$input" >"$st/pulls/$n.json"
+    echo "opened $n draft=$(jq .draft "$st/pulls/$n.json")" >>"$st/events"
     out=$(pr "$n") ;;
   "GET $P/pulls/"*/reviews)
     n=${path#"$P"/pulls/}; n=${n%/reviews}
@@ -140,12 +163,25 @@ case "$method $path" in
     out=$(stack_json "$n") ;;
   "POST $P/dispatches")
     jq -c . <<<"$input" >>"$st/dispatches"
-    [[ $(jq -r .event_type <<<"$input") == open-pr && ! -f $st/no_workflow ]] &&
-      workflow "$(jq -c .client_payload <<<"$input")"
+    ev=$(jq -r .event_type <<<"$input")
+    [[ ($ev == open-pr || $ev == pr-draft) && ! -f $st/no_workflow ]] &&
+      workflow "$ev" "$(jq -c .client_payload <<<"$input")"
     silent=1 ;;
-  "GET $P/actions/workflows/open-pr.yml/runs")
+  "GET $P/actions/workflows/"*.yml/runs)
+    w=${path#"$P"/actions/workflows/}; w=${w%.yml/runs}
     out=$(for f in "$st"/runs/*.json; do [[ -f $f ]] && cat "$f"; done |
-      jq -s '{total_count: length, workflow_runs: (sort_by(.id) | reverse)}') ;;
+      jq -s --arg w "$w" '[.[] | select((.workflow // "open-pr") == $w)]
+        | {total_count: length, workflow_runs: (sort_by(.id) | reverse)}') ;;
+  "POST graphql")
+    m=$(jq -r .query <<<"$input" | grep -oE 'convertPullRequestToDraft|markPullRequestReadyForReview')
+    n=$(jq -r .id <<<"$input"); n=${n#PR_}
+    # the cloud proxy refuses a session's GraphQL: only a simulated workflow run gets this far
+    [[ -n ${FAKE_APP:-} ]] || { echo "gh: GraphQL is not available from Claude Code sessions (HTTP 403)" >&2; exit 1; }
+    [[ -n $m && -f $st/pulls/$n.json ]] || { echo "gh: Could not resolve to a node (HTTP 200)" >&2; exit 1; }
+    d=$([[ $m == convertPullRequestToDraft ]] && echo true || echo false)
+    jq --argjson d "$d" '.draft = $d' "$st/pulls/$n.json" >"$st/tmp" && mv "$st/tmp" "$st/pulls/$n.json"
+    echo "marked $n $([[ $d == true ]] && echo draft || echo ready)" >>"$st/events"
+    out=$(jq -n --arg m "$m" --argjson n "$n" --argjson d "$d" '{data: {($m): {pullRequest: {number: $n, isDraft: $d}}}}') ;;
   *) echo "fake: unexpected endpoint $method $endpoint" >&2; exit 97 ;;
 esac
 ((silent)) && exit 0
