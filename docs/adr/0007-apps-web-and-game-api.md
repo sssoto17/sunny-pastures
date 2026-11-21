@@ -119,7 +119,7 @@ and `PlayerId` as types only, so it is tested against a fake store. There is no 
 
   `game` → type-only `auth` (for `PlayerId`) was added by the auth grill (section 4, Q4).
   `coverage.requireAllFiles` puts every file under `apps/web/src` in a zone. Section 6 adds a
-  test-files-only allowance (`game/**/tests/**` → `store/tests/**`), a second one for the game route
+  test-files-only allowance (`game/**/tests/**` → `store/tests/**`), a second one for the API route
   files' tests (`routeTests` → `routes` and `api`, #397) and an `acceptance` zone with no
   allowances. The store gate's one file (`store/tests/storeGate.db.test.ts`) is a zone of its own
   that may also run `rules` and `sim`, since it plays the script with the real rules (#383).
