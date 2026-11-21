@@ -210,8 +210,20 @@ describe("review.yml", () => {
 			);
 		});
 
-		it("reports whether the skill was registered, from the init message", () => {
-			expect(yml).toContain("RESULT skill=code-review-and-quality registered=");
+		it("proves in the Report step that the skill's text reached the model (#381)", () => {
+			const report = yml.slice(at("- name: Report"));
+			expect(report).toContain(
+				`node .github/scripts/skill-proof.mjs "$f" "$HOME/.claude/projects" \\\n` +
+					"            code-review-and-quality '# Code Review and Quality'",
+			);
+			// The line it counts is SKILL.md's own heading, so a renamed heading fails here first.
+			const skill = readFileSync(
+				fileURLToPath(
+					new URL("../../../.claude/skills/code-review-and-quality/SKILL.md", import.meta.url),
+				),
+				"utf8",
+			);
+			expect(skill.split("\n")).toContain("# Code Review and Quality");
 		});
 	});
 });

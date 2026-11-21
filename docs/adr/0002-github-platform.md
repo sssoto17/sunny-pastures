@@ -529,9 +529,22 @@ branches. The pattern is _propose, then apply_: Claude proposes and plain code a
   _Alternatives:_ adding the `project` source was rejected: it also loads the repo's
   `.claude/settings.json` (hooks, allow rules) and `.mcp.json`, whose servers the action starts (it
   sets `enableAllProjectMcpServers`). Allowing the `Skill` tool was rejected as unneeded: a typed
-  skill is expanded by the CLI, not through the tool (tried with CLI 2.1.327, 18 Nov), so `Skill`
-  stays denied and the model can't load another skill. The Report step logs
-  `RESULT skill=code-review-and-quality registered=` from the run's init message.
+  skill is expanded by the CLI, not through the tool, so `Skill` stays denied and the model can't
+  load another skill. Tried by hand (#381, 21 Nov) with CLI 2.1.319, the version the pinned action
+  runs (its lockfile has `claude-agent-sdk` 0.3.319, whose `claudeCodeVersion` is 2.1.319), and with
+  2.1.330, both with `--setting-sources user` and `Skill` denied: the skill's text reached the
+  model. Unverified in a CI run until #381's first run after merge shows `loaded=1`. The proof
+  (#381): the CLI writes the expanded skill to the session's transcript
+  (`~/.claude/projects/<cwd>/<session>.jsonl`) as an `isMeta` user message, and never to its
+  `stream-json` output, even with `--replay-user-messages`: that stream is what the SDK relays and
+  the action saves as its execution file. So the Report step runs `.github/scripts/skill-proof.mjs`,
+  which takes the session id from the execution file and counts the skill's
+  `# Code Review and Quality` heading in that transcript, in records from the skill's own folder
+  (the model reading `SKILL.md` with Read doesn't count). It logs
+  `RESULT skill=code-review-and-quality registered=<bool> loaded=<n> cli=<version> from=<dir>`, and
+  with `loaded=0`, or no transcript, it fails the step with an `::error::` annotation after the
+  review is posted. Failing, not warning: a green job with a warning goes unread, and `review` isn't
+  a required check, so the red job blocks no merge.
 - **Apply.** Only after Claude has finished does the job mint the App's token, scoped to contents
   and pull requests. `.github/scripts/post-review.sh` (tested by
   `.github/scripts/tests/post-review.test.mjs`) then posts the review and applies the rules above in
