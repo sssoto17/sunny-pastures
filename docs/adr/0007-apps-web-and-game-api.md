@@ -533,7 +533,7 @@ sim type-only (#383).
   (`game/**/tests/**` → `store/tests/**`), as ADR-0005 section 4 allows for a helper owned by
   another module's `tests/`. Production `game` code still reaches `store` only for types.
 - **The route files' tests** (#397; admin, 21 Nov 2026) sit in a test-files-only zone, `routeTests`
-  (`src/app/api/**/tests/**` → `routes` and `api`). A test under `src/app/**` is otherwise in
+  (`src/app/api/**/tests/*.test.ts` → `routes` and `api`). A test under `src/app/**` is otherwise in
   `pages`, which reaches only the sim, so no unit test could import a `route.ts`, and the route
   files' lines, reached only by the acceptance tests, pulled the project coverage ratchet down. The
   tests check `runtime` and that each export hands its request to `getApi()`, which they mock

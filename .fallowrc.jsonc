@@ -28,9 +28,10 @@
   "boundaries": {
     "zones": [
       // The route files' tests (#397; ADR-0007 section 6; admin, 21 Nov 2026), before `routes` and
-      // `pages`, so they take the API routes' tests/ folders only: they import the route files to
-      // check `runtime` and that each export hands the request to `getApi()`, which they mock.
-      { "name": "routeTests", "patterns": ["apps/web/src/app/api/**/tests/**"] },
+      // `pages`, so they take the API routes' `*.test.ts` files only, never a helper beside them:
+      // they import the route files to check `runtime` and that each export hands the request to
+      // `getApi()`, which they mock.
+      { "name": "routeTests", "patterns": ["apps/web/src/app/api/**/tests/*.test.ts"] },
       { "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
       { "name": "pages", "patterns": ["apps/web/src/app/**"] },
       { "name": "api", "patterns": ["apps/web/src/server/api/**"] },
