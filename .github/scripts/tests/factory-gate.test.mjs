@@ -280,6 +280,8 @@ describe("factory.yml", () => {
 
 	it("caps the factory job at 60 minutes and Claude at the gate's turns (at most 100)", () => {
 		expect(factory).toMatch(/^ {4}timeout-minutes: 60$/m);
+		// The Claude step stops first, so Report still runs on a runaway (its cost and minutes).
+		expect(factory).toMatch(/id: claude\n {8}timeout-minutes: 55\n/);
 		expect(factory).toContain("--max-turns ${{ needs.gate.outputs.turns }}");
 	});
 

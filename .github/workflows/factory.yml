@@ -175,7 +175,9 @@ jobs:
       # A leading /name runs that skill; the rest of the line reaches it as its arguments. The
       # project's settings load (hooks, allow, ask and deny rules): an `ask` rule has no one to ask
       # here, so it denies. No web tools: the issue and the repo are the whole input.
+      # 55 of the job's 60 minutes, so a runaway Claude is stopped with time left for Report.
       - id: claude
+        timeout-minutes: 55
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
