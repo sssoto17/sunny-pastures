@@ -696,8 +696,9 @@ run results 68
 expect_code 0
 assert "expected the seven tested rows to pass" test "$(grep -c '^| ([a-f][0-9]*) .* | pass |' <<<"$out")" -eq 7
 assert "expected (f) not exercised" row f "AGENTS.md waits for the code owner" "not exercised"
-assert "expected what (f) observed" contains "$out" "App withheld approval (Code-owned path row): \`REVIEW_REQUIRED\`, \`BLOCKED\`"
-assert "expected (e4) not exercised" row e4 "merges only on admin approval" "not exercised"
+assert "expected what (f) observed" contains "$out" "App withheld approval (\`review:admin\`, until #104): \`REVIEW_REQUIRED\`, \`BLOCKED\`"
+assert "expected (e4) not exercised" row e4 "the escalation thread holds the merge" "not exercised"
+assert "expected why (e4) can't run yet" contains "$out" "\`review:admin\` holds the approval until #104"
 assert "expected (b)'s reading" contains "$out" 'autoMergeRequest by `sunny-reviewer`'
 assert "expected every review listed" contains "$out" '- reviews, oldest first: `sunny-reviewer[bot]` DISMISSED, `sunny-reviewer[bot]` APPROVED'
 assert "expected the auto-merge detail" contains "$out" 'autoMergeRequest: enabled by `sunny-reviewer`, SQUASH'
@@ -749,10 +750,23 @@ run results 68
 assert "expected (e3) to fail when reopened" row e3 "admin resolves, it stays resolved" fail
 fx_view 73 REVIEW_REQUIRED CLEAN null 5 '{"name":"review:admin"}'
 run results 68
-assert "expected (e4) to fail when (e) could merge without you" row e4 "merges only on admin approval" fail
+assert "expected (e4) to fail when (e) could merge without you" row e4 "the escalation thread holds the merge" fail
 fx_reviews 73 APPROVED:h73
 run results 68
-assert "expected (e1) to fail on an approval" row e1 "escalation thread, no approval" fail
+assert "expected (e1) to fail on an approval under review:admin" row e1 "escalation thread, review:admin holds approval" fail
+# #322: the App approves (e), which your account opened, and the open thread alone holds it.
+fx_view 73 APPROVED BLOCKED null 5
+run results 68
+assert "expected (e4) to pass while the open thread holds an approved (e)" row e4 "the escalation thread holds the merge" pass
+fx_view 73 APPROVED CLEAN null 5
+run results 68
+assert "expected (e4) to fail when an approved (e) could merge with its thread open" row e4 "the escalation thread holds the merge" fail
+fx_threads 73 true sunny-factory
+run results 68
+assert "expected (e4) to fail when a thread the factory resolved lets (e) merge" row e4 "the escalation thread holds the merge" fail
+fx_threads 73 true sssoto17
+run results 68
+assert "expected (e4) not to fail once you resolved it and it can merge" row e4 "the escalation thread holds the merge" "not exercised"
 
 # --- cleanup 68 ---------------------------------------------------------------------------------
 printf 'heads/throwaway/68-%s\n' a c e f >"$work/fx/refs"

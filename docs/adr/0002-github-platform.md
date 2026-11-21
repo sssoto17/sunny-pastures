@@ -422,12 +422,17 @@ PR_ means either kind.
     admin's account opened; an approval on every clean part lets a stack merge in one action once
     its threads are resolved ("Stacks", below). On a PR an App opened (#336) it still withholds:
     resolving a thread starts no workflow (below), so a thread the factory App resolved could let
-    the PR merge before the bot checks who resolved it. **The code waits:** `post-review.sh` keeps
-    withholding on every escalated PR until #322, and #68's test (e) is rewritten there; until then
-    tests (e) and (f) (`scripts/setup/README.md`, `ci-check-68.sh`) hold as written. Code-owner
-    review is separate and stays on (Q15). On a factory PR the bot also requests the admin's review,
-    so `review-requested:@me` is the admin's queue. The admin's own open PRs show under
-    `author:@me`.
+    the PR merge before the bot checks who resolved it. **Built in #322:** `post-review.sh` reads
+    who opened the PR from the REST PR object (`user.login` and `user.type`, never text the PR
+    wrote) and approves a clean escalated PR only when that is the admin's `User` account and its
+    own escalation thread is open on the PR. When no file took the thread, or the admin has already
+    resolved it and a later head comes in, nothing would hold the merge, so it withholds; a finding
+    whose body starts with `escalated:` is posted as `Finding: escalated: …`, so it can't pass for
+    the thread. #68's test (e) was rewritten to match. Until #104 the bot also adds `review:admin`
+    when it escalates, and the label holds its approval ("Until #104, the label stays"), so the
+    approval shows only once the label is gone. Code-owner review is separate and stays on (Q15). On
+    a factory PR the bot also requests the admin's review, so `review-requested:@me` is the admin's
+    queue. The admin's own open PRs show under `author:@me`.
   - **The escalation thread is the bot's memory across runs.** Anyone with write access can resolve
     a thread, the factory App included, and so can any session on the admin's account. Agents never
     resolve review threads: a `deny` rule on the GitHub MCP resolve-thread tool and the `PreToolUse`
@@ -445,9 +450,10 @@ PR_ means either kind.
     bypass-merges it; a PR an App opened the admin approves (code-owner review stays on; "Stacks",
     below). The resolved thread and the merge are the record of who decided.
   - **The bot's earlier Request changes.** When its re-review finds those findings fixed, the bot's
-    Approve replaces its Request changes, on an escalated PR too. Until the reviewer App follows
-    #264 (below), it dismisses its own Request changes on an escalated PR instead
-    (`dismissPullRequestReview`). The admin can also dismiss it.
+    Approve replaces its Request changes, on an escalated PR too (#322). Where it withholds with
+    every finding fixed (an escalated PR an App opened, or `review:admin` until #104), it dismisses
+    its own Request changes instead (`dismissPullRequestReview`), which would otherwise block for
+    good. The admin can also dismiss it.
   - **Why a thread, not a review request or a label.** Attended sessions act as the admin after #37
     too, so the admin authors their PRs, and GitHub doesn't request a review from a PR's own author.
     That's widely reported as an API error; it isn't in the docs or tested here. So a review request
@@ -535,14 +541,14 @@ branches. The pattern is _propose, then apply_: Claude proposes and plain code a
 - **Apply.** Only after Claude has finished does the job mint the App's token, scoped to contents
   and pull requests. `.github/scripts/post-review.sh` (tested by
   `.github/scripts/tests/post-review.test.mjs`) then posts the review and applies the rules above in
-  code. It approves only when none of these holds: a Required finding, an escalation row,
-  `review:admin`, an escalation thread of its own, or an earlier finding of its own still open.
-  **#264 drops the escalation row and the escalation thread from that list on a PR the admin's
-  account opened** (on an App-opened PR they still withhold); the script follows in its own change
-  (#322), and `review:admin` keeps holding approval until #104. It also reopens escalation threads
-  someone other than the admin resolved, resolves only the App's own fixed finding threads, adds the
-  label and the escalation thread, requests the admin's review on factory PRs, and dismisses its own
-  Request changes once an escalated PR is fixed.
+  code. It approves only when none of these holds: a Required finding, `review:admin` (until #104),
+  or an earlier finding of its own still open. **An escalation row or an escalation thread of its
+  own no longer withholds it on a PR the admin's account opened (#264, done in #322)**: there it
+  approves while its escalation thread is open on the PR, which then alone holds the merge. On a PR
+  an App opened, or anyone else, they still withhold. It also reopens escalation threads someone
+  other than the admin resolved, resolves only the App's own fixed finding threads, adds the label
+  and the escalation thread, requests the admin's review on factory PRs, and dismisses its own
+  Request changes when it withholds with every finding fixed.
 - **Rows from paths (12 Nov, #240's review).** The script also works out the rows that depend only
   on paths, and merges them with the verdict's, so a prompt-injected verdict can't drop them:
   Code-owned path (`.github/CODEOWNERS`, gitignore rules, a rename's old path too) and Content
@@ -855,7 +861,7 @@ own. It has one, and GitHub enforces the limits on it:
 | What a session on the admin's account can do | What stops the factory App |
 |---|---|
 | Bypass-merge an admin-review PR | It's on no bypass list. Code-owner review and the 1 required approval hold the merge |
-| Clear an escalation | It can resolve the escalation thread, but the reviewer never approves an escalated PR an App opened (only one the admin's account opened, #264), and it unresolves a thread the admin didn't resolve, which holds the merge again (area 2, "Approvals") |
+| Clear an escalation | It can resolve the escalation thread on any PR. The reviewer never approves an escalated PR an App opened (only one the admin's account opened, #264), and on its next run it unresolves a thread the admin didn't resolve. But resolving starts no workflow, so on an escalated PR the admin's account opened, which the reviewer approved with auto-merge on, a thread the App resolves lets the PR merge before any re-check (the admin's rule of 16 Nov, #322; "The honest limit", below) |
 | Push a `v*` tag | The tag ruleset restricts creation, and only the Repository admin role bypasses it (A8). An App installation doesn't hold that role |
 | Edit a ruleset | That needs the Administration permission, which the factory App doesn't get |
 
@@ -875,6 +881,13 @@ classifier, never by GitHub:
   it, removing `review:admin`); the resolve-thread hook and `deny` rule back the instruction (#264);
 - pushing a `v*` tag from a local session, which ships to production (area 4);
 - editing a ruleset.
+
+One gap holds for the factory App as well, by the admin's rule of 16 Nov (#264, #322): on an
+escalated PR the admin's account opened, the reviewer approves and turns on auto-merge while the
+escalation thread holds the merge. Any account with write access, the factory App included, can
+resolve that thread, and resolving starts no workflow, so the PR merges at once, before the reviewer
+can reopen a thread the admin didn't resolve. Only instructions (agents never resolve review
+threads) and the resolve-thread hook stand in the way.
 
 PR #52 makes Claude Code ask before tag pushes and before `--remove-label review:admin` (permission
 rules, commit `523f745`), so two of the four become a prompt the admin sees. The factory is outside
@@ -1869,10 +1882,13 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
       GitHub's protected-branches page speaks of "a person with admin permissions", so test it
       rather than assume it;
     - (d) a push to the PR dismisses the App's approval (back to `REVIEW_REQUIRED`);
-    - (e) a PR that meets an escalation row gets an escalation thread that mentions the admin and no
-      approval. When the factory App resolves the thread, the App's next run unresolves it. When the
-      admin resolves it, it stays resolved, and the PR merges only on the admin's approval. Until
-      #104, adding `review:admin` also makes the App dismiss its approval and turn auto-merge off;
+    - (e) a PR that meets an escalation row gets an escalation thread that mentions the admin. On a
+      PR the admin's account opened, the App approves it if it finds it clean, and the open thread
+      alone holds the merge (`APPROVED`, `BLOCKED`); on a PR an App opened, it withholds its
+      approval (#322). When the factory App resolves the thread, the App's next run unresolves it.
+      When the admin resolves it, it stays resolved. Until #104, the App also adds `review:admin`
+      when it escalates, which holds its approval, so (e) shows no approval; and adding the label
+      makes the App dismiss its approval and turn auto-merge off;
     - (f) an App-approved PR that changes one line of `AGENTS.md` still waits for the code owner's
       review (`BLOCKED`).
 

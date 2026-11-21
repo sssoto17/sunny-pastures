@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Posts sunny-reviewer's review of one PR from Claude's JSON verdict (review.yml, ADR-0002 area 2).
 # The verdict is data: this script, not the model, decides the review's event. It approves only
-# when the verdict has no Required finding and no escalation row, the PR doesn't carry
-# review:admin, this App has no escalation thread on it, and none of its earlier finding threads
-# is still open. After an approval it turns on auto-merge (squash) for the reviewed head, and when
-# it doesn't approve it turns off auto-merge that is on (ADR-0002 area 2, flow step 3). It never
-# merges: with the repo's allow_auto_merge off, GitHub refuses, and the review still stands (Q16).
+# when the verdict has no Required finding, the PR doesn't carry review:admin (until #104) and none
+# of its earlier finding threads is still open. An escalated PR (an escalation row, or an
+# escalation thread of its own) it approves only when the admin's account opened it and its
+# escalation thread is open on the PR, which then alone holds the merge; on one an App opened it
+# withholds (ADR-0002 area 2, #264, #322). After an approval it turns on auto-merge (squash) for
+# the reviewed head, and when it doesn't approve it turns off auto-merge that is on (ADR-0002 area
+# 2, flow step 3). It never merges: with the repo's allow_auto_merge off, GitHub refuses, and the
+# review still stands (Q16).
 # Tests: .github/scripts/tests/post-review.test.mjs.
 #
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
@@ -31,8 +34,8 @@ if grep -qE 'sk-ant-|gh[opsu]_[A-Za-z0-9]{20}|github_pat_|-----BEGIN' "$v"; then
   echo "::error::the verdict looks like it holds a credential: nothing posted"
   exit 1
 fi
-now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null)] | @tsv')
-IFS=$'\t' read -r head_now author node auto_on <<<"$now"
+now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null), .user.type] | @tsv')
+IFS=$'\t' read -r head_now author node auto_on author_type <<<"$now"
 if [[ $head_now != "$HEAD" ]]; then
   echo "the head moved to $head_now: the newer run reviews it"
   exit 0
@@ -99,16 +102,31 @@ defs+=' def fixed: .id as $i | ($v[0].resolve_threads // []) | index($i) != null
   def open_finding: own and (esc | not) and (.isResolved | not);'
 ids=$(pick '.[] | select(open_finding and fixed) | .id')
 for id in $ids; do set_thread resolveReviewThread "$id"; done
-# Its escalation threads are its memory: one on the PR means it never approves (ADR-0002).
+# Its escalation threads are its memory: one on the PR keeps the PR escalated (ADR-0002).
 escalated_before=$(pick 'any(.[]; own and esc)')
 still_open=$(pick '[.[] | select(open_finding and (fixed | not))] | length')
+needs_admin=false # an escalation row now, or an escalation thread of its own from before
+[[ -z $rows && $escalated_before != true ]] || needs_admin=true
+# An escalation thread of its own still open (one someone else resolved was reopened above) holds
+# the merge. Once the admin resolved it, nothing holds the PR any more, so no run after that
+# approves it: not a later head, and not a re-review of the same head either (review-gate.sh runs
+# that only for review:admin, which holds the approval anyway).
+# Posting a new escalation thread below sets it too.
+held=$(pick 'any(.[]; own and esc and ((.isResolved | not) or .resolvedBy.login != $admin))')
 escalated=false
-[[ -z $rows && $labelled != true && $escalated_before != true ]] || escalated=true
+[[ $needs_admin != true && $labelled != true ]] || escalated=true
+# Who opened the PR, from the REST author, never from text the PR wrote. Only the admin's own
+# account (a User) gets an approval on an escalated PR: on one an App opened (#336), a thread the
+# App resolved could let it merge before the next run reopens it (ADR-0002, #264).
+by_admin=false
+[[ $author == "$ADMIN" && $author_type == User ]] && by_admin=true
 
 # Required findings: a line comment, else a file comment, else listed in the review's body.
 unplaced="" note=""
 while IFS= read -r f; do
   path=$(jq -r '.path // ""' <<<"$f") line=$(jq -r '.line // 0' <<<"$f") body=$(jq -r '.body // ""' <<<"$f")
+  # "escalated:" marks its escalation threads, which no finding may pass for (open_finding).
+  [[ ! $body =~ ^[[:space:]]*escalated: ]] || body="Finding: $body"
   [[ $line =~ ^[0-9]+$ ]] || line=0
   if ((line > 0)) && comment "$path" "$body" "$line"; then continue; fi
   if [[ -n $path ]] && comment "$path" "Line $line: $body"; then continue; fi
@@ -119,14 +137,14 @@ if [[ -n $rows ]]; then
   # One escalation thread per PR. Later rows are named in each review's summary.
   if [[ $escalated_before != true ]]; then
     body="escalated: $rows"$'\n\n'"@$ADMIN: this PR meets the rows above (CONSTRAINTS.md,"
-    body+=" Escalation criteria). sunny-reviewer won't approve it; only you resolve this thread."
+    body+=" Escalation criteria). This open thread holds the merge; only you resolve it."
     # The file the verdict names, else any file the head still has.
     want=$(jq -r '.escalation_path // ""' "$v")
     paths=$(jq -r --arg p "$want" '(map(select(.filename == $p and .status != "removed"))
       + map(select(.status != "removed"))) | .[].filename' "$CTX/files.json")
     posted=false
     while IFS= read -r path; do
-      if [[ -n $path ]] && comment "$path" "$body"; then posted=true; break; fi
+      if [[ -n $path ]] && comment "$path" "$body"; then posted=true held=true; break; fi
     done <<<"$paths"
     [[ $posted == true ]] || note=$'\n\n'"Escalation thread not posted (no file took it): $rows"
   fi
@@ -144,17 +162,13 @@ dismiss() { # state message: dismiss this App's own reviews in that state
     gh api -X PUT "$r/pulls/$PR/reviews/$id/dismissals" --silent -f event=DISMISS -f message="$2"
   done
 }
-# On an escalated PR this App never approves, so once its findings are all fixed it dismisses its
-# own Request changes, which would otherwise block for good.
-if [[ $escalated == true ]] && ((nfind == 0 && still_open == 0)); then
-  dismiss CHANGES_REQUESTED "Its findings are fixed. The PR is escalated and waits for the admin."
-fi
-
 labelled_now=$(has_label) # read again: a label added during this run still holds the approval
 event=APPROVE
 if ((nfind > 0)) || [[ -n $unplaced ]]; then
   event=REQUEST_CHANGES
-elif [[ $escalated == true || $labelled_now == true ]] || ((still_open > 0)); then
+elif [[ $labelled_now == true ]] || ((still_open > 0)); then
+  event=COMMENT
+elif [[ $needs_admin == true ]] && [[ $by_admin != true || $held != true ]]; then
   event=COMMENT
 fi
 # A later COMMENT doesn't replace an APPROVE, so an earlier approval that no longer holds (say
@@ -166,6 +180,12 @@ if [[ $event != APPROVE ]]; then
     echo "::warning::auto-merge is still on: turn it off by hand (gh pr merge $PR --disable-auto)"
   fi
 fi
+# Withheld with every finding fixed (review:admin, or an escalated PR it may not approve): its own
+# Request changes would block for good, so it dismisses it. Where it approves, the Approve
+# replaces it.
+if [[ $event == COMMENT ]] && ((still_open == 0)); then
+  dismiss CHANGES_REQUESTED "Its findings are fixed. The PR waits for the admin."
+fi
 body=$(jq -r .summary "$v")
 [[ -z $unplaced ]] || body+=$'\n\nRequired findings without a place in the diff:\n'"$unplaced"
 ((still_open == 0)) || body+=$'\n\n'"$still_open earlier finding thread(s) still open."
@@ -176,4 +196,4 @@ if [[ $event == APPROVE ]]; then
   # Refused while allow_auto_merge is off (or the PR merges as it is): the approval stands.
   if [[ $auto_on == true ]] || set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi
 fi
-echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated auto_merge=$auto"
+echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated by_admin=$by_admin auto_merge=$auto"

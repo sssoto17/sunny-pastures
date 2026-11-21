@@ -59,9 +59,13 @@ them.
   reviewer reopened the thread. `results 68` reads the newest dispatch.
 - **Step 6 before step 7:** (e3) passes when the thread is resolved by you and the App has reviewed
   the newest head. Resolve first, then push; a thread open again after step 7 is a fail.
-- **"Not exercised" is never a pass.** The App never approves (f) (Code-owned path row, in code) and
-  you can't approve (e) or (f) (you opened them). (f)'s code-owner hold rests on the ruleset's
-  `require_code_owner_review` (`gh api repos/sssoto17/sunny-pastures/rules/branches/main`: `true`).
+- **"Not exercised" is never a pass.** Your account opened (e) and (f), so you can't approve them,
+  and since #322 the App approves an escalated PR your account opened when it finds it clean: the
+  open escalation thread alone holds the merge, which (e4) reads (`APPROVED`, `BLOCKED`, thread
+  open). Until #104, though, the `review:admin` the App adds when it escalates holds its approval on
+  (e) and (f), so (e4) and (f) read "not exercised". (e1) passes while the label holds the approval.
+  (f)'s code-owner hold rests on the ruleset's `require_code_owner_review`
+  (`gh api repos/sssoto17/sunny-pastures/rules/branches/main`: `true`).
 - **To run one test again,** fix the cause, then `cleanup 68` and start over from step 1. For step 5
   alone, run it again: `results 68` reads the newest dispatch only.
 - **Afterwards,** once the results comment is on #68, remove
