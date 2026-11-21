@@ -4,8 +4,8 @@
 	"description": "The Next.js app: UI, game API and persistence. src/server/ is server-only.",
 	"type": "module",
 	"scripts": {
-		"dev": "next dev --webpack",
-		"build": "next build --webpack",
+		"dev": "next dev",
+		"build": "next build",
 		"start": "next start"
 	},
 	"dependencies": {

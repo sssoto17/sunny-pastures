@@ -37,9 +37,7 @@
       { "name": "auth", "patterns": ["apps/web/src/server/auth/**"] },
       { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
       { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
-      { "name": "sim", "patterns": ["packages/sim/src/**"] },
-      // Next's config sits beside apps/web/package.json and imports no zone (#393).
-      { "name": "nextConfig", "patterns": ["apps/web/next.config.mjs"] }
+      { "name": "sim", "patterns": ["packages/sim/src/**"] }
     ],
     "rules": [
       { "from": "routes", "allow": ["api"] },
@@ -59,8 +57,7 @@
       { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
       { "from": "config", "allow": [] },
       { "from": "timing", "allow": [] },
-      { "from": "sim", "allow": [] },
-      { "from": "nextConfig", "allow": [] }
+      { "from": "sim", "allow": [] }
     ],
     // A pattern matches a call and a constructor call, also through an import or a namespace.
     "calls": {
