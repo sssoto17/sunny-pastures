@@ -101,7 +101,32 @@ describe("readActionRequest", () => {
 		expect(request.bodyUsed).toBe(false);
 	});
 
-	it("refuses a body over 4 KiB with 413 when it has a Content-Length", async () => {
+	it("refuses a body that is larger than its Content-Length says with 413", async () => {
+		const padding = "x".repeat(5000);
+		const request = postJson(
+			{ action: plant, expectedSeq: 0, padding },
+			{ headers: { "Content-Length": "10" } },
+		);
+
+		expect(await refusal(request)).toBe("too_large");
+	});
+
+	it("stops reading an oversize body and cancels its stream", async () => {
+		let isCancelled = false;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				controller.enqueue(new Uint8Array(1024));
+			},
+			cancel() {
+				isCancelled = true;
+			},
+		});
+
+		expect(await refusal(postStream(body))).toBe("too_large");
+		expect(isCancelled).toBe(true);
+	});
+
+	it("refuses a body over 4 KiB with 413 when it has no Content-Length", async () => {
 		const padding = "x".repeat(4096);
 
 		expect(await refusal(postJson({ action: plant, expectedSeq: 0, padding }))).toBe("too_large");
