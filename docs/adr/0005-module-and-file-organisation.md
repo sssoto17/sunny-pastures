@@ -292,6 +292,22 @@ on that part of conflict 5); the `@/` alias belongs to `apps/web`, where Next re
 `paths`. Rejected: Node subpath imports (`#hash`; the purity rule would need a `#` exception) and a
 tsconfig alias in the sim (consumers' bundlers would have to resolve the sim's private aliases).
 
+(Amended 21 Nov, #433: **the sim ships compiled.** Turbopack, Next 16's default bundler, can't map a
+`.js` import onto a `.ts` file
+([vercel/next.js#82945](https://github.com/vercel/next.js/issues/82945), open), so it couldn't
+bundle the sim's source. The sim now builds the way a published package ships:
+`packages/sim/tsconfig.build.json` writes JavaScript and declarations to `dist/` under the sim's own
+options, and the package's `exports` give Next and Node `dist/`. Source readers keep `src/`:
+`tsc -b` and editors through the `@sunny-pastures/source` condition (`customConditions` in
+`tsconfig.base.json`), Vitest, its coverage and Stryker through an exact alias in
+`vitest.config.mts`. So no test reads a stale or missing `dist/`. `apps/web`'s `build` and `dev`
+build the sim first, and the determinism gate runs the built `dist/`. _Pattern:_ a compiled internal
+package (Turborepo's "Compiled package", as against "Just-in-Time"), with a build artefact at the
+package boundary. Rejected: **webpack with `resolve.extensionAlias`** (it works, but gives up Next's
+default bundler), **a custom Turbopack loader** that strips `.js` (#82945's community workaround; a
+regex over source that misses dynamic imports) and **dropping `.js` from the sim's imports** (it
+breaks NodeNext and this section's rule). Revisit once Turbopack maps `.js` to `.ts`.)
+
 ### Naming in code (Q21; C9)
 
 <!-- prettier-ignore -->

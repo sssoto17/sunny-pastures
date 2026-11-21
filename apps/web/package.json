@@ -4,8 +4,9 @@
 	"description": "The Next.js app: UI, game API and persistence. src/server/ is server-only.",
 	"type": "module",
 	"scripts": {
-		"dev": "next dev",
-		"build": "next build",
+		"dev": "pnpm --filter @sunny-pastures/sim build && pnpm --parallel --filter @sunny-pastures/sim --filter @sunny-pastures/web run dev:watch",
+		"dev:watch": "next dev",
+		"build": "pnpm --filter @sunny-pastures/sim build && next build",
 		"start": "next start"
 	},
 	"dependencies": {
