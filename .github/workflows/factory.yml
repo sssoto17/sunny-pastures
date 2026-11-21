@@ -1,0 +1,213 @@
+# The factory (#107; ADR-0002, area 2, "How a factory job starts"): one workflow_dispatch run takes
+# one issue to an open PR as the App sunny-factory, within a fixed turn and time cap. The admin
+# dispatches it (workflow_dispatch needs actions: write, which a lane's token lacks), and later the
+# sweep and chain (#108). It always runs main's copy: the `factory` environment admits only main,
+# so a dispatch on another branch never reaches the App's key.
+#
+# Three jobs, each skipped unless the one before says go, so a refusal never mints a token or
+# calls Claude:
+# - switch: the kill switch (#106), exactly as factory-switch.yml's header shows. Anything but
+#   FACTORY_ENABLED=true logs `SWITCH off` and every later job is skipped.
+# - gate: .github/scripts/factory-gate.sh refuses unless the issue is open and carries
+#   factory:ready (read with the read-only GITHUB_TOKEN, before the key is touched), then mints a
+#   read-only App token and refuses unless the board's item has Status Ready and Mode Factory.
+#   An unreadable board is a refusal (#102 found the App can't resolve the user-owned Project).
+# - factory: mints the write token, then claude-code-action runs /implement on the issue with
+#   .github/factory-prompt.md, and Claude opens the PR with scripts/open-pr.sh (open-pr.yml then
+#   opens it as sunny-factory[bot]). Report logs total_cost_usd and the job's minutes.
+#
+# Caps (admin, 21 Nov 2026): --max-turns 100 (the max_turns input may only lower it) and
+# timeout-minutes 60 on the factory job. Concurrency 1: one factory run at a time; a newer
+# dispatch waits, and one waiting run is replaced by a newer one (GitHub's concurrency rules).
+# GITHUB_TOKEN is read-only in every job; writes go through the sunny-factory installation
+# token. Actions pinned to full SHAs, the same pins as review.yml and open-pr.yml.
+name: factory
+# Runs read "factory #<n>", so the sweep (#108) and the admin can find an issue's runs. A name is
+# display text that no shell reads.
+run-name: 'factory #${{ inputs.issue }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: The issue to work (Ready, Mode Factory, factory:ready)
+        required: true
+        type: string
+      max_turns:
+        description: Claude's turn cap, from 1 to 100 (only ever lower than the default)
+        required: false
+        default: '100'
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: factory
+  cancel-in-progress: false
+
+jobs:
+  switch:
+    uses: ./.github/workflows/factory-switch.yml
+    permissions:
+      contents: read
+
+  gate:
+    needs: switch
+    if: needs.switch.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    environment: factory
+    permissions:
+      contents: read # the checkout of .github/scripts
+      issues: read # the issue and its labels
+    outputs:
+      run: ${{ steps.board.outputs.run }}
+      issue: ${{ steps.board.outputs.issue }}
+      turns: ${{ steps.board.outputs.turns }}
+    env:
+      ISSUE: ${{ inputs.issue }}
+      MAX_TURNS: ${{ inputs.max_turns }}
+      PROJECT_URL: https://github.com/users/sssoto17/projects/3
+      # The issue's items on any Project, with the two fields the gate reads. GraphQL only: REST
+      # has no per-issue view of Project items.
+      BOARD_QUERY: >-
+        query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name)
+        { issue(number: $n) { projectItems(first: 20) { nodes { project { url }
+        status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+        mode: fieldValueByName(name: "Mode") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      # Phase 1, no secret yet: the inputs and the issue, with the read-only GITHUB_TOKEN.
+      - id: issue
+        name: Check the issue (read-only token)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          f=$RUNNER_TEMP/issue.json
+          # A bad input is refused by the script before this answer is read.
+          if [[ $ISSUE =~ ^[1-9][0-9]{0,6}$ ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" >"$f"
+          else
+            echo '{}' >"$f"
+          fi
+          ISSUE_JSON=$f bash .github/scripts/factory-gate.sh
+
+      # Read-only: the board's fields are all this token is for.
+      - id: app
+        if: steps.issue.outputs.issue_ok == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          permission-issues: read
+
+      # Phase 2: the board. A failed read leaves its error in the file, and the gate refuses.
+      - id: board
+        name: Check the board (read-only App token)
+        if: steps.app.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          N: ${{ steps.issue.outputs.issue }}
+        run: |
+          set -euo pipefail
+          f=$RUNNER_TEMP/board.json
+          gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
+            -F n="$N" -f query="$BOARD_QUERY" >"$f" 2>"$f.err" || { [ -s "$f" ] || cp "$f.err" "$f"; }
+          ISSUE_JSON=$RUNNER_TEMP/issue.json BOARD_JSON=$f bash .github/scripts/factory-gate.sh
+
+  factory:
+    needs: [switch, gate]
+    if: needs.switch.outputs.run == 'true' && needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: factory
+    permissions:
+      contents: read # main's checkout
+      pull-requests: read # Report finds the PR the run opened
+    env:
+      ISSUE: ${{ needs.gate.outputs.issue }}
+      ANTHROPIC_API_KEY: '' # never an API key: the setup-token is the only credential
+    steps:
+      - name: Start the clock
+        run: |
+          echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
+          echo "RESULT issue=#$ISSUE max_turns=$TURNS"
+        env:
+          TURNS: ${{ needs.gate.outputs.turns }}
+
+      # What the work needs: contents write pushes the branch and sends open-pr's
+      # repository_dispatch; reads for the issue and open-pr.sh's PR lookup. No workflows,
+      # administration or issues write: the App can't push a workflow file or edit the board.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: read
+          permission-issues: read
+
+      # Commits carry the App's bot user, as create-github-app-token's README shows.
+      - id: bot
+        name: Look up the App's bot user
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          echo "name=$SLUG[bot]" >>"$GITHUB_OUTPUT"
+          echo "id=$(gh api "/users/$SLUG[bot]" --jq .id)" >>"$GITHUB_OUTPUT"
+
+      # main, with history for the review's merge-base. The action points origin at the App's
+      # token itself, so the checkout keeps none.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup
+
+      # A leading /name runs that skill; the rest of the line reaches it as its arguments. The
+      # project's settings load (hooks, allow, ask and deny rules): an `ask` rule has no one to ask
+      # here, so it denies. No web tools: the issue and the repo are the whole input.
+      - id: claude
+        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app.outputs.token }}
+          bot_name: ${{ steps.bot.outputs.name }}
+          bot_id: ${{ steps.bot.outputs.id }}
+          prompt: >-
+            /implement #${{ needs.gate.outputs.issue }} Read .github/factory-prompt.md and follow
+            it. The issue is #${{ needs.gate.outputs.issue }}.
+          claude_args: >-
+            --max-turns ${{ needs.gate.outputs.turns }}
+            --allowedTools "Bash,Edit,Write,MultiEdit,Read,Glob,Grep,Skill,Task,TodoWrite"
+            --disallowedTools "WebFetch,WebSearch,Read(//proc/**)"
+
+      # Report data (ADR-0002, "Caps"): cost, turns, the job's seconds and billed minutes, and
+      # the PR. Non-secret fields only. The switch and gate jobs bill a minute each on top.
+      - name: Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
+          OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          secs=$(($(date +%s) - ${JOB_START:-$(date +%s)}))
+          echo "RESULT job_seconds=$secs job_minutes=$(((secs + 59) / 60)) claude=$OUTCOME"
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" | jq -r --arg n "$ISSUE" \
+            '[.[] | select(.user.login == "sunny-factory[bot]" and ((.body // "")
+            | test("(?i)closes #" + $n + "([^0-9]|$)")))][0].html_url // "none"') || pr=unknown
+          echo "RESULT pr=$pr"
+          f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
+          [ -f "$f" ] || { echo "RESULT execution_file=missing"; exit 0; }
+          jq -r '.[] | select(.type == "result") | "RESULT subtype=\(.subtype) is_error=\(.is_error)"
+            + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f"

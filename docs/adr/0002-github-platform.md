@@ -821,6 +821,36 @@ the switch, only the factory jobs (the sweep, the chain and the factory job) do 
   throwaway `check-106-factory-switch.yml` with the switch unset and then `false`, and writes both
   runs' results for #106 (`scripts/setup/README.md`).
 
+**The factory workflow, built (#107).** `.github/workflows/factory.yml` is the `workflow_dispatch`
+run above: an `issue` input, and a `max_turns` input that can only lower the cap. Pattern: a
+pipeline of guard jobs, each skipped unless the one before says go, so a refusal never reaches the
+App's key or Claude. Concurrency 1 (group `factory`, never cancelling a running job), and
+`GITHUB_TOKEN` read-only in every job.
+
+1. **`switch`** calls `factory-switch.yml`, exactly as its header shows. With the switch off the run
+   logs `SWITCH off` and stops; that is how the workflow is tested without turning the factory on.
+2. **`gate`** runs `.github/scripts/factory-gate.sh` twice. First, with the read-only `GITHUB_TOKEN`
+   and before any key is touched: the input is an issue number, the issue is open, it isn't a PR,
+   and it carries `factory:ready`. Then, with a read-only `sunny-factory` token (`issues: read`), it
+   reads the issue's Project items over GraphQL and wants Status `Ready` and Mode `Factory` on the
+   Sunny Pastures board. An error, an empty answer or another board's item is a refusal
+   (`GATE refused: …`). #102 found the App's token can't resolve this user-owned Project, so until
+   that is settled the gate is expected to refuse every issue at the board step: it fails closed
+   rather than skip the Ready check the admin decided on.
+3. **`factory`** (`timeout-minutes: 60`) mints the write token (`contents: write` to push and to
+   send `open-pr`'s dispatch; `pull_requests` and `issues` read; no workflows), checks out `main`,
+   installs, and runs `claude-code-action` on the setup-token with `--max-turns` from the gate (100
+   unless lowered), the App's token as `github_token` and its bot user for commits. The prompt is
+   `/implement #N` plus `.github/factory-prompt.md`; Claude opens the PR with `scripts/open-pr.sh`,
+   so `open-pr.yml` opens it as `sunny-factory[bot]`. The project's settings load, so an `ask` rule
+   denies (no one can answer it) and the hooks run; web tools are off. `Report` logs
+   `total_cost_usd`, turns, the job's seconds and billed minutes, and the PR.
+
+Alternatives considered: one job with `if:` on each step (a refusal would still start the job that
+holds the `factory` environment); reading the board with REST (`/users/{u}/projectsV2/{n}/items` has
+no per-issue lookup, and it faces the same App limit); trusting the dispatcher's choice instead of
+reading Ready (the sweep, #108, isn't the admin).
+
 **Until the factory App runs, every session acts as `sssoto17`.** Elsewhere in this ADR, "until #37"
 means until then: the build issues under #58, after the checks #101–#103. Cloud and local sessions
 alike, factory or not, use the admin's account, so they hold the admin's "For pull requests only"
