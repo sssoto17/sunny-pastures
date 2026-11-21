@@ -1006,6 +1006,35 @@ and never pushes.
   merge that any session could make ("The honest limit", above), and auto-merge (#68) can't rest on
   a real admin approval.
 
+### Commissioned work as the admin (#385)
+
+**Decided 19 Nov 2026** (#333, section 5; ADR-0007, "Acceptance tests"). Admin-owned paths, first
+`tests/acceptance/**`, must never come from `sunny-factory[bot]`: `guard / acceptance` (#384) fails
+a `[bot]`-authored PR that touches them. A lane the admin deliberately starts for such work opens
+its PR as the admin instead.
+
+- **The switch.** `scripts/open-pr.sh --as-admin` (and `scripts/stack.sh open|add --as-admin`, which
+  passes it on) skips the dispatch and opens the PR over REST (`POST /repos/{o}/{r}/pulls`) with the
+  session's own credentials, the admin's; pushes are the admin's already (#336, above). It adds the
+  labels after opening, refusing first any that don't exist, and `stack.sh` links the parts with the
+  lane's token. Off by default: without it nothing changes.
+- **The gate.** The script refuses unless `OPEN_PR_AS_ADMIN` holds an issue number and the body
+  links that issue (`Closes #N` or `Part of #N`). Only the admin's launch sets it: locally
+  `OPEN_PR_AS_ADMIN=<N> claude …`, in the cloud the environment's variables for that run. A brief
+  only says to use the switch; it can't turn it on. Locally an `ask` rule on
+  `*open-pr.sh*--as-admin*` and `*stack.sh*--as-admin*` also prompts the admin. The script appends
+  to the body that a lane opened the PR as the admin for #N.
+- **The honest limit.** A session on the admin's account can set any variable the admin can, and an
+  `ask` rule doesn't prompt in a cloud auto-mode lane. So, like the thread-resolve hook, this is a
+  standard plus a check, not a boundary; the guarantee ADR-0007 states rests on which identity runs.
+- **Such a PR merges by bypass**, as every lane PR did before #336: the admin is its author and
+  can't approve it.
+
+**Alternatives considered.** A boolean variable: one setting would cover every later run in the same
+environment, where an issue number covers one issue. Detecting the admin's runs by commit trailer or
+branch: ADR-0007 rejects it, it's easy to fake. `gh pr create`: GraphQL, which the cloud proxy
+refuses, and an `ask` rule already.
+
 ## 3. Merge methods
 
 **Current state.** All three methods are enabled. Merge commits were used for #3, #26 and #30. #13,

@@ -19,13 +19,15 @@ usage() {
   cat >&2 <<'EOF'
 usage: scripts/stack.sh <command> ...
 
-  open [--base <branch>] [--label <name>]... <branch>=<body-file>...
+  open [--as-admin] [--base <branch>] [--label <name>]... <branch>=<body-file>...
       Push the parts, open each PR on the part below (part 1 on --base, default main), and link
       them as one native stack. Each part must be built on the one below and add commits of its
       own. A body file's first line is the PR title; the rest is the body. Run it again after a
       failure: it reuses the PRs and the stack it finds.
-  add <pr> [--label <name>]... <branch>=<body-file>
+  add <pr> [--as-admin] [--label <name>]... <branch>=<body-file>
       Append a part on top of the stack that holds <pr>.
+  --as-admin is passed to scripts/open-pr.sh for each part: only for admin-owned paths, on a run
+      the admin started with OPEN_PR_AS_ADMIN (#385). The parts are then linked with your token.
   update <pr>
       After an edit to a lower part: rebase each open part onto the new head of the one below,
       then push them, each with a lease on the head it fetched. The stack stays linear.
@@ -47,7 +49,7 @@ die() { # code message
 }
 
 # --- parts --------------------------------------------------------------------------------------
-branches=() bodies=() labels=()
+branches=() bodies=() labels=() as_admin=()
 parse_parts() { # <branch>=<body-file>... -> branches, bodies; checks each before anything runs
   local arg b f
   for arg in "$@"; do
@@ -90,7 +92,7 @@ ensure_pr() { # head base body-file -> "<number> new|reused"; reuses an open PR 
     return
   fi
   for l in ${labels[@]+"${labels[@]}"}; do args+=(--label "$l"); done # the App adds them as it opens the PR
-  n=$("$OPEN_PR" --base "$base" ${args[@]+"${args[@]}"} "$head" "$f") # its own line, so a failure stops here
+  n=$("$OPEN_PR" ${as_admin[@]+"${as_admin[@]}"} --base "$base" ${args[@]+"${args[@]}"} "$head" "$f") # its own line, so a failure stops here
   echo "$n new"
 }
 
@@ -214,6 +216,7 @@ cmd_open() {
     case $1 in
       --base) (($# >= 2)) || die 2 "--base needs a branch"; base=$2; shift 2 ;;
       --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
+      --as-admin) as_admin=(--as-admin); shift ;;
       *) break ;;
     esac
   done
@@ -275,6 +278,7 @@ cmd_add() {
   while (($#)); do
     case $1 in
       --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
+      --as-admin) as_admin=(--as-admin); shift ;;
       *) break ;;
     esac
   done

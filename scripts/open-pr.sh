@@ -5,6 +5,9 @@
 # enters a session. So the admin is a reviewer of the PR, not its author. It waits for that run
 # and prints the PR's number, alone, on stdout. scripts/stack.sh opens each stack part through it.
 # REST only (`gh api`), since the cloud GitHub proxy refuses GraphQL (`gh pr create` uses it).
+# --as-admin (#385; ADR-0007, "Acceptance tests") opens the PR with the session's own credentials,
+# the admin's, for work the admin commissions on admin-owned paths such as tests/acceptance/**. It
+# works only when the admin's launch set OPEN_PR_AS_ADMIN to the issue the PR links.
 # Tests: scripts/open-pr.test.sh. Needs bash 4+, git, jq and an authenticated gh.
 set -euo pipefail
 shopt -s inherit_errexit
@@ -16,7 +19,8 @@ TIMEOUT=${OPEN_PR_TIMEOUT:-300} POLL=${OPEN_PR_POLL:-5}
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/open-pr.sh [--base <branch>] [--label <name>]... [--dry-run] <branch> <body-file>
+usage: scripts/open-pr.sh [--as-admin] [--base <branch>] [--label <name>]... [--dry-run]
+                          <branch> <body-file>
 
   Opens <branch>'s PR as sunny-factory[bot] and prints its number. Push the branch first. The
   body file's first line is the PR's title; the rest is its body.
@@ -25,6 +29,11 @@ usage: scripts/open-pr.sh [--base <branch>] [--label <name>]... [--dry-run] <bra
              stacks: it calls this for each part.
   --label    a label the App adds (it must exist); repeat for more.
   --dry-run  check and print the dispatch request, send nothing.
+  --as-admin open the PR as the admin, not the App, for admin-owned paths such as
+             tests/acceptance/** only (#385). Refused unless OPEN_PR_AS_ADMIN, set by the admin's
+             launch command, names the issue the body links (Closes #N or Part of #N). The body
+             gets a line saying a lane opened it as the admin. A stack part opened this way is
+             linked by scripts/stack.sh, not the workflow.
 
 A branch that already has an open PR prints that PR's number and sends nothing. The workflow
 refuses main, names outside the lanes' (<N>-<slug>, claude/<name>) and a base with no open PR;
@@ -38,13 +47,14 @@ die() { # code message
   exit "$1"
 }
 
-base=main labels=() dry=0
+base=main labels=() dry=0 as_admin=0
 while (($#)); do
   case $1 in
     -h | --help) usage; exit 0 ;;
     --base) (($# >= 2)) || die 2 "--base needs a branch"; base=$2; shift 2 ;;
     --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
     --dry-run) dry=1; shift ;;
+    --as-admin) as_admin=1; shift ;;
     -*) usage; die 2 "unknown option: $1" ;;
     *) break ;;
   esac
@@ -56,6 +66,19 @@ branch=$1 file=$2
 title=$(head -n1 "$file")
 [[ -n ${title//[[:space:]]/} ]] || die 2 "the body file $file has no title on its first line"
 body=$(tail -n +2 "$file" | sed '/./,$!d')
+
+if ((as_admin)); then # the gate: the admin's launch, not a brief, names the commissioned issue
+  issue=${OPEN_PR_AS_ADMIN:-}
+  [[ -n $issue ]] || die 2 "--as-admin needs OPEN_PR_AS_ADMIN=<issue>, which only the admin's \
+launch command sets (#385): without it, open the PR as the App"
+  [[ $issue =~ ^[1-9][0-9]*$ ]] || die 2 "OPEN_PR_AS_ADMIN must be an issue number, got: $issue"
+  shopt -s nocasematch
+  [[ $body =~ (^|[^[:alnum:]])(closes|part\ of)\ \#$issue([^0-9]|$) ]] ||
+    die 2 "the body doesn't link #$issue (Closes #$issue or Part of #$issue), the issue"
+  shopt -u nocasematch
+  body+=$'\n\n'"Opened as the admin by a lane, with \`scripts/open-pr.sh --as-admin\` on a run the"
+  body+=" admin started for #$issue (#385)."
+fi
 
 open_pr_for() { gh api "$P/pulls?head=${REPO%%/*}:$1&state=open" --jq '.[0].number // empty'; }
 
@@ -70,6 +93,28 @@ found=$(open_pr_for "$branch")
 if [[ -n $found ]]; then
   printf 'open-pr: %s already open as #%s\n' "$branch" "$found" >&2
   echo "$found"
+  exit 0
+fi
+
+if ((as_admin)); then # straight to REST with the session's credentials; no dispatch, no App
+  for l in ${labels[@]+"${labels[@]}"}; do
+    gh api "$P/labels/$l" --silent 2>/dev/null || die 2 "no label $l in the repo"
+  done
+  request=$(jq -n --arg head "$branch" --arg base "$base" --arg title "$title" --arg body "$body" \
+    '{title: $title, head: $head, base: $base, body: $body}')
+  if ((dry)); then
+    echo "open-pr: dry run, nothing sent; the request to open the PR as the admin:" >&2
+    printf '%s\n' "$request"
+    exit 0
+  fi
+  pr=$(gh api -X POST "$P/pulls" --input - --jq .number <<<"$request") ||
+    die 1 "GitHub refused to open the PR"
+  for l in ${labels[@]+"${labels[@]}"}; do
+    gh api -X POST "$P/issues/$pr/labels" --silent -f "labels[]=$l" ||
+      echo "open-pr: #$pr is open, but adding the label $l failed" >&2
+  done
+  echo "open-pr: opened #$pr as the admin" >&2
+  echo "$pr"
   exit 0
 fi
 

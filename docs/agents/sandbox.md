@@ -45,6 +45,11 @@ host" below. These habits keep `.git/config` out of it:
   `scripts/open-pr.sh [--label <name>]... <branch> <body-file>` (a stack with `scripts/stack.sh`),
   never `gh pr create`: the `open-pr` workflow opens it as `sunny-factory[bot]`, and neither needs
   an upstream (#336). It uses REST only, so it works in cloud sessions too.
+  - **`--as-admin`, for admin-owned paths only** (`tests/acceptance/**`; #385, ADR-0007 "Acceptance
+    tests"): `scripts/open-pr.sh --as-admin …` (or `scripts/stack.sh open --as-admin …`) opens the
+    PR with the session's own credentials, the admin's, so `guard / acceptance` sees a human author.
+    It's off by default and refused unless `OPEN_PR_AS_ADMIN=<N>` is set by the admin's launch and
+    the body links #N. Never set that variable yourself, in a command or a brief.
 - Don't run `gh pr checkout` or `git remote set-url`. Read a PR's files with
   `git show origin/<branch>:<path>` or `gh api`.
 
