@@ -838,7 +838,7 @@ App's key or Claude. Concurrency 1 (group `factory`, never cancelling a running 
    that is settled the gate is expected to refuse every issue at the board step: it fails closed
    rather than skip the Ready check the admin decided on.
 3. **`factory`** (`timeout-minutes: 60`) mints the write token (`contents: write` to push and to
-   send `open-pr`'s dispatch; `pull_requests` and `issues` read; no workflows), checks out `main`,
+   send `open-pr`'s dispatch; `pull-requests` and `issues` read; no workflows), checks out `main`,
    installs, and runs `claude-code-action` on the setup-token with `--max-turns` from the gate (100
    unless lowered), the App's token as `github_token` and its bot user for commits. The prompt is
    `/implement #N` plus `.github/factory-prompt.md`; Claude opens the PR with `scripts/open-pr.sh`,
@@ -846,10 +846,17 @@ App's key or Claude. Concurrency 1 (group `factory`, never cancelling a running 
    denies (no one can answer it) and the hooks run; web tools are off. `Report` logs
    `total_cost_usd`, turns, the job's seconds and billed minutes, and the PR.
 
-Alternatives considered: one job with `if:` on each step (a refusal would still start the job that
-holds the `factory` environment); reading the board with REST (`/users/{u}/projectsV2/{n}/items` has
-no per-issue lookup, and it faces the same App limit); trusting the dispatcher's choice instead of
-reading Ready (the sweep, #108, isn't the admin).
+Claude reads the issue from files the workflow wrote: its body and only the comments whose author is
+the owner or a collaborator, since anyone can comment on a public issue. **Residual risk:** Claude
+has Bash and the write token in `GH_TOKEN`, so a prompt injection that got past that filter could
+read it (`/proc/self/environ` isn't blocked by the `env`/`printenv` deny rules). The token lives for
+the job only, and the App can't push workflows, approve, merge or bypass a ruleset.
+
+Alternatives considered: everything in the `factory` job with `if:` on each step (every refusal
+would start the 60-minute job and its setup; `gate` holds the environment too, but only for its
+read-only token, and its issue phase runs before that token is minted); reading the board with REST
+(`/users/{u}/projectsV2/{n}/items` has no per-issue lookup, and it faces the same App limit);
+trusting the dispatcher's choice instead of reading Ready (the sweep, #108, isn't the admin).
 
 **Until the factory App runs, every session acts as `sssoto17`.** Elsewhere in this ADR, "until #37"
 means until then: the build issues under #58, after the checks #101–#103. Cloud and local sessions

@@ -320,6 +320,19 @@ describe("factory.yml", () => {
 		expect(gate).toMatch(/^ {6}MAX_TURNS: \$\{\{ inputs\.max_turns \}\}$/m);
 	});
 
+	// The repo is public: a stranger's comment must never reach a Claude holding a write token.
+	it("hands Claude the issue and only the owner's and collaborators' comments", () => {
+		expect(factory).toMatch(
+			/select\(\.author_association\s*\|\s*IN\("OWNER", "MEMBER", "COLLABORATOR"\)\)/,
+		);
+		expect(factory.indexOf("Gather the issue")).toBeLessThan(factory.indexOf("id: claude"));
+		expect(factory).toContain("--add-dir ${{ runner.temp }}/factory-context");
+	});
+
+	it("reports the factory's own PR by its <N>- head, not a lane's PR for the same issue", () => {
+		expect(factory).toMatch(/\.head\.ref \| startswith\(\$n \+ "-"\)/);
+	});
+
 	it("logs total_cost_usd and the job's minutes, whatever happened", () => {
 		const report = factory.slice(factory.indexOf("name: Report"));
 		expect(report).toMatch(/^ {8}if: always\(\)$/m);

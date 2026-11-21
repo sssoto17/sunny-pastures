@@ -129,13 +129,17 @@ jobs:
     permissions:
       contents: read # main's checkout
       pull-requests: read # Report finds the PR the run opened
+      issues: read # the issue and its trusted comments, for Claude's context
     env:
       ISSUE: ${{ needs.gate.outputs.issue }}
       ANTHROPIC_API_KEY: '' # never an API key: the setup-token is the only credential
     steps:
-      - name: Start the clock
+      - id: clock
+        name: Start the clock
         run: |
+          set -euo pipefail
           echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
+          echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$GITHUB_OUTPUT"
           echo "RESULT issue=#$ISSUE max_turns=$TURNS"
         env:
           TURNS: ${{ needs.gate.outputs.turns }}
@@ -172,6 +176,23 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      # The issue as Claude reads it, as files (the repo is public): its body, and only the
+      # comments of the owner and collaborators. Anyone can comment on a public issue, and that
+      # text would reach a Claude with Bash and a write token, so the rest never reaches it.
+      - name: Gather the issue (read-only token)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ctx=$RUNNER_TEMP/factory-context
+          mkdir -p "$ctx"
+          r="repos/$GITHUB_REPOSITORY/issues/$ISSUE"
+          gh api "$r" --jq '{number, title, body, labels: [.labels[].name]}' >"$ctx/issue.json"
+          gh api --paginate "$r/comments?per_page=100" --jq '.[] | select(.author_association
+            | IN("OWNER", "MEMBER", "COLLABORATOR")) | {author: .user.login, created_at, body}' |
+            jq -s . >"$ctx/comments.json"
+          echo "RESULT trusted_comments=$(jq length "$ctx/comments.json")"
+
       # A leading /name runs that skill; the rest of the line reaches it as its arguments. The
       # project's settings load (hooks, allow, ask and deny rules): an `ask` rule has no one to ask
       # here, so it denies. No web tools: the issue and the repo are the whole input.
@@ -188,9 +209,11 @@ jobs:
           bot_id: ${{ steps.bot.outputs.id }}
           prompt: >-
             /implement #${{ needs.gate.outputs.issue }} Read .github/factory-prompt.md and follow
-            it. The issue is #${{ needs.gate.outputs.issue }}.
+            it. The issue is #${{ needs.gate.outputs.issue }}; its context folder is
+            ${{ runner.temp }}/factory-context.
           claude_args: >-
             --max-turns ${{ needs.gate.outputs.turns }}
+            --add-dir ${{ runner.temp }}/factory-context
             --allowedTools "Bash,Edit,Write,MultiEdit,Read,Glob,Grep,Skill,Task,TodoWrite"
             --disallowedTools "WebFetch,WebSearch,Read(//proc/**)"
 
@@ -202,12 +225,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
           OUTCOME: ${{ steps.claude.outcome }}
+          STARTED: ${{ steps.clock.outputs.started }}
         run: |
+          set -uo pipefail # no -e: every line reports, whatever failed before it
           secs=$(($(date +%s) - ${JOB_START:-$(date +%s)}))
           echo "RESULT job_seconds=$secs job_minutes=$(((secs + 59) / 60)) claude=$OUTCOME"
+          # This run's branch is <N>-<slug>; lanes open PRs as sunny-factory[bot] too, so the head
+          # tells the factory's PR from a lane's.
           pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" | jq -r --arg n "$ISSUE" \
-            '[.[] | select(.user.login == "sunny-factory[bot]" and ((.body // "")
-            | test("(?i)closes #" + $n + "([^0-9]|$)")))][0].html_url // "none"') || pr=unknown
+            '[.[] | select(.user.login == "sunny-factory[bot]" and (.head.ref | startswith($n + "-"))
+            and .created_at >= (env.STARTED))][0].html_url // "none"') || pr=unknown
           echo "RESULT pr=$pr"
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
           [ -f "$f" ] || { echo "RESULT execution_file=missing"; exit 0; }
