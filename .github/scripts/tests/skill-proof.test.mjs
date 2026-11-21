@@ -67,6 +67,25 @@ describe("countLoads", () => {
 		expect(countLoads([typed, readByTool], SKILL, LINE).count).toBe(0);
 	});
 
+	// Each of the next two holds the header and the line as whole lines, so only the check named
+	// in the test rejects it (#447's review: both checks survived their mutants).
+	const HEADED = `Base directory for this skill: ${BASE}\n\n${LINE}\n`;
+
+	it("doesn't count a user record the CLI didn't mark isMeta, even with the skill's text", () => {
+		const typedText = { ...expanded(HEADED), isMeta: undefined };
+		const pasted = { ...expanded(), isMeta: false };
+		pasted.message = { role: "user", content: HEADED };
+		expect(countLoads([typedText, pasted], SKILL, LINE).count).toBe(0);
+	});
+
+	it("doesn't count a block that isn't text, whatever fields it carries", () => {
+		const record = expanded();
+		record.message.content = [
+			{ type: "tool_result", tool_use_id: "t1", text: HEADED, content: HEADED },
+		];
+		expect(countLoads([record], SKILL, LINE).count).toBe(0);
+	});
+
 	it("doesn't count another skill's text, or the line quoted mid-line", () => {
 		const other = expanded(
 			`Base directory for this skill: /home/runner/.claude/skills/x\n\n${LINE}\n`,
