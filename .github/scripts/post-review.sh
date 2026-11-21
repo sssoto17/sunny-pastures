@@ -4,7 +4,7 @@
 # when the verdict has no Required finding, the PR doesn't carry review:admin (until #104) and none
 # of its earlier finding threads is still open. An escalated PR (an escalation row, or an
 # escalation thread of its own) it approves only when the admin's account opened it and its
-# escalation thread is on the PR, which then alone holds the merge; on one an App opened it
+# escalation thread is open on the PR, which then alone holds the merge; on one an App opened it
 # withholds (ADR-0002 area 2, #264, #322). After an approval it turns on auto-merge (squash) for
 # the reviewed head, and when it doesn't approve it turns off auto-merge that is on (ADR-0002 area
 # 2, flow step 3). It never merges: with the repo's allow_auto_merge off, GitHub refuses, and the
@@ -107,7 +107,9 @@ escalated_before=$(pick 'any(.[]; own and esc)')
 still_open=$(pick '[.[] | select(open_finding and (fixed | not))] | length')
 needs_admin=false # an escalation row now, or an escalation thread of its own from before
 [[ -z $rows && $escalated_before != true ]] || needs_admin=true
-held=$escalated_before # its escalation thread is on the PR, so the thread holds the merge
+# An escalation thread of its own still open (one someone else resolved was reopened above) holds
+# the merge. Once the admin resolved it, nothing holds a later head, so that one isn't approved.
+held=$(pick 'any(.[]; own and esc and ((.isResolved | not) or .resolvedBy.login != $admin))')
 escalated=false
 [[ $needs_admin != true && $labelled != true ]] || escalated=true
 # Who opened the PR, from the REST author, never from text the PR wrote. Only the admin's own
@@ -120,6 +122,8 @@ by_admin=false
 unplaced="" note=""
 while IFS= read -r f; do
   path=$(jq -r '.path // ""' <<<"$f") line=$(jq -r '.line // 0' <<<"$f") body=$(jq -r '.body // ""' <<<"$f")
+  # "escalated:" marks its escalation threads, which no finding may pass for (open_finding).
+  [[ $body != escalated:* ]] || body="Finding: $body"
   [[ $line =~ ^[0-9]+$ ]] || line=0
   if ((line > 0)) && comment "$path" "$body" "$line"; then continue; fi
   if [[ -n $path ]] && comment "$path" "Line $line: $body"; then continue; fi
@@ -164,12 +168,6 @@ elif [[ $labelled_now == true ]] || ((still_open > 0)); then
 elif [[ $needs_admin == true ]] && [[ $by_admin != true || $held != true ]]; then
   event=COMMENT
 fi
-# Withheld with every finding fixed (review:admin, or an escalated PR it may not approve): its own
-# Request changes would block for good, so it dismisses it. Where it approves, the Approve
-# replaces it.
-if [[ $event == COMMENT ]] && ((still_open == 0)); then
-  dismiss CHANGES_REQUESTED "Its findings are fixed. The PR waits for the admin."
-fi
 # A later COMMENT doesn't replace an APPROVE, so an earlier approval that no longer holds (say
 # review:admin was added after it) is dismissed (ADR-0002, test (e)).
 if [[ $event != APPROVE ]]; then
@@ -178,6 +176,12 @@ if [[ $event != APPROVE ]]; then
   if [[ $auto_on == true ]] && ! set_auto disable; then
     echo "::warning::auto-merge is still on: turn it off by hand (gh pr merge $PR --disable-auto)"
   fi
+fi
+# Withheld with every finding fixed (review:admin, or an escalated PR it may not approve): its own
+# Request changes would block for good, so it dismisses it. Where it approves, the Approve
+# replaces it.
+if [[ $event == COMMENT ]] && ((still_open == 0)); then
+  dismiss CHANGES_REQUESTED "Its findings are fixed. The PR waits for the admin."
 fi
 body=$(jq -r .summary "$v")
 [[ -z $unplaced ]] || body+=$'\n\nRequired findings without a place in the diff:\n'"$unplaced"

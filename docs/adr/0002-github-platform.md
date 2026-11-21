@@ -425,12 +425,14 @@ PR_ means either kind.
     the PR merge before the bot checks who resolved it. **Built in #322:** `post-review.sh` reads
     who opened the PR from the REST PR object (`user.login` and `user.type`, never text the PR
     wrote) and approves a clean escalated PR only when that is the admin's `User` account and its
-    own escalation thread is on the PR; when no file took the thread, nothing would hold the merge,
-    so it withholds. #68's test (e) was rewritten to match. Until #104 the bot also adds
-    `review:admin` when it escalates, and the label holds its approval ("Until #104, the label
-    stays"), so the approval shows only once the label is gone. Code-owner review is separate and
-    stays on (Q15). On a factory PR the bot also requests the admin's review, so
-    `review-requested:@me` is the admin's queue. The admin's own open PRs show under `author:@me`.
+    own escalation thread is open on the PR. When no file took the thread, or the admin has already
+    resolved it and a later head comes in, nothing would hold the merge, so it withholds; a finding
+    whose body starts with `escalated:` is posted as `Finding: escalated: …`, so it can't pass for
+    the thread. #68's test (e) was rewritten to match. Until #104 the bot also adds `review:admin`
+    when it escalates, and the label holds its approval ("Until #104, the label stays"), so the
+    approval shows only once the label is gone. Code-owner review is separate and stays on (Q15). On
+    a factory PR the bot also requests the admin's review, so `review-requested:@me` is the admin's
+    queue. The admin's own open PRs show under `author:@me`.
   - **The escalation thread is the bot's memory across runs.** Anyone with write access can resolve
     a thread, the factory App included, and so can any session on the admin's account. Agents never
     resolve review threads: a `deny` rule on the GitHub MCP resolve-thread tool and the `PreToolUse`
@@ -542,11 +544,11 @@ branches. The pattern is _propose, then apply_: Claude proposes and plain code a
   code. It approves only when none of these holds: a Required finding, `review:admin` (until #104),
   or an earlier finding of its own still open. **An escalation row or an escalation thread of its
   own no longer withholds it on a PR the admin's account opened (#264, done in #322)**: there it
-  approves once its escalation thread is on the PR, which then alone holds the merge. On a PR an App
-  opened, or anyone else, they still withhold. It also reopens escalation threads someone other than
-  the admin resolved, resolves only the App's own fixed finding threads, adds the label and the
-  escalation thread, requests the admin's review on factory PRs, and dismisses its own Request
-  changes when it withholds with every finding fixed.
+  approves while its escalation thread is open on the PR, which then alone holds the merge. On a PR
+  an App opened, or anyone else, they still withhold. It also reopens escalation threads someone
+  other than the admin resolved, resolves only the App's own fixed finding threads, adds the label
+  and the escalation thread, requests the admin's review on factory PRs, and dismisses its own
+  Request changes when it withholds with every finding fixed.
 - **Rows from paths (12 Nov, #240's review).** The script also works out the rows that depend only
   on paths, and merges them with the verdict's, so a prompt-injected verdict can't drop them:
   Code-owned path (`.github/CODEOWNERS`, gitignore rules, a rename's old path too) and Content

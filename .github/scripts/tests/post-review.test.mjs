@@ -211,6 +211,22 @@ describe("post-review.sh", () => {
 		expect(later.calls).not.toContain("event=APPROVE");
 	});
 
+	it("after the admin resolved its thread, approves no later head: nothing would hold it", () => {
+		const done = thread("E1", "escalated: Feature slice", { resolved: true, by: "o" });
+		for (const v of [verdict(), verdict({ escalation_rows: ["Interface change"] })]) {
+			const r = run(v, { threads: [done], env: { ...ADMIN_PR, FAKE_NO_LABEL: "1" } });
+			expect(r.calls).toContain("-f event=COMMENT");
+			expect(r.calls).not.toContain("event=APPROVE");
+			expect(r.calls).not.toContain("-F id=E1");
+		}
+	});
+
+	it("never lets a finding pass for an escalation thread", () => {
+		const findings = [{ path: "a.ts", line: 3, body: "escalated: not really" }];
+		const r = run(verdict({ findings }));
+		expect(r.calls).toContain("-F line=3 -f side=RIGHT -f body=Finding: escalated: not really");
+	});
+
 	it("approves an escalated PR only while its escalation thread is on the PR", () => {
 		// No file took the thread: nothing would hold the merge, so it withholds.
 		const files = [{ filename: "gone.yml", status: "removed" }];
