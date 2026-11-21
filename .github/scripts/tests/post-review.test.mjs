@@ -197,8 +197,10 @@ describe("post-review.sh", () => {
 		["another account opened", { FAKE_AUTHOR: "sssoto17", FAKE_AUTHOR_TYPE: "User" }],
 		["a Bot with the admin's login opened", { FAKE_AUTHOR: "o", FAKE_AUTHOR_TYPE: "Bot" }],
 	])("withholds its approval on a clean escalated PR %s", (_name, env) => {
-		const reviews = changesRequested;
-		const first = run(verdict(escRows), { reviews, env: { ...env, FAKE_NO_LABEL: "1" } });
+		const first = run(verdict(escRows), {
+			reviews: changesRequested,
+			env: { ...env, FAKE_NO_LABEL: "1" },
+		});
 		expect(first.calls).toContain("-f subject_type=file -f body=escalated: Feature slice");
 		expect(first.calls).toContain("-f event=COMMENT");
 		expect(first.calls).not.toContain("event=APPROVE");

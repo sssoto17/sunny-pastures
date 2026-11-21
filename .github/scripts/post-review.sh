@@ -109,6 +109,7 @@ needs_admin=false # an escalation row now, or an escalation thread of its own fr
 [[ -z $rows && $escalated_before != true ]] || needs_admin=true
 # An escalation thread of its own still open (one someone else resolved was reopened above) holds
 # the merge. Once the admin resolved it, nothing holds a later head, so that one isn't approved.
+# Posting a new escalation thread below sets it too.
 held=$(pick 'any(.[]; own and esc and ((.isResolved | not) or .resolvedBy.login != $admin))')
 escalated=false
 [[ $needs_admin != true && $labelled != true ]] || escalated=true
@@ -134,7 +135,7 @@ if [[ -n $rows ]]; then
   # One escalation thread per PR. Later rows are named in each review's summary.
   if [[ $escalated_before != true ]]; then
     body="escalated: $rows"$'\n\n'"@$ADMIN: this PR meets the rows above (CONSTRAINTS.md,"
-    body+=" Escalation criteria). sunny-reviewer won't approve it; only you resolve this thread."
+    body+=" Escalation criteria). This open thread holds the merge; only you resolve it."
     # The file the verdict names, else any file the head still has.
     want=$(jq -r '.escalation_path // ""' "$v")
     paths=$(jq -r --arg p "$want" '(map(select(.filename == $p and .status != "removed"))
