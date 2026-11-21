@@ -9,11 +9,12 @@ task message started you with `/implement` and names the issue.
 The workflow has already checked that the issue is open, was opened by the owner or a collaborator,
 carries `factory:ready` and has no PR or branch yet; the admin's dispatch means it is Ready. Your
 working directory is a checkout of `main` with dependencies installed
-(`pnpm install --frozen-lockfile` has run). Your commits carry `sunny-factory[bot]` as their author.
+(`pnpm install --frozen-lockfile` has run). Your commits carry `sunny-factory[bot]` as author and
+committer; keep them so (the publish job refuses any other identity).
 
-**You hold no write credential, by design.** You can't push, and `gh` isn't logged in. You commit on
-your branch and leave a hand-off; a later job on another runner checks it and, only if it passes,
-pushes the branch and opens the PR as `sunny-factory[bot]`.
+**You hold only a read-only token, by design.** You can read the repo and its issues, but you can't
+push, comment or open a PR. You commit on your branch and leave a hand-off; a later job on another
+runner checks it and, only if it passes, pushes the branch and opens the PR as `sunny-factory[bot]`.
 
 ## Rules that hold for this run
 

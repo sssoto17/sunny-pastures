@@ -11,10 +11,12 @@
 # branch that isn't <n>-<slug> for this issue or already exists here; a title that is empty or
 # over 256 characters; a body without `Closes #<n>`; a label outside review:admin and area:*;
 # a bundle git can't verify; no commits, or more than 100; a diff that touches .github/workflows/
-# or tests/acceptance/ (the App can't push workflows, and guard / acceptance fails a [bot] PR there).
+# or tests/acceptance/ (the App can't push workflows, and guard / acceptance fails a [bot] PR there);
+# a commit whose author or committer isn't the App's bot user.
 #
 # Env: ISSUE (the gate's checked number), HANDOFF (the tar.gz), WORK (an empty directory to unpack
-# into), BASE (main's commit to diff against), GITHUB_OUTPUT. Run inside the repository the branch
+# into), BASE (main's commit to diff against), BOT (the App's bot user, sunny-factory[bot]),
+# GITHUB_OUTPUT. Run inside the repository the branch
 # is fetched into. Writes branch=, labels= (comma-separated) and body= (the body file) and logs one
 # PUBLISH line. Exit codes: 0 passed; 1 refused, nothing fetched past the check that failed.
 # Tests: .github/scripts/tests/factory-publish.test.mjs
@@ -22,6 +24,7 @@ set -euo pipefail
 
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is not set}"
 : "${ISSUE:?ISSUE is not set}" "${HANDOFF:?HANDOFF is not set}" "${WORK:?WORK is not set}" "${BASE:?BASE is not set}"
+: "${BOT:?BOT is not set}"
 
 esc() { local s=${1//'%'/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
 refuse() { # message
@@ -64,15 +67,23 @@ while IFS= read -r l || [[ -n $l ]]; do
   labels+=("$l")
 done <"$WORK/labels"
 
-# The commits. --no-renames lists both sides of a move, so a rename out of a protected path counts.
+# The commits.
 git bundle verify -q "$WORK/commits.bundle" >/dev/null 2>&1 || refuse "git can't verify the bundle against main"
 git fetch -q --no-tags "$WORK/commits.bundle" "refs/heads/$branch:refs/heads/$branch" 2>/dev/null ||
   refuse "the bundle has no branch $branch"
 count=$(git rev-list --count "$BASE..refs/heads/$branch")
 ((count >= 1)) || refuse "the branch $branch has no commits past main"
 ((count <= 100)) || refuse "the branch $branch has $count commits, over 100"
-blocked=$(git diff --no-renames --name-only "$BASE...refs/heads/$branch" | grep -E '^(\.github/workflows/|tests/acceptance/)' || true)
-[[ -z $blocked ]] || refuse "the diff touches $(printf '%s' "$blocked" | head -n 3 | tr '\n' ' ')(workflows and acceptance tests stay out of factory PRs)"
+# A pathspec, not a grep over names: git quotes a name with non-ASCII characters, tabs or quotes,
+# which a pattern on the listing would miss. A move in or out counts too: rename detection under a
+# pathspec sees only the side inside it, as an add or a delete.
+git diff --quiet "$BASE...refs/heads/$branch" -- .github/workflows tests/acceptance ||
+  refuse "the diff touches .github/workflows/ or tests/acceptance/ (they stay out of factory PRs)"
+# Every commit carries the App as author and committer, as the factory job's git config set them.
+bot=$(sed 's/[][\.*^$+?(){}|]/\\&/g' <<<"$BOT") # as an ERE, literally
+others=$(git log --format='%an <%ae>%n%cn <%ce>' "$BASE..refs/heads/$branch" |
+  grep -vxE "$bot <[0-9]+\+$bot@users\.noreply\.github\.com>" | sort -u | head -n 3 || true)
+[[ -z $others ]] || refuse "a commit isn't authored and committed by $BOT: $(printf '%s' "$others" | tr '\n' ';')"
 
 echo "branch=$branch" >>"$GITHUB_OUTPUT"
 echo "labels=$(IFS=,; echo "${labels[*]-}")" >>"$GITHUB_OUTPUT"

@@ -843,11 +843,12 @@ its dispatch isn't the admin's choice.
    collaborator (`author_association`: the repo is public, and an issue's author can edit its body
    after it is labelled), carries `factory:ready`, and has no open PR and no `<n>-` branch yet (one
    factory branch per issue).
-3. **`factory`** (`timeout-minutes: 60`; environment `factory` for `CLAUDE_CODE_OAUTH_TOKEN` only)
-   checks out `main` and installs. It runs the gate again on a fresh read, then writes the issue and
-   only its owner's and collaborators' comments to files. `claude-code-action` runs on the
-   setup-token with `--max-turns` from the gate (100 unless lowered, the Claude step stopped at 55
-   minutes), the read-only `GITHUB_TOKEN` as `github_token`, no `GH_TOKEN`, and
+3. **`factory`** (`timeout-minutes: 60`; environment `factory-claude`, which holds only
+   `CLAUDE_CODE_OAUTH_TOKEN`) checks out `main` and installs. It runs the gate again on a fresh
+   read, then writes the issue and only its owner's and collaborators' comments to files.
+   `claude-code-action` runs on the setup-token with `--max-turns` from the gate (100 unless
+   lowered, the Claude step stopped at 55 minutes), only the read-only `GITHUB_TOKEN` (as
+   `github_token`, which the action also hands to git and its GitHub tools), and
    `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. The prompt is `/implement #N` plus
    `.github/factory-prompt.md`. Claude commits locally and writes the branch name, PR body and
    labels to files, and a plain step packs them with a git bundle of the new commits into the job's
@@ -856,25 +857,29 @@ its dispatch isn't the admin's choice.
 4. **`publish`** runs on a fresh runner that never ran the model, with `main`'s checkout.
    `.github/scripts/factory-publish.sh` refuses (`PUBLISH refused: …`, a failed job) a hand-off with
    any entry but the four files, a branch that isn't `<n>-<slug>`, a body without `Closes #<n>`, a
-   label outside `review:admin` and `area:*`, or a diff that touches `.github/workflows/` or
-   `tests/acceptance/`. Only then does it mint the App's token (`contents: write` to push and to
-   send `open-pr`'s dispatch, `pull-requests: read`), push the branch with hooks off, and run
-   `scripts/open-pr.sh`, so `open-pr.yml` opens the PR as `sunny-factory[bot]`. Commits and PR both
-   carry the App.
+   label outside `review:admin` and `area:*`, a diff that touches `.github/workflows/` or
+   `tests/acceptance/` (a pathspec, so a quoted non-ASCII name or a move counts), or a commit whose
+   author or committer isn't `sunny-factory[bot]`. Only then does it mint the App's token
+   (`contents: write` to push and to send `open-pr`'s dispatch, `pull-requests: read`), push the
+   branch with hooks off, and run `scripts/open-pr.sh`, so `open-pr.yml` opens the PR as
+   `sunny-factory[bot]`. The PR's author and every commit's author and committer are the App.
 5. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
    rounds each job up) and their sum, and the PR.
 
 **Caps.** `--max-turns` doesn't count the turns of `Task` subagents, so the 55-minute step timeout
 and the job's 60 are the real bound on a run.
 
+**Two environments, both `main` only (admin, 21 Nov 2026, in the coordinator session).** The Claude
+job runs in `factory-claude`, which holds only `CLAUDE_CODE_OAUTH_TOKEN`. The App's key stays in
+`factory`, which only `publish` (and `open-pr.yml`) enters, so nothing on Claude's runner can reach
+the key, whatever GitHub hands a job.
+
 **Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
 environment, but the runner user has sudo, so a prompt injection could still read it from the
-action's own process. The token reaches Claude's model calls only, and rotates with
-`claude setup-token`. Whether GitHub hands the `factory` job the environment's other secret, the
-App's key, though the job never references it, isn't documented; if it does, sudo could reach it
-too. Splitting the setup-token into an environment of its own would close that (a question for the
-admin). No write token exists on the model's runner: what the model wrote reaches GitHub only
-through the publish checks, and the App can't push workflows, approve, merge or bypass a ruleset.
+action's own process. It reaches Claude's model calls only, and rotates with `claude setup-token`.
+Claude's Bash also has open network access, so whatever it can read can leave the runner. No write
+token exists on the model's runner: what the model wrote reaches GitHub only through the publish
+checks, and the App can't push workflows, approve, merge or bypass a ruleset.
 
 Alternatives considered: everything in one job with `if:` on each step (every refusal would start
 the 60-minute job; and a write step after Claude on the same runner is reachable from anything
@@ -1011,6 +1016,9 @@ separate: this is only the identity step for lanes in Claude Code.
   environment would add no protection, since either key acts as the same App. The risk is a workflow
   on any branch other than `main` reading the key: a branch's own copy of a workflow could print it.
   So #107's throwaway test dispatches from `main` instead of running on a `throwaway/*` branch.
+  (Amended 21 Nov 2026, #107: the key still has one environment, but #107's Claude job runs in a
+  second one, `factory-claude`, which holds only `CLAUDE_CODE_OAUTH_TOKEN`, so Claude's runner never
+  enters the environment with the key; "The factory workflow, built (#107)", above.)
 - **The payload is untrusted.** Anyone with write access can dispatch, a prompt-injected session
   included. Its fields reach the shell only through `env:`, never as `${{ }}` inside `run:` (the
   run's name uses the branch, which is display text no shell reads), and go to GitHub as values
