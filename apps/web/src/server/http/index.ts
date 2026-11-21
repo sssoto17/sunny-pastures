@@ -31,12 +31,13 @@ export type Problem =
 
 /**
  * What every game API response carries besides its body (#330, "Headers"). `rulesVersion` is the
- * rules the server checked the request under; `serverTiming` renders the `Server-Timing` value
- * when the response is built, so it holds every phase that ran.
+ * rules the server checked the request under. `serverTiming` renders the `Server-Timing` value
+ * when the response is built, so the caller renders it after `total` is recorded; `null` sends no
+ * header (the shape of #394's renderer).
  */
 export interface ResponseMeta {
 	readonly rulesVersion: number;
-	readonly serverTiming: () => string;
+	readonly serverTiming: () => string | null;
 }
 
 /** Builds every game API error response: the one place an error body is made (#330, "Errors"). */
@@ -80,11 +81,13 @@ const fixedMessages = {
 // #330, "Headers": on every response, errors included. The client compares `Rules-Version` with
 // its own rules to tell a stale client from a refusal (ADR-0006, "The client").
 function buildHeaders(meta: ResponseMeta): Headers {
-	return new Headers({
+	const headers = new Headers({
 		"Rules-Version": String(meta.rulesVersion),
 		"Cache-Control": "no-store",
-		"Server-Timing": meta.serverTiming(),
 	});
+	const timing = meta.serverTiming();
+	if (timing !== null) headers.set("Server-Timing", timing);
+	return headers;
 }
 
 function readMessage(problem: Problem): string {

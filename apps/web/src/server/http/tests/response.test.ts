@@ -39,6 +39,16 @@ describe("buildErrorResponse", () => {
 		});
 	});
 
+	it("sends no Server-Timing when the timing renders nothing", () => {
+		const response = buildErrorResponse(
+			{ error: "internal" },
+			{ ...meta, serverTiming: () => null },
+		);
+
+		expect(response.headers.has("Server-Timing")).toBe(false);
+		expect(response.headers.get("Rules-Version")).toBe("3");
+	});
+
 	it("asks a client to retry after a second only when the farm is busy", () => {
 		expect(buildErrorResponse({ error: "busy" }, meta).headers.get("Retry-After")).toBe("1");
 		expect(buildErrorResponse({ error: "internal" }, meta).headers.get("Retry-After")).toBeNull();

@@ -59,8 +59,8 @@
       { "from": "config", "allow": [] },
       { "from": "timing", "allow": [] },
       // The HTTP contract (#395; admin, 21 Nov): the request checks, the error builder and the
-      // headers. It sees the sim's types, never its code, and the timing header; no other module.
-      { "from": "http", "allow": ["timing"], "allowTypeOnly": ["sim"] },
+      // headers. It sees the sim's types, never its code; the timing value is passed in.
+      { "from": "http", "allow": [], "allowTypeOnly": ["sim"] },
       { "from": "sim", "allow": [] }
     ],
     // A pattern matches a call and a constructor call, also through an import or a namespace.
