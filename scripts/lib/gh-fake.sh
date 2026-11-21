@@ -15,9 +15,10 @@
 #
 # POST dispatches stands in for the workflows: open-pr runs the real .github/scripts/open-pr.sh
 # ($FAKE_WORKFLOW_SCRIPT) and pr-draft the real pr-draft.sh beside it, each with the payload as its
-# environment, as sunny-factory[bot], and records the run under runs/, newest id highest, and
-# pr-draft's "<state> <prs>" in events. no_workflow makes the event start nothing; run_pending
-# leaves the run in progress.
+# environment, as sunny-factory[bot], and records the run under runs/, newest id highest.
+# events logs, in order, "opened <n> draft=<bool>", each pr-draft request "<state> <prs>" and each
+# mutation "marked <n> draft|ready". no_workflow makes the event start nothing; run_pending leaves
+# the run in progress.
 st=$(cd "$(dirname "$0")/../gh" && pwd)
 for a in "$@"; do printf '%s\n' "$a"; done >>"$st/calls"
 printf -- '--\n' >>"$st/calls"
@@ -79,7 +80,7 @@ set_stack() { # n -> writes .stack on each of its open PRs
 workflow() { # name payload -> runs its step script as the App and records the run
   local id status=completed conclusion=success script fields title
   case $1 in
-    open-pr) script=$FAKE_WORKFLOW_SCRIPT fields="branch base title body labels"
+    open-pr) script=$FAKE_WORKFLOW_SCRIPT fields="branch base title body labels ready"
       title="open-pr $(jq -r .branch <<<"$2")" ;;
     pr-draft) script=${FAKE_WORKFLOW_SCRIPT%/*}/pr-draft.sh fields="state prs"
       title="pr-draft $(jq -r '"\(.state) \(.prs)"' <<<"$2")"
@@ -118,6 +119,7 @@ case "$method $path" in
       user: {login: $login}, head: {ref: .head, sha: $sha, repo: {full_name: "sssoto17/sunny-pastures"}},
       base: {ref: .base}, stack: null}' \
       <<<"$input" >"$st/pulls/$n.json"
+    echo "opened $n draft=$(jq .draft "$st/pulls/$n.json")" >>"$st/events"
     out=$(pr "$n") ;;
   "GET $P/pulls/"*/reviews)
     n=${path#"$P"/pulls/}; n=${n%/reviews}
@@ -173,9 +175,12 @@ case "$method $path" in
   "POST graphql")
     m=$(jq -r .query <<<"$input" | grep -oE 'convertPullRequestToDraft|markPullRequestReadyForReview')
     n=$(jq -r .id <<<"$input"); n=${n#PR_}
+    # the cloud proxy refuses a session's GraphQL: only a simulated workflow run gets this far
+    [[ -n ${FAKE_APP:-} ]] || { echo "gh: GraphQL is not available from Claude Code sessions (HTTP 403)" >&2; exit 1; }
     [[ -n $m && -f $st/pulls/$n.json ]] || { echo "gh: Could not resolve to a node (HTTP 200)" >&2; exit 1; }
     d=$([[ $m == convertPullRequestToDraft ]] && echo true || echo false)
     jq --argjson d "$d" '.draft = $d' "$st/pulls/$n.json" >"$st/tmp" && mv "$st/tmp" "$st/pulls/$n.json"
+    echo "marked $n $([[ $d == true ]] && echo draft || echo ready)" >>"$st/events"
     out=$(jq -n --arg m "$m" --argjson n "$n" --argjson d "$d" '{data: {($m): {pullRequest: {number: $n, isDraft: $d}}}}') ;;
   *) echo "fake: unexpected endpoint $method $endpoint" >&2; exit 97 ;;
 esac

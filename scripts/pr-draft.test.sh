@@ -75,7 +75,8 @@ expect_eq "the payload: state and the PRs, each once" "$(jq -c .client_payload <
 run ready 41 42
 expect_code 0
 expect_eq "both ready" "$(draft 41) $(draft 42)" "false false"
-expect_eq "the workflow saw draft, then ready" "$(cat "$work/gh/events")" $'draft 41,42\nready 41,42'
+expect_eq "the workflow switched each, draft then ready" "$(cat "$work/gh/events")" \
+  $'draft 41,42\nmarked 41 draft\nmarked 42 draft\nready 41,42\nmarked 41 ready\nmarked 42 ready'
 
 # --- only the PRs not in the state are sent; none, and nothing is sent ----------------------------
 reset 41:358-a:false 42:358-b:true

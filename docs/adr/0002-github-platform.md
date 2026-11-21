@@ -1078,8 +1078,11 @@ separate: this is only the identity step for lanes in Claude Code.
   deployment branch is `main`. It mints the App's token with `contents: read` and
   `pull_requests: write` only, checks out `main`'s `.github/scripts`, and
   `.github/scripts/open-pr.sh` opens the PR over REST, adds the labels that already exist, and links
-  a stack part into the stack of the part below. Its PRs start CI and the review as any App's do
-  ("The factory's identity", above).
+  a stack part into the stack of the part below. The PR opens as a draft, and the run marks it ready
+  after the link (#358, "Stacks", above), with the App's token, so its ready mark starts CI and the
+  review as any App's events do ("The factory's identity", above). The sixth payload property,
+  `ready: "false"`, leaves it a draft: `scripts/stack.sh` sends it for part 1, which it marks ready
+  through `pr-draft` once the stack is linked.
 - **The key never enters a session.** It lives only in the secret `FACTORY_APP_PRIVATE_KEY` of
   #101's environment `factory`, which #107's `publish` job uses too (its Claude job doesn't); the
   client ID is that environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh`
@@ -1176,9 +1179,11 @@ its PR as the admin instead.
   passes it on) skips the dispatch and opens the PR over REST (`POST /repos/{o}/{r}/pulls`) with the
   session's own credentials, the admin's; pushes are the admin's already (#336, above). It adds the
   labels after opening, refusing first any that don't exist, and `stack.sh` links the parts with the
-  lane's token. Since no workflow runs, the script repeats the workflow's refusals (main, a non-lane
-  branch or base, a base with no open PR, the length limits), and refuses an open PR the App already
-  opened for the branch. Off by default: without it nothing changes.
+  lane's token. The PR opens as a draft, and the `pr-draft` dispatch marks it ready as the App
+  (#358), at once for a single PR and after the link for a stack's parts, since the session can't
+  switch a draft over REST. Since no workflow runs, the script repeats the workflow's refusals
+  (main, a non-lane branch or base, a base with no open PR, the length limits), and refuses an open
+  PR the App already opened for the branch. Off by default: without it nothing changes.
 - **The gate.** The script refuses unless `OPEN_PR_AS_ADMIN` holds an issue number and the body
   links that issue (`Closes #N` or `Part of #N`). Only the admin's launch sets it: locally
   `OPEN_PR_AS_ADMIN=<N> claude …`, in the cloud the environment's variables for that run. A brief
