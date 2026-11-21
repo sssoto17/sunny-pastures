@@ -38,7 +38,8 @@ usage: scripts/open-pr.sh [--as-admin] [--base <branch>] [--label <name>]... [--
 A branch that already has an open PR prints that PR's number and sends nothing. The workflow
 refuses main, names outside the lanes' (<N>-<slug>, claude/<name>) and a base with no open PR;
 this script then prints the run's link. OPEN_PR_TIMEOUT (seconds, default 300) bounds the wait.
-Exit codes: 0 the PR is open; 1 a gh command, the run or the wait failed; 2 refused, nothing sent.
+Exit codes: 0 the PR is open; 1 a gh command, the run or the wait failed (with --as-admin, a
+label too: the PR's number is still printed); 2 refused, nothing sent.
 EOF
 }
 
@@ -76,6 +77,16 @@ launch command sets (#385): without it, open the PR as the App"
   [[ $body =~ (^|[^[:alnum:]])(closes|part\ of)\ \#$issue([^0-9]|$) ]] ||
     die 2 "the body doesn't link #$issue (Closes #$issue or Part of #$issue), the issue"
   shopt -u nocasematch
+  # The workflow's refusals, here since no workflow runs (.github/scripts/open-pr.sh).
+  lane='^([0-9]+-[a-z0-9]+(-[a-z0-9]+)*|claude/[A-Za-z0-9._-]+)$'
+  [[ $branch != main ]] || die 2 "never from main: a PR comes from a lane branch"
+  [[ $branch =~ $lane ]] || die 2 "$branch isn't a lane branch (<N>-<slug> or claude/<name>)"
+  [[ $base == main || $base =~ $lane ]] || die 2 "the base $base isn't main or a lane branch"
+  [[ $base != "$branch" ]] || die 2 "a PR can't go onto itself"
+  ((${#title} <= 256)) || die 2 "the title is over 256 characters"
+  for l in ${labels[@]+"${labels[@]}"}; do
+    [[ $l =~ ^[A-Za-z0-9:._-]+$ ]] || die 2 "$l is not a label name here"
+  done
   body+=$'\n\n'"Opened as the admin by a lane, with \`scripts/open-pr.sh --as-admin\` on a run the"
   body+=" admin started for #$issue (#385)."
 fi
@@ -90,16 +101,27 @@ if local=$(git rev-parse -q --verify "refs/heads/$branch"); then
     die 2 "your $branch isn't the one on origin: push it first (git push origin $branch)"
 fi
 found=$(open_pr_for "$branch")
+if [[ -n $found ]] && ((as_admin)); then # the App's PR would fail guard / acceptance (#384)
+  author=$(gh api "$P/pulls/$found" --jq .user.login)
+  [[ $author != *'[bot]' ]] ||
+    die 2 "#$found was opened by $author, so it can't carry admin-owned paths: close it, then run this again"
+fi
 if [[ -n $found ]]; then
   printf 'open-pr: %s already open as #%s\n' "$branch" "$found" >&2
   echo "$found"
   exit 0
 fi
 
-if ((as_admin)); then # straight to REST with the session's credentials; no dispatch, no App
+# The switch (a guard clause on the main path): straight to REST with the session's credentials,
+# the admin's; no dispatch, no App.
+if ((as_admin)); then
+  ((${#body} <= 65536)) || die 2 "the body is over 65536 characters, GitHub's limit"
   for l in ${labels[@]+"${labels[@]}"}; do
-    gh api "$P/labels/$l" --silent 2>/dev/null || die 2 "no label $l in the repo"
+    gh api "$P/labels/$l" --silent 2>/dev/null || die 2 "no label $l in the repo, or it couldn't be read"
   done
+  if [[ $base != main && -z $(open_pr_for "$base") ]]; then
+    die 2 "the base $base has no open PR: a stack part goes onto the part below's PR"
+  fi
   request=$(jq -n --arg head "$branch" --arg base "$base" --arg title "$title" --arg body "$body" \
     '{title: $title, head: $head, base: $base, body: $body}')
   if ((dry)); then
@@ -109,13 +131,16 @@ if ((as_admin)); then # straight to REST with the session's credentials; no disp
   fi
   pr=$(gh api -X POST "$P/pulls" --input - --jq .number <<<"$request") ||
     die 1 "GitHub refused to open the PR"
+  code=0
   for l in ${labels[@]+"${labels[@]}"}; do
-    gh api -X POST "$P/issues/$pr/labels" --silent -f "labels[]=$l" ||
-      echo "open-pr: #$pr is open, but adding the label $l failed" >&2
+    gh api -X POST "$P/issues/$pr/labels" --silent -f "labels[]=$l" || {
+      echo "open-pr: #$pr is open, but adding the label $l failed: add it by hand" >&2
+      code=1
+    }
   done
   echo "open-pr: opened #$pr as the admin" >&2
   echo "$pr"
-  exit 0
+  exit "$code"
 fi
 
 # Five properties of the ten client_payload allows; the whole payload stays under 64 KB.
