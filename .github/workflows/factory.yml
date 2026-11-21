@@ -1,0 +1,290 @@
+# The factory (#107; ADR-0002, area 2, "The factory workflow, built"): one workflow_dispatch run
+# takes one issue to an open PR as the App sunny-factory, within a fixed turn and time cap. The
+# admin dispatches it (workflow_dispatch needs actions: write, which a lane's token lacks); the
+# dispatch is the Ready signal (admin, 21 Nov 2026). It always runs main's copy: the `factory` and
+# `claude-seat` environments admit only main, so a dispatch on another branch reaches neither.
+#
+# Each job is skipped unless the one before says go, so a refusal never mints a token or calls
+# Claude, and Claude never shares a runner with a write credential:
+# - switch: the kill switch (#106), exactly as factory-switch.yml's header shows. Anything but
+#   FACTORY_ENABLED=true logs `SWITCH off` and every later job is skipped.
+# - gate: .github/scripts/factory-gate.sh, with the read-only GITHUB_TOKEN and no environment. It
+#   refuses unless the issue is open, opened by the owner or a collaborator, carries factory:ready
+#   (the Mode signal) and has no open PR or <n>- branch yet.
+# - factory: claude-code-action runs /implement on the issue with .github/factory-prompt.md, on the
+#   setup-token and the read-only GITHUB_TOKEN only. Claude commits locally and writes the branch
+#   name, PR body and labels to files; a plain step packs them with a git bundle into the job's
+#   output (the hand-off). No App token exists on this runner.
+# - publish: a fresh runner that never ran the model. .github/scripts/factory-publish.sh checks the
+#   hand-off (branch name, labels, body, no workflow or acceptance-test paths); only then does it
+#   mint the App's token, push the branch and open the PR with scripts/open-pr.sh, so open-pr.yml
+#   opens it as sunny-factory[bot].
+# - report: total_cost_usd, turns, each job's billed minutes and the PR, whatever happened.
+#
+# Caps (admin, 21 Nov 2026): --max-turns 100 (the max_turns input may only lower it) and
+# timeout-minutes 60 on the factory job, its Claude step stopping at 55. --max-turns doesn't count
+# Task subagents' turns, so the timeout is the real bound. Concurrency 1: one factory run at a
+# time; a newer dispatch waits, and one waiting run is replaced by a newer one (GitHub's rule).
+# GITHUB_TOKEN is read-only in every job. Actions pinned to full SHAs, main's pins.
+name: factory
+# Runs read "factory #<n>", so the sweep (#108) and the admin can find an issue's runs. A name is
+# display text that no shell reads.
+run-name: 'factory #${{ inputs.issue }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: The issue to work (open, factory:ready, opened by the owner or a collaborator)
+        required: true
+        type: string
+      max_turns:
+        description: Claude's turn cap, from 1 to 100 (only ever lower than the default)
+        required: false
+        default: '100'
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: factory
+  cancel-in-progress: false
+
+env:
+  FACTORY_APP: sunny-factory # the App's slug (ADR-0002, "The factory's identity")
+  # Its bot user's id (the user id GitHub gives sunny-factory[bot], read from PR #448's author):
+  # commits carry it, and publish refuses any other.
+  FACTORY_BOT_ID: '355564973'
+
+jobs:
+  switch:
+    uses: ./.github/workflows/factory-switch.yml
+    permissions:
+      contents: read
+
+  gate:
+    needs: switch
+    if: needs.switch.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read # the checkout of .github/scripts, and the branch lookup
+      issues: read # the issue, its author and labels
+      pull-requests: read # the open PRs, for the duplicate guard
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+      issue: ${{ steps.gate.outputs.issue }}
+      turns: ${{ steps.gate.outputs.turns }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - id: gate
+        name: Check the issue (read-only token)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+          MAX_TURNS: ${{ inputs.max_turns }}
+        run: bash .github/scripts/factory-gather.sh
+
+  factory:
+    needs: [switch, gate]
+    if: needs.switch.outputs.run == 'true' && needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Its own environment, holding CLAUDE_CODE_OAUTH_TOKEN only: the App's key lives in `factory`,
+    # which this job never enters, so nothing on Claude's runner can reach it (admin, 21 Nov 2026).
+    environment: claude-seat
+    permissions:
+      contents: read # main's checkout
+      issues: read # the issue and its trusted comments
+      pull-requests: read # the gate's duplicate guard, run again
+    outputs:
+      handoff: ${{ steps.handoff.outputs.handoff }}
+      cost: ${{ steps.result.outputs.cost }}
+    env:
+      ISSUE: ${{ needs.gate.outputs.issue }}
+      OUT: ${{ github.workspace }}/../factory-out
+      ANTHROPIC_API_KEY: '' # never an API key: the setup-token is the only credential
+    steps:
+      # main, with history for the review's merge-base. The action points origin at the
+      # read-only GITHUB_TOKEN itself, so the checkout keeps none.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup
+
+      # The issue as Claude reads it, as files (the repo is public): the gate runs again on a fresh
+      # read, so an issue that changed hands or got a branch since stops here, then its body and
+      # only the comments of the owner and collaborators.
+      - id: context
+        name: Gather the issue (read-only token)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_TURNS: ${{ needs.gate.outputs.turns }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/factory-gather.sh
+          grep -qx 'run=true' "$GITHUB_OUTPUT" || { echo "::error::the issue no longer passes the gate"; exit 1; }
+          ctx=$RUNNER_TEMP/factory-context
+          mkdir -p "$ctx" "$OUT"
+          r="repos/$GITHUB_REPOSITORY/issues/$ISSUE"
+          # The copy the gate just checked, so the text Claude reads is the text whose author passed.
+          jq '{number, title, body, labels: [.labels[].name]}' "$RUNNER_TEMP/factory-gate/issue.json" >"$ctx/issue.json"
+          gh api --paginate "$r/comments?per_page=100" --jq '.[] | select(.author_association
+            | IN("OWNER", "MEMBER", "COLLABORATOR")) | {author: .user.login, created_at, body}' |
+            jq -s . >"$ctx/comments.json"
+          echo "RESULT trusted_comments=$(jq length "$ctx/comments.json")"
+
+      # No write credential: only the read-only GITHUB_TOKEN, as github_token (the action also
+      # hands it to git and its GitHub tools), and subprocesses get a scrubbed environment (the
+      # setup-token stays out of Bash's env). Bash still has open network access. A
+      # leading /name runs that skill; the rest of the line reaches it as its arguments. The
+      # project's settings load: an `ask` rule has no one to ask here, so it denies. No web tools.
+      - id: claude
+        timeout-minutes: 55
+        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
+        env:
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          bot_name: ${{ env.FACTORY_APP }}[bot]
+          bot_id: ${{ env.FACTORY_BOT_ID }}
+          prompt: >-
+            /implement #${{ needs.gate.outputs.issue }} Read .github/factory-prompt.md and follow
+            it. The issue is #${{ needs.gate.outputs.issue }}; its context folder is
+            ${{ runner.temp }}/factory-context; write your hand-off files to ${{ env.OUT }}.
+          claude_args: >-
+            --max-turns ${{ needs.gate.outputs.turns }}
+            --add-dir ${{ runner.temp }}/factory-context
+            --add-dir ${{ env.OUT }}
+            --allowedTools "Bash,Edit,Write,MultiEdit,Read,Glob,Grep,Skill,Task,TodoWrite"
+            --disallowedTools "WebFetch,WebSearch,Read(//proc/**)"
+
+      # The hand-off: data for publish to check, never trusted here. The bundle holds only the
+      # commits past the main this run checked out.
+      - id: handoff
+        name: Pack the hand-off
+        if: steps.claude.outcome == 'success'
+        run: |
+          set -euo pipefail
+          [ -s "$OUT/branch" ] || { echo "RESULT handoff=none: Claude wrote no branch"; exit 0; }
+          b=$(head -n1 "$OUT/branch")
+          [[ $b =~ ^$ISSUE-[a-z0-9-]+$ ]] || { echo "RESULT handoff=none: bad branch name"; exit 0; }
+          h=$RUNNER_TEMP/handoff
+          mkdir -p "$h"
+          printf '%s\n' "$b" >"$h/branch"
+          cp "$OUT/pr-body.md" "$h/pr-body.md"
+          if [ -f "$OUT/labels" ]; then cp "$OUT/labels" "$h/labels"; else : >"$h/labels"; fi
+          git bundle create -q "$h/commits.bundle" "$GITHUB_SHA..refs/heads/$b"
+          data=$(tar -C "$h" -czf - branch commits.bundle labels pr-body.md | base64 -w0)
+          ((${#data} < 900000)) || { echo "RESULT handoff=none: ${#data} bytes, over the 900 kB cap"; exit 0; }
+          echo "handoff=$data" >>"$GITHUB_OUTPUT"
+          echo "RESULT handoff=$b bytes=${#data}"
+
+      - id: result
+        name: Claude's result
+        if: always()
+        env:
+          EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
+          OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          set -uo pipefail
+          f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
+          [ -f "$f" ] || { echo "RESULT claude=$OUTCOME execution_file=missing"; exit 0; }
+          line=$(jq -r '.[] | select(.type == "result") | "subtype=\(.subtype) is_error=\(.is_error)"
+            + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" | tail -n1)
+          echo "RESULT claude=$OUTCOME $line"
+          echo "cost=$line" | tr -cd '[:alnum:] =._\n-' >>"$GITHUB_OUTPUT"
+
+  publish:
+    needs: [gate, factory]
+    if: needs.factory.outputs.handoff != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: factory
+    # GITHUB_TOKEN for the checkout only; every write goes through the App's token.
+    permissions:
+      contents: read
+    outputs:
+      pr: ${{ steps.open.outputs.pr }}
+    env:
+      ISSUE: ${{ needs.gate.outputs.issue }}
+    steps:
+      # main's scripts and history, the base the hand-off is checked against. Fresh: no model ran
+      # on this runner, so its git config and hooks are main's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - id: check
+        name: Check the hand-off (no token yet)
+        env:
+          DATA: ${{ needs.factory.outputs.handoff }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$DATA" | base64 -d >"$RUNNER_TEMP/handoff.tgz"
+          mkdir -p "$RUNNER_TEMP/handoff"
+          HANDOFF=$RUNNER_TEMP/handoff.tgz WORK=$RUNNER_TEMP/handoff BASE=$(git rev-parse HEAD) \
+            BOT="$FACTORY_APP[bot]" BOT_ID=$FACTORY_BOT_ID bash .github/scripts/factory-publish.sh
+
+      # Only what publishing needs: contents write pushes the branch and sends open-pr's
+      # repository_dispatch; pull requests read for open-pr.sh's lookup. No workflows.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: read
+
+      - id: open
+        name: Push and open the PR as sunny-factory
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BRANCH: ${{ steps.check.outputs.branch }}
+          LABELS: ${{ steps.check.outputs.labels }}
+          BODY: ${{ steps.check.outputs.body }}
+        run: |
+          set -euo pipefail
+          git -c core.hooksPath=/dev/null push --no-verify \
+            "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" \
+            "refs/heads/$BRANCH:refs/heads/$BRANCH"
+          args=()
+          IFS=, read -r -a wanted <<<"$LABELS"
+          for l in ${wanted[@]+"${wanted[@]}"}; do args+=(--label "$l"); done
+          pr=$(scripts/open-pr.sh ${args[@]+"${args[@]}"} "$BRANCH" "$BODY")
+          echo "pr=$pr" >>"$GITHUB_OUTPUT"
+          echo "RESULT pr=#$pr branch=$BRANCH"
+
+  # Report data (ADR-0002, "Caps"): cost and turns, each job's billed minutes (GitHub rounds each
+  # job up to a whole minute) and the PR. Non-secret fields only.
+  report:
+    needs: [switch, gate, factory, publish]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: read # this run's jobs and their times
+    steps:
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COST: ${{ needs.factory.outputs.cost }}
+          PR: ${{ needs.publish.outputs.pr }}
+        run: |
+          set -uo pipefail # no -e: every line reports, whatever failed before it
+          echo "RESULT claude ${COST:-not run}"
+          echo "RESULT pr=${PR:+#}${PR:-none}"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" | jq -r '
+            [.jobs[] | select(.started_at != null and .completed_at != null and .conclusion != "skipped")
+              | {name, s: ((.completed_at | fromdate) - (.started_at | fromdate))}]
+            | (.[] | "RESULT job=\(.name) seconds=\(.s) minutes=\(((.s + 59) / 60) | floor)"),
+              "RESULT job_minutes=\((map(((.s + 59) / 60) | floor) | add // 0) + 1) (this report job counted as 1)"' ||
+            echo "RESULT job_minutes=unknown: the jobs API failed"

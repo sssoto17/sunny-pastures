@@ -88,7 +88,8 @@ threat-model document (the spec's table already is one).
 | `rules/` | `createRules(content)` → `{ sim, newFarm, replay, rulesVersion }`. `replay` folds `apply` over the actions at their `at` (and throws on a refusal, ADR-0001), then `advance`s to `to`. M3 has one version (`rulesVersion = 1`); the M4 registry replaces the implementation behind the same interface |
 | `store/` | the `GameStore` type and `createStore({ db, newFarm, replay })`: B100. The layout grill wrote `sql`; section 5, Q9 hands the store the Drizzle client instead |
 | `auth/` | `createAuth(config)` → `{ readPlayer(request) }` (section 4) |
-| `timing/` | `withTiming(name, fn)` and the `Server-Timing` header |
+| `timing/` | `createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`: one recorder per request; phases `load`, `sim`, `commit`, `total`, summed across retries; the header value, or `null` when no phase ran (#394) |
+| `http/` | the HTTP contract (section 3), added by #395: `readActionRequest` and `readFarmRequest` (the 415 → 413 → 400 checks and the action guards), `buildErrorResponse` and `buildJsonResponse` (the one error builder and the headers on every response). Builds `Response`s, so it isn't `game/` |
 | `game/` | `submitAction(deps, playerId, body)` and `loadFarm(deps, playerId)`: ADR-0001's loop and the 422 re-check. Returns results, never `Response`s |
 | `api/` | the composition root: `getApi()` builds config → db → rules → store → auth → deps, and exposes what the routes call |
 
@@ -114,11 +115,13 @@ and `PlayerId` as types only, so it is tested against a fake store. There is no 
   | `auth` | `config` |  |
   | `db` | nothing | `config` |
   | `config`, `timing` | nothing |  |
+  | `http` (#395) | nothing | `sim` |
 
   `game` → type-only `auth` (for `PlayerId`) was added by the auth grill (section 4, Q4).
   `coverage.requireAllFiles` puts every file under `apps/web/src` in a zone. Section 6 adds a
   test-files-only allowance (`game/**/tests/**` → `store/tests/**`) and an `acceptance` zone with no
-  allowances.
+  allowances. The store gate's one file (`store/tests/storeGate.db.test.ts`) is a zone of its own
+  that may also run `rules` and `sim`, since it plays the script with the real rules (#383).
 
 - Client code imports only the sim's package entry, which is the current content (ADR-0006, "The
   client"). The registry lives in `server/rules/`, out of the client's reach.
@@ -198,7 +201,9 @@ first action writes its first row.
   [Build tickets for game API persistence from ADR-0007](https://github.com/sssoto17/sunny-pastures/issues/335)):
   `route.ts` stays a thin adapter (section 2, Q1), so the request guards, the error builder and the
   headers live in a server module the routes reach through `server/api`, where they are unit-tested.
-  Which module holds them is the build ticket's call.
+  Which module holds them is the build ticket's call. #395 settled it (admin, 21 Nov 2026): a module
+  of its own, `http/`, with its own zone that only `api` imports, so `api/` stays the composition
+  root and the contract's imports are held by the boundary check.
 
 ### Response
 
@@ -479,13 +484,16 @@ anywhere); the first store test against the local stack proves it. If it fails, 
   only be reached with a database, so leaving `db` out of coverage would fail the 80% floor by
   construction.
 - `ci / test` starts a stack (`supabase start`, `supabase db reset`, `pnpm db:env`) **only when the
-  PR touches `apps/web/src/server/**` or `supabase/**`**. Otherwise it runs `--project unit`, and
-  the gate runs `--skip-ratchet`, because untested store files would read 0% (as `check:task`
-  already does for partial runs).
+  PR touches `apps/web/src/server/**`, `supabase/**`, `.github/actions/supabase-stack/**` or
+  `vitest.config.mts`** (the last two added by the admin, 21 Nov; #439 review: what runs the `db`
+  tests is checked on the PR too). Otherwise it runs `--project unit`, and the gate runs
+  `--skip-ratchet`, because untested store files would read 0% (as `check:task` already does for
+  partial runs).
 - **The ratchet runs in full on `main`** (admin, 19 Nov, an addendum to the test-architecture
   resolution). Every push to `main` always starts the stack and runs both projects with the full
   gate, ratchet included. A drop that merges through a PR without the stack turns `main` red on that
-  merge, so nothing drifts unseen. PRs that touch `apps/web/src/server/**` or `supabase/**` still
+  merge, so nothing drifts unseen. PRs that touch `apps/web/src/server/**`, `supabase/**`,
+  `.github/actions/supabase-stack/**` or `vitest.config.mts` (admin, 21 Nov; #439 review) still
   check the ratchet before merging, and the changed-line floors (90%/80%) apply to every PR as
   before.
 - **No conditional skips.** A `db` test without a stack **fails** with "run `pnpm db:start`"; it
@@ -506,7 +514,10 @@ still offering refused ones. At every snapshot seq, after the 8-hour gap and at 
 must strictly deep-equal the in-memory farm (types included), and the final state hash must equal
 `determinismScript.hash`. It reads both files and never writes them. If `ci / determinism` is green
 and this test is red, the store is at fault, which keeps ADR-0001's "where does the failure lie"
-property. The `stateAt` checks at random times move to M6 with the audit route.
+property. The `stateAt` checks at random times move to M6 with the audit route. The gate is the one
+store test that runs `rules` and the sim's code, so its file is a Fallow zone of its own
+(`storeGate`: the store tests' rule plus `rules` and `sim`), and the store's other tests keep the
+sim type-only (#383).
 
 ### Action-handler tests: an in-memory store held to a contract
 
@@ -622,11 +633,13 @@ Actions minutes are tight.
 | Humble Object (thin adapter) | `route.ts` | Framework code that is hard to test holds no logic | Next middleware, a `withPlayer` wrapper |
 | Functional core, imperative shell (ADR-0001) | `game/` with the sim | `game/` returns results; the routes and the store do the I/O | — |
 | Facade with a Strategy slot | `rules/` | One interface over content → sim, `newFarm`, `replay`; M4's registry swaps the implementation | `replay` in the sim, `replay` in `game/` |
-| Decorator | `timing/` (`withTiming`) | Times a step without editing it | — |
+| Decorator | `timing/` (`createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`) | Times a step without editing it | — |
 | Layered architecture, enforced | Fallow zones, `server-only` | The direction of dependencies is checked, not reviewed | ESLint `no-restricted-imports`, dependency-cruiser |
 | Resource scoped to the caller ("me" resource) | `/api/farm` | Ownership comes from identity, so there is no ownership check to forget (T5) | — |
 | Idempotent Receiver | `Idempotency-Key`, `unique (farm_id, idempotency_key)` and the stored `answer` | A retry gets the first answer, stored in the row that claims the seq | the key in the body (the spike) |
-| Parse, don't validate | the request guards return the sim's `Action`; the branded `PlayerId` | Handlers only see checked values, and a raw string can't stand in for a verified id | a schema library (Zod, Valibot) |
+| Parse, don't validate | the request guards in `http/` return the sim's `Action`; the branded `PlayerId` | Handlers only see checked values, and a raw string can't stand in for a verified id | a schema library (Zod, Valibot) |
+| Table-driven dispatch, checked for exhaustiveness | `http/`'s guards: one per variant, keyed by `Action["type"]`, built from a field table | The build fails when the sim adds a variant without a guard; each guard is one line | a `switch` over `type` (exhaustive too, but each case hand-written), a schema library |
+| Factory with a closed message catalogue | `http/`'s `buildErrorResponse` | One function makes every error body and its headers; only the sim's refusal reason is free text, so no stack trace or SQL can reach a body | each route building its own `Response`, Next middleware |
 | Envelope | `{ answer, farm }` | The stored answer stays small; the farm is a fresh read | the farm inside the answer, the answer alone |
 | Version negotiation by tag (ADR-0006) | `Rules-Version`, `farm.rulesVersion` | The client reloads on a mismatch | — |
 | Bearer token (RFC 6750) | `Authorization` header | Stateless, no CSRF, the same for the browser, tests and Locust | the `@supabase/ssr` cookie |

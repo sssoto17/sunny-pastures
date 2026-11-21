@@ -292,6 +292,25 @@ describe("floor guard, end to end", () => {
 			expect(guard().out).toContain(`[check-removed] ${CI}`);
 		});
 
+		// #384: `guard / acceptance` runs main's copy of its script from a checkout of its own; a PR
+		// that points the checkout at its head or replaces the run would pass its own acceptance edits.
+		const ACCEPTANCE =
+			'jobs:\n  acceptance-guard:\n    steps:\n      - uses: actions/checkout@0000000000000000000000000000000000000000\n        with:\n          ref: ${{ github.event.repository.default_branch }}\n      - run: node "$dir/acceptance-guard.mjs"\n';
+		it.each([
+			[
+				"a changed checkout ref",
+				ACCEPTANCE.replace(
+					"${{ github.event.repository.default_branch }}",
+					"${{ github.head_ref }}",
+				),
+			],
+			["the run replaced", ACCEPTANCE.replace(/node .*\n/, "true\n")],
+		])("block %s in the acceptance-guard job", (_, content) => {
+			repo = makeRepo({ ...BASE, [CI]: ACCEPTANCE });
+			repo.write({ [CI]: content });
+			expect(guard().out).toContain(`[check-removed] ${CI}`);
+		});
+
 		// #125: the duplication and formatting checks run as steps of `ci / lint`.
 		it.each(['pnpm dupes --changed-since "origin/$BASE_REF"', "pnpm format:check"])(
 			"block a removed `%s` step",

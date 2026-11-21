@@ -11,9 +11,16 @@ declare module "vitest" {
 		 */
 		propertyTimeout: number;
 		/**
-		 * The local stack's connection strings, provided only by vitest.stack.config.mjs to the
-		 * `*.stack.ts` tests (#372): game_api's, and postgres's for setting up and as other roles.
+		 * The local stack's settings, provided only to the `db` project's `*.db.test.ts` files by its
+		 * global setup (apps/web/src/server/db/tests/stackSetup.ts; ADR-0007 section 6): game_api's
+		 * connection string, postgres's for setting up and acting as other roles, and the Supabase
+		 * API's URL and publishable key. All four are secrets in output: never print them.
 		 */
-		stack?: { databaseUrl: string; adminDatabaseUrl: string };
+		stack?: {
+			databaseUrl: string;
+			adminDatabaseUrl: string;
+			supabaseUrl: string;
+			supabasePublishableKey: string;
+		};
 	}
 }

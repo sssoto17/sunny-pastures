@@ -11,8 +11,9 @@ T68_THREADS='query($owner: String!, $name: String!, $pr: Int!) { repository(owne
   { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { isResolved resolvedBy { login }
   comments(first: 1) { nodes { author { login } body } } } } } } }'
 # An open thread holds a PR through required conversation resolution, so the App's approval plus
-# auto-merge can't merge (a) or a wrongly approved (c). (e) and (f) never get the App's approval:
-# their rows come from paths, in code (post-review.sh).
+# auto-merge can't merge (a) or a wrongly approved (c). (e) and (f) carry the App's escalation
+# thread instead (their rows come from paths, in code: post-review.sh), and until #104 the
+# review:admin it adds with that thread holds its approval as well.
 T68_HOLD="Hold (ci-check.sh start 68): this open thread keeps a throwaway PR from merging once"
 T68_HOLD+=" allow_auto_merge goes on for #68's tests. Leave it open; cleanup 68 closes it unmerged."
 
@@ -212,11 +213,11 @@ T68_VERDICTS='
    elif ($d.a | bot | map(.state) | index("DISMISSED")) == null then t("d"; "a push dismisses the approval"; "fail"; "no dismissed approval on (a)")
    elif ($d.a | latest) == "APPROVED" then t("d"; "a push dismisses the approval"; "pass"; "approval `DISMISSED`, then a fresh `APPROVED`")
    else t("d"; "a push dismisses the approval"; "not yet run"; "dismissed; waiting for the fresh review") end),
-  (if seen($d.e) | not then t("e1"; "escalation thread, no approval"; "not yet run"; "no review on (e)")
+  (if seen($d.e) | not then t("e1"; "escalation thread, review:admin holds approval"; "not yet run"; "no review on (e)")
    elif ($d.e | bot | map(.state) | index("APPROVED")) == null and ($d.e.labels | index("review:admin")) != null
      and (($d.e | esc).comments.nodes[0].body // "" | contains("@\($admin)"))
-   then t("e1"; "escalation thread, no approval"; "pass"; "thread mentions @\($admin), `review:admin`, no `APPROVED`")
-   else t("e1"; "escalation thread, no approval"; "fail"; "see PR #\($d.e.number) below") end),
+   then t("e1"; "escalation thread, review:admin holds approval"; "pass"; "thread mentions @\($admin), `review:admin`, no `APPROVED`")
+   else t("e1"; "escalation thread, review:admin holds approval"; "fail"; "see PR #\($d.e.number) below") end),
   (if ($d.resolve.status // "") == "" then t("e2"; "factory resolves, App reopens"; "not yet run"; "no resolve 68 run")
    elif $d.resolve.status != "completed" then t("e2"; "factory resolves, App reopens"; "not yet run"; "run \($d.resolve.status)")
    elif $d.resolve.conclusion == "success" then t("e2"; "factory resolves, App reopens"; "pass"; "run \($d.resolve.url)")
@@ -230,15 +231,24 @@ T68_VERDICTS='
    elif ($d.e | bot | last | .commit) != $d.e.headRefOid or ($d.e.head_author | startswith("sunny-factory"))
    then t("e3"; "admin resolves, it stays resolved"; "not yet run"; "resolved; waiting for push 68 e and its review")
    else t("e3"; "admin resolves, it stays resolved"; "pass"; "resolved by @\($admin) after the App reviewed the head") end),
-  # What was not tested never reads pass: "not exercised" says what was observed instead.
-  (if seen($d.e) | not then t("e4"; "merges only on admin approval"; "not yet run"; "no review on (e)")
-   elif $d.e.mergeStateStatus != "BLOCKED" then t("e4"; "merges only on admin approval"; "fail"; "`\($d.e.mergeStateStatus)` without your approval")
-   else t("e4"; "merges only on admin approval"; "not exercised"; "observed `\($d.e.reviewDecision)`, `BLOCKED`, no App approval; your `gh` authored (e), so you cannot approve it") end),
+  # What was not tested never reads pass: "not exercised" says what was observed instead. #322:
+  # the App approves (e), which your account opened, and the open escalation thread alone holds
+  # it; once you resolve the thread it may merge. Until #104, review:admin holds the approval.
+  (($d.e // {threads: []} | esc) as $th | ($th != null and ($th.isResolved | not)) as $open
+   | (seen($d.e) and ($d.e | latest) == "APPROVED") as $approved |
+   if seen($d.e) | not then t("e4"; "the escalation thread holds the merge"; "not yet run"; "no review on (e)")
+   elif $open and $approved and $d.e.reviewDecision == "APPROVED" and $d.e.mergeStateStatus == "BLOCKED"
+   then t("e4"; "the escalation thread holds the merge"; "pass"; "App approved; the open thread alone holds it: `APPROVED`, `BLOCKED`")
+   elif $d.e.mergeStateStatus != "BLOCKED" and ((($th.resolvedBy.login // "") == $admin and $approved) | not)
+   then t("e4"; "the escalation thread holds the merge"; "fail"; "`\($d.e.mergeStateStatus)` without your resolved thread behind an App approval")
+   elif $approved
+   then t("e4"; "the escalation thread holds the merge"; "not exercised"; "App approved; observed `\($d.e.reviewDecision)`, `\($d.e.mergeStateStatus)` with the thread resolved by @\($admin)")
+   else t("e4"; "the escalation thread holds the merge"; "not exercised"; "observed `\($d.e.reviewDecision)`, `\($d.e.mergeStateStatus)`, no App approval: `review:admin` holds the approval until #104") end),
   (if seen($d.f) | not then t("f"; "AGENTS.md waits for the code owner"; "not yet run"; "no review on (f)")
    elif $d.f.mergeStateStatus != "BLOCKED" or $d.f.reviewDecision == "APPROVED"
    then t("f"; "AGENTS.md waits for the code owner"; "fail"; "`\($d.f.reviewDecision)`, `\($d.f.mergeStateStatus)`")
    elif ($d.f | latest) == "APPROVED" then t("f"; "AGENTS.md waits for the code owner"; "pass"; "App approved; `\($d.f.reviewDecision)`, `BLOCKED`")
-   else t("f"; "AGENTS.md waits for the code owner"; "not exercised"; "App withheld approval (Code-owned path row): `\($d.f.reviewDecision)`, `BLOCKED`; the code-owner hold behind an App approval is not reachable with the path rows in code") end)
+   else t("f"; "AGENTS.md waits for the code owner"; "not exercised"; "App withheld approval (`review:admin`, until #104): `\($d.f.reviewDecision)`, `BLOCKED`; the code-owner hold behind an App approval is not reachable while the label holds it") end)
   ]'
 
 results_68() {

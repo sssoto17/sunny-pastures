@@ -4,23 +4,8 @@ Scripts the admin runs by hand; each header says what it does. Runbooks of sever
 
 ## #106: the factory's kill switch
 
-`scripts/setup/factory-switch.sh`, on your own machine, after #106's PR has merged (it dispatches
-`main`'s `check-106-factory-switch.yml`, which needs `actions: write`). While `FACTORY_ENABLED`
-doesn't exist yet it runs the throwaway once with it unset; then it sets the variable to `false`
-(after asking) and runs it again. Each run must log `SWITCH off` with the stand-in for the factory's
-work skipped. It writes both runs to `.scratch/106-results.md`; post it with
-`gh issue comment 106 --repo sssoto17/sunny-pastures --body-file .scratch/106-results.md` and add
-the run links to the PR. Then remove `.github/workflows/check-106-factory-switch.yml` from `main` in
-a PR of its own (code-owned).
-
-To check one run by hand instead:
-
-```sh
-gh workflow run check-106-factory-switch.yml --repo sssoto17/sunny-pastures --ref main
-gh run list --repo sssoto17/sunny-pastures --workflow check-106-factory-switch.yml --limit 1
-gh run view <run-id> --repo sssoto17/sunny-pastures --log | grep 'SWITCH'
-gh run view <run-id> --repo sssoto17/sunny-pastures --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
-```
+`scripts/setup/factory-switch.sh`, on your own machine: it sets the repo variable `FACTORY_ENABLED`
+to `false` (after asking) and reads it back. Re-running it is safe.
 
 Flipping the switch later: ADR-0002, area 2, "The kill switch, built (#106)".
 
@@ -74,9 +59,13 @@ them.
   reviewer reopened the thread. `results 68` reads the newest dispatch.
 - **Step 6 before step 7:** (e3) passes when the thread is resolved by you and the App has reviewed
   the newest head. Resolve first, then push; a thread open again after step 7 is a fail.
-- **"Not exercised" is never a pass.** The App never approves (f) (Code-owned path row, in code) and
-  you can't approve (e) or (f) (you opened them). (f)'s code-owner hold rests on the ruleset's
-  `require_code_owner_review` (`gh api repos/sssoto17/sunny-pastures/rules/branches/main`: `true`).
+- **"Not exercised" is never a pass.** Your account opened (e) and (f), so you can't approve them,
+  and since #322 the App approves an escalated PR your account opened when it finds it clean: the
+  open escalation thread alone holds the merge, which (e4) reads (`APPROVED`, `BLOCKED`, thread
+  open). Until #104, though, the `review:admin` the App adds when it escalates holds its approval on
+  (e) and (f), so (e4) and (f) read "not exercised". (e1) passes while the label holds the approval.
+  (f)'s code-owner hold rests on the ruleset's `require_code_owner_review`
+  (`gh api repos/sssoto17/sunny-pastures/rules/branches/main`: `true`).
 - **To run one test again,** fix the cause, then `cleanup 68` and start over from step 1. For step 5
   alone, run it again: `results 68` reads the newest dispatch only.
 - **Afterwards,** once the results comment is on #68, remove

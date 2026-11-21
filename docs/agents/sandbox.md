@@ -24,6 +24,7 @@ Write each Bash call so a rule in `.claude/settings.json` can match it, or it pr
 | Git commands that write `.git/config` or `.git/hooks`: `git push -u` / `--set-upstream`, `git worktree add` from a remote branch with tracking, `git remote set-url`, `gh pr checkout` | `could not lock config file` | The sandbox protects `.git/config` and `.git/hooks`, so a session can't plant a hook or a `core.fsmonitor` program. Avoid these commands rather than leaving the sandbox; see "Git inside the sandbox". |
 | Every bare `supabase` command, even `supabase --version` | `EROFS: read-only file system` | The CLI writes telemetry to `~/.supabase`, and home is read-only. `HOME=$TMPDIR supabase …` also works. The `pnpm db:*` scripts and `pnpm supabase:check` run outside the sandbox on their own (`sandbox.excludedCommands` in `.claude/settings.json`). |
 | Anything that connects to a service on the host: local Postgres (55322), the Supabase API (55321), a spike server started in an earlier command | `Connection refused` | The sandbox has its own network namespace, so `127.0.0.1` inside it isn't the host's loopback. Checked on 6 Nov: port 55322 refused inside, open outside. |
+| `pnpm test`, `pnpm check:task` or `--project db` whenever a `db` test (`*.db.test.ts`) is queued (#382) | `EACCES` on `.env`, or "The db tests need the local Supabase stack" | The `db` project's global setup reads `.env` and connects to the host's Postgres, and both are blocked here. Run it outside. With no Docker at all, run `pnpm test --project unit` and leave the `db` tests to CI (`supabase/README.md`, "Without Docker"). |
 | Reading `.env`, `.env.local`, `.env.*.local`, `.env.production`, `~/.ssh`, `~/.aws` | Empty file or permission denied | These paths are read-denied, so `node --env-file=.env` sees nothing. Pass `DATABASE_URL` in the environment, or run the command outside. |
 
 A server and the client that calls it work inside the sandbox only when they run in the same command
@@ -45,6 +46,11 @@ host" below. These habits keep `.git/config` out of it:
   `scripts/open-pr.sh [--label <name>]... <branch> <body-file>` (a stack with `scripts/stack.sh`),
   never `gh pr create`: the `open-pr` workflow opens it as `sunny-factory[bot]`, and neither needs
   an upstream (#336). It uses REST only, so it works in cloud sessions too.
+  - **`--as-admin`, for admin-owned paths only** (`tests/acceptance/**`; #385, ADR-0007 "Acceptance
+    tests"): `scripts/open-pr.sh --as-admin …` (or `scripts/stack.sh open --as-admin …`) opens the
+    PR with the session's own credentials, the admin's, so `guard / acceptance` sees a human author.
+    It's off by default and refused unless `OPEN_PR_AS_ADMIN=<N>` is set by the admin's launch and
+    the body links #N. Never set that variable yourself, in a command or a brief.
 - Don't run `gh pr checkout` or `git remote set-url`. Read a PR's files with
   `git show origin/<branch>:<path>` or `gh api`.
 
@@ -128,6 +134,14 @@ Factory, repo settings and a bare `git push` ask first. Reading `.env*`, command
 secrets, force pushes and pushes to `main` are denied. Bash rules match the command text, so they're
 guidance, not a security boundary. The sandbox and the hooks are what enforce.
 
+An `ask` rule prompts in auto mode too, so each one can stop an unattended lane until the admin
+answers (<https://code.claude.com/docs/en/permission-modes.md>, "How the classifier evaluates
+actions"). Add one only for an action the admin must confirm. A wildcard allow paired with ask rules
+for its write flags prompts on every write: keep the pair only when the admin wants each write
+confirmed (vitest's snapshot flags, admin, 21 Nov). Otherwise drop both, so auto mode's classifier
+decides; Manual mode then prompts, or runs the command inside the sandbox when sandbox auto-allow is
+on (#434: `prettier --write` stopped the #382 lane for over an hour).
+
 ## Working directory
 
 `cd` in a Bash command carries over to the next command. If a session `cd`s into another worktree,
@@ -146,6 +160,7 @@ print credentials, and what to use instead:
 | Prints secrets | Use instead |
 |---|---|
 | `supabase start` (keys, S3 credentials, DB URL with password) | `pnpm db:start` |
+| `supabase db reset` (a secret-shaped line seen on 21 Nov, #382) | `pnpm db:reset`, which shows the CLI's output, redacted, only on failure |
 | `supabase status` | `pnpm db:status`; `pnpm db:env` sets `game_api`'s password (the one already in `.env`, or a new one) and writes `DATABASE_URL` (`game_api`) and `ADMIN_DATABASE_URL` to `.env` without echoing either |
 | `env`, `printenv`, `cat .env` (denied by permission rules) | `test -n "${NAME:+x}" && echo set` to check a variable is set |
 

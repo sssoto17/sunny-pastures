@@ -1,0 +1,55 @@
+name: supabase-stack
+description: >-
+  The local Supabase stack for tests (#382; ADR-0007 section 6), reusable by any job that needs
+  one (#49's ci / acceptance): the Supabase CLI from its release, checked against a hash written
+  here, then pnpm db:start, pnpm db:reset and pnpm db:env, which leave DATABASE_URL,
+  ADMIN_DATABASE_URL, SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in ./.env. Run
+  ./.github/actions/setup first. No step prints a key, token or URL (#382; docs/agents/sandbox.md,
+  "Secrets in output"): supabase/db.sh captures both of the CLI's streams and hides every value.
+inputs:
+  exclude:
+    description: >-
+      The services supabase start leaves out (its --exclude). The db tests need Postgres, and the
+      auth module's tests need Auth (gotrue) behind the API gateway (kong); the rest only cost
+      image pulls.
+    default: realtime,storage-api,imgproxy,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+runs:
+  using: composite
+  steps:
+    # The standalone binary, as supabase/README.md requires, at the version `pnpm supabase:check`
+    # pins. v2.122.0 was published on 23 Oct 2026, past the 7-day rule for binaries
+    # (CONSTRAINTS.md, "Tools are dependencies"). The hash is the release's own checksums.txt line,
+    # copied here so a replaced release asset fails the step (as security.yml does for gitleaks).
+    - name: Install the Supabase CLI
+      shell: bash
+      env:
+        SUPABASE_VERSION: 2.122.0
+        SUPABASE_SHA256: 59ed066847b98d7461c60e9109d40cab6b9756177ce06ebb05b51338519f5136
+      run: |
+        dir="$RUNNER_TEMP/supabase-cli"
+        archive="supabase_${SUPABASE_VERSION}_linux_amd64.tar.gz"
+        mkdir -p "$dir"
+        curl -fsSL --retry 3 -o "$dir/$archive" \
+          "https://github.com/supabase/cli/releases/download/v${SUPABASE_VERSION}/$archive"
+        echo "$SUPABASE_SHA256  $dir/$archive" | sha256sum --check --strict
+        tar -xzf "$dir/$archive" -C "$dir" supabase
+        echo "$dir" >> "$GITHUB_PATH"
+    - name: Check the Supabase CLI's version
+      shell: bash
+      run: pnpm supabase:check
+    # db:start lists the stack's URLs (password hidden) on stdout; #382 asks for no URL in the log,
+    # so stdout is dropped. A failure still shows the CLI's output, redacted, on stderr.
+    - name: Start the stack
+      shell: bash
+      env:
+        EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        pnpm db:start --exclude "$EXCLUDE" > /dev/null
+        echo "The Supabase stack is up (excluded: $EXCLUDE)."
+    - name: Reset the database
+      shell: bash
+      run: pnpm db:reset
+    # Prints the variables' names only.
+    - name: Write .env
+      shell: bash
+      run: pnpm db:env

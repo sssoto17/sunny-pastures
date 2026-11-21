@@ -112,16 +112,3 @@ describe("factory-switch.yml (the reusable switch)", () => {
 			expect(ref).toMatch(/^[0-9a-f]{40}$/);
 	});
 });
-
-describe("check-106-factory-switch.yml (the throwaway dispatch)", () => {
-	const yml = workflow("check-106-factory-switch.yml");
-
-	it("calls the switch first and runs its stand-in only when it says run=true", () => {
-		expect(yml).toContain("uses: ./.github/workflows/factory-switch.yml");
-		expect(yml).toMatch(/needs: switch\n\s+if: needs\.switch\.outputs\.run == 'true'\n/);
-	});
-
-	it("mints no token and calls no Claude, even with the switch on", () => {
-		expect(yml).not.toMatch(/secrets\.|environment:|create-github-app-token|claude-code-action/);
-	});
-});

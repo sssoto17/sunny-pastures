@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# Setup wizard for #106, the factory's kill switch (ADR-0002, area 2, "Caps"): shows a run with
-# the switch off (#106 criterion 3) and leaves the repo variable FACTORY_ENABLED set to `false`. It
-# dispatches main's throwaway .github/workflows/check-106-factory-switch.yml, first with the
-# variable unset (only while it doesn't exist yet), then with it `false`, and checks each run: the
-# switch job logs SWITCH off and the stand-in for the factory's work never runs. It writes the
-# results as Markdown for #106. Only the admin runs it, after the PR has merged: workflow_dispatch
-# needs actions: write and creating a repo variable needs the admin's token, which a lane lacks.
-# Nothing it prints is secret: run links, job conclusions and the SWITCH log lines.
+# Setup wizard for the factory's kill switch (#106; ADR-0002, area 2, "The kill switch, built
+# (#106)"): sets the repo variable FACTORY_ENABLED to `false` (after asking) and reads it back.
+# Only the admin runs it: creating or changing a repo variable needs the admin's token, which a
+# lane lacks.
+# Nothing it prints is secret: FACTORY_ENABLED is a repo variable, not a secret.
 # Tests: scripts/setup/factory-switch.test.sh. Run with --help for usage and exit codes.
 #
 # A wizard walks a human through a manual procedure, step by step.
@@ -215,27 +212,20 @@ fi
 
 REPO=sssoto17/sunny-pastures
 VAR=FACTORY_ENABLED
-WORKFLOW=check-106-factory-switch.yml
-RESULTS_FILE=${RESULTS_FILE:-.scratch/106-results.md}
-POLL_SECONDS=${FACTORY_SWITCH_POLL_SECONDS:-10}
-POLL_TRIES=${FACTORY_SWITCH_POLL_TRIES:-36} # 6 minutes at 10 s
 VARS_URL=https://github.com/$REPO/settings/variables/actions
 
 usage() {
   cat >&2 <<'USAGE'
 usage: scripts/setup/factory-switch.sh
 
-Shows #106's kill switch stopping a run, after #106's PR has merged, one stage per screen:
-  1. checks gh is signed in and check-106-factory-switch.yml is on main;
-  2. while FACTORY_ENABLED doesn't exist yet: dispatches the throwaway once with it unset;
-  3. sets FACTORY_ENABLED to false (after asking) and reads it back;
-  4. dispatches the throwaway with it false;
-  5. writes both runs' results to .scratch/106-results.md (RESULTS_FILE overrides), for #106.
-Each run passes when its switch job logged "SWITCH off" and the stand-in for the factory's work
-never ran. Re-running is safe: a variable that exists is only set to false after asking.
+Turns the factory's kill switch off, one stage per screen:
+  1. checks gh is signed in and reads FACTORY_ENABLED;
+  2. sets FACTORY_ENABLED to false (after asking) and reads it back.
+Re-running is safe: a variable that is false already is left alone. To turn the factory on, see
+ADR-0002, area 2, "The kill switch, built (#106)".
 
-Exit codes: 0 done; 1 a gh command or a check failed; 2 refused (gh missing or signed out, the
-workflow isn't on main, you declined, input ended); 3 a run didn't finish in time.
+Exit codes: 0 done; 1 a gh command or a check failed; 2 refused (gh missing or signed out, you
+declined, input ended).
 USAGE
 }
 
@@ -263,7 +253,7 @@ intro() {
 ok() { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
 
 # current_value: the variable's value, or "(unset)" only on a 404. Any other failure stops the
-# wizard rather than label a run "unset" while the variable may exist. On a 404, gh api prints the
+# wizard rather than report "unset" while the variable may exist. On a 404, gh api prints the
 # error body on stdout, so a failed call's output is dropped, never echoed.
 current_value() {
   local v err
@@ -276,80 +266,18 @@ current_value() {
   die 1 "reading $VAR failed (not a 404): check gh auth status and re-run"
 }
 
-# newest_dispatch: "<id><TAB><status><TAB><url>" of the newest dispatch of the throwaway, or
-# nothing when it has none.
-newest_dispatch() {
-  gh run list --repo "$REPO" --workflow "$WORKFLOW" --event workflow_dispatch --limit 1 \
-    --json databaseId,status,url --jq '.[0] // empty | "\(.databaseId)\t\(.status)\t\(.url)"'
-}
-
-RESULTS=() # one Markdown block per checked run
-
-# dispatch_and_check LABEL: dispatches the throwaway on main, waits for the run it started, and
-# checks it: the switch job succeeded and logged SWITCH off, and the stand-in didn't run.
-dispatch_and_check() {
-  local label=$1 last run id="" status="" url="" i jobs log switch_line switch_job stand_in
-  # The run is told apart by its id, newer than the newest before the dispatch: no local clock.
-  last=$(newest_dispatch) || die 1 "gh run list failed"
-  last=${last%%$'\t'*}
-  gh workflow run "$WORKFLOW" --repo "$REPO" --ref main >/dev/null || die 1 "gh workflow run $WORKFLOW failed"
-  ok "dispatched $WORKFLOW on main ($label)"
-  # GitHub takes a few seconds to list a new dispatch.
-  for ((i = 0; i < POLL_TRIES; i++)); do
-    sleep "$POLL_SECONDS"
-    run=$(newest_dispatch) || die 1 "gh run list failed"
-    [[ -n $run && ${run%%$'\t'*} != "$last" ]] || continue
-    IFS=$'\t' read -r id status url <<<"$run"
-    [[ $status == completed ]] && break
-  done
-  [[ $status == completed ]] || die 3 "the run didn't finish in time${url:+: $url}"
-  note "$url"
-  jobs=$(gh run view "$id" --repo "$REPO" --json jobs --jq '.jobs[] | "\(.name)\t\(.conclusion)"') ||
-    die 1 "gh run view $id failed"
-  log=$(gh run view "$id" --repo "$REPO" --log) ||
-    die 1 "gh run view $id --log failed: check the run by hand (scripts/setup/README.md, #106): $url"
-  # Log lines are "job<TAB>step<TAB>timestamp message".
-  switch_line=$(grep -oE 'SWITCH (on|off): .*' <<<"$log" | head -n1) || true
-  # The switch job is "switch / switch" (a job inside the called workflow).
-  switch_job=$(awk -F'\t' '$1 ~ /^switch/ {print $2; exit}' <<<"$jobs")
-  stand_in=$(awk -F'\t' '$1 ~ /stand-in/ {print $2}' <<<"$jobs")
-  RESULTS+=("$(
-    printf '### FACTORY_ENABLED %s\n\nRun: %s\n\n```\n%s\n```\n\n' "$label" "$url" "${switch_line:-(no SWITCH line)}"
-    printf '| Job | Conclusion |\n|---|---|\n'
-    awk -F'\t' '{printf "| %s | %s |\n", $1, $2}' <<<"$jobs"
-    [[ -n $stand_in ]] || printf '| stand-in | (never started) |\n'
-  )")
-  [[ $switch_job == success ]] || die 1 "the switch job didn't succeed (${switch_job:-not listed}): $url"
-  [[ $switch_line == "SWITCH off: "* ]] || die 1 "the switch didn't log SWITCH off ($label): ${switch_line:-no SWITCH line}; $url"
-  [[ -z $stand_in || $stand_in == skipped ]] || die 1 "the stand-in ran ($stand_in) with the switch $label: $url"
-  ok "$switch_line"
-  ok "stand-in: ${stand_in:-never started}"
-}
-
 run_wizard() {
 
-TOTAL_STAGES=5
+TOTAL_STAGES=2
 
-intro "#106: the factory's kill switch"
+intro "The factory's kill switch"
 
-stage "Check gh and the workflow"
+stage "Check gh"
 command -v gh >/dev/null 2>&1 || die 2 "gh is not installed: https://cli.github.com"
 gh auth status >/dev/null 2>&1 || die 2 "gh is signed out: run gh auth login, then re-run this"
-gh api "repos/$REPO/contents/.github/workflows/$WORKFLOW?ref=main" --silent >/dev/null 2>&1 ||
-  die 2 "$WORKFLOW isn't on main yet: merge #106's PR first"
 before=$(current_value)
-ok "gh is signed in; $WORKFLOW is on main"
+ok "gh is signed in"
 say "$VAR now: $before"
-pause
-
-stage "A run with $VAR unset"
-if [[ $before == "(unset)" ]]; then
-  say "An unset variable reads as empty in a workflow, which counts as off."
-  confirm "Dispatch $WORKFLOW on main now?" || die 2 "you declined: nothing dispatched"
-  dispatch_and_check "unset"
-else
-  note "$VAR exists already, so this run is skipped; stage 4 runs with it false"
-fi
 pause
 
 stage "Set $VAR to false"
@@ -364,24 +292,6 @@ fi
 [[ $(current_value) == false ]] || die 1 "$VAR doesn't read back as false"
 ok "$VAR is false"
 open_url "$VARS_URL"
-pause
-
-stage "A run with $VAR false"
-confirm "Dispatch $WORKFLOW on main now?" || die 2 "you declined: nothing dispatched"
-dispatch_and_check "false"
-pause
-
-stage "Results for #106"
-mkdir -p "$(dirname "$RESULTS_FILE")"
-{
-  printf '## #106 criterion 3: runs with the kill switch off\n\n'
-  printf 'From `scripts/setup/factory-switch.sh`. `FACTORY_ENABLED` is now `false`.\n\n'
-  printf '%s\n' "${RESULTS[@]}"
-} >"$RESULTS_FILE"
-ok "wrote $RESULTS_FILE"
-say "Read it, then post it and add the run links to the PR:"
-say "  gh issue comment 106 --repo $REPO --body-file $RESULTS_FILE"
-say "Afterwards, remove .github/workflows/$WORKFLOW from main in a PR of its own."
 pause
 
 finish

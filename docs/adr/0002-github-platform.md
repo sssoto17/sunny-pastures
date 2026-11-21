@@ -422,12 +422,17 @@ PR_ means either kind.
     admin's account opened; an approval on every clean part lets a stack merge in one action once
     its threads are resolved ("Stacks", below). On a PR an App opened (#336) it still withholds:
     resolving a thread starts no workflow (below), so a thread the factory App resolved could let
-    the PR merge before the bot checks who resolved it. **The code waits:** `post-review.sh` keeps
-    withholding on every escalated PR until #322, and #68's test (e) is rewritten there; until then
-    tests (e) and (f) (`scripts/setup/README.md`, `ci-check-68.sh`) hold as written. Code-owner
-    review is separate and stays on (Q15). On a factory PR the bot also requests the admin's review,
-    so `review-requested:@me` is the admin's queue. The admin's own open PRs show under
-    `author:@me`.
+    the PR merge before the bot checks who resolved it. **Built in #322:** `post-review.sh` reads
+    who opened the PR from the REST PR object (`user.login` and `user.type`, never text the PR
+    wrote) and approves a clean escalated PR only when that is the admin's `User` account and its
+    own escalation thread is open on the PR. When no file took the thread, or the admin has already
+    resolved it and a later head comes in, nothing would hold the merge, so it withholds; a finding
+    whose body starts with `escalated:` is posted as `Finding: escalated: …`, so it can't pass for
+    the thread. #68's test (e) was rewritten to match. Until #104 the bot also adds `review:admin`
+    when it escalates, and the label holds its approval ("Until #104, the label stays"), so the
+    approval shows only once the label is gone. Code-owner review is separate and stays on (Q15). On
+    a factory PR the bot also requests the admin's review, so `review-requested:@me` is the admin's
+    queue. The admin's own open PRs show under `author:@me`.
   - **The escalation thread is the bot's memory across runs.** Anyone with write access can resolve
     a thread, the factory App included, and so can any session on the admin's account. Agents never
     resolve review threads: a `deny` rule on the GitHub MCP resolve-thread tool and the `PreToolUse`
@@ -445,9 +450,10 @@ PR_ means either kind.
     bypass-merges it; a PR an App opened the admin approves (code-owner review stays on; "Stacks",
     below). The resolved thread and the merge are the record of who decided.
   - **The bot's earlier Request changes.** When its re-review finds those findings fixed, the bot's
-    Approve replaces its Request changes, on an escalated PR too. Until the reviewer App follows
-    #264 (below), it dismisses its own Request changes on an escalated PR instead
-    (`dismissPullRequestReview`). The admin can also dismiss it.
+    Approve replaces its Request changes, on an escalated PR too (#322). Where it withholds with
+    every finding fixed (an escalated PR an App opened, or `review:admin` until #104), it dismisses
+    its own Request changes instead (`dismissPullRequestReview`), which would otherwise block for
+    good. The admin can also dismiss it.
   - **Why a thread, not a review request or a label.** Attended sessions act as the admin after #37
     too, so the admin authors their PRs, and GitHub doesn't request a review from a PR's own author.
     That's widely reported as an API error; it isn't in the docs or tested here. So a review request
@@ -529,20 +535,34 @@ branches. The pattern is _propose, then apply_: Claude proposes and plain code a
   _Alternatives:_ adding the `project` source was rejected: it also loads the repo's
   `.claude/settings.json` (hooks, allow rules) and `.mcp.json`, whose servers the action starts (it
   sets `enableAllProjectMcpServers`). Allowing the `Skill` tool was rejected as unneeded: a typed
-  skill is expanded by the CLI, not through the tool (tried with CLI 2.1.327, 18 Nov), so `Skill`
-  stays denied and the model can't load another skill. The Report step logs
-  `RESULT skill=code-review-and-quality registered=` from the run's init message.
+  skill is expanded by the CLI, not through the tool, so `Skill` stays denied and the model can't
+  load another skill. Tried by hand (#381, 21 Nov) with CLI 2.1.319, the version the pinned action
+  installs (61a9c27: its installer pins `2.1.319` in `src/entrypoints/run.ts` and
+  `base-action/action.yml`, and the SDK is handed `~/.local/bin/claude` as
+  `pathToClaudeCodeExecutable`, so its bundled binary is never used), and with 2.1.330, both with
+  `--setting-sources user` and `Skill` denied: the skill's text reached the model. Unverified in a
+  CI run until #381's first run after merge shows `loaded=1`. The proof (#381): the CLI writes the
+  expanded skill to the session's transcript (`~/.claude/projects/<cwd>/<session>.jsonl`) as an
+  `isMeta` user message, and never to its `stream-json` output, even with `--replay-user-messages`:
+  that stream is what the SDK relays and the action saves as its execution file. So the Report step
+  runs `.github/scripts/skill-proof.mjs`, which takes the session id from the execution file and
+  counts the skill's `# Code Review and Quality` heading in that transcript, in records from the
+  skill's own folder (the model reading `SKILL.md` with Read doesn't count). It logs
+  `RESULT skill=code-review-and-quality registered=<bool> loaded=<n> cli=<version> from=<dir>`, and
+  with `loaded=0`, no transcript or no execution file, it fails the step with an `::error::`
+  annotation after the review is posted. Failing, not warning: a green job with a warning goes
+  unread, and `review` isn't a required check, so the red job blocks no merge.
 - **Apply.** Only after Claude has finished does the job mint the App's token, scoped to contents
   and pull requests. `.github/scripts/post-review.sh` (tested by
   `.github/scripts/tests/post-review.test.mjs`) then posts the review and applies the rules above in
-  code. It approves only when none of these holds: a Required finding, an escalation row,
-  `review:admin`, an escalation thread of its own, or an earlier finding of its own still open.
-  **#264 drops the escalation row and the escalation thread from that list on a PR the admin's
-  account opened** (on an App-opened PR they still withhold); the script follows in its own change
-  (#322), and `review:admin` keeps holding approval until #104. It also reopens escalation threads
-  someone other than the admin resolved, resolves only the App's own fixed finding threads, adds the
-  label and the escalation thread, requests the admin's review on factory PRs, and dismisses its own
-  Request changes once an escalated PR is fixed.
+  code. It approves only when none of these holds: a Required finding, `review:admin` (until #104),
+  or an earlier finding of its own still open. **An escalation row or an escalation thread of its
+  own no longer withholds it on a PR the admin's account opened (#264, done in #322)**: there it
+  approves while its escalation thread is open on the PR, which then alone holds the merge. On a PR
+  an App opened, or anyone else, they still withhold. It also reopens escalation threads someone
+  other than the admin resolved, resolves only the App's own fixed finding threads, adds the label
+  and the escalation thread, requests the admin's review on factory PRs, and dismisses its own
+  Request changes when it withholds with every finding fixed.
 - **Rows from paths (12 Nov, #240's review).** The script also works out the rows that depend only
   on paths, and merges them with the verdict's, so a prompt-injected verdict can't drop them:
   Code-owned path (`.github/CODEOWNERS`, gitignore rules, a rename's old path too) and Content
@@ -817,9 +837,76 @@ the switch, only the factory jobs (the sweep, the chain and the factory job) do 
   `gh variable set FACTORY_ENABLED --repo sssoto17/sunny-pastures --body false` (`true` to turn it
   on). Read it with `gh variable get FACTORY_ENABLED --repo sssoto17/sunny-pastures`. The next run
   reads the new value; a job already past the switch finishes, and `gh run cancel <id>` stops it.
-- **Its first value** is set by `scripts/setup/factory-switch.sh`, which also dispatches the
-  throwaway `check-106-factory-switch.yml` with the switch unset and then `false`, and writes both
-  runs' results for #106 (`scripts/setup/README.md`).
+- **It is set to `false`** by `scripts/setup/factory-switch.sh`, which asks first and reads it back
+  (`scripts/setup/README.md`). The run with the switch off is posted on #106; the throwaway workflow
+  that made it is removed.
+
+**The factory workflow, built (#107).** `.github/workflows/factory.yml` is the `workflow_dispatch`
+run above: an `issue` input, and a `max_turns` input that can only lower the cap. Pattern: a
+pipeline of guard jobs, each skipped unless the one before says go, so a refusal never reaches a
+secret or Claude; and a split between the model and the writer, so Claude never shares a runner with
+a write credential (the rule `review.yml` follows too). Concurrency 1 (group `factory`, never
+cancelling a running job), and `GITHUB_TOKEN` read-only in every job.
+
+**Ready and Mode (admin, 21 Nov 2026, option b).** The workflow doesn't read the Project: no Actions
+token can read this user-owned board (#102). `factory:ready` stands for Mode Factory, which
+`triage-labels.md` keeps in step with it, and the admin's manual dispatch stands for Ready. Only the
+admin and collaborators can set labels. The sweep (#108) waits for #102's native issue fields, since
+its dispatch isn't the admin's choice.
+
+1. **`switch`** calls `factory-switch.yml`, exactly as its header shows. With the switch off the run
+   logs `SWITCH off` and stops; that is how the workflow is tested without turning the factory on.
+2. **`gate`** has no environment and only the read-only `GITHUB_TOKEN`.
+   `.github/scripts/factory-gather.sh` reads the issue, the open PRs and the issue's `<n>-`
+   branches, and `.github/scripts/factory-gate.sh` refuses (`GATE refused: …`) unless the input is
+   an issue number and the issue exists, is open, isn't a PR, was opened by the owner or a
+   collaborator (`author_association`: the repo is public, and an issue's author can edit its body
+   after it is labelled), carries `factory:ready`, and has no open PR and no `<n>-` branch yet (one
+   factory branch per issue).
+3. **`factory`** (`timeout-minutes: 60`; environment `claude-seat`, which holds only
+   `CLAUDE_CODE_OAUTH_TOKEN`) checks out `main` and installs. It runs the gate again on a fresh
+   read, then writes the issue and only its owner's and collaborators' comments to files.
+   `claude-code-action` runs on the setup-token with `--max-turns` from the gate (100 unless
+   lowered, the Claude step stopped at 55 minutes), only the read-only `GITHUB_TOKEN` (as
+   `github_token`, which the action also hands to git and its GitHub tools), and
+   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. The prompt is `/implement #N` plus
+   `.github/factory-prompt.md`. Claude commits locally and writes the branch name, PR body and
+   labels to files, and a plain step packs them with a git bundle of the new commits into the job's
+   output (the hand-off, under 900 kB). The project's settings load, so an `ask` rule denies (no one
+   can answer it) and the hooks run; web tools are off.
+4. **`publish`** runs on a fresh runner that never ran the model, with `main`'s checkout.
+   `.github/scripts/factory-publish.sh` refuses (`PUBLISH refused: …`, a failed job) a hand-off with
+   any entry but the four files, a branch that isn't `<n>-<slug>`, a body without `Closes #<n>`, a
+   label outside `review:admin` and `area:*`, a diff that touches `.github/workflows/` or
+   `tests/acceptance/` (a pathspec, so a quoted non-ASCII name or a move counts), or a commit whose
+   author or committer isn't `sunny-factory[bot]`. Only then does it mint the App's token
+   (`contents: write` to push and to send `open-pr`'s dispatch, `pull-requests: read`), push the
+   branch with hooks off, and run `scripts/open-pr.sh`, so `open-pr.yml` opens the PR as
+   `sunny-factory[bot]`. The PR's author and every commit's author and committer are the App.
+5. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
+   rounds each job up) and their sum, and the PR.
+
+**Caps.** `--max-turns` doesn't count the turns of `Task` subagents, so the 55-minute step timeout
+and the job's 60 are the real bound on a run.
+
+**Two environments, both `main` only (admin, 21 Nov 2026, in the coordinator session).** The Claude
+job runs in `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN` and is named for the seat, not
+the factory, so `review.yml` can share it later. The App's key stays in `factory`, which only
+`publish` (and `open-pr.yml`) enters, so nothing on Claude's runner can reach the key, whatever
+GitHub hands a job.
+
+**Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
+environment, but the runner user has sudo, so a prompt injection could still read it from the
+action's own process. It reaches Claude's model calls only, and rotates with `claude setup-token`.
+Claude's Bash also has open network access, so whatever it can read can leave the runner. No write
+token exists on the model's runner: what the model wrote reaches GitHub only through the publish
+checks, and the App can't push workflows, approve, merge or bypass a ruleset.
+
+Alternatives considered: everything in one job with `if:` on each step (every refusal would start
+the 60-minute job; and a write step after Claude on the same runner is reachable from anything
+Claude left running, with sudo); handing the work over as an artifact (`actions/upload-artifact` is
+a new action, which the admin ruled out; a job output carries a small bundle); reading the board (no
+Actions token can, #102).
 
 **Until the factory App runs, every session acts as `sssoto17`.** Elsewhere in this ADR, "until #37"
 means until then: the build issues under #58, after the checks #101–#103. Cloud and local sessions
@@ -855,7 +942,7 @@ own. It has one, and GitHub enforces the limits on it:
 | What a session on the admin's account can do | What stops the factory App |
 |---|---|
 | Bypass-merge an admin-review PR | It's on no bypass list. Code-owner review and the 1 required approval hold the merge |
-| Clear an escalation | It can resolve the escalation thread, but the reviewer never approves an escalated PR an App opened (only one the admin's account opened, #264), and it unresolves a thread the admin didn't resolve, which holds the merge again (area 2, "Approvals") |
+| Clear an escalation | It can resolve the escalation thread on any PR. The reviewer never approves an escalated PR an App opened (only one the admin's account opened, #264), and on its next run it unresolves a thread the admin didn't resolve. But resolving starts no workflow, so on an escalated PR the admin's account opened, which the reviewer approved with auto-merge on, a thread the App resolves lets the PR merge before any re-check (the admin's rule of 16 Nov, #322; "The honest limit", below) |
 | Push a `v*` tag | The tag ruleset restricts creation, and only the Repository admin role bypasses it (A8). An App installation doesn't hold that role |
 | Edit a ruleset | That needs the Administration permission, which the factory App doesn't get |
 
@@ -875,6 +962,13 @@ classifier, never by GitHub:
   it, removing `review:admin`); the resolve-thread hook and `deny` rule back the instruction (#264);
 - pushing a `v*` tag from a local session, which ships to production (area 4);
 - editing a ruleset.
+
+One gap holds for the factory App as well, by the admin's rule of 16 Nov (#264, #322): on an
+escalated PR the admin's account opened, the reviewer approves and turns on auto-merge while the
+escalation thread holds the merge. Any account with write access, the factory App included, can
+resolve that thread, and resolving starts no workflow, so the PR merges at once, before the reviewer
+can reopen a thread the admin didn't resolve. Only instructions (agents never resolve review
+threads) and the resolve-thread hook stand in the way.
 
 PR #52 makes Claude Code ask before tag pushes and before `--remove-label review:admin` (permission
 rules, commit `523f745`), so two of the four become a prompt the admin sees. The factory is outside
@@ -941,15 +1035,18 @@ separate: this is only the identity step for lanes in Claude Code.
   a stack part into the stack of the part below. Its PRs start CI and the review as any App's do
   ("The factory's identity", above).
 - **The key never enters a session.** It lives only in the secret `FACTORY_APP_PRIVATE_KEY` of
-  #101's environment `factory`, which #107's factory job uses too; the client ID is that
-  environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh` checks both, and stores
-  a new key only through stdin.
+  #101's environment `factory`, which #107's `publish` job uses too (its Claude job doesn't); the
+  client ID is that environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh`
+  checks both, and stores a new key only through stdin.
 - **One environment, `main` only (admin, 17 Nov 2026).** The lanes and #107's factory share
   `factory`, and its only deployment rule is `main`: the admin removed #101's `throwaway/*` rule,
   and the setup script stops while any other rule remains. With one App, a second key in a second
   environment would add no protection, since either key acts as the same App. The risk is a workflow
   on any branch other than `main` reading the key: a branch's own copy of a workflow could print it.
   So #107's throwaway test dispatches from `main` instead of running on a `throwaway/*` branch.
+  (Amended 21 Nov 2026, #107: the key still has one environment, but #107's Claude job runs in a
+  second one, `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN`, so Claude's runner never
+  enters the environment with the key; "The factory workflow, built (#107)", above.)
 - **The payload is untrusted.** Anyone with write access can dispatch, a prompt-injected session
   included. Its fields reach the shell only through `env:`, never as `${{ }}` inside `run:` (the
   run's name uses the branch, which is display text no shell reads), and go to GitHub as values
@@ -1005,6 +1102,39 @@ and never pushes.
 - **Keep opening PRs as the admin's account** (the status quo). Every admin-review PR stays a bypass
   merge that any session could make ("The honest limit", above), and auto-merge (#68) can't rest on
   a real admin approval.
+
+### Commissioned work as the admin (#385)
+
+**Decided 19 Nov 2026** (#333, section 5; ADR-0007, "Acceptance tests"). Admin-owned paths, first
+`tests/acceptance/**`, must never come from `sunny-factory[bot]`: `guard / acceptance` (#384) fails
+a `[bot]`-authored PR that touches them. A lane the admin deliberately starts for such work opens
+its PR as the admin instead.
+
+- **Pattern: a feature toggle off by default, behind a guard clause.** The default path, the
+  dispatch to the App, is unchanged; the switch branches off before it.
+- **The switch.** `scripts/open-pr.sh --as-admin` (and `scripts/stack.sh open|add --as-admin`, which
+  passes it on) skips the dispatch and opens the PR over REST (`POST /repos/{o}/{r}/pulls`) with the
+  session's own credentials, the admin's; pushes are the admin's already (#336, above). It adds the
+  labels after opening, refusing first any that don't exist, and `stack.sh` links the parts with the
+  lane's token. Since no workflow runs, the script repeats the workflow's refusals (main, a non-lane
+  branch or base, a base with no open PR, the length limits), and refuses an open PR the App already
+  opened for the branch. Off by default: without it nothing changes.
+- **The gate.** The script refuses unless `OPEN_PR_AS_ADMIN` holds an issue number and the body
+  links that issue (`Closes #N` or `Part of #N`). Only the admin's launch sets it: locally
+  `OPEN_PR_AS_ADMIN=<N> claude …`, in the cloud the environment's variables for that run. A brief
+  only says to use the switch; it can't turn it on. Locally an `ask` rule on
+  `*open-pr.sh*--as-admin*` and `*stack.sh*--as-admin*` also prompts the admin. The script appends
+  to the body that a lane opened the PR as the admin for #N.
+- **The honest limit.** A session on the admin's account can set any variable the admin can, and an
+  `ask` rule doesn't prompt in a cloud auto-mode lane. So, like the thread-resolve hook, this is a
+  standard plus a check, not a boundary; the guarantee ADR-0007 states rests on which identity runs.
+- **Such a PR merges by bypass**, as every lane PR did before #336: the admin is its author and
+  can't approve it.
+
+**Alternatives considered.** A boolean variable: one setting would cover every later run in the same
+environment, where an issue number covers one issue. Detecting the admin's runs by commit trailer or
+branch: ADR-0007 rejects it, it's easy to fake. `gh pr create`: GraphQL, which the cloud proxy
+refuses, and an `ask` rule already.
 
 ## 3. Merge methods
 
@@ -1836,10 +1966,13 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
       GitHub's protected-branches page speaks of "a person with admin permissions", so test it
       rather than assume it;
     - (d) a push to the PR dismisses the App's approval (back to `REVIEW_REQUIRED`);
-    - (e) a PR that meets an escalation row gets an escalation thread that mentions the admin and no
-      approval. When the factory App resolves the thread, the App's next run unresolves it. When the
-      admin resolves it, it stays resolved, and the PR merges only on the admin's approval. Until
-      #104, adding `review:admin` also makes the App dismiss its approval and turn auto-merge off;
+    - (e) a PR that meets an escalation row gets an escalation thread that mentions the admin. On a
+      PR the admin's account opened, the App approves it if it finds it clean, and the open thread
+      alone holds the merge (`APPROVED`, `BLOCKED`); on a PR an App opened, it withholds its
+      approval (#322). When the factory App resolves the thread, the App's next run unresolves it.
+      When the admin resolves it, it stays resolved. Until #104, the App also adds `review:admin`
+      when it escalates, which holds its approval, so (e) shows no approval; and adding the label
+      makes the App dismiss its approval and turn auto-merge off;
     - (f) an App-approved PR that changes one line of `AGENTS.md` still waits for the code owner's
       review (`BLOCKED`).
 
@@ -2016,12 +2149,12 @@ an item someone will tick (#214): the Review section's two yes/no checkboxes bec
 /supabase/config.toml   @sssoto17
 /supabase/migrations/   @sssoto17
 # Drizzle (#372): the schema the migrations are generated from (its RLS included), the client,
-# drizzle-kit's config, the drift check, and the config of the tests that run against the stack.
+# drizzle-kit's config and the drift check. db/ holds the global setup of the tests that run
+# against the stack too (db/tests/stackSetup.ts, #382), and their `db` project is in vitest.config.*.
 /apps/web/src/server/store/schema.ts @sssoto17
 /apps/web/src/server/db/ @sssoto17
 /apps/web/drizzle.config.json @sssoto17
 /supabase/drift.sh      @sssoto17
-/vitest.stack.config.mjs @sssoto17
 
 # Configs that can weaken a check (CONSTRAINTS.md, "Guarding the bar"), in any directory.
 eslint.config.*         @sssoto17

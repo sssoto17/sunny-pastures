@@ -4,11 +4,13 @@
 	"description": "The Next.js app: UI, game API and persistence. src/server/ is server-only.",
 	"type": "module",
 	"scripts": {
-		"dev": "next dev",
-		"build": "next build",
+		"dev": "pnpm --filter @sunny-pastures/sim build && pnpm --parallel --filter @sunny-pastures/sim --filter @sunny-pastures/web run dev:watch",
+		"dev:watch": "next dev",
+		"build": "pnpm --filter @sunny-pastures/sim build && next build",
 		"start": "next start"
 	},
 	"dependencies": {
+		"@sunny-pastures/sim": "workspace:*",
 		"@supabase/supabase-js": "2.119.0",
 		"drizzle-orm": "0.45.4",
 		"next": "16.4.6",

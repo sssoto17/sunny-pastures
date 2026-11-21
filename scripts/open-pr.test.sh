@@ -179,5 +179,103 @@ OPEN_PR_TIMEOUT=0 run feature/y "$work/body.md"
 expect_code 1
 expect_err "no PR for feature/y after 0 s"
 
+# --- --as-admin (#385): off unless the admin's launch named the issue -------------------------
+unset OPEN_PR_AS_ADMIN
+printf 'test(acceptance): the first contract (#386)\n\nCloses #386.\n' >"$work/admin.md"
+reset
+run --as-admin 336-a "$work/admin.md"
+expect_code 2
+expect_err "OPEN_PR_AS_ADMIN"
+assert "nothing opened" test ! -e "$work/gh/pulls/400.json"
+OPEN_PR_AS_ADMIN=1 run --as-admin 336-a "$work/admin.md"
+expect_code 2
+expect_err "doesn't link #1"
+OPEN_PR_AS_ADMIN=386x run --as-admin 336-a "$work/admin.md"
+expect_code 2
+expect_err "an issue number"
+OPEN_PR_AS_ADMIN=38 run --as-admin 336-a "$work/admin.md"
+expect_code 2
+expect_err "doesn't link #38"
+# the link needs a word of its own: "Discloses #386" or "xPart of #386" doesn't link #386
+printf 'test(acceptance): x\n\nDiscloses #386 and xPart of #386.\n' >"$work/word.md"
+OPEN_PR_AS_ADMIN=386 run --as-admin 336-a "$work/word.md"
+expect_code 2
+expect_err "doesn't link #386"
+OPEN_PR_AS_ADMIN=386 run --as-admin --label nope 336-a "$work/admin.md"
+expect_code 2
+expect_err "no label nope"
+assert "nothing opened or dispatched" bash -c "! test -e '$work/gh/pulls/400.json' && ! test -s '$work/gh/dispatches'"
+
+# the variable alone changes nothing: without the switch the App opens the PR
+reset
+OPEN_PR_AS_ADMIN=386 run 336-a "$work/admin.md"
+expect_code 0
+expect_eq "the App without the switch" "$(pr_field 400 .user.login)" "sunny-factory[bot]"
+
+# on: the PR is the admin's, opened over REST, and its body says a lane opened it
+reset
+GH_TOKEN=ghp_sentinel_never_printed OPEN_PR_AS_ADMIN=386 run --as-admin --label review:admin 336-a "$work/admin.md"
+expect_code 0
+expect_eq "stdout is the PR number" "$out" 400
+expect_eq "opened by the admin" "$(pr_field 400 .user.login)" sssoto17
+expect_eq "the title" "$(pr_field 400 .title)" "test(acceptance): the first contract (#386)"
+assert "the body keeps the link" contains "$(pr_field 400 .body)" "Closes #386."
+assert "the body says a lane opened it as the admin" contains "$(pr_field 400 .body)" \
+  "Opened as the admin by a lane, with \`scripts/open-pr.sh --as-admin\` on a run the admin started for #386 (#385)."
+assert "no dispatch" bash -c "! test -s '$work/gh/dispatches'"
+assert "the label added" contains "$calls" $'issues/400/labels\n--silent\n-f\nlabels[]=review:admin'
+expect_err "opened #400 as the admin"
+assert "no token in the output" bash -c "! grep -q ghp_sentinel <<<'$out$err'"
+
+# a stack part, and Part of #N, open on the part below
+branch 336-b 336-a
+printf 'test(acceptance): part 2\n\nPart of #386.\n' >"$work/part.md"
+OPEN_PR_AS_ADMIN=386 run --as-admin --base 336-a 336-b "$work/part.md"
+expect_code 0
+expect_eq "on the part below" "$(pr_field 401 .base.ref)" 336-a
+expect_eq "part 2 by the admin" "$(pr_field 401 .user.login)" sssoto17
+
+# the workflow's own refusals hold with the switch too, before anything is sent
+reset
+branch feature/z main
+OPEN_PR_AS_ADMIN=386 run --as-admin feature/z "$work/admin.md"
+expect_code 2
+expect_err "isn't a lane branch"
+OPEN_PR_AS_ADMIN=386 run --as-admin main "$work/admin.md"
+expect_code 2
+expect_err "never from main"
+OPEN_PR_AS_ADMIN=386 run --as-admin --base feature/z 336-a "$work/admin.md"
+expect_code 2
+expect_err "isn't main or a lane branch"
+OPEN_PR_AS_ADMIN=386 run --as-admin --label 'a b' 336-a "$work/admin.md"
+expect_code 2
+expect_err "not a label name"
+branch 336-c main
+OPEN_PR_AS_ADMIN=386 run --as-admin --base 336-c 336-a "$work/admin.md"
+expect_code 2
+expect_err "has no open PR"
+assert "nothing opened" test ! -e "$work/gh/pulls/400.json"
+
+# an open PR the App opened can't stand in for the admin's
+run 336-a "$work/body.md"
+OPEN_PR_AS_ADMIN=386 run --as-admin 336-a "$work/admin.md"
+expect_code 2
+expect_err "#400 was opened by sunny-factory[bot]"
+
+# a label GitHub refuses after the PR opened: exit 1, the number still on stdout
+reset
+echo "gh: Forbidden (HTTP 403)" >"$work/gh/fail_POST_repos_sssoto17_sunny-pastures_issues_400_labels"
+OPEN_PR_AS_ADMIN=386 run --as-admin --label review:admin 336-a "$work/admin.md"
+expect_code 1
+expect_eq "the PR's number" "$out" 400
+expect_err "adding the label review:admin failed"
+
+# a dry run prints the request and opens nothing
+reset
+OPEN_PR_AS_ADMIN=386 run --as-admin --dry-run 336-a "$work/admin.md"
+expect_code 0
+expect_eq "the pulls request" "$(jq -r '.head, .base' <<<"$out" | tr '\n' ' ')" "336-a main "
+assert "nothing opened" test ! -e "$work/gh/pulls/400.json"
+
 echo "open-pr.test.sh: $pass passed, $fail failed"
 ((fail == 0))

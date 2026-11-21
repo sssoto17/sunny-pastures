@@ -31,11 +31,27 @@
       { "name": "pages", "patterns": ["apps/web/src/app/**"] },
       { "name": "api", "patterns": ["apps/web/src/server/api/**"] },
       { "name": "config", "patterns": ["apps/web/src/server/config/**"] },
+      // Test-file zones (#382; ADR-0007 section 6, an allowance for test files only): the db
+      // module's tests/ holds the `db` project's global setup, `readStack` and `createPlayer`,
+      // which the store's and auth's stack tests use. Each sits before its module's zone, so it
+      // takes the module's tests/ folder only, and the module's source keeps its own rule.
+      { "name": "dbTests", "patterns": ["apps/web/src/server/db/tests/**"] },
+      // The store gate (#383; ADR-0007 section 6, "The store gate"), one file, before the rest of
+      // the store's tests: it plays the recorded script through B100 with the real rules, so it
+      // alone runs `rules` and the sim's code. The store's other tests keep the type-only sim.
+      { "name": "storeGate", "patterns": ["apps/web/src/server/store/tests/storeGate.db.test.ts"] },
+      { "name": "storeTests", "patterns": ["apps/web/src/server/store/tests/**"] },
+      { "name": "authTests", "patterns": ["apps/web/src/server/auth/tests/**"] },
+      // game/'s tests (#383; ADR-0007 sections 2 and 6): the one test-files-only allowance,
+      // `game/**/tests/**` → `store/tests/**`, so they run on the in-memory store
+      // (store/tests/memoryStore.ts), a helper owned by another module's tests/ (ADR-0005 s. 4).
+      { "name": "gameTests", "patterns": ["apps/web/src/server/game/**/tests/**"] },
       { "name": "db", "patterns": ["apps/web/src/server/db/**"] },
       { "name": "rules", "patterns": ["apps/web/src/server/rules/**"] },
       { "name": "store", "patterns": ["apps/web/src/server/store/**"] },
       { "name": "auth", "patterns": ["apps/web/src/server/auth/**"] },
       { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
+      { "name": "http", "patterns": ["apps/web/src/server/http/**"] },
       { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
       { "name": "sim", "patterns": ["packages/sim/src/**"] }
     ],
@@ -44,7 +60,7 @@
       { "from": "pages", "allow": ["sim"] },
       {
         "from": "api",
-        "allow": ["config", "db", "rules", "store", "auth", "timing", "game", "sim"]
+        "allow": ["config", "db", "rules", "store", "auth", "timing", "http", "game", "sim"]
       },
       {
         "from": "game",
@@ -57,7 +73,26 @@
       { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
       { "from": "config", "allow": [] },
       { "from": "timing", "allow": [] },
-      { "from": "sim", "allow": [] }
+      // The HTTP contract (#395; admin, 21 Nov): the request checks, the error builder and the
+      // headers. It sees the sim's types, never its code; the timing value is passed in.
+      { "from": "http", "allow": [], "allowTypeOnly": ["sim"] },
+      { "from": "sim", "allow": [] },
+      // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
+      { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
+      { "from": "storeTests", "allow": ["store", "dbTests"], "allowTypeOnly": ["db", "sim"] },
+      { "from": "authTests", "allow": ["auth", "config", "dbTests"] },
+      // The store's test zone, plus the rules and the sim's code to play the script with.
+      {
+        "from": "storeGate",
+        "allow": ["store", "dbTests", "rules", "sim"],
+        "allowTypeOnly": ["db"]
+      },
+      // game's own rule, plus game itself and the store's test helpers; `store` stays type-only.
+      {
+        "from": "gameTests",
+        "allow": ["game", "rules", "timing", "sim", "storeTests"],
+        "allowTypeOnly": ["store", "auth"]
+      }
     ],
     // A pattern matches a call and a constructor call, also through an import or a namespace.
     "calls": {
