@@ -133,6 +133,13 @@ one repo milestone (`M1 Persistence spike` … `M9 Hand-in`; list them with
     allows. Decided by the admin on 7 Nov (#56).
   - **Admin-only values are refused**: `--status Ready` (see **Status rules**) and `--mode Factory`
     (it goes with `factory:ready`, see `triage-labels.md`).
+  - **`--from` makes a guarded move** (#417), the form the board workflow uses (**Status rules**):
+    `--status "In review" --from "Ready,In progress"` sets Status alone, and only when the issue is
+    on the Project and its Status is now one of the `--from` names. Otherwise it changes nothing,
+    says why and exits 0. It never adds the issue to the Project, never removes `triage`, takes no
+    other field, and refuses Backlog in `--from`, so it never moves an issue out of Backlog.
+  - **`PROJECT_GH_TOKEN`**, when set, is the token for the Project's calls only; the issue's calls
+    keep `gh`'s own. The board workflow keeps its Project token off the repo's endpoints that way.
   - **`--type`** sets GitHub's native issue type (Chore, Bug, Feature, Design) on the issue itself.
     Once the type, Priority, Size and Week are all set, the script removes `triage` and its
     `Triage:` line says so (see **Issue fields**).
@@ -295,12 +302,29 @@ all of:
   `CONSTRAINTS.md`;
 - every item under "Acceptance criteria" is verified by CI alone.
 
-**The other moves:**
+**The other moves.** The board moves itself (#417): nobody runs a script for the rows marked
+_automatic_. The workflow `.github/workflows/board.yml` does the In progress and In review rows,
+through `scripts/board-status.sh` and `scripts/issue-fields.sh --from`; the Project's built-in "Item
+closed" and "Pull request merged" workflows do Done. The automation never sets Ready, never moves an
+issue out of Backlog, never sets Mode, and leaves an issue that isn't on the Project alone. Only the
+PR that closes the issue moves it, so the `Part of #N` parts of a split or stack don't: on `main`,
+the issues GitHub records the PR as closing; on another base (a stack's closing part, for which
+GitHub records none until it sits on `main`), the body's closing keyword, which `guard / pr-body`
+allows only on the closing part. A lane PR opens as a draft and is marked ready once linked (#358):
+it's In progress as a draft, and In review once ready and green: the CI run that the ready mark
+starts decides, not the mark itself. A finished check moves an issue only when the PR's checks turn
+green or red; the PR's own events (opened, ready, draft, closed) do the rest.
 
 <!-- prettier-ignore -->
 | Move                     | When                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------- |
-| Ready → In progress      | Someone starts it: the admin is assigned (manual), or the factory claims it (factory). A branch exists. |
-| In progress → In review  | A PR is open with `Closes #N` and its checks are green.                                   |
-| In review → Done         | The PR merged (the issue closes, and the Project moves it).                               |
+| Ready → In progress      | _Automatic._ Work starts: a branch named `<N>-<slug>` is created, or a PR with `Closes #N` opens. The admin is assigned (manual), or the factory claims it (factory). |
+| In progress → In review  | _Automatic._ A PR with `Closes #N` is open, not a draft, and its checks are green. Green means every check passes apart from `guard / code-owned`, which stays red on a code-owned PR until the admin approves its head (admin, 21 Nov, on #417). A check still running, cancelled or stale isn't green yet: a re-run decides it. A draft stays In progress until it's marked ready. |
+| In review → In progress  | _Automatic._ That PR's checks go red, it turns back into a draft, or it closes unmerged. |
+| In review → Done         | _Automatic._ The PR merged (the issue closes, and the Project's built-in workflow moves it). |
 | Any → Backlog            | It turns out not ready (add the `blocked:*` label that says why, or split it), or the admin drops it from the current focus. |
+
+**The coordinator only fixes a wrong status.** It no longer moves issues as PRs open and merge. When
+the board shows a status the rows above don't explain (a move the workflow missed, or a run that
+failed: the `board` workflow's runs show why), it sets the right one with
+`scripts/issue-fields.sh <N> --status <Status>` from a local session, never Ready.

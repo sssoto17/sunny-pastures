@@ -44,7 +44,7 @@ flowchart TB
     PR["Pull request"]
     RB["Reviewer bot<br/>approve → auto-merge (from #68)<br/>or request changes"]
     MR{"You review and merge<br/>admin-review PRs"}
-    PM["Evening: update the board<br/>light retro · remember:remember handoff"]
+    PM["Evening: check the board<br/>light retro · remember:remember handoff"]
     AM --> F
     AM --> B
     F --> PR
@@ -234,8 +234,9 @@ and keeps its stack with `scripts/stack.sh` (#264), never with hand-chained base
 Evening, about 10 minutes. This routine stays manual, with no schedule: it needs local state (the
 worktrees, the handoff), which a cloud routine can't see.
 
-1. Update the board: statuses, `blocked:*` labels with their reason. Before giving you a closing
-   PR's verdict, the coordinator ticks the acceptance criteria its reviewer confirmed
+1. Check the board: the Status moves itself (`docs/agents/issue-tracker.md`, "Status rules"), so fix
+   only a status that's wrong, and set `blocked:*` labels with their reason. Before giving you a
+   closing PR's verdict, the coordinator ticks the acceptance criteria its reviewer confirmed
    (`docs/agents/issue-tracker.md`, "Checkboxes"). `scripts/missing-fields.sh` and
    `scripts/orphan-issues.sh` list the open issues missing a field or a parent (`issue-tracker.md`,
    "Issue fields" and "Grouping").

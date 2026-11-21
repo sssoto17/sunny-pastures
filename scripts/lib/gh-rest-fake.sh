@@ -7,6 +7,8 @@
 #
 # State under $work/gh:
 #   calls                   each call's arguments, one per line, then "--"
+#   tokens                  each call's GH_TOKEN (or "-" when unset), method and path, one line
+#                           a call, so a suite can check which token reached which path
 #   get/<path>              the JSON a GET of <path> returns (query string ignored); a missing
 #                           file is a 404, as on GitHub
 #   fail_<METHOD>_<path>    fails every such call with the file's text (path's / become _)
@@ -58,6 +60,7 @@ if [[ -z $method ]]; then
 fi
 path=${endpoint%%\?*} query=""
 [[ $endpoint == *\?* ]] && query=${endpoint#*\?}
+printf '%s %s %s\n' "${GH_TOKEN:--}" "$method" "$path" >>"$st/tokens"
 key=${method}_${path//\//_}
 n=$(($(cat "$st/count_$key" 2>/dev/null || echo 0) + 1))
 echo "$n" >"$st/count_$key"

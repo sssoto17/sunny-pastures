@@ -1,0 +1,21 @@
+# A new branch, for the board (#417): an issue's branch (<N>-<slug>) moves a Ready issue to In
+# progress. A `create` run takes this file and its secrets' gate from the new branch, so it holds
+# nothing and does nothing: it only finishes, and that starts board.yml through workflow_run, which
+# runs main's copy with the Project token (environment `board`, main only) and reads the branch's
+# name from the event, never from this run.
+name: board-branch
+
+on: create
+
+permissions: {}
+
+jobs:
+  branch:
+    name: board / branch
+    # Branches only: a tag's run is skipped, and board.yml moves nothing for a skipped run.
+    if: github.event.ref_type == 'branch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - run: echo "A new branch; board.yml on main decides whether an issue moves."

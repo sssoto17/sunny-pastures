@@ -538,6 +538,124 @@ expect_code 4
 expect_no_writes
 expect_err "Skipped: add #47 to Project 3"
 
+# --- the guarded move (--from), the board workflow's form (#417) --------------------------------
+# A move from a Status the list names: Status alone, in one item update.
+reset Status=Ready
+case_ 47 --status "In progress" --from Ready
+expect_code 0
+expect_item Status=03b81b61
+expect_out "Status:   In progress"
+assert "expected one item update" test "$(count "PATCH $PA/items")" -eq 1
+
+# Names ignore case, and a list takes several.
+reset "Status=In progress"
+case_ 47 --status "in review" --from "ready, In Progress"
+expect_code 0
+expect_item Status=e763de54
+
+# Any Status the list doesn't name is left alone, with the reason: nothing is written.
+for now in Backlog Done "In review"; do
+  reset "Status=$now"
+  case_ 47 --status "In progress" --from Ready
+  expect_code 0
+  expect_no_writes
+  expect_item "Status=$(jq -r --arg o "$now" '.[] | select(.name == "Status") | .options[] |
+    select(.name.raw == $o) | .id' "$st/get/$PA/fields")"
+  expect_out "Status:   $now (left alone: a move to In progress starts only from Ready)"
+done
+
+# No Status at all (added by hand): left alone, not given Backlog.
+reset Size=S
+case_ 47 --status "In review" --from "Ready,In progress"
+expect_code 0
+expect_no_writes
+expect_out "Status:   - (left alone"
+
+# An issue that isn't on the Project is left alone: never added.
+reset null
+case_ 47 --status "In progress" --from Ready
+expect_code 0
+expect_no_writes
+expect_no_call "-X POST $PA/items"
+expect_out "Status:   - (left alone: it isn't on the Project)"
+
+# It never starts from Backlog, never sets Ready, and moves Status alone.
+for from in Backlog "Ready,backlog" " BACKLOG "; do
+  reset Status=Backlog
+  case_ 47 --status "In progress" --from "$from"
+  expect_code 2
+  expect_err "--from never names Backlog"
+  expect_no_gh
+done
+reset Status=In\ progress
+case_ 47 --status Ready --from "In progress"
+expect_code 2
+expect_err "only the admin moves an issue to Ready"
+expect_no_gh
+for extra in "--mode Factory" "--mode Manual" "--size S"; do
+  reset Status=Ready
+  read -ra words <<<"$extra"
+  case_ 47 --status "In progress" --from Ready "${words[@]}"
+  expect_code 2
+  expect_no_gh
+done
+reset Status=Ready
+case_ 47 --status "In progress" --from Ready --size S
+expect_err "--from moves Status alone"
+reset Status=Ready
+case_ 47 --from Ready
+expect_code 2
+expect_err "--from moves Status alone"
+reset Status=Ready
+case_ 47 --status "In progress" --from Ready --from Ready
+expect_code 2
+expect_err "--from given twice"
+reset Status=Ready
+case_ 47 --status "In progress" --from "Ready,,In review"
+expect_code 2
+expect_err "--from has an empty name"
+
+# An unknown name in the list changes nothing.
+reset Status=Ready
+case_ 47 --status "In progress" --from Readdy
+expect_code 2
+expect_err 'unknown Status "Readdy" in --from'
+expect_no_writes
+
+# A guarded move leaves `triage` alone, even with the four set: it moves Status only.
+reset Status=Ready "${four[@]}" -- "" triage
+case_ 47 --status "In progress" --from Ready
+expect_code 0
+expect_item Status=03b81b61
+expect_no_call "-X DELETE"
+
+# The Project refused: exit 4, nothing written, and the command that finishes it.
+reset Status=Ready
+touch "$st/refuse_projects"
+case_ 47 --status "In progress" --from Ready
+expect_code 4
+expect_no_writes
+expect_err "skipped the move"
+
+# PROJECT_GH_TOKEN goes to the Project's calls only; the issue's calls keep GH_TOKEN.
+reset Status=Ready
+args=(PROJECT_GH_TOKEN=proj 47 --status "In progress" --from Ready)
+out=$(PATH="$work/bin:$PATH" GH_TOKEN=repo PROJECT_GH_TOKEN=proj bash "$script" 47 \
+  --status "In progress" --from Ready 2>"$work/err")
+code=$?
+err=$(cat "$work/err")
+calls=$(cat "$st/calls" 2>/dev/null || true)
+expect_code 0
+assert "expected every Project call to carry the Project token" \
+  test "$(grep -c " users/sssoto17/projectsV2/" "$st/tokens")" -eq "$(grep -c "^proj .* users/sssoto17/projectsV2/" "$st/tokens")"
+assert "expected the Project token on no repo call" \
+  test "$(grep -c "^proj .* repos/" "$st/tokens")" -eq 0
+assert "expected the repo calls to keep GH_TOKEN" test "$(grep -c "^repo .* repos/" "$st/tokens")" -gt 0
+# Without it, every call keeps gh's own token.
+reset Status=Ready
+out=$(PATH="$work/bin:$PATH" GH_TOKEN=repo bash "$script" 47 --size S 2>"$work/err")
+assert "expected one token for every call" test "$(cut -d" " -f1 "$st/tokens" | sort -u)" == repo
+
 # --- called from zsh ---------------------------------------------------------------------------
 # zsh doesn't split unquoted $var, which silently dropped 5 of #47's fields on 7 Nov. The script
 # runs under bash whatever the caller's shell, so a zsh caller gets the same calls.
