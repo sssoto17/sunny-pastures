@@ -54,10 +54,12 @@ export type SubmitResult =
 export type LoadResult = { readonly kind: "loaded"; readonly farm: FarmEnvelope } | Busy;
 
 /**
- * The farm can't be served now; nothing was written, and the client retries with the same key
- * (503 `busy`, ADR-0007, section 3, "Errors"). `conflicts`: still conflicting after the last retry
- * (MUST-13.3). `store`: the store threw, as on an unknown rules version (ADR-0006, sections 5 and
- * 8); `error` is for the server's log, never for the response body.
+ * The farm can't be served now, and the client retries with the same key (503 `busy`, ADR-0007,
+ * section 3, "Errors"). `conflicts`: still conflicting after the last retry, and nothing was
+ * written (MUST-13.3). `store`: the store threw, as on an unknown rules version (ADR-0006, sections
+ * 5 and 8). The action may be in the log even so (a commit whose reply was lost, or a resend whose
+ * fresh load failed), and the retry with the same key then gets its answer. `error` is for the
+ * server's log, never for the response body.
  */
 export type Busy =
 	| { readonly kind: "busy"; readonly cause: "conflicts" }
@@ -94,8 +96,10 @@ export async function submitAction(
 		const farm = loaded.value;
 		// A request that lost a race loads the winner's action, stamped later than its own: it takes
 		// effect at the farm's time instead, as the rules refuse a time before it (ADR-0003, D7), and
-		// the loser must still commit on its retry (MUST-13.3). Both times are the server's.
-		const at = Math.max(stampedAt, farm.at);
+		// the loser must still commit on its retry (MUST-13.3). Both times are the server's. The
+		// farm's own time, the one `apply` checks, so a store inconsistency can't reach the player
+		// as a refusal about time.
+		const at = Math.max(stampedAt, farm.state.time);
 		const step = timing.withTiming("sim", () => runStep(rules, farm, request, at, retries));
 		if (!step.ok) return await refuse(deps, playerId, idempotencyKey, step.reason);
 
@@ -198,8 +202,9 @@ type Stored<T> =
 
 /**
  * Runs one store call, timed as `phase`. A throw is a store error, so it becomes `busy` (ADR-0006,
- * sections 5 and 8); the store is the only collaborator caught, so a bug in the loop or the sim
- * still throws and reaches the route as a 500.
+ * sections 5 and 8), and so is a throw from the `replay` it runs (`@/server/rules`). Only the store
+ * is caught: a bug in the loop, or in `apply` or `stateHash`, still throws and reaches the route as
+ * a 500.
  */
 async function callStore<T>(
 	{ timing }: GameDeps,
