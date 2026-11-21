@@ -34,26 +34,28 @@ report. When a pointer here and the rule's home disagree, the home wins.
   (`git worktree add "$TMPDIR/review-<N>" <sha>`, then `pnpm install --frozen-lockfile`), removed
   with `git worktree remove` (no `--force`) when you're done. If it refuses, leave it: `$TMPDIR` is
   cleared on reboot and `git worktree prune` drops the record. Never `rm -rf`, `git checkout --`,
-  `git restore` or `git clean` a review copy; make a fresh one instead (`review-<N>-2`). The main
-  folder stays on the branch it's on (`AGENTS.md`). The CI reviewer App never runs PR code
-  (ADR-0002, area 2), so it cites instead. In the local sandbox (`docs/agents/sandbox.md`; seen in
-  30+ review runs on 21 Nov):
+  `git restore` or `git clean` a review copy; make a fresh one instead, named
+  `$TMPDIR/review-<N>-<short sha>`. The main folder stays on the branch it's on (`AGENTS.md`). The
+  CI reviewer App never runs PR code (ADR-0002, area 2), so it cites instead. In the local sandbox
+  (`docs/agents/sandbox.md`; seen in 30+ review runs on 21 Nov):
   - **Get the head without a checkout**: the branch-switch hook blocks one in the main folder. Fetch
     it into a ref, `git fetch origin +pull/<N>/head:refs/review/<N>`, check that
     `git rev-parse refs/review/<N>` prints the SHA you review, and copy from that ref.
   - **When `git worktree add` fails** (it often does from a main-folder session, whose sandbox
     mounts the worktree admin folders under `.git/worktrees` read-only), make a plain copy:
-    `mkdir -p "$TMPDIR/review-<N>"`, then
-    `git archive refs/review/<N> | tar -x -C "$TMPDIR/review-<N>"`. It has no `.git`, so the
-    `.github/scripts` tests that call `git ls-files` fail for reasons unrelated to the PR; run
+    `mkdir "$TMPDIR/review-<N>-<short sha>"` (no `-p`: it fails on an existing copy, which you'd
+    otherwise unpack over; pick a new name), then
+    `git archive refs/review/<N> | tar -x -C "$TMPDIR/review-<N>-<short sha>"`. It has no `.git`, so
+    the `.github/scripts` tests that call `git ls-files` fail for reasons unrelated to the PR; run
     `git init && git add -A` in the copy, with no commit, before you test (a copy under `$TMPDIR`
     has none of the sandbox's placeholder files, so `-A` is safe there). Leave this copy in place
     when you're done.
   - **When `pnpm install` fails** on pnpm's store lock, run it outside the sandbox. If the PR
-    changes no dependency (`git diff --quiet <sha> -- pnpm-lock.yaml ':(glob)**/package.json'` in
-    the main folder exits 0), you can instead symlink the main folder's `node_modules` into the
-    copy: the root's, `apps/web`'s and `packages/sim`'s, after any `git add -A`. A worktree with
-    those links refuses `git worktree remove`; leave it.
+    changes no dependency
+    (`git diff --quiet <sha> -- pnpm-lock.yaml pnpm-workspace.yaml ':(glob)**/package.json'` in the
+    main folder exits 0), you can instead symlink the main folder's `node_modules` into the copy:
+    the root's, `apps/web`'s and `packages/sim`'s, after any `git add -A`. A worktree with those
+    links refuses `git worktree remove`; leave it.
 - **On a test-heavy PR, plant a mutant**: break the code under test on purpose and confirm a test
   goes red. A test that stays green against its mutant is a Required finding.
 - **Measure timing claims** rather than estimate them.
