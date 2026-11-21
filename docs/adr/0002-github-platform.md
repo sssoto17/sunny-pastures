@@ -1338,13 +1338,13 @@ linked issue, Backlog included, and can't see checks or drafts.
   the repo goes private again, the token needs `repo` too.
 
 Patterns: a pipeline of a pure decision and a guarded command (the decide job computes, the move job
-applies), and the guarded transition itself (a compare-and-set on Status: move only from the listed
-states). Alternatives considered: one job holding the token (rejected: it would read PR text in the
-job that can write the Project); a GitHub App (rejected: an App can't call the user-owned Project's
-endpoints, above); polling on a schedule (rejected: minutes of lag and a run every few minutes
-whether or not anything changed); parsing `Closes #N` from the body (rejected: GitHub's own record
-of what will close is `closingIssuesReferences`, which also leaves out a stack part whose base isn't
-`main` yet).
+applies), and the guarded transition itself (a check-then-set on Status: move only from the listed
+states; not atomic, so two close events can land out of order until the next one). Alternatives
+considered: one job holding the token (rejected: it would read PR text in the job that can write the
+Project); a GitHub App (rejected: an App can't call the user-owned Project's endpoints, above);
+polling on a schedule (rejected: minutes of lag and a run every few minutes whether or not anything
+changed); parsing `Closes #N` from the body (rejected: GitHub's own record of what will close is
+`closingIssuesReferences`, which also leaves out a stack part whose base isn't `main` yet).
 
 Mode stays in step with `factory:ready` by hand until the "Mode ↔ `factory:ready` sync" candidate in
 `triage-labels.md` reaches 3 repetitions.

@@ -62,7 +62,7 @@ Where GitHub refuses the Project (HTTP 403, as the cloud's GitHub proxy does), i
 finishes it from a local session, and exits 4. The Project's field names (--size XL, --week
 "Wk 99") can't be checked then: only --type is. The finishing run checks them.
 
-Exit codes: 0 done (or, with --from, left alone), 1 a gh call failed or the read-back differs, 2 bad arguments or an unknown
+Exit codes: 0 done (with --from, also left alone), 1 a gh call failed or the read-back differs, 2 bad arguments or an unknown
 name (nothing changed), 4 the Project step was skipped: the issue's type is set, the Project
 wasn't touched and its field names weren't checked; run the printed command where the Project
 can be reached.

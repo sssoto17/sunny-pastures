@@ -50,7 +50,8 @@ reset() {
 }
 pr() { # number state draft merged [sha]
   jq -n --argjson n "$1" --arg s "$2" --argjson d "$3" --argjson m "$4" --arg h "${5:-$SHA}" \
-    '{number: $n, state: $s, draft: $d, merged: $m, title: "::error::not a command", head: {sha: $h, ref: "x"}}' \
+    '{number: $n, state: $s, draft: $d, merged: $m, title: "::error::not a command",
+      head: {sha: $h, ref: "x", repo: {full_name: "sssoto17/sunny-pastures"}}}' \
     >"$st/get/$R/pulls/$1"
 }
 closes() { # pr "number:STATE[:owner/repo]"...
@@ -292,6 +293,30 @@ jq -n --arg h "$SHA" --arg o "$OTHER" '[{number: 12, state: "open", head: {sha: 
 case_ decide commit "$SHA"
 expect_code 0
 expect_out "moves=417:review"
+# A pull_request_target run's head is main's commit: its PRs come from the event, checked.
+reset
+pr 12 open false false
+closes 12 417:OPEN
+green
+jq -n '[]' >"$st/get/$R/commits/$OTHER/pulls"
+case_ decide commit "$OTHER" 12 12
+expect_code 0
+expect_out "moves=417:review"
+reset
+case_ decide commit "$OTHER" 12x
+expect_code 2
+assert "expected no gh calls" test ! -s "$st/calls"
+
+# A fork's PR moves nothing, whichever way it's found.
+reset
+pr 12 open false false
+jq '.head.repo.full_name = "someone/fork"' "$st/get/$R/pulls/12" >"$work/f" && mv "$work/f" "$st/get/$R/pulls/12"
+closes 12 417:OPEN
+green
+case_ decide pr 12
+expect_out "moves="
+expect_err "another repository"
+
 # A commit on main (the merged PR) moves nothing.
 reset
 jq -n '[{number: 12, state: "closed", head: {sha: "x"}}]' >"$st/get/$R/commits/$SHA/pulls"

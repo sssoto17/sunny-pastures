@@ -13,6 +13,9 @@
 #   BOARD_PROJECT_TOKEN (a classic PAT with the `project` scope alone: fine-grained PATs can't reach
 #   a user-owned Project). It sees only those pairs, checks each again, and calls main's script
 #   with the token on the Project's calls only (PROJECT_GH_TOKEN). GITHUB_TOKEN reads the issue.
+# Two events on one PR can finish close together and their moves land out of order; the next
+# event puts it right, and the coordinator fixes a status that stays wrong. No concurrency group:
+# GitHub keeps only the newest pending run of a group, which would drop other PRs' moves.
 # Every event here runs main's copy of this file with main's checkout: pull_request_target and
 # workflow_run never check out or run the PR's code. Event values reach the shell only through
 # `env:`, and the script checks every number before use. Actions are GitHub-owned and pinned to a
@@ -22,8 +25,11 @@ name: board
 on:
   # The PR's own state: opened or reopened (work started), marked ready (In review if green),
   # turned into a draft or closed (back to In progress), and edited (a `Closes #N` added).
+  # PRs onto main only: GitHub records `Closes #N` only there, and a stack part on another base
+  # would run that base branch's copy of this file.
   pull_request_target:
     types: [opened, reopened, edited, ready_for_review, converted_to_draft, closed]
+    branches: [main]
   # A PR's checks finished: every workflow that reports a check on a PR head, by its `name:`.
   # `code-owned` is left out on purpose (its result doesn't count). A new workflow that reports
   # on PRs joins this list. `board-branch` reports a new branch (board-branch.yml).
@@ -67,6 +73,9 @@ jobs:
           RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          # A pull_request_target run (review, Labeler) may carry main's commit as its head, so
+          # its PRs come from the event too; the script checks each is a number.
+          RUN_PRS: ${{ join(github.event.workflow_run.pull_requests.*.number, ' ') }}
         run: |
           set -euo pipefail
           if [[ $EVENT == pull_request_target ]]; then
@@ -78,7 +87,8 @@ jobs:
               echo "board: a create run that didn't succeed (a tag): nothing moves"
             fi
           else
-            bash scripts/board-status.sh decide commit "$HEAD_SHA" >>"$GITHUB_OUTPUT"
+            read -ra prs <<<"$RUN_PRS"
+            bash scripts/board-status.sh decide commit "$HEAD_SHA" "${prs[@]}" >>"$GITHUB_OUTPUT"
           fi
 
   move:

@@ -22,6 +22,11 @@
 set -euo pipefail
 shopt -s inherit_errexit
 
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+  echo "board-status: needs bash 4.4 or later, found $BASH_VERSION" >&2
+  exit 2
+fi
+
 REPO=sssoto17/sunny-pastures
 R=repos/$REPO
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -29,14 +34,17 @@ here="$(cd "$(dirname "$0")" && pwd)"
 usage() {
   cat >&2 <<'EOF'
 usage: scripts/board-status.sh decide pr <number>
-       scripts/board-status.sh decide commit <sha>
+       scripts/board-status.sh decide commit <sha> [<pr>...]
        scripts/board-status.sh decide branch <name>
        scripts/board-status.sh move <issue>:<kind>
 
 decide  reads GitHub (read-only) and prints one line, `moves=` then the moves, each
         <issue>:<kind> and space-separated, or nothing after `=` when nothing moves.
-        pr      a PR: the open issues it closes, by its state, draft flag and checks
-        commit  every open PR whose head is this commit (a finished workflow run's head)
+        pr      a PR: the open issues it closes, by its state, draft flag and checks; a
+                fork's PR moves nothing
+        commit  every open PR whose head is this commit, and each <pr> given (a finished
+                workflow run's head and its pull_requests: a pull_request_target run's head
+                may be main's commit, so its PRs come from the event)
         branch  a new branch: <N>-<slug>, optionally after one `<prefix>/` and `issue-`
 move    one move: scripts/issue-fields.sh <issue> --status <Status> --from <list>
         start  -> In progress from Ready
@@ -100,11 +108,15 @@ checks() { # sha
 }
 
 decide_pr() { # pr -> moves on stdout, one a line
-  local pr=$1 row state draft merged sha kind verdict issues
-  row=$(gh api "$R/pulls/$pr" --jq '[.state, .draft, .merged, .head.sha] | @tsv') ||
+  local pr=$1 row state draft merged sha head_repo kind verdict issues
+  row=$(gh api "$R/pulls/$pr" --jq '[.state, .draft, .merged, .head.sha, (.head.repo.full_name // "-")] | @tsv') ||
     die 1 "could not read PR #$pr"
-  IFS=$'\t' read -r state draft merged sha <<<"$row"
+  IFS=$'\t' read -r state draft merged sha head_repo <<<"$row"
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die 1 "unexpected answer from GitHub for PR #$pr"
+  if [[ $head_repo != "$REPO" ]]; then
+    say "PR #$pr comes from another repository: nothing moves"
+    return 0
+  fi
   if [[ $merged == true ]]; then
     say "PR #$pr merged: Done is the Project's built-in workflow"
     return 0
@@ -135,14 +147,17 @@ decide_pr() { # pr -> moves on stdout, one a line
   done <<<"$issues"
 }
 
-decide_commit() { # sha
-  local prs pr
+decide_commit() { # sha [pr...]
+  local sha=$1 prs pr
+  shift
   # The SHA is checked to be 40 hex digits before it goes into the filter.
-  prs=$(gh api "$R/commits/$1/pulls" --jq ".[] | select(.state == \"open\" and .head.sha == \"$1\") | .number") ||
-    die 1 "could not read the PRs of $1"
-  [[ -n $prs ]] || { say "no open PR has $1 as its head: nothing moves"; return 0; }
+  prs=$(gh api "$R/commits/$sha/pulls" --jq ".[] | select(.state == \"open\" and .head.sha == \"$sha\") | .number") ||
+    die 1 "could not read the PRs of $sha"
+  (($#)) && prs+=$'\n'$(printf '%s\n' "$@")
+  prs=$(sort -un <<<"$prs" | sed '/^$/d')
+  [[ -n $prs ]] || { say "no open PR has $sha as its head: nothing moves"; return 0; }
   while read -r pr; do
-    valid_number "$pr" || die 1 "unexpected PR number from GitHub for $1"
+    valid_number "$pr" || die 1 "unexpected PR number from GitHub for $sha"
     decide_pr "$pr"
   done <<<"$prs"
 }
@@ -184,10 +199,15 @@ move() { # issue:kind
 case ${1-} in
   -h | --help) usage; exit 0 ;;
   decide)
-    (($# == 3)) || { usage; exit 2; }
+    (($# >= 3)) || { usage; exit 2; }
+    [[ $2 == commit ]] || (($# == 3)) || { usage; exit 2; }
     case $2 in
       pr) valid_number "$3" || die 2 "not a PR number: \"$3\""; out=$(decide_pr "$3") ;;
-      commit) [[ $3 =~ ^[0-9a-f]{40}$ ]] || die 2 "not a commit SHA: \"$3\""; out=$(decide_commit "$3") ;;
+      commit)
+        [[ $3 =~ ^[0-9a-f]{40}$ ]] || die 2 "not a commit SHA: \"$3\""
+        for p in "${@:4}"; do valid_number "$p" || die 2 "not a PR number: \"$p\""; done
+        out=$(decide_commit "${@:3}")
+        ;;
       branch) out=$(decide_branch "$3") ;;
       *) usage; exit 2 ;;
     esac
