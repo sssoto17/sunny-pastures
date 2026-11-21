@@ -8,15 +8,28 @@
 # withholds (ADR-0002 area 2, #264, #322). After an approval it turns on auto-merge (squash) for
 # the reviewed head, and when it doesn't approve it turns off auto-merge that is on (ADR-0002 area
 # 2, flow step 3). It never merges: with the repo's allow_auto_merge off, GitHub refuses, and the
-# review still stands (Q16).
+# review still stands (Q16). On a PR based on anything but DEFAULT_BRANCH, a stacked part (#404), it
+# never leaves auto-merge on: that would merge the part into the part below, and a stack merges whole.
 # Tests: .github/scripts/tests/post-review.test.mjs.
 #
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
 # App's slug), ADMIN, FACTORY_APP (the factory App's slug), CTX (holds files.json), VERDICT,
-# THREADS_QUERY, RUNNER_TEMP; CODEOWNERS (default .github/CODEOWNERS, main's copy).
+# THREADS_QUERY, RUNNER_TEMP, DEFAULT_BRANCH, BASE and BASE_SHA (the base gather judged); CODEOWNERS
+# (default .github/CODEOWNERS, main's copy).
 # shellcheck disable=SC2016 # single-quoted jq programs, by design
 set -euo pipefail
 
+: "${DEFAULT_BRANCH:?}" "${BASE:?}" # a missing one must not read as "every PR is a stacked part"
+# A stacked part (#404): claude-code-action fetched origin/<base> and restored config from it
+# after gather's gate read the base's files at BASE_SHA. If the part below moved in between, the
+# review ran with config the gate never saw: nothing is posted, and the run fails so it shows.
+if [[ $BASE != "$DEFAULT_BRANCH" ]]; then
+  restored=$(git rev-parse --verify --quiet "refs/remotes/origin/$BASE^{commit}") || restored=none
+  if [[ $restored != "${BASE_SHA-}" ]]; then
+    echo "::error::the action restored config from $BASE at $restored, not ${BASE_SHA:-unknown} as the gate read: nothing posted"
+    exit 1
+  fi
+fi
 r="repos/$GITHUB_REPOSITORY" v="$RUNNER_TEMP/verdict.json" t="$RUNNER_TEMP/threads.json"
 printf '%s' "$VERDICT" >"$v"
 # The whole shape, or nothing is posted: a missing or null field must never read as "none".
@@ -34,8 +47,8 @@ if grep -qE 'sk-ant-|gh[opsu]_[A-Za-z0-9]{20}|github_pat_|-----BEGIN' "$v"; then
   echo "::error::the verdict looks like it holds a credential: nothing posted"
   exit 1
 fi
-now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null), .user.type] | @tsv')
-IFS=$'\t' read -r head_now author node auto_on author_type <<<"$now"
+now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null), .user.type, .base.ref] | @tsv')
+IFS=$'\t' read -r head_now author node auto_on author_type base_ref <<<"$now"
 if [[ $head_now != "$HEAD" ]]; then
   echo "the head moved to $head_now: the newer run reviews it"
   exit 0
@@ -192,7 +205,12 @@ body=$(jq -r .summary "$v")
 body+=$note
 gh api -X POST "$r/pulls/$PR/reviews" --silent -f commit_id="$HEAD" -f event="$event" -f body="$body"
 auto=off
-if [[ $event == APPROVE ]]; then
+if [[ $event == APPROVE && $base_ref != "$DEFAULT_BRANCH" ]]; then
+  auto=stacked
+  if [[ $auto_on == true ]] && ! set_auto disable; then
+    echo "::warning::auto-merge is on for a stacked part: turn it off by hand (gh pr merge $PR --disable-auto)"
+  fi
+elif [[ $event == APPROVE ]]; then
   # Refused while allow_auto_merge is off (or the PR merges as it is): the approval stands.
   if [[ $auto_on == true ]] || set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi
 fi
