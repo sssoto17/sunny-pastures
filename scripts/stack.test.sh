@@ -237,6 +237,30 @@ case_ open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$(body 7-p2 'feat: two')" 7-p3=
 expect_code 0
 expect_eq "completed here" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401,403]"
 
+# --- --as-admin (#385): each part opened as the admin, and linked with the lane's token ----------
+reset
+three_parts
+OPEN_PR_AS_ADMIN=264 case_ open --as-admin 7-p1="$(body 7-p1 'test: one')" 7-p2="$(body 7-p2 'test: two')"
+expect_code 0
+expect_eq "opened by the admin" "$(pr_field 400 .user.login) $(pr_field 401 .user.login)" "sssoto17 sssoto17"
+expect_eq "linked by stack.sh" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401]"
+OPEN_PR_AS_ADMIN=264 case_ add 401 --as-admin 7-p3="$(body 7-p3 'test: three')"
+expect_code 0
+expect_eq "the added part by the admin" "$(pr_field 403 .user.login)" sssoto17
+expect_eq "added to the stack" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401,403]"
+reset
+three_parts
+case_ open --as-admin 7-p1="$(body 7-p1 'test: one')" 7-p2="$(body 7-p2 'test: two')"
+expect_code 2
+expect_err "OPEN_PR_AS_ADMIN"
+# a part whose open PR the App opened can't be reused as the admin's
+reset
+three_parts
+run open 7-p1="$(body 7-p1 'test: one')" 7-p2="$(body 7-p2 'test: two')"
+OPEN_PR_AS_ADMIN=264 case_ open --as-admin 7-p1="$work/bodies/7-p1.md" 7-p2="$work/bodies/7-p2.md"
+expect_code 2
+expect_err "#400 was opened by sunny-factory[bot]"
+
 # --- add: appends a part on the top open part ----------------------------------------------------
 reset
 three_parts

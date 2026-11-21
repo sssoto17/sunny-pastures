@@ -45,6 +45,11 @@ host" below. These habits keep `.git/config` out of it:
   `scripts/open-pr.sh [--label <name>]... <branch> <body-file>` (a stack with `scripts/stack.sh`),
   never `gh pr create`: the `open-pr` workflow opens it as `sunny-factory[bot]`, and neither needs
   an upstream (#336). It uses REST only, so it works in cloud sessions too.
+  - **`--as-admin`, for admin-owned paths only** (`tests/acceptance/**`; #385, ADR-0007 "Acceptance
+    tests"): `scripts/open-pr.sh --as-admin …` (or `scripts/stack.sh open --as-admin …`) opens the
+    PR with the session's own credentials, the admin's, so `guard / acceptance` sees a human author.
+    It's off by default and refused unless `OPEN_PR_AS_ADMIN=<N>` is set by the admin's launch and
+    the body links #N. Never set that variable yourself, in a command or a brief.
 - Don't run `gh pr checkout` or `git remote set-url`. Read a PR's files with
   `git show origin/<branch>:<path>` or `gh api`.
 
@@ -127,6 +132,14 @@ Read-only `gh` and `git` commands, the writes AGENTS.md allows, the `pnpm` check
 Factory, repo settings and a bare `git push` ask first. Reading `.env*`, commands that print
 secrets, force pushes and pushes to `main` are denied. Bash rules match the command text, so they're
 guidance, not a security boundary. The sandbox and the hooks are what enforce.
+
+An `ask` rule prompts in auto mode too, so each one can stop an unattended lane until the admin
+answers (<https://code.claude.com/docs/en/permission-modes.md>, "How the classifier evaluates
+actions"). Add one only for an action the admin must confirm. A wildcard allow paired with ask rules
+for its write flags prompts on every write: keep the pair only when the admin wants each write
+confirmed (vitest's snapshot flags, admin, 21 Nov). Otherwise drop both, so auto mode's classifier
+decides; Manual mode then prompts, or runs the command inside the sandbox when sandbox auto-allow is
+on (#434: `prettier --write` stopped the #382 lane for over an hour).
 
 ## Working directory
 

@@ -50,16 +50,16 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   hook (`.claude/hooks/block-branch-switch.sh`) enforces this: in the main folder it denies branch
   switches and a top-level `cd` into a worktree.
 - The coordinating session (the main folder) briefs, dispatches reviewers, relays and keeps the
-  board (`.claude/skills/today/SKILL.md`, "After the agenda: coordinator mode"). Work that crops up
-  becomes a brief in `.scratch/` for a lane, not an edit. After each completed task it gives a short
-  status: today's agenda, what's done, what's left in order. A session that finishes an issue asks
-  "close #N?" in the same report. A `PreToolUse` hook (`.claude/hooks/block-coordinator-work.sh`)
-  backs this up: in the main folder it denies the file tools and the common shell writes (redirects,
-  `sed -i`, `cp`, `mv`, `rm` and the like) on repo files outside `.scratch/` and `.remember/`,
-  commits and opening PRs; filing issues stays allowed. It can't catch every write, so the standard
-  above is what holds. Both hooks skip remote sessions (`CLAUDE_CODE_REMOTE=true` or
-  `GITHUB_ACTIONS=true`: cloud sessions, routines, factory and reviewer jobs), which have no main
-  folder.
+  board (the user-scoped `/today` skill, `~/.claude/skills/today/`: `SKILL.md` "The coordinator's
+  rules" and "During the day", and `prs.md`). Work that crops up becomes a brief in `.scratch/` for
+  a lane, not an edit. After each completed task it gives a short status: today's agenda, what's
+  done, what's left in order. A session that finishes an issue asks "close #N?" in the same report.
+  A `PreToolUse` hook (`.claude/hooks/block-coordinator-work.sh`) backs this up: in the main folder
+  it denies the file tools and the common shell writes (redirects, `sed -i`, `cp`, `mv`, `rm` and
+  the like) on repo files outside `.scratch/` and `.remember/`, commits and opening PRs; filing
+  issues stays allowed. It can't catch every write, so the standard above is what holds. Both hooks
+  skip remote sessions (`CLAUDE_CODE_REMOTE=true` or `GITHUB_ACTIONS=true`: cloud sessions,
+  routines, factory and reviewer jobs), which have no main folder.
 - Check before you state. Verify a claim about the board, the repo or the tools (an issue's
   blockers, a skill's name, what a doc or rule requires) with a command first, not from memory.
   Review a results PR against every step of the rule or criteria it reports on.

@@ -5,10 +5,11 @@
 // (state hash and plain JSON) with the recorded state hash.
 //
 // The sim's source imports `.js` paths that are `.ts` files, so Node can't run it as it stands.
-// The gate compiles it once with the repo's own tsc, under the sim's own compiler options, into a
-// temp folder, and each process imports that JavaScript (no runner package; admin, 16 Nov). The
-// processes run with different time zones and locales, and each also plays the script twice and
-// replays it from JSON snapshots (packages/sim/src/sim/tests/playScript.ts).
+// The gate builds the sim with the repo's own tsc and the sim's build config (tsconfig.build.json),
+// the JavaScript Next bundles, into its own temp folder (#433), and each process imports that (no
+// runner package; admin, 16 Nov). The processes run with different time zones and locales, and
+// each also plays the script twice and replays it from JSON snapshots
+// (packages/sim/src/sim/tests/playScript.ts).
 //
 // Usage: node .github/scripts/determinism-gate.mjs [--update | --record]
 //   --update  writes the hash both processes agree on to determinismScript.hash
@@ -18,7 +19,16 @@
 // Exit codes: 0 pass, 1 the gate failed, 2 could not run. A 2 never reads as a pass.
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -29,6 +39,7 @@ import { CannotRun, isMain } from "./diff.mjs";
 const SELF = fileURLToPath(import.meta.url);
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SIM_TESTS = "packages/sim/src/sim/tests";
+const SIM_BUILD = "packages/sim/tsconfig.build.json";
 const SCRIPT = `${SIM_TESTS}/determinismScript.json`;
 const HASH = `${SIM_TESTS}/determinismScript.hash`;
 const STEPS = 500;
@@ -95,35 +106,56 @@ export const evaluate = ({ script, runs, expected }) => {
 	return { failures, report };
 };
 
-// The sim, compiled with its own tsconfig's options into `dir`, as ES modules.
+// The sim as it ships, plus the gate's two helpers, as ES modules in `dir` (#433). The gate checks
+// the JavaScript Next bundles, so a build config that drifts from the sim's checked options can't
+// pass unnoticed: it runs the sim's build config (packages/sim/tsconfig.build.json) with its output
+// sent into `dir`, so every run starts from an empty folder (no file left from a deleted module, and
+// no race with a `dev:watch` writing packages/sim/dist). Then it turns only the helpers into
+// JavaScript, one file at a time, under the sim's own compiler options. A whole-program tsc would
+// follow their relative imports and write the sim out again; `isolatedModules`
+// (tsconfig.base.json) makes the per-file conversion safe, and `tsc -b` type-checks the helpers in
+// the sim's test project. Their `../../index.js` and `../../random/index.js` then land on the built
+// sim, which holds all of src/ but the tests.
 const compile = (dir) => {
-	const config = join(dir, "tsconfig.json");
 	const out = join(dir, "out");
-	const files = ["playScript.ts", "recordScript.ts"].map((f) => join(ROOT, SIM_TESTS, f));
-	writeFileSync(
-		config,
-		JSON.stringify({
-			extends: join(ROOT, "packages/sim/tsconfig.json"),
-			compilerOptions: {
-				outDir: out,
-				emitDeclarationOnly: false,
-				declaration: false,
-				composite: false,
-				incremental: false,
-				noEmitOnError: true,
-			},
-			include: [],
-			files,
-		}),
-	);
 	const tsc = spawnSync(
 		process.execPath,
-		[join(ROOT, "node_modules/typescript/bin/tsc"), "-p", config],
+		[join(ROOT, "node_modules/typescript/bin/tsc"), "-p", join(ROOT, SIM_BUILD), "--outDir", out],
 		{ encoding: "utf8" },
 	);
-	if (tsc.status !== 0) throw new CannotRun(`tsc failed:\n${tsc.stdout}${tsc.stderr}`);
+	if (tsc.status !== 0) throw new CannotRun(`the sim's build failed:\n${tsc.stdout}${tsc.stderr}`);
+
 	writeFileSync(join(out, "package.json"), '{ "type": "module" }\n');
-	return (file) => pathToFileURL(join(out, SIM_TESTS.replace("packages/sim/src/", ""), file)).href;
+	const ts = createRequire(import.meta.url)(join(ROOT, "node_modules/typescript"));
+	const simConfig = join(ROOT, "packages/sim/tsconfig.json");
+	const { options } = ts.parseJsonConfigFileContent(
+		ts.readConfigFile(simConfig, ts.sys.readFile).config,
+		ts.sys,
+		dirname(simConfig),
+	);
+	const tests = join(out, SIM_TESTS.replace("packages/sim/src/", ""));
+	mkdirSync(tests, { recursive: true });
+	for (const helper of ["playScript.ts", "recordScript.ts"]) {
+		const fileName = join(ROOT, SIM_TESTS, helper);
+		const { outputText, diagnostics } = ts.transpileModule(readFileSync(fileName, "utf8"), {
+			// Converting one file alone, tsc can't read the package.json that makes it an ES module
+			// under NodeNext, so the format is set here, as dist/ is.
+			compilerOptions: {
+				...options,
+				module: ts.ModuleKind.ESNext,
+				moduleResolution: ts.ModuleResolutionKind.Bundler,
+			},
+			fileName,
+			reportDiagnostics: true,
+		});
+		if (diagnostics.length > 0) {
+			const text = diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
+			throw new CannotRun(`${helper} doesn't convert:\n${text.join("\n")}`);
+		}
+
+		writeFileSync(join(tests, helper.replace(/\.ts$/, ".js")), outputText);
+	}
+	return (file) => pathToFileURL(join(tests, file)).href;
 };
 
 // One process: plays the script at `scriptPath` and prints what it saw as JSON on stdout.

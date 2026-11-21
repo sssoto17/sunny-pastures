@@ -1,0 +1,10 @@
+{
+	"//": "The sim as it ships (#433): JavaScript and declarations in dist/, from src/ without the tests, under the sim's own options (ES2022 lib, no ambient types), so what ships passes the same purity compile. Next and Node read dist/ through the package's `default` export; Vitest, tsc -b and editors read src/ through the `@sunny-pastures/source` condition. Not in the root references: tsc -b only typechecks, and this config only emits.",
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"emitDeclarationOnly": false,
+		"composite": false,
+		"incremental": false,
+		"outDir": "dist"
+	}
+}

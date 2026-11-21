@@ -17,12 +17,17 @@ const propertyTimeout = Math.max(5_000, 15 * simPropertyRuns);
 
 // apps/web's imports, resolved as Next resolves them (#342, #329 decisions 3 and 4): `@/` is its
 // src/, and `server-only` is Next's own empty module on the server side, with no package to install.
+// The sim is read from its source, never from a dist/ that may be stale or missing (#433): Next
+// takes the built dist/, tests and coverage take src/. tsc reads src/ through the package's
+// `@sunny-pastures/source` condition; Vite would need its default conditions repeated beside ours
+// to do the same, so an exact alias keeps it to one line.
 const fromRoot = (path: string) => decodeURIComponent(new URL(path, import.meta.url).pathname);
 
 export default defineConfig({
 	resolve: {
 		alias: [
 			{ find: /^@\//, replacement: fromRoot("apps/web/src/") },
+			{ find: /^@sunny-pastures\/sim$/, replacement: fromRoot("packages/sim/src/index.ts") },
 			{
 				find: /^server-only$/,
 				replacement: fromRoot("apps/web/node_modules/next/dist/compiled/server-only/empty.js"),

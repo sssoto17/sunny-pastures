@@ -1,0 +1,54 @@
+# `guard / acceptance` (#384, MUST-15.2): a `[bot]`-authored PR that touches tests/acceptance/**
+# fails (ADR-0007, section 6); rules in acceptance-guard.mjs. Its own workflow, so ci.yml stays
+# untouched. No path filter and no `if:`, so it reports on every PR and can be required (a skipped
+# required check reads as passing, ADR-0002, area 2). Actions pinned to a full SHA (area 8).
+name: acceptance-guard
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# No concurrency group, as in pr-body.yml (#264): a cancelled twin of a required check misreads.
+
+jobs:
+  # Not `acceptance` (#49 may take it): floor-guard GUARDED_JOBS matches job ids in every workflow.
+  acceptance-guard:
+    name: guard / acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Lists the PR's files: read-only scopes, with the token in env, never in a `run:` expression.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      # Run the default branch's script, not the PR's, so a PR can't switch off the check that
+      # judges it (as the floor job does, #99). A sparse checkout leaves other refs' blobs off the
+      # runner, so the default branch gets a checkout of its own. The PR's copy runs only while
+      # the default branch has none; if it has one that can't be read, the step fails.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+          path: .acceptance-guard
+          sparse-checkout: .github/scripts
+      - name: Take the script from the default branch
+        run: |
+          dir="$RUNNER_TEMP/acceptance-guard"
+          mkdir -p "$dir"
+          listed=$(git -C .acceptance-guard ls-tree HEAD -- .github/scripts/acceptance-guard.mjs) || exit 1
+          if [[ -n $listed ]]; then
+            cp .acceptance-guard/.github/scripts/acceptance-guard.mjs .acceptance-guard/.github/scripts/diff.mjs "$dir/"
+          else
+            echo "::warning::the default branch has no acceptance-guard.mjs yet; using this PR's copy"
+            cp .github/scripts/acceptance-guard.mjs .github/scripts/diff.mjs "$dir/"
+          fi
+      - run: node "$RUNNER_TEMP/acceptance-guard/acceptance-guard.mjs"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
