@@ -30,7 +30,10 @@ export interface GameStore {
 	 * farm is still at `expectedSeq`, and writes `next` as a snapshot when that seq is a multiple of
 	 * 100. A key the farm already used gives `duplicate` with its first answer and writes nothing
 	 * (MUST-13.2); a farm no longer at `expectedSeq` gives `conflict` and writes nothing (MUST-13.3).
-	 * Throws when the database refuses the row, such as a seq or `at` above 2^53 - 1.
+	 * `conflict` means this call wrote nothing, not that the key is unused: a commit with the same key
+	 * may still be in flight, so retry with the same key, which then finds it as `duplicate`.
+	 * Throws a `RangeError` when `expectedSeq` isn't a non-negative safe integer, and throws when the
+	 * database refuses the row it writes, such as one with an `at` above 2^53 - 1.
 	 */
 	readonly commit: (playerId: string, entry: CommitEntry) => Promise<CommitResult>;
 }
@@ -98,6 +101,13 @@ const snapshotEvery = 100;
  */
 const rulesVersion = 1;
 
+/**
+ * Pinned, not left to the role's default: under repeatable read the loser of a race would throw a
+ * serialization error instead of seeing the winner's row, so neither `conflict` nor `duplicate`
+ * would hold (MUST-13.2, MUST-13.3).
+ */
+const readCommitted = { isolationLevel: "read committed" } as const;
+
 export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
 	return {
 		async load(playerId) {
@@ -135,12 +145,22 @@ export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
 		},
 
 		async commit(playerId, entry) {
-			const seq = entry.expectedSeq + 1;
+			const { expectedSeq } = entry;
+			if (!Number.isSafeInteger(expectedSeq) || expectedSeq < 0) {
+				// The conditional insert is the only seq guard (ADR-0007, section 5, Q6), so a seq that
+				// isn't one never reaches it: a string "5" would write seq "51".
+				throw new RangeError(
+					`Store error: expectedSeq must be a non-negative safe integer, got ${String(expectedSeq)}.`,
+				);
+			}
+
+			const seq = expectedSeq + 1;
 			return await db.transaction(async (tx): Promise<CommitResult> => {
 				// One row claims the key and the next seq together, and only while the farm is at
-				// expectedSeq: the seq is taken if another commit got there first, and the row before it
-				// must exist, so the log has no gaps (ADR-0007, section 5, Q6). A raw template, as
-				// postgres.js 4.x types the parameters server-side (Q9); the casts make each type explicit.
+				// expectedSeq: the seq is taken if another commit got there first, and the row before
+				// it must exist, so the log has no gaps (ADR-0007, section 5, Q6). A raw template, as
+				// postgres.js 4.x types the parameters server-side (Q9); the casts pin each type, since
+				// `$n = 0` alone would be read as an integer and overflow past 2^31 - 1.
 				const appended = await tx.execute(sql`
 					insert into ${actions}
 						(farm_id, seq, at, action, idempotency_key, answer, rules_version)
@@ -148,15 +168,15 @@ export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
 						${playerId}::uuid, ${seq}::bigint, ${entry.at}::bigint,
 						${JSON.stringify(entry.action)}::jsonb, ${entry.idempotencyKey}::uuid,
 						${JSON.stringify(entry.answer)}::jsonb, ${rulesVersion}::integer
-					where ${entry.expectedSeq}::bigint = 0 or exists (
+					where ${expectedSeq}::bigint = 0 or exists (
 						select 1 from ${actions}
-						where farm_id = ${playerId}::uuid and seq = ${entry.expectedSeq}::bigint
+						where farm_id = ${playerId}::uuid and seq = ${expectedSeq}::bigint
 					)
 					on conflict do nothing
 					returning 1`);
 				if (appended.length === 0) {
-					// A concurrent insert with the same key waited on the unique index, so by now a key
-					// that is taken is visible to this statement. Nothing was written either way.
+					// Nothing was written. A key committed by now is visible to this new statement
+					// under read committed; one still in flight isn't, so that call gets `conflict`.
 					const [row] = await tx
 						.select({ answer: actions.answer })
 						.from(actions)
@@ -172,11 +192,13 @@ export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
 					// The append above won this seq, so no other commit for this farm races this write.
 					await tx
 						.insert(snapshots)
-						.values({ farmId: playerId, seq, at: entry.at, state: entry.next, rulesVersion });
+						.values({ farmId: playerId, seq, at: entry.at, state: entry.next, rulesVersion })
+						// A snapshot is a cache: one already at this seq and version mustn't fail the append.
+						.onConflictDoNothing();
 				}
 
 				return { kind: "committed", seq };
-			});
+			}, readCommitted);
 		},
 	};
 }

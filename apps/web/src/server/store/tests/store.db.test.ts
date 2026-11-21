@@ -82,6 +82,28 @@ function describeGameStore(name: string, makeStore: MakeStore) {
 			expect(await store.processed(farmId, ahead.idempotencyKey)).toBeNull();
 		});
 
+		it.each([-1, 1.5, Number.NaN, 2 ** 53])(
+			"refuses an expectedSeq of %s, and writes nothing",
+			async (expectedSeq) => {
+				const farmId = await createPlayer();
+				const store = makeStore();
+				const entry = { ...makeEntry(newFarm(), 0, 1_000), expectedSeq };
+
+				await expect(store.commit(farmId, entry)).rejects.toThrow(RangeError);
+				expect((await store.load(farmId)).seq).toBe(0);
+			},
+		);
+
+		it("refuses an expectedSeq that is a string, as an unchecked request body could send", async () => {
+			const farmId = await createPlayer();
+			const store = makeStore();
+			await play(store, farmId, 5);
+			const entry = { ...makeEntry(newFarm(), 5, 6_000), expectedSeq: "5" as unknown as number };
+
+			await expect(store.commit(farmId, entry)).rejects.toThrow(RangeError);
+			expect((await store.load(farmId)).seq).toBe(5);
+		});
+
 		it("answers a resent key with the first answer, and writes nothing (MUST-13.2)", async () => {
 			const farmId = await createPlayer();
 			const store = makeStore();
