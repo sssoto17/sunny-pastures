@@ -95,6 +95,11 @@ Things to know:
   (`.github/CODEOWNERS`) and the edits that will ask the admin; which `CONSTRAINTS.md` "Admin
   review" rows apply, so the PR carries `review:admin`; its `area:*` label; steps that need the
   host (`sandbox.md`); other lanes in flight on the same files, from the agenda's In flight>
+<Only for an issue that changes admin-owned paths such as `tests/acceptance/**` (#385; ADR-0007,
+  "Acceptance tests"):>
+- Open the PR with `scripts/open-pr.sh --as-admin` (a stack: `scripts/stack.sh open --as-admin`),
+  so the admin is its author. It works only on a run the admin launched with
+  `OPEN_PR_AS_ADMIN=<N>`; never set it yourself. The script adds the line saying a lane opened it.
 
 For the coordinator (resolve, then delete this section before launch):
 - <judgement calls, as above>
@@ -126,6 +131,9 @@ empty.">
 - #<N> <title> (Factory, ...): /implement #<N>
 - #<N> <title> (<mode>, <priority>, <size>): brief <path> (new | exists, not rewritten)
   /implement #<N> Read and follow <absolute brief path> first.
+  <For a brief with `--as-admin` (#385), the launch line instead: `OPEN_PR_AS_ADMIN=<N> claude
+  "/implement #<N> Read and follow <absolute brief path> first."`; in the cloud, the variable in
+  the environment's settings for that run, then removed.>
 - #<N> Retro inbox: no lane.
 <Issues named in the arguments that aren't Ready, under "Also drafted", with their status and
 PR, and no launch line.>

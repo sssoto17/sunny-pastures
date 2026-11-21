@@ -78,6 +78,8 @@
 			"Bash(gh api graphql*enablePullRequestAutoMerge*)",
 			"Bash(gh pr create)",
 			"Bash(gh pr create *)",
+			"Bash(*open-pr.sh*--as-admin*)",
+			"Bash(*stack.sh*--as-admin*)",
 			"mcp__github__create_pull_request",
 			"mcp__plugin_github_github__create_pull_request",
 			"Bash(gh pr close *)",
