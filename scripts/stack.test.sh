@@ -253,6 +253,13 @@ three_parts
 case_ open --as-admin 7-p1="$(body 7-p1 'test: one')" 7-p2="$(body 7-p2 'test: two')"
 expect_code 2
 expect_err "OPEN_PR_AS_ADMIN"
+# a part whose open PR the App opened can't be reused as the admin's
+reset
+three_parts
+run open 7-p1="$(body 7-p1 'test: one')" 7-p2="$(body 7-p2 'test: two')"
+OPEN_PR_AS_ADMIN=264 case_ open --as-admin 7-p1="$work/bodies/7-p1.md" 7-p2="$work/bodies/7-p2.md"
+expect_code 2
+expect_err "#400 was opened by sunny-factory[bot]"
 
 # --- add: appends a part on the top open part ----------------------------------------------------
 reset

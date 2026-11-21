@@ -196,6 +196,11 @@ expect_err "an issue number"
 OPEN_PR_AS_ADMIN=38 run --as-admin 336-a "$work/admin.md"
 expect_code 2
 expect_err "doesn't link #38"
+# the link needs a word of its own: "Discloses #386" or "xPart of #386" doesn't link #386
+printf 'test(acceptance): x\n\nDiscloses #386 and xPart of #386.\n' >"$work/word.md"
+OPEN_PR_AS_ADMIN=386 run --as-admin 336-a "$work/word.md"
+expect_code 2
+expect_err "doesn't link #386"
 OPEN_PR_AS_ADMIN=386 run --as-admin --label nope 336-a "$work/admin.md"
 expect_code 2
 expect_err "no label nope"
@@ -216,7 +221,7 @@ expect_eq "opened by the admin" "$(pr_field 400 .user.login)" sssoto17
 expect_eq "the title" "$(pr_field 400 .title)" "test(acceptance): the first contract (#386)"
 assert "the body keeps the link" contains "$(pr_field 400 .body)" "Closes #386."
 assert "the body says a lane opened it as the admin" contains "$(pr_field 400 .body)" \
-  "Opened as the admin by a lane"
+  "Opened as the admin by a lane, with \`scripts/open-pr.sh --as-admin\` on a run the admin started for #386 (#385)."
 assert "no dispatch" bash -c "! test -s '$work/gh/dispatches'"
 assert "the label added" contains "$calls" $'issues/400/labels\n--silent\n-f\nlabels[]=review:admin'
 expect_err "opened #400 as the admin"

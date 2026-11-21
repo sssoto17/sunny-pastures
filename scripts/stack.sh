@@ -89,6 +89,11 @@ ensure_pr() { # head base body-file -> "<number> new|reused"; reuses an open PR 
   found=$(open_pr_for "$head")
   if [[ -n $found ]]; then
     refuse_other_base "$head" "$base" "$found"
+    if ((${#open_pr_flags[@]})); then # as open-pr.sh does: the App's PR fails guard / acceptance
+      l=$(gh api "$P/pulls/${found%% *}" --jq .user.login)
+      [[ $l != *'[bot]' ]] ||
+        die 2 "#${found%% *} was opened by $l, so it can't carry admin-owned paths: close it first"
+    fi
     echo "${found%% *} reused"
     return
   fi
