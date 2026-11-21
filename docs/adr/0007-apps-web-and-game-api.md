@@ -120,7 +120,8 @@ and `PlayerId` as types only, so it is tested against a fake store. There is no 
   `game` → type-only `auth` (for `PlayerId`) was added by the auth grill (section 4, Q4).
   `coverage.requireAllFiles` puts every file under `apps/web/src` in a zone. Section 6 adds a
   test-files-only allowance (`game/**/tests/**` → `store/tests/**`) and an `acceptance` zone with no
-  allowances.
+  allowances. The store gate's one file (`store/tests/storeGate.db.test.ts`) is a zone of its own
+  that may also run `rules` and `sim`, since it plays the script with the real rules (#383).
 
 - Client code imports only the sim's package entry, which is the current content (ADR-0006, "The
   client"). The registry lives in `server/rules/`, out of the client's reach.
@@ -513,7 +514,10 @@ still offering refused ones. At every snapshot seq, after the 8-hour gap and at 
 must strictly deep-equal the in-memory farm (types included), and the final state hash must equal
 `determinismScript.hash`. It reads both files and never writes them. If `ci / determinism` is green
 and this test is red, the store is at fault, which keeps ADR-0001's "where does the failure lie"
-property. The `stateAt` checks at random times move to M6 with the audit route.
+property. The `stateAt` checks at random times move to M6 with the audit route. The gate is the one
+store test that runs `rules` and the sim's code, so its file is a Fallow zone of its own
+(`storeGate`: the store tests' rule plus `rules` and `sim`), and the store's other tests keep the
+sim type-only (#383).
 
 ### Action-handler tests: an in-memory store held to a contract
 
