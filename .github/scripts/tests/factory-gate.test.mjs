@@ -360,6 +360,9 @@ describe("factory.yml", () => {
 		expect(step).toMatch(/sudo apt-get install -y .*bubblewrap/);
 		expect(step).toContain("bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true");
 		expect(step).not.toMatch(/uses:/);
+		// A broken bwrap must stop the job: no continue-on-error, and the error line exits 1.
+		expect(step).not.toMatch(/continue-on-error/);
+		expect(step).toMatch(/::error::bwrap can't create its namespaces[^\n]*\n\s*exit 1/);
 		expect(factory).toMatch(/CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'/);
 		expect(yml).not.toMatch(/CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '?0/);
 	});

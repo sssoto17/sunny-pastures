@@ -947,13 +947,15 @@ GitHub hands a job.
 **Bubblewrap for the scrub (admin, 21 Nov 2026, option a).** The scrub runs Claude's subprocesses
 under bubblewrap, and Claude Code 2.1.319 refuses to start with the scrub on and no `bwrap`
 ("bubblewrap is required for subprocess env scrubbing and isolation"; #107's live test, three runs).
-An earlier reading here, that the action sets the isolation up only with `allowed_non_write_users`,
-was wrong for this CLI: that input only decides whether the action installs bubblewrap itself (its
-"Install subprocess isolation dependencies" step, `action.yml` at the pinned SHA). So the factory
-job installs `bubblewrap` and `socat` from Ubuntu's archive before the Claude step, as that action
-step does; the scrub stays on, never `0`. Ubuntu 24.04's AppArmor denies unprivileged user
-namespaces (`kernel.apparmor_restrict_unprivileged_userns=1`), which bwrap needs. The step first
-loads the narrowest fix, an AppArmor profile that lets `/usr/bin/bwrap` alone create them
+PR #448's body read the action as setting the isolation up only with `allowed_non_write_users`; that
+was wrong for this CLI, which needs bubblewrap whenever the scrub is on. At the pinned SHA that
+input makes the action install bubblewrap itself (its "Install subprocess isolation dependencies"
+step), turn the scrub on by default and put `/usr/bin` first on the `PATH`, among other things, none
+of which the factory uses (`action.yml`, read 21 Nov 2026). So the factory job installs `bubblewrap`
+and `socat` from Ubuntu's archive before the Claude step, as that action step does; the scrub stays
+on, never `0`. Ubuntu 24.04's AppArmor denies unprivileged user namespaces
+(`kernel.apparmor_restrict_unprivileged_userns=1`), which bwrap needs. The step first loads the
+narrowest fix, an AppArmor profile that lets `/usr/bin/bwrap` alone create them
 (`/usr/bin/bwrap flags=(default_allow) { userns, }`, the form of Ubuntu's per-program example in
 [Restricted unprivileged user namespaces](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces),
 read 21 Nov 2026), and only if `bwrap` still fails sets that sysctl to `0` for this runner, as the

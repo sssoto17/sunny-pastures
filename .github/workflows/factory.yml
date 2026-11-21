@@ -167,12 +167,13 @@ jobs:
             sudo apparmor_parser -r /etc/apparmor.d/bwrap || echo "the bwrap AppArmor profile didn't load"
           fi
           if smoke 2>"$RUNNER_TEMP/bwrap.err"; then
-            echo "RESULT bwrap=ok via=apparmor-profile $(bwrap --version)"
+            echo "RESULT bwrap=ok via=apparmor-profile restrict=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo none) $(bwrap --version)"
             exit 0
           fi
           echo "bwrap with the profile: $(head -c 300 "$RUNNER_TEMP/bwrap.err")"
           if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
-            sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+            sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0 ||
+              { echo "::error::sysctl failed: AppArmor still restricts user namespaces"; exit 1; }
           fi
           smoke 2>"$RUNNER_TEMP/bwrap.err" || {
             echo "::error::bwrap can't create its namespaces: $(head -c 300 "$RUNNER_TEMP/bwrap.err")"
