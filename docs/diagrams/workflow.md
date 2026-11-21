@@ -9,9 +9,9 @@ Last changed: 2026-11-16 (the Wk 2 workflow audit's stale places, #273). Before 
 (`REVIEW.md` as the one review standard, #225).
 
 Every name below is a skill in `.claude/skills/`, except `remember:remember`, which comes from the
-`remember` plugin. `/clear` and `/compact` are built-in commands. `/today` is a skill too: its stage
-1 (drafting the agenda and briefs, #117) and its coordinator mode (#157) have landed, and stage 2 is
-#109 (see **Automation stages**).
+`remember` plugin, and `/today`, which is the admin's user-scoped skill (`~/.claude/skills/today/`).
+`/clear` and `/compact` are built-in commands. `/today`'s stage 1 (drafting the agenda and briefs,
+#117) and its coordinator mode (#157) have landed, and stage 2 is #109 (see **Automation stages**).
 
 ## The loops
 
@@ -101,7 +101,8 @@ PR, but it neither approves nor turns on auto-merge: ruleset `main` stays at 0 r
 with last-push approval off until #264 ("Stacks: one approval pass and one CI run per stack") lands,
 and #68 is blocked by #264 (retro 2026-11-15, Outcomes 1). So you merge every PR, factory PRs
 included. The coordinating session dispatches a fresh-context reviewer agent per PR and relays its
-verdict before you merge (`.claude/skills/today/SKILL.md`, "After the agenda: coordinator mode").
+verdict before you merge (the user-scoped `/today` skill, `~/.claude/skills/today/prs.md`, "Review"
+and "Relay").
 
 ## When to use what
 
@@ -181,9 +182,10 @@ Morning, about 10 minutes:
 2. Open the **This week** board. Pick at most 3 outcomes (usually 1 design and 1–2 build) and move
    them to **Ready**. Ready is your focus; everything else stays in Backlog.
 3. Launch Factory items first, so agents work while you design.
-4. For each Manual item, write a brief (`/today` drafts them into `.scratch/`; its full shape is
-   `.claude/skills/today/SKILL.md`, "Drafting a brief") and open a fresh session in the repo with
-   the launch line `/implement #N Read and follow <brief> first.` The brief, in short:
+4. For each Manual item, write a brief (`/today` drafts them into `.scratch/`; its full shape is in
+   the user-scoped skill's `~/.claude/skills/today/dispatch.md`, "The unattended brief") and open a
+   fresh session in the repo with the launch line `/implement #N Read and follow <brief> first.` The
+   brief, in short:
 
    ```
    Build lane: #N "<title>" (<milestone>, <week>, <priority>, under #<parent>).
