@@ -843,7 +843,7 @@ its dispatch isn't the admin's choice.
    collaborator (`author_association`: the repo is public, and an issue's author can edit its body
    after it is labelled), carries `factory:ready`, and has no open PR and no `<n>-` branch yet (one
    factory branch per issue).
-3. **`factory`** (`timeout-minutes: 60`; environment `factory-claude`, which holds only
+3. **`factory`** (`timeout-minutes: 60`; environment `claude-seat`, which holds only
    `CLAUDE_CODE_OAUTH_TOKEN`) checks out `main` and installs. It runs the gate again on a fresh
    read, then writes the issue and only its owner's and collaborators' comments to files.
    `claude-code-action` runs on the setup-token with `--max-turns` from the gate (100 unless
@@ -870,9 +870,10 @@ its dispatch isn't the admin's choice.
 and the job's 60 are the real bound on a run.
 
 **Two environments, both `main` only (admin, 21 Nov 2026, in the coordinator session).** The Claude
-job runs in `factory-claude`, which holds only `CLAUDE_CODE_OAUTH_TOKEN`. The App's key stays in
-`factory`, which only `publish` (and `open-pr.yml`) enters, so nothing on Claude's runner can reach
-the key, whatever GitHub hands a job.
+job runs in `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN` and is named for the seat, not
+the factory, so `review.yml` can share it later. The App's key stays in `factory`, which only
+`publish` (and `open-pr.yml`) enters, so nothing on Claude's runner can reach the key, whatever
+GitHub hands a job.
 
 **Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
 environment, but the runner user has sudo, so a prompt injection could still read it from the
@@ -1007,9 +1008,9 @@ separate: this is only the identity step for lanes in Claude Code.
   a stack part into the stack of the part below. Its PRs start CI and the review as any App's do
   ("The factory's identity", above).
 - **The key never enters a session.** It lives only in the secret `FACTORY_APP_PRIVATE_KEY` of
-  #101's environment `factory`, which #107's factory job uses too; the client ID is that
-  environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh` checks both, and stores
-  a new key only through stdin.
+  #101's environment `factory`, which #107's `publish` job uses too (its Claude job doesn't); the
+  client ID is that environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh`
+  checks both, and stores a new key only through stdin.
 - **One environment, `main` only (admin, 17 Nov 2026).** The lanes and #107's factory share
   `factory`, and its only deployment rule is `main`: the admin removed #101's `throwaway/*` rule,
   and the setup script stops while any other rule remains. With one App, a second key in a second
@@ -1017,7 +1018,7 @@ separate: this is only the identity step for lanes in Claude Code.
   on any branch other than `main` reading the key: a branch's own copy of a workflow could print it.
   So #107's throwaway test dispatches from `main` instead of running on a `throwaway/*` branch.
   (Amended 21 Nov 2026, #107: the key still has one environment, but #107's Claude job runs in a
-  second one, `factory-claude`, which holds only `CLAUDE_CODE_OAUTH_TOKEN`, so Claude's runner never
+  second one, `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN`, so Claude's runner never
   enters the environment with the key; "The factory workflow, built (#107)", above.)
 - **The payload is untrusted.** Anyone with write access can dispatch, a prompt-injected session
   included. Its fields reach the shell only through `env:`, never as `${{ }}` inside `run:` (the

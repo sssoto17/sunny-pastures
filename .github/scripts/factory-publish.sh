@@ -15,7 +15,8 @@
 # a commit whose author or committer isn't the App's bot user.
 #
 # Env: ISSUE (the gate's checked number), HANDOFF (the tar.gz), WORK (an empty directory to unpack
-# into), BASE (main's commit to diff against), BOT (the App's bot user, sunny-factory[bot]),
+# into), BASE (main's commit to diff against), BOT and BOT_ID (the App's bot user,
+# sunny-factory[bot], and its user id, pinned in factory.yml),
 # GITHUB_OUTPUT. Run inside the repository the branch
 # is fetched into. Writes branch=, labels= (comma-separated) and body= (the body file) and logs one
 # PUBLISH line. Exit codes: 0 passed; 1 refused, nothing fetched past the check that failed.
@@ -24,7 +25,7 @@ set -euo pipefail
 
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is not set}"
 : "${ISSUE:?ISSUE is not set}" "${HANDOFF:?HANDOFF is not set}" "${WORK:?WORK is not set}" "${BASE:?BASE is not set}"
-: "${BOT:?BOT is not set}"
+: "${BOT:?BOT is not set}" "${BOT_ID:?BOT_ID is not set}"
 
 esc() { local s=${1//'%'/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
 refuse() { # message
@@ -36,6 +37,7 @@ refuse() { # message
   exit 1
 }
 
+[[ $BOT_ID =~ ^[1-9][0-9]*$ ]] || refuse "BOT_ID $(printf %q "$BOT_ID") isn't a user id"
 [[ $ISSUE =~ ^[1-9][0-9]{0,6}$ ]] || refuse "ISSUE $(printf %q "$ISSUE") isn't an issue number"
 
 # The entries, before anything is unpacked: exactly these names, each a regular file.
@@ -82,7 +84,7 @@ git diff --quiet "$BASE...refs/heads/$branch" -- .github/workflows tests/accepta
 # Every commit carries the App as author and committer, as the factory job's git config set them.
 bot=$(sed 's/[][\.*^$+?(){}|]/\\&/g' <<<"$BOT") # as an ERE, literally
 others=$(git log --format='%an <%ae>%n%cn <%ce>' "$BASE..refs/heads/$branch" |
-  grep -vxE "$bot <[0-9]+\+$bot@users\.noreply\.github\.com>" | sort -u | head -n 3 || true)
+  grep -vxE "$bot <$BOT_ID\+$bot@users\.noreply\.github\.com>" | sort -u | head -n 3 || true)
 [[ -z $others ]] || refuse "a commit isn't authored and committed by $BOT: $(printf '%s' "$others" | tr '\n' ';')"
 
 echo "branch=$branch" >>"$GITHUB_OUTPUT"

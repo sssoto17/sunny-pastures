@@ -7,13 +7,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = fileURLToPath(new URL("../factory-publish.sh", import.meta.url));
 const BOT = "sunny-factory[bot]";
-const BOT_EMAIL = `123+${BOT}@users.noreply.github.com`;
+const BOT_ID = "355564973";
+const BOT_EMAIL = `${BOT_ID}+${BOT}@users.noreply.github.com`;
 
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
 // Git with a fixed identity: the App's bot user, as the factory job's git config sets it.
-const git = (cwd, args, { name = BOT, email = BOT_EMAIL } = {}) => {
+// `committer` overrides the committer alone.
+const git = (cwd, args, { name = BOT, email = BOT_EMAIL, committer = { name, email } } = {}) => {
 	const res = spawnSync("git", args, {
 		cwd,
 		encoding: "utf8",
@@ -23,8 +25,8 @@ const git = (cwd, args, { name = BOT, email = BOT_EMAIL } = {}) => {
 			GIT_CONFIG_NOSYSTEM: "1",
 			GIT_AUTHOR_NAME: name,
 			GIT_AUTHOR_EMAIL: email,
-			GIT_COMMITTER_NAME: name,
-			GIT_COMMITTER_EMAIL: email,
+			GIT_COMMITTER_NAME: committer.name,
+			GIT_COMMITTER_EMAIL: committer.email,
 		},
 	});
 	if (res.status !== 0) throw new Error(`git ${args.join(" ")}: ${res.stderr}`);
@@ -106,6 +108,7 @@ function run(repo, base) {
 			WORK: work,
 			BASE: base,
 			BOT,
+			BOT_ID,
 			GITHUB_OUTPUT: join(dir, "out"),
 		},
 	});
@@ -161,7 +164,12 @@ describe("factory-publish.sh", () => {
 			);
 		});
 
-		it("refuses a branch name over 100 characters", () => {
+		// The exact limit: 100 characters pass, 101 don't.
+		it("passes a branch name of exactly 100 characters", () => {
+			expect(publish({ branch: `42-${"a".repeat(97)}` }).code).toBe(0);
+		});
+
+		it("refuses a branch name of 101 characters", () => {
 			expect(refusal(publish({ branch: `42-${"a".repeat(98)}` }))).toMatch(
 				/branch name is over 100 characters/,
 			);
@@ -203,6 +211,13 @@ describe("factory-publish.sh", () => {
 			["the author and committer", { name: "Someone", email: "s@example.invalid" }],
 			["a lookalike name", { name: "sunny-factory", email: BOT_EMAIL }],
 			["a lookalike email", { name: BOT, email: `x+${BOT}@example.invalid` }],
+			// Only the committer differs: the author line alone would pass.
+			["only the committer", { committer: { name: "Someone", email: "s@example.invalid" } }],
+			// A name that contains the App's: a pattern not anchored to the whole line would pass it.
+			// With the App's own email, so only the whole-line match tells it apart.
+			["evil-sunny-factory[bot]", { name: `evil-${BOT}`, email: BOT_EMAIL }],
+			// The App's name with another user's id: only the pinned id is the App's bot user.
+			["another id", { name: BOT, email: `123+${BOT}@users.noreply.github.com` }],
 		])("refuses a commit with another identity: %s", (_n, identity) => {
 			expect(refusal(publish({ identity }))).toMatch(
 				/a commit isn't authored and committed by sunny-factory\[bot\]/,
@@ -244,7 +259,12 @@ describe("factory-publish.sh", () => {
 			expect(refusal(publish({ body: "\nCloses #42\n" }))).toMatch(/no title on its first line/);
 		});
 
-		it("refuses a title over 256 characters", () => {
+		// The exact limit: 256 characters pass, 257 don't.
+		it("passes a title of exactly 256 characters", () => {
+			expect(publish({ body: `${"t".repeat(256)}\n\nCloses #42\n` }).code).toBe(0);
+		});
+
+		it("refuses a title of 257 characters", () => {
 			expect(refusal(publish({ body: `${"t".repeat(257)}\n\nCloses #42\n` }))).toMatch(
 				/title is over 256 characters/,
 			);

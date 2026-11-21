@@ -2,7 +2,7 @@
 # takes one issue to an open PR as the App sunny-factory, within a fixed turn and time cap. The
 # admin dispatches it (workflow_dispatch needs actions: write, which a lane's token lacks); the
 # dispatch is the Ready signal (admin, 21 Nov 2026). It always runs main's copy: the `factory` and
-# `factory-claude` environments admit only main, so a dispatch on another branch reaches neither.
+# `claude-seat` environments admit only main, so a dispatch on another branch reaches neither.
 #
 # Each job is skipped unless the one before says go, so a refusal never mints a token or calls
 # Claude, and Claude never shares a runner with a write credential:
@@ -52,6 +52,9 @@ concurrency:
 
 env:
   FACTORY_APP: sunny-factory # the App's slug (ADR-0002, "The factory's identity")
+  # Its bot user's id (the user id GitHub gives sunny-factory[bot], read from PR #448's author):
+  # commits carry it, and publish refuses any other.
+  FACTORY_BOT_ID: '355564973'
 
 jobs:
   switch:
@@ -93,7 +96,7 @@ jobs:
     timeout-minutes: 60
     # Its own environment, holding CLAUDE_CODE_OAUTH_TOKEN only: the App's key lives in `factory`,
     # which this job never enters, so nothing on Claude's runner can reach it (admin, 21 Nov 2026).
-    environment: factory-claude
+    environment: claude-seat
     permissions:
       contents: read # main's checkout
       issues: read # the issue and its trusted comments
@@ -136,7 +139,6 @@ jobs:
             | IN("OWNER", "MEMBER", "COLLABORATOR")) | {author: .user.login, created_at, body}' |
             jq -s . >"$ctx/comments.json"
           echo "RESULT trusted_comments=$(jq length "$ctx/comments.json")"
-          echo "bot_id=$(gh api "/users/$FACTORY_APP[bot]" --jq .id)" >>"$GITHUB_OUTPUT"
 
       # No write credential: only the read-only GITHUB_TOKEN, as github_token (the action also
       # hands it to git and its GitHub tools), and subprocesses get a scrubbed environment (the
@@ -152,7 +154,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           bot_name: ${{ env.FACTORY_APP }}[bot]
-          bot_id: ${{ steps.context.outputs.bot_id }}
+          bot_id: ${{ env.FACTORY_BOT_ID }}
           prompt: >-
             /implement #${{ needs.gate.outputs.issue }} Read .github/factory-prompt.md and follow
             it. The issue is #${{ needs.gate.outputs.issue }}; its context folder is
@@ -230,7 +232,7 @@ jobs:
           printf '%s' "$DATA" | base64 -d >"$RUNNER_TEMP/handoff.tgz"
           mkdir -p "$RUNNER_TEMP/handoff"
           HANDOFF=$RUNNER_TEMP/handoff.tgz WORK=$RUNNER_TEMP/handoff BASE=$(git rev-parse HEAD) \
-            BOT="$FACTORY_APP[bot]" bash .github/scripts/factory-publish.sh
+            BOT="$FACTORY_APP[bot]" BOT_ID=$FACTORY_BOT_ID bash .github/scripts/factory-publish.sh
 
       # Only what publishing needs: contents write pushes the branch and sends open-pr's
       # repository_dispatch; pull requests read for open-pr.sh's lookup. No workflows.

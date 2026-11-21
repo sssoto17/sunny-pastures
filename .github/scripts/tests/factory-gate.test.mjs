@@ -341,8 +341,8 @@ describe("factory.yml", () => {
 
 	// Required (review of 39bcd47): the model never shares a runner with a write credential.
 	// Decision 12 (admin, 21 Nov 2026): Claude's runner never enters the environment with the key.
-	it("runs Claude in factory-claude and publishes from factory, the only job with the App's key", () => {
-		expect(factory).toMatch(/^ {4}environment: factory-claude$/m);
+	it("runs Claude in claude-seat and publishes from factory, the only job with the App's key", () => {
+		expect(factory).toMatch(/^ {4}environment: claude-seat$/m);
 		expect(publish).toMatch(/^ {4}environment: factory$/m);
 		const withKey = ["switch", "gate", "factory", "publish", "report"].filter((j) =>
 			job(j).includes("FACTORY_APP_PRIVATE_KEY"),
@@ -351,7 +351,13 @@ describe("factory.yml", () => {
 		expect(yml.match(/environment: factory$/gm)).toHaveLength(1);
 	});
 
-	it("gives Claude no write credential: no App token, no GH_TOKEN, a scrubbed environment", () => {
+	it("pins the App's bot user id once, for Claude's commits and for publish's identity check", () => {
+		expect(yml).toMatch(/^ {2}FACTORY_BOT_ID: '355564973'$/m);
+		expect(factory).toContain("bot_id: ${{ env.FACTORY_BOT_ID }}");
+		expect(publish).toContain("BOT_ID=$FACTORY_BOT_ID bash .github/scripts/factory-publish.sh");
+	});
+
+	it("gives Claude only the read-only token: no App token, no GH_TOKEN env, a scrubbed environment", () => {
 		expect(factory).not.toMatch(
 			/create-github-app-token|FACTORY_APP_PRIVATE_KEY|GH_TOKEN: \$\{\{ steps\.app/,
 		);
