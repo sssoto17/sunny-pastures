@@ -36,6 +36,7 @@
       { "name": "store", "patterns": ["apps/web/src/server/store/**"] },
       { "name": "auth", "patterns": ["apps/web/src/server/auth/**"] },
       { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
+      { "name": "http", "patterns": ["apps/web/src/server/http/**"] },
       { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
       { "name": "sim", "patterns": ["packages/sim/src/**"] }
     ],
@@ -44,7 +45,7 @@
       { "from": "pages", "allow": ["sim"] },
       {
         "from": "api",
-        "allow": ["config", "db", "rules", "store", "auth", "timing", "game", "sim"]
+        "allow": ["config", "db", "rules", "store", "auth", "timing", "http", "game", "sim"]
       },
       {
         "from": "game",
@@ -57,6 +58,9 @@
       { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
       { "from": "config", "allow": [] },
       { "from": "timing", "allow": [] },
+      // The HTTP contract (#395; admin, 21 Nov): the request checks, the error builder and the
+      // headers. It sees the sim's types, never its code, and the timing header; no other module.
+      { "from": "http", "allow": ["timing"], "allowTypeOnly": ["sim"] },
       { "from": "sim", "allow": [] }
     ],
     // A pattern matches a call and a constructor call, also through an import or a namespace.

@@ -89,6 +89,7 @@ threat-model document (the spec's table already is one).
 | `store/` | the `GameStore` type and `createStore({ db, newFarm, replay })`: B100. The layout grill wrote `sql`; section 5, Q9 hands the store the Drizzle client instead |
 | `auth/` | `createAuth(config)` → `{ readPlayer(request) }` (section 4) |
 | `timing/` | `createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`: one recorder per request; phases `load`, `sim`, `commit`, `total`, summed across retries; the header value, or `null` when no phase ran (#394) |
+| `http/` | the HTTP contract (section 3), added by #395: `readActionRequest` and `readFarmRequest` (the 415 → 413 → 400 checks and the action guards), `buildErrorResponse` and `buildJsonResponse` (the one error builder and the headers on every response). Builds `Response`s, so it isn't `game/` |
 | `game/` | `submitAction(deps, playerId, body)` and `loadFarm(deps, playerId)`: ADR-0001's loop and the 422 re-check. Returns results, never `Response`s |
 | `api/` | the composition root: `getApi()` builds config → db → rules → store → auth → deps, and exposes what the routes call |
 
@@ -114,6 +115,7 @@ and `PlayerId` as types only, so it is tested against a fake store. There is no 
   | `auth` | `config` |  |
   | `db` | nothing | `config` |
   | `config`, `timing` | nothing |  |
+  | `http` (#395) | `timing` | `sim` |
 
   `game` → type-only `auth` (for `PlayerId`) was added by the auth grill (section 4, Q4).
   `coverage.requireAllFiles` puts every file under `apps/web/src` in a zone. Section 6 adds a
@@ -198,7 +200,9 @@ first action writes its first row.
   [Build tickets for game API persistence from ADR-0007](https://github.com/sssoto17/sunny-pastures/issues/335)):
   `route.ts` stays a thin adapter (section 2, Q1), so the request guards, the error builder and the
   headers live in a server module the routes reach through `server/api`, where they are unit-tested.
-  Which module holds them is the build ticket's call.
+  Which module holds them is the build ticket's call. #395 settled it (admin, 21 Nov 2026): a module
+  of its own, `http/`, with its own zone that only `api` imports, so `api/` stays the composition
+  root and the contract's imports are held by the boundary check.
 
 ### Response
 
@@ -626,7 +630,9 @@ Actions minutes are tight.
 | Layered architecture, enforced | Fallow zones, `server-only` | The direction of dependencies is checked, not reviewed | ESLint `no-restricted-imports`, dependency-cruiser |
 | Resource scoped to the caller ("me" resource) | `/api/farm` | Ownership comes from identity, so there is no ownership check to forget (T5) | — |
 | Idempotent Receiver | `Idempotency-Key`, `unique (farm_id, idempotency_key)` and the stored `answer` | A retry gets the first answer, stored in the row that claims the seq | the key in the body (the spike) |
-| Parse, don't validate | the request guards return the sim's `Action`; the branded `PlayerId` | Handlers only see checked values, and a raw string can't stand in for a verified id | a schema library (Zod, Valibot) |
+| Parse, don't validate | the request guards in `http/` return the sim's `Action`; the branded `PlayerId` | Handlers only see checked values, and a raw string can't stand in for a verified id | a schema library (Zod, Valibot) |
+| Table-driven dispatch, checked for exhaustiveness | `http/`'s guards: one per variant, keyed by `Action["type"]`, built from a field table | The build fails when the sim adds a variant without a guard; each guard is one line | a `switch` over `type` (exhaustive too, but each case hand-written), a schema library |
+| Factory with a closed message catalogue | `http/`'s `buildErrorResponse` | One function makes every error body and its headers; only the sim's refusal reason is free text, so no stack trace or SQL can reach a body | each route building its own `Response`, Next middleware |
 | Envelope | `{ answer, farm }` | The stored answer stays small; the farm is a fresh read | the farm inside the answer, the answer alone |
 | Version negotiation by tag (ADR-0006) | `Rules-Version`, `farm.rulesVersion` | The client reloads on a mismatch | — |
 | Bearer token (RFC 6750) | `Authorization` header | Stateless, no CSRF, the same for the browser, tests and Locust | the `@supabase/ssr` cookie |
