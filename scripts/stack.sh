@@ -8,6 +8,11 @@
 # links every part with the lane's token. It never merges, never takes a part out of
 # a stack and never moves a base by hand: merging stays with the admin. It force-pushes only a
 # stack's own part branches, each with a lease (update, refresh), never main or the stack's base.
+# One CI run per head (#358; ADR-0002, area 2, "Stacks"): part 1 opens as a draft and is marked
+# ready once the stack is linked; update and refresh turn the parts they move into drafts, push,
+# wait until GitHub shows the pushed heads and bases, then mark them ready, so the two `synchronize`
+# events a stacked push fires land on drafts and the ready mark starts one run. scripts/pr-draft.sh
+# switches them, as the App. STACK_WAIT_TIMEOUT (seconds, default 120) bounds the wait.
 # Tests: scripts/stack.test.sh. Needs bash 4+, git and an authenticated gh.
 set -euo pipefail
 shopt -s inherit_errexit # a failed gh inside $( … ) stops the script too
@@ -15,6 +20,8 @@ shopt -s inherit_errexit # a failed gh inside $( … ) stops the script too
 REPO=sssoto17/sunny-pastures
 P=repos/$REPO
 OPEN_PR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/open-pr.sh
+PR_DRAFT=${OPEN_PR%/*}/pr-draft.sh
+WAIT=${STACK_WAIT_TIMEOUT:-120} POLL=${STACK_WAIT_POLL:-3}
 
 usage() {
   cat >&2 <<'EOF'
@@ -23,15 +30,18 @@ usage: scripts/stack.sh <command> ...
   open [--as-admin] [--base <branch>] [--label <name>]... <branch>=<body-file>...
       Push the parts, open each PR on the part below (part 1 on --base, default main), and link
       them as one native stack. Each part must be built on the one below and add commits of its
-      own. A body file's first line is the PR title; the rest is the body. Run it again after a
-      failure: it reuses the PRs and the stack it finds.
+      own. A body file's first line is the PR title; the rest is the body. Part 1 stays a draft
+      until the stack is linked, then every part is marked ready. Run it again after a failure:
+      it reuses the PRs and the stack it finds.
   add <pr> [--as-admin] [--label <name>]... <branch>=<body-file>
       Append a part on top of the stack that holds <pr>.
   --as-admin is passed to scripts/open-pr.sh for each part: only for admin-owned paths, on a run
       the admin started with OPEN_PR_AS_ADMIN (#385). The parts are then linked with your token.
   update <pr>
       After an edit to a lower part: rebase each open part onto the new head of the one below,
-      then push them, each with a lease on the head it fetched. The stack stays linear.
+      then push them, each with a lease on the head it fetched. The stack stays linear. The
+      parts it moves are drafts during the push, and are marked ready once GitHub shows their
+      new heads; if the wait times out they stay drafts, and running it again marks them ready.
   refresh <pr>
       After a lower part merged (GitHub retargets but doesn't rebase): rebase the open parts onto
       the base, dropping the merged part's commits, then push as update does.
@@ -84,8 +94,8 @@ refuse_other_base() { # head base "<number> <base>"|"" : an open PR for head on 
     die 2 "#${3%% *} already has $1 on ${3#* }, not on $2: a hand-chained PR. Close it, or retarget it to $2, then run this again"
 }
 
-ensure_pr() { # head base body-file -> "<number> new|reused"; reuses an open PR on the same base
-  local head=$1 base=$2 f=$3 found l n args=()
+ensure_pr() { # head base body-file [--draft] -> "<number> new|reused"; reuses an open PR on the same base
+  local head=$1 base=$2 f=$3 found l n args=(${4:+"$4"})
   found=$(open_pr_for "$head")
   if [[ -n $found ]]; then
     refuse_other_base "$head" "$base" "$found"
@@ -123,6 +133,46 @@ require_stack() { # pr -> stack number
   s=$(stack_of "$1")
   [[ -n $s ]] || die 2 "#$1 is not in a stack: open the stack with 'scripts/stack.sh open'"
   echo "$s"
+}
+
+# Drafts around a push (#358): see the header. Each wraps scripts/pr-draft.sh, which waits until
+# GitHub shows the state; pr_of and below_of are filled by load_parts.
+declare -A pr_of below_of
+load_parts() { # stack -> heads (the open parts' head refs, bottom first), pr_of, below_of
+  local num state head sha merged below=""
+  heads=()
+  while read -r num state head sha merged; do
+    [[ $state == open ]] || continue
+    heads+=("$head") pr_of[$head]=$num below_of[$head]=$below below=$head
+  done < <(stack_parts "$1")
+}
+
+prs_of() { local b; for b in "$@"; do echo "${pr_of[$b]}"; done; }
+
+# Until GitHub shows each part's local head as its head and, above the bottom part, the part below's
+# local head as its base: the pushes' `synchronize` events have then been raised, on drafts.
+wait_github() { # head...
+  local start=$SECONDS b n got want left
+  while :; do
+    left=()
+    for b in "$@"; do
+      n=${pr_of[$b]}
+      want="$(git rev-parse "refs/heads/$b") ${below_of[$b]:+$(git rev-parse "refs/heads/${below_of[$b]}")}"
+      got=$(gh api "$P/pulls/$n" --jq '"\(.head.sha) \(.base.sha)"') || got="" # a failed read waits
+      [[ ${got% *} == "${want% *}" && (-z ${want#* } || ${got#* } == "${want#* }") ]] || left+=("#$n")
+    done
+    ((${#left[@]})) || return 0
+    ((SECONDS - start < WAIT)) || die 1 "after $WAIT s GitHub doesn't show the pushed heads of ${left[*]}: \
+they stay drafts, so no run reports on an old head. Run this again to mark them ready once it does"
+    sleep "$POLL"
+  done
+}
+
+ready_parts() { # head... : wait for GitHub, then mark the drafts among them ready
+  ((${#@})) || return 0
+  wait_github "$@"
+  "$PR_DRAFT" ready $(prs_of "$@") ||
+    die 1 "the parts are pushed, but marking them ready failed: run this again"
 }
 
 # --- git ----------------------------------------------------------------------------------------
@@ -208,12 +258,20 @@ restack() { # stack-base onto upstream branch...
     leases+=("--force-with-lease=refs/heads/$b:${was_remote[$b]}") refs+=("$b")
   done
   ((${#refs[@]})) || { echo "nothing to push: the stack is up to date"; return 0; }
-  git push -q --atomic "${leases[@]}" origin "${refs[@]}" || {
+  # The parts that move: the lowest pushed part and every part above it (#358).
+  for i in "${!heads[@]}"; do [[ " ${refs[*]} " == *" ${heads[i]} "* ]] && break; done
+  local moved=("${heads[@]:i}")
+  undo() { # message : every branch back where it was, the moved parts ready again, then stop
     git switch -q --detach HEAD
     for b in "${heads[@]}"; do git update-ref "refs/heads/$b" "${was_local[$b]}"; done
     git switch -q "$start" 2>/dev/null || git switch -q --detach "$start"
-    die 1 "push refused (a lease or a rule): every branch is back where it was; fetch and run this again"
+    "$PR_DRAFT" ready $(prs_of "${moved[@]}") || true
+    die 1 "$1"
   }
+  "$PR_DRAFT" draft $(prs_of "${moved[@]}") ||
+    undo "turning the moved parts into drafts failed: nothing pushed, every branch is back where it was"
+  git push -q --atomic "${leases[@]}" origin "${refs[@]}" ||
+    undo "push refused (a lease or a rule): every branch is back where it was; fetch and run this again"
 }
 
 # --- commands -----------------------------------------------------------------------------------
@@ -247,13 +305,18 @@ cmd_open() {
   ((whole || !in_stack)) || die 2 "a part's PR is already in a stack: add a part with 'scripts/stack.sh add', or unlink it in the UI"
 
   git push -q origin "${branches[@]}"
-  local got
+  local got draft
   for i in "${!branches[@]}"; do
-    got=$(ensure_pr "${branches[i]}" "${bases[i]}" "${bodies[i]}")
+    # Part 1 waits as a draft for the stack, as every part opened with no run to link it does.
+    draft=""
+    ((i == 0 || ${#open_pr_flags[@]})) && draft=--draft
+    got=$(ensure_pr "${branches[i]}" "${bases[i]}" "${bodies[i]}" $draft)
     nums+=("${got%% *}")
     [[ $got == *reused ]] && add_labels "${nums[i]}"
   done
   ((whole)) || link_stack "${nums[@]}"
+  "$PR_DRAFT" ready "${nums[@]}" ||
+    die 1 "PRs $(printf '#%s ' "${nums[@]}")are open and stacked, but not all are ready: run the same command again"
   cmd_status "${nums[0]}"
 }
 
@@ -302,8 +365,9 @@ cmd_add() {
   check_chain "origin/$top" "${branches[0]}"
   refuse_other_base "${branches[0]}" "$top" "$(open_pr_for "${branches[0]}")"
   git push -q origin "${branches[0]}"
-  local n got
-  got=$(ensure_pr "${branches[0]}" "$top" "${bodies[0]}")
+  local n got draft=""
+  ((${#open_pr_flags[@]})) && draft=--draft # no run links it, so it waits as a draft for the link
+  got=$(ensure_pr "${branches[0]}" "$top" "${bodies[0]}" $draft)
   n=${got%% *}
   [[ $got == *reused ]] && add_labels "$n"
   if [[ $(stack_of "$n") != "$s" ]]; then
@@ -311,14 +375,8 @@ cmd_add() {
       die 1 "#$n is open on $top but not in stack #$s; run the same command again"
     echo "stack: linked #$n into stack #$s with your token: the open-pr run didn't (or --as-admin opened it)" >&2
   fi
+  "$PR_DRAFT" ready "$n" || die 1 "#$n is open in stack #$s but still a draft: run the same command again"
   cmd_status "$n"
-}
-
-open_heads() { # stack -> the open parts' head refs, bottom first
-  local num state head sha merged
-  while read -r num state head sha merged; do
-    [[ $state == open ]] && echo "$head"
-  done < <(stack_parts "$1")
 }
 
 cmd_update() {
@@ -326,10 +384,11 @@ cmd_update() {
   local s base heads=()
   s=$(require_stack "$1")
   base=$(gh api "$P/stacks/$s" --jq .base.ref)
-  mapfile -t heads < <(open_heads "$s")
+  load_parts "$s"
   ((${#heads[@]})) || die 2 "stack #$s has no open part"
   fetch "${heads[@]}"
   restack "$base" "" "" "${heads[@]}" # not in a condition, so errexit holds inside it
+  ready_parts "${heads[@]}"
   cmd_status "$1"
 }
 
@@ -346,6 +405,7 @@ cmd_refresh() {
       ((${#heads[@]})) || upstream=$sha # the last part below the open ones
     fi
   done < <(stack_parts "$s")
+  load_parts "$s"
   ((${#heads[@]})) || { echo "stack #$s has no open part"; return; }
   git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base"
   fetch "${heads[@]}"
@@ -357,6 +417,7 @@ cmd_refresh() {
     [[ -z $upstream ]] || echo "stack: the merged part's head ${upstream:0:7} isn't in this clone, so the lowest open part stays where it is; rebase it onto origin/$base by hand" >&2
     restack "$base" "" "" "${heads[@]}"
   fi
+  ready_parts "${heads[@]}"
   cmd_status "$1"
 }
 
@@ -367,14 +428,15 @@ cmd_status() {
   gh api "$P/stacks/$s" --jq '"stack #\(.number) on \(.base.ref) (\(if .open then "open" else "closed" end))"'
   local parts=() line
   while IFS= read -r line; do parts+=("$line"); done < <(stack_parts "$s")
-  local i num state head sha merged base reviews checks loc sync
+  local i num state head sha merged base draft reviews checks loc sync
   for i in "${!parts[@]}"; do
     read -r num state head sha merged <<<"${parts[i]}"
     if [[ $state != open ]]; then
       printf '%s/%s #%s %s\n' $((i + 1)) "${#parts[@]}" "$num" "$([[ $merged == yes ]] && echo merged || echo closed)"
       continue
     fi
-    base=$(gh api "$P/pulls/$num" --jq .base.ref)
+    line=$(gh api "$P/pulls/$num" --jq '"\(.base.ref) \(if .draft then "(draft)" else "" end)"')
+    read -r base draft <<<"$line"
     reviews=$(gh api "$P/pulls/$num/reviews?per_page=100" --jq '
       [group_by(.user.login)[] | map(select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")) | last | select(. != null)]
       | (map(select(.state == "APPROVED") | .user.login)) as $ok
@@ -396,7 +458,8 @@ cmd_status() {
     elif git merge-base --is-ancestor "$sha" "$loc" 2>/dev/null; then sync="local ahead: update"
     else sync="local differs: refresh"
     fi
-    printf '%s/%s #%s %s base %s; %s; checks %s; %s\n' $((i + 1)) "${#parts[@]}" "$num" "$head" "$base" "$reviews" "$checks" "$sync"
+    printf '%s/%s #%s %s%s base %s; %s; checks %s; %s\n' $((i + 1)) "${#parts[@]}" "$num" "$head" "${draft:+ $draft}" \
+      "$base" "$reviews" "$checks" "$sync"
   done
 }
 
