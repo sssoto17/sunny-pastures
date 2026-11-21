@@ -14,7 +14,7 @@ permissions:
 # No concurrency group, as in pr-body.yml (#264): a cancelled twin of a required check misreads.
 
 jobs:
-  # Not `acceptance`, which `ci / acceptance` (#49) may take; the floor guard guards this id.
+  # Not `acceptance` (#49 may take it): floor-guard GUARDED_JOBS matches job ids in every workflow.
   acceptance-guard:
     name: guard / acceptance
     runs-on: ubuntu-24.04

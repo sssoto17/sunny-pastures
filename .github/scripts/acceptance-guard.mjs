@@ -26,7 +26,7 @@ export const inAcceptance = (path) => {
 // `listFiles` (every page) answer as REST does. Throws CannotRun when it can't judge.
 export const checkAcceptance = async (event, { getPull, listFiles }) => {
 	const pr = event?.pull_request;
-	if (!pr?.number || !pr.user?.login) throw new CannotRun("the event has no pull_request author");
+	if (!pr?.number || !pr.user?.login) throw new CannotRun("the event has no PR number or author");
 	const author = pr.user.login;
 	if (!isBot(pr.user))
 		return { ok: true, touched: [], message: `${author} isn't a bot (MUST-15.2)` };

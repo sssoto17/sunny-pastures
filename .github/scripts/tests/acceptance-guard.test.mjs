@@ -96,7 +96,7 @@ describe("checkAcceptance", () => {
 		["no author", { pull_request: { number: 1 } }],
 		["no number", { pull_request: { user: FACTORY } }],
 	])("can't run on an event with %s", async (_, ev) => {
-		await expect(checkAcceptance(ev, github([]).deps)).rejects.toThrow("no pull_request author");
+		await expect(checkAcceptance(ev, github([]).deps)).rejects.toThrow("no PR number or author");
 	});
 });
 
