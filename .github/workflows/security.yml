@@ -6,22 +6,56 @@
 # Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
 # No third-party action: each scanner is a pinned download checked against a hash written here
 # (ADR-0002, areas 8 and 9). Its suppressions and config files are the floor guard's (#40).
+# One run per head (#358; ADR-0002, area 2, "Stacks"): every job skips while the PR is a draft
+# (the `gate` job reads its live state), and the run comes from `ready_for_review`, as in ci.yml.
 name: security
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
-# No concurrency group (#264): a push to a stacked part fires two pull_request events on one
-# head, and a group that cancels, or queues and then cancels, left a cancelled twin of a required
-# check there, which GitHub read as the latest result and blocked the merge (throwaway stack
-# #315). The cost: runs for a superseded head finish too.
+# The backstop (#358, admin decision (c)), as in ci.yml: a newer run for the same PR cancels the
+# older one, so two runs never go in parallel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
+  # The draft gate (#358; ADR-0002, area 2, "Stacks"): the PR's live draft state, not the
+  # payload's. A run whose event was raised while the PR was a draft can start after the ready
+  # mark; read from the payload, its jobs would skip, and with cancel-in-progress its skipped checks
+  # would replace the ready run's as the head's newest results, which read as passing. On `push`,
+  # or when the read fails, `draft` stays empty and every job runs: it fails open toward CI.
+  gate:
+    name: security / gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      pull-requests: read
+    outputs:
+      draft: ${{ steps.draft.outputs.draft }}
+    steps:
+      - id: draft
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .draft); then
+            echo "PR #$PR draft: $draft"
+          else
+            draft=""
+            echo "::warning title=draft gate::couldn't read PR #$PR; the jobs run"
+          fi
+          echo "draft=$draft" >>"$GITHUB_OUTPUT"
+
   secrets:
     name: guard / secrets
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -56,6 +90,8 @@ jobs:
 
   audit:
     name: ci / audit
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -72,6 +108,8 @@ jobs:
 
   code-scan:
     name: guard / code-scan
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:

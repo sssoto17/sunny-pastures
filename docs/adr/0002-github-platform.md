@@ -618,7 +618,8 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
 - **`guard / stack-base`** fails a PR whose base isn't `main` unless it's in a native stack, so a
   hand-chained PR can't slip in. On `opened` the event's `pull_request.stack` is `null`, because
   `stack.sh` links the stack after opening the PRs (seen on throwaway stack #315), so the guard asks
-  GitHub again for up to 60 s before it fails.
+  GitHub again for up to 60 s before it fails. Since #358 its run comes from `ready_for_review`,
+  after the stack is linked, so the retry is a fallback.
 - **Approvals.** The reviewer approves each clean part, escalated ones included when the admin's
   account opened them; the escalation thread alone holds the merge ("Approvals", above). GitHub's
   stack merge needs "all pull requests below it … approved and … passing checks", and its restack
@@ -654,20 +655,65 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   already contains (REST compare: `ahead` or `identical`), so a push to a lower part without
   `scripts/stack.sh update`, or a top part that left the stack, runs the suite on that part rather
   than leaving a stale green above it (#264's fix round). Both jobs take the script from `main`, as
-  the floor job does (#99), so a PR can't switch off its own tests. Part 1 of a stack on `main`
-  still runs them once at open, since it's opened before the stack exists; later pushes skip it.
-  Shown on #315: skipped on the lower parts, run on the top one (runs 43939156451, 43939157918,
-  43939156505). A required job skipped by its `if:` counts as passing: #312 showed ci/lint, ci/test
-  and ci/typecheck "Skipped · Required" with a green summary ("3 skipped, 10 successful"; admin, 16
-  Nov).
-- **No cancelled twins on a head.** One push to a stacked part fires two `pull_request` events on
-  the same head. With `cancel-in-progress`, one run was cancelled, and GitHub read the cancelled
-  checks as the latest results: #313 showed "10 cancelled, 3 successful" and couldn't merge although
-  the same checks had passed. So `ci`, `security` and `pr-body` have no concurrency group: nothing
-  is cancelled, and both twins run to completion. The cost: runs for a superseded head finish too,
-  and a flaky job gets two draws at turning a head red. On `150dbda`, `ci / test` timed out on one
-  twin and passed on the other, and `ci / scripts`' `issue-fields.test.sh` failed on one and passed
-  on the other.
+  the floor job does (#99), so a PR can't switch off its own tests. Before #358, part 1 of a stack
+  on `main` ran them once at open, since it was opened before the stack existed; it now stays a
+  draft until the stack does. Shown on #315: skipped on the lower parts, run on the top one (runs
+  43939156451, 43939157918, 43939156505). A required job skipped by its `if:` counts as passing:
+  #312 showed ci/lint, ci/test and ci/typecheck "Skipped · Required" with a green summary ("3
+  skipped, 10 successful"; admin, 16 Nov).
+- **One CI run per head: drafts around every push** (#358; admin, 21 Nov 2026). A push to a stacked
+  part fires `pull_request` `synchronize` twice on the same head, about a second apart:
+  `scripts/stack.sh update` pushes the parts in one atomic push, so the part above gets a new head
+  and a new base at once (PR #376's evidence: #365, #366, and throwaway stack #391 over 4 rounds).
+  No event filter tells the two apart (same action, head and merge commit), and no push from
+  `stack.sh` or `gh stack` avoids them. So they land on drafts:
+  - `scripts/open-pr.sh` opens every PR as a draft (`draft: true` on REST create). The `open-pr` run
+    links a stack part into the stack, then marks it ready; `stack.sh` keeps part 1 a draft until
+    the stack exists, then marks it ready. So `ready_for_review` carries `pull_request.stack`.
+  - `stack.sh update` and `refresh` turn the parts they move into drafts, push, and wait until
+    `GET pulls/<n>` shows each part's pushed head and, above part 1, the part below's new head as
+    its base. Then they mark those parts ready. A wait that times out fails loudly and leaves the
+    parts drafts, so no stale run can report; running the command again marks them ready.
+  - `ci`, `security` and `pr-body` run on `ready_for_review`, and every job skips while the PR is a
+    draft. A first job, `gate`, reads the PR's live draft state (`GET pulls/<n>`, read-only token),
+    never the event payload's (admin, 21 Nov 2026, option (a) of #449's review); every other job has
+    `needs: gate` and `if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}`. On `push` to
+    `main`, or when the read fails, the output is empty and every job runs: the gate fails open
+    toward running CI. A required check skipped on a draft hides nothing, since a draft can't merge,
+    and the ready mark starts the run the merge box reads. `review.yml` already skipped drafts and
+    ran on `ready_for_review`, so the review runs once a head too.
+  - The switch goes through the `pr-draft` dispatch ("Lanes open PRs as sunny-factory", below): the
+    REST update endpoint has no draft field, and the cloud proxy refuses the GraphQL mutations
+    `convertPullRequestToDraft` and `markPullRequestReadyForReview`. The App's token marks ready,
+    never `GITHUB_TOKEN`, since events `GITHUB_TOKEN` causes start no workflows.
+  - Whether turning an approved part into a draft keeps its approval is unknown, and is checked on
+    the first real stack after #358 (its criteria); the admin decides if it doesn't.
+
+  _Alternatives_ (PR #376, options (a) to (d)): no concurrency group, from #264 to #358, where both
+  twins ran in full and a flaky job got two draws (on #366 `ci / test` timed out on one twin and
+  passed on the other); a twin gate whose second run replays the first's result, which still runs
+  twice and so breaks "two runs never go in parallel" (admin, 19 Nov); a group without cancelling,
+  where both runs cost in full and a third event cancels the pending one; stages and filters, which
+  can't tell the twins apart.
+
+- **The backstop: cancel-in-progress** (#358, admin decision (c)). `ci`, `security` and `pr-body`
+  have a `concurrency` group per workflow and PR number, `github.sha` on a push, with
+  `cancel-in-progress: true` (the workflows' headers hold the expression). A newer run for a PR
+  cancels the older one, and `github.sha` gives each push to `main` a group of its own, so nothing
+  on `main` is cancelled. A `synchronize` that GitHub raises after the ready mark carries
+  `draft: false`, runs in full, and cancels the ready run. The merge box reads each check from the
+  head's newest check suite: on #313 both events came in the same instant and the cancelled run sat
+  in the newer suite ("10 cancelled, 3 successful", blocked), while on throwaway stack #391, events
+  about 1 s apart, 12 of 12 cancelled runs sat in the older one. If a merge box shows cancelled
+  checks again, #376's guard that restarts the cancelled run is the next step. **The gap the gate
+  closes:** a `synchronize` raised while the part was still a draft, whose run starts only after the
+  ready run. Read from its payload (`draft: true`), its jobs would skip, it would cancel the ready
+  run, and its skipped checks would sit in the newest suite, which reads as passing. The wait before
+  the ready mark only narrows that window, since a head and base GitHub shows prove the events were
+  raised, not that their runs exist. With the gate, that late run reads the PR as ready and runs in
+  full, so the newest suite holds checks that ran. **The residual** is #313's twin race: two runs
+  created in the same instant, where the cancelled one lands in the newer suite. It fails closed:
+  the merge box shows cancelled checks and blocks, and a re-run clears it.
 - **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). It ran on `pull_request`
   and on `pull_request_review`, and on PR #377 the admin's approval didn't unblock the merge: the
   review run passed in its own check suite, but the merge stayed blocked on the `pull_request` run's
@@ -678,11 +724,11 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   that head runs it; whether the stale-approval dismissal on a push fires `dismissed`, and so runs
   it at once, is checked on #379's throwaway PRs. The job has no `if:`: a skipped required check
   reads as passing (above), so a COMMENTED review would turn it green; it always runs and passes or
-  fails on the diff and the reviews. Unlike `ci`, `security` and `pr-body` (above), it has a
-  `concurrency` group per PR with `cancel-in-progress` (admin, 19 Nov): reviews don't come in twins
-  on one push, and a run that a newer review cancels is followed by the newer run on the same head.
-  Whether GitHub then reads the cancelled run as the head's result, as on #313, is unproven for
-  review runs; #379's throwaway PRs check two reviews seconds apart. The workflow comes from the
+  fails on the diff and the reviews. Like `ci`, `security` and `pr-body` since #358 (above), it has
+  a `concurrency` group per PR with `cancel-in-progress` (admin, 19 Nov): reviews don't come in
+  twins on one push, and a run that a newer review cancels is followed by the newer run on the same
+  head. Whether GitHub then reads the cancelled run as the head's result, as on #313, is unproven
+  for review runs; #379's throwaway PRs check two reviews seconds apart. The workflow comes from the
   PR's merge ref, as for `pull_request`; the script and CODEOWNERS still come from the default
   branch (#337). The label `review:admin` it adds now lands at the first review, not at open; the
   agent and the reviewer bot still add it earlier (CONSTRAINTS.md, "Escalation criteria").

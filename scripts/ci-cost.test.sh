@@ -185,6 +185,18 @@ expect_no_call "/pulls"
 assert "expected every gh api call to be a GET or a log read" \
   test -z "$(call_lines | grep -v -e '^api -X GET ' -e '/logs$')"
 
+# --- a workflow's runs group by its file, not by name: `run-name:` gives each run its own (#358) --
+reset
+runs_page 1 2 \
+  "$(run_json 31 'synchronize abc · part 4' "$CI" pull_request a '[94]' 2026-11-08T10:00:00Z '"success"')" \
+  "$(run_json 32 'opened def · part 5' "$CI" pull_request b '[95]' 2026-11-08T11:00:00Z '"success"')"
+jobs_of 31 "$(job_json 311 'ci / test' success 2026-11-08T10:00:00Z 2026-11-08T10:01:00Z)"
+jobs_of 32 "$(job_json 321 'ci / test' success 2026-11-08T11:00:00Z 2026-11-08T11:02:00Z)"
+case_ "${RANGE[@]}"
+expect_code 0
+expect_out "${T}minutes"$'\n'"ci${T}2${T}2${T}3"
+expect_out_lacks "part 4"
+
 # --- a run without pull_requests[] goes to the latest PR on its branch opened before it ---------
 reset
 runs_page 1 3 \
