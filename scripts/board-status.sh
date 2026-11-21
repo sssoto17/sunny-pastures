@@ -39,7 +39,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/board-status.sh decide pr <number>
+usage: scripts/board-status.sh decide pr <number> [<action>]
        scripts/board-status.sh decide commit <sha> [<pr>...]
        scripts/board-status.sh decide branch <name>
        scripts/board-status.sh move <issue>:<kind>
@@ -48,7 +48,8 @@ decide  reads GitHub (read-only) and prints one line, `moves=` then the moves, e
         <issue>:<kind> and space-separated, or nothing after `=` when nothing moves.
         pr      a PR: the open issues it closes, by its state, draft flag and checks; a
                 fork's PR moves nothing. On a base other than main, the issues come from the
-                body's closing keywords (#N or sssoto17/sunny-pastures#N), open issues only
+                body's closing keywords (#N or sssoto17/sunny-pastures#N), open issues only.
+                <action> is the PR event's: on ready_for_review it never gives review
         commit  every open PR whose head is this commit, and each <pr> given (a finished
                 workflow run's head and its pull_requests: a pull_request_target run's head
                 may be main's commit, so its PRs come from the event). Checks only: review
@@ -82,8 +83,8 @@ valid_number() { [[ $1 =~ ^[1-9][0-9]{0,6}$ ]]; }
 
 # The open issues of this repo that GitHub will close when the PR merges. GraphQL with the job's
 # read-only token: REST has no closing references. GitHub records them only while the base is the
-# default branch, so a stack's closing part counts once it sits on main (CONSTRAINTS.md, "Split
-# size").
+# default branch (CONSTRAINTS.md, "Split size"), so a PR on another base, a stack's closing part,
+# is read from its body instead (body_closing).
 CLOSING_QUERY='query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner,
   name: $name) { pullRequest(number: $pr) { closingIssuesReferences(first: 25) { nodes { number
   state repository { nameWithOwner } } } } } }'
@@ -121,17 +122,32 @@ checks() { # sha
 BODY_FILTER='(.body // "") | ascii_downcase
   | [scan("\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \\t]+(?:sssoto17/sunny-pastures)?#([0-9]{1,7})\\b")]
   | .[][0]'
+# A failed read returns 1, so the caller stops instead of reading "closes nothing"; an issue that
+# doesn't exist (404) is only left out. Explicit returns: errexit is off in a `|| die` caller.
 body_closing() { # pr -> issue numbers, one a line
-  local n row
-  gh api "$R/pulls/$1" --jq "$BODY_FILTER" | sort -un | while read -r n; do
+  local nums n row err
+  nums=$(gh api "$R/pulls/$1" --jq "$BODY_FILTER") || return 1
+  nums=$(sort -un <<<"$nums" | sed '/^$/d') || return 1
+  [[ -n $nums ]] || return 0
+  err=$(mktemp "${TMPDIR:-/tmp}/board-status.XXXXXX") || return 1
+  while read -r n; do
     valid_number "$n" || continue
-    row=$(gh api "$R/issues/$n" --jq '[.state, has("pull_request")] | @tsv' 2>/dev/null) || continue
-    [[ $row == $'open\tfalse' ]] && printf '%s\n' "$n"
-  done
+    if ! row=$(gh api "$R/issues/$n" --jq '[.state, has("pull_request")] | @tsv' 2>"$err"); then
+      if grep -q 'HTTP 404' "$err"; then continue; fi
+      cat "$err" >&2
+      rm -f "$err"
+      return 1
+    fi
+    if [[ $row == $'open\tfalse' ]]; then printf '%s\n' "$n"; fi
+  done <<<"$nums"
+  rm -f "$err"
   return 0
 }
 
-decide_pr() { # pr [checks] -> moves on stdout, one a line
+# mode: `checks` for a finished check run, or the PR event's action. A ready_for_review never gives
+# `review`: on a draft the CI jobs were skipped, and until the new run's checks exist the skipped
+# ones read as green, so the CI run's own completion decides In review.
+decide_pr() { # pr [checks|<action>] -> moves on stdout, one a line
   local pr=$1 mode=${2-event} row state draft merged sha head_repo base kind verdict issues
   row=$(gh api "$R/pulls/$pr" --jq '[.state, .draft, .merged, .head.sha, (.head.repo.full_name // "-"), .base.ref] | @tsv') ||
     die 1 "could not read PR #$pr"
@@ -165,7 +181,13 @@ decide_pr() { # pr [checks] -> moves on stdout, one a line
   else
     verdict=$(checks "$sha")
     case $verdict in
-      green) kind=review ;;
+      green)
+        if [[ $mode == ready_for_review ]]; then
+          kind=start verdict="just marked ready, checks not run yet"
+        else
+          kind=review
+        fi
+        ;;
       red) kind=back ;;
       *)
         if [[ $mode == checks ]]; then
@@ -175,7 +197,7 @@ decide_pr() { # pr [checks] -> moves on stdout, one a line
         kind=start
         ;;
     esac
-    verdict="open, checks $verdict"
+    [[ $verdict == just* ]] || verdict="open, checks $verdict"
   fi
   local n
   while read -r n; do
@@ -238,9 +260,14 @@ case ${1-} in
   -h | --help) usage; exit 0 ;;
   decide)
     (($# >= 3)) || { usage; exit 2; }
-    [[ $2 == commit ]] || (($# == 3)) || { usage; exit 2; }
+    [[ $2 == commit ]] || (($# == 3)) || [[ $2 == pr && $# == 4 ]] || { usage; exit 2; }
     case $2 in
-      pr) valid_number "$3" || die 2 "not a PR number: \"$3\""; out=$(decide_pr "$3") ;;
+      pr)
+        valid_number "$3" || die 2 "not a PR number: \"$3\""
+        action=${4-event}
+        [[ $action =~ ^[a-z_]{1,40}$ && $action != checks ]] || die 2 "not an event action"
+        out=$(decide_pr "$3" "$action")
+        ;;
       commit)
         [[ $3 =~ ^[0-9a-f]{40}$ ]] || die 2 "not a commit SHA: \"$3\""
         for p in "${@:4}"; do valid_number "$p" || die 2 "not a PR number: \"$p\""; done

@@ -311,9 +311,9 @@ PR that closes the issue moves it, so the `Part of #N` parts of a split or stack
 the issues GitHub records the PR as closing; on another base (a stack's closing part, for which
 GitHub records none until it sits on `main`), the body's closing keyword, which `guard / pr-body`
 allows only on the closing part. A lane PR opens as a draft and is marked ready once linked (#358):
-it's In progress as a draft, and In review once ready and green. A finished check moves an issue
-only when the PR's checks turn green or red; the PR's own events (opened, ready, draft, closed) do
-the rest.
+it's In progress as a draft, and In review once ready and green: the CI run that the ready mark
+starts decides, not the mark itself. A finished check moves an issue only when the PR's checks turn
+green or red; the PR's own events (opened, ready, draft, closed) do the rest.
 
 <!-- prettier-ignore -->
 | Move                     | When                                                                                     |

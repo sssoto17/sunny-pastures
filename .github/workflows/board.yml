@@ -16,10 +16,10 @@
 # Two events on one PR can finish close together and their moves land out of order; the next
 # event puts it right, and the coordinator fixes a status that stays wrong. No concurrency group:
 # GitHub keeps only the newest pending run of a group, which would drop other PRs' moves.
-# Every event here runs the default branch's copy of this file with main's checkout: pull_request_target and
-# workflow_run never check out or run the PR's code. Event values reach the shell only through
-# `env:`, and the script checks every number before use. Actions are GitHub-owned and pinned to a
-# full SHA, the pin main already uses (ADR-0002, area 8).
+# Every event here runs the default branch's copy of this file with main's checkout:
+# pull_request_target and workflow_run never check out or run the PR's code. Event values reach
+# the shell only through `env:`, and the script checks every number before use. Actions are
+# GitHub-owned and pinned to a full SHA, the pin main already uses (ADR-0002, area 8).
 name: board
 
 on:
@@ -69,6 +69,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
           RUN_EVENT: ${{ github.event.workflow_run.event }}
           RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -79,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ $EVENT == pull_request_target ]]; then
-            bash scripts/board-status.sh decide pr "$PR" >>"$GITHUB_OUTPUT"
+            bash scripts/board-status.sh decide pr "$PR" "$ACTION" >>"$GITHUB_OUTPUT"
           elif [[ $RUN_EVENT == create ]]; then
             if [[ $RUN_CONCLUSION == success ]]; then
               bash scripts/board-status.sh decide branch "$HEAD_BRANCH" >>"$GITHUB_OUTPUT"

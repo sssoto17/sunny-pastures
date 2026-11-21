@@ -224,6 +224,35 @@ statuses
 case_ decide pr 12
 expect_out "moves=417:back"
 
+# Marked ready: never In review on that event, even when the head reads green (the draft's
+# skipped jobs): the CI run's completion decides. Red is still red; other actions read checks.
+reset
+pr 12 open false false
+closes 12 417:OPEN
+green
+case_ decide pr 12 ready_for_review
+expect_code 0
+expect_out "moves=417:start"
+reset
+pr 12 open false false
+closes 12 417:OPEN
+checks "1|completed|failure|ci / lint"
+statuses
+case_ decide pr 12 ready_for_review
+expect_out "moves=417:back"
+reset
+pr 12 open false false
+closes 12 417:OPEN
+green
+case_ decide pr 12 edited
+expect_out "moves=417:review"
+for bad in checks "Ready" '$(id)' ""; do
+  reset
+  case_ decide pr 12 "$bad"
+  expect_code 2
+  assert "expected no gh calls" test ! -s "$st/calls"
+done
+
 # A draft is In progress, never In review, even when green.
 reset
 pr 12 open true false
@@ -332,6 +361,39 @@ green
 case_ decide pr 12
 expect_code 0
 expect_out "moves="
+# A reference with letters glued on names no issue: not #417 from "#417abc", not #4 from "#4x17".
+reset
+pr 12 open false false
+stacked 12 417-part-2 "closes #417abc, closes #4x17"
+issue 417 open
+issue 4 open
+green
+case_ decide pr 12
+expect_code 0
+expect_out "moves="
+# A failed read of the body stops the step: never "closes nothing".
+reset
+pr 12 open false false
+stacked 12 417-part-2 "Closes #417"
+issue 417 open
+green
+echo "gh: Server Error (HTTP 502)" >"$st/fail_GET_${R//\//_}_pulls_12.2"
+case_ decide pr 12
+expect_code 1
+expect_out ""
+expect_err "could not read the issues PR #12 closes"
+# A failed issue read stops it too; only a missing issue (404) is left out.
+reset
+pr 12 open false false
+stacked 12 417-part-2 "Closes #417"
+issue 417 open
+green
+echo "gh: Server Error (HTTP 502)" >"$st/fail_GET_${R//\//_}_issues_417"
+case_ decide pr 12
+expect_code 1
+expect_out ""
+expect_err "could not read the issues PR #12 closes"
+
 # On main, the body doesn't count: only GitHub's record (the fixture's body names #999).
 reset
 pr 12 open false false
