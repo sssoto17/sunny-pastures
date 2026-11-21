@@ -82,7 +82,9 @@ be deleted.
   uncommitted `.claude/commands/x.md`, say), which `rm -rf` would then delete. Remove the worktree
   from outside the sandbox, where `git status` shows what's really there. `after-merge.sh` reads
   `/proc/self/mountinfo` first: with any mount in the worktree or its admin folder, or any
-  placeholder, it stops before changing anything and prints one command to run outside.
+  placeholder, it stops before changing anything and prints one command to run outside. A reviewer's
+  throwaway copy under `$TMPDIR` is the exception: leave it when removal refuses (`REVIEW.md`,
+  "Reproduce, then report").
 - **`git branch -D`** always tries to drop the branch's `branch.<name>` section from `.git/config`,
   so inside the sandbox it warns "could not lock config file .git/config". The warning is harmless:
   the ref is deleted. A branch created with `--no-track` (above) has no such section, so nothing is
