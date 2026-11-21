@@ -409,6 +409,30 @@ expect_eq "its trailers stay trailers" "$(git -C "$repo" log -1 --format='%(trai
   "Co-Authored-By: T <t@example.invalid>"
 assert "the other commits listed" bash -c "git -C '$repo' log -1 --format=%B 7-p2 | grep -q '^- 7-p2: b2.txt$'"
 expect_eq "7-p3 pushed" "$(remote_sha 7-p3)" "$(git -C "$repo" rev-parse 7-p3)"
+# the rebuild finds the part's first commit without a pipe that closes early: `rev-list | head -n1`
+# raced git's per-line writes, so pipefail stopped update with SIGPIPE (exit 141, no message) now
+# and then on the case above (#418). A part longer than a pipe's buffer (2000 commits, about 80 KB
+# of SHAs) makes that race certain.
+reset
+part 7-p1 main a.txt
+part 7-p2 7-p1 b.txt
+for i in $(seq 2000); do
+  ((i > 1)) || from="from refs/heads/7-p2^0"$'\n'
+  printf 'commit refs/heads/7-p2\ncommitter T <t@example.invalid> %s +0000\ndata <<E\n7-p2: step %s\nE\n%s\n' \
+    $((1700000000 + i)) "$i" "${from-}"
+  from=""
+done | git -C "$repo" fast-import --quiet
+git -C "$repo" reset -q --hard 7-p2
+git -C "$repo" switch -q 7-p1
+echo more >"$repo/a2.txt" && git -C "$repo" add a2.txt && git -C "$repo" commit -qm "7-p1: more"
+git -C "$repo" switch -q 7-p2 && git -C "$repo" merge -q --no-edit 7-p1
+run open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$(body 7-p2 'feat: two')"
+case_ update 401
+expect_code 0
+expect_eq "a long part: now linear" "$(git -C "$repo" rev-list --merges main..7-p2 | wc -l)" 0
+expect_eq "a long part: one commit on 7-p1" "$(git -C "$repo" rev-list --count 7-p1..7-p2)" 1
+expect_eq "a long part: its first commit's subject kept" "$(git -C "$repo" log -1 --format=%s 7-p2)" "7-p2: b.txt"
+expect_eq "a long part: pushed" "$(remote_sha 7-p2)" "$(git -C "$repo" rev-parse 7-p2)"
 # a conflict changes nothing: no branch moves, nothing is pushed, no rebase is left open
 reset
 part 7-p1 main a.txt

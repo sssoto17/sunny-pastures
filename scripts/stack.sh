@@ -229,7 +229,10 @@ restack() { # stack-base onto upstream branch...
       # GitHub's restack, so rebuild the part as one commit with the same tree.
       [[ -n $(git rev-list --merges -n1 "$below_new..$b") ]] || continue
       local first
-      first=$(git rev-list --reverse --no-merges "$below_new..$b" | head -n1)
+      # No `| head -n1`: git writes a line at a time, so head can close the pipe before git is
+      # done, and under pipefail the SIGPIPE stops this script with exit 141 (#418).
+      first=$(git rev-list --reverse --no-merges "$below_new..$b")
+      first=${first%%$'\n'*}
       # Message: the first commit's subject and body, the other commits' subjects, its trailers last.
       local msg trailers
       msg=$(git log -1 --format=%B "$first")
