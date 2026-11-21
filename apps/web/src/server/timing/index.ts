@@ -15,9 +15,10 @@ export type Clock = () => number;
  */
 export interface Timing {
 	/**
-	 * Runs `fn` and adds its duration to `phase`, then returns what `fn` returns. A promise is
-	 * timed until it settles. A phase that throws or rejects is still recorded, and its error is
-	 * rethrown unchanged. A phase run more than once (a retry) is summed under one name.
+	 * Runs `fn` and adds its duration to `phase`, then returns what `fn` returns. A promise, or any
+	 * thenable, is timed until it settles and comes back as a native promise. A phase that throws
+	 * or rejects is still recorded, and its error is rethrown unchanged. A phase run more than once
+	 * (a retry) is summed under one name.
 	 */
 	withTiming<T>(phase: Phase, fn: () => T): T;
 	/**
@@ -25,12 +26,13 @@ export interface Timing {
 	 * order load, sim, commit, total, each rounded to the microsecond. A phase that never ran is
 	 * left out, never sent as 0; `null` when none ran, so the caller sends no header.
 	 */
-	serverTiming(): string | null;
+	renderServerTiming(): string | null;
 }
 
 /** Starts one request's timings. Durations come from `clock`, never from the sim or `Date.now`. */
 export function createTiming(clock: Clock = () => performance.now()): Timing {
-	// Unrounded sums: rounding each retry before adding would let the error grow with retries.
+	// Retries are summed (ADR-0007, section 3) unrounded: rounding each one before adding would let
+	// the error grow with the retries.
 	const durations = new Map<Phase, number>();
 	const record = (phase: Phase, start: number): void => {
 		durations.set(phase, (durations.get(phase) ?? 0) + clock() - start);
@@ -47,18 +49,20 @@ export function createTiming(clock: Clock = () => performance.now()): Timing {
 				throw error;
 			}
 
-			if (!(value instanceof Promise)) {
+			if (!isThenable(value)) {
 				record(phase, start);
 				return value;
 			}
 
-			// `value` is the `T` the caller expects, a promise; `settle` returns one that settles
-			// the same way, after recording.
+			// Any thenable, not only a native promise: Drizzle's query builders are lazy thenables,
+			// and an `instanceof Promise` check would time them at 0 ms while the query ran later,
+			// outside `load` (MUST-13.9). The caller awaits what it gets back, so a native promise
+			// that settles the same way, after recording, stands in for `T`.
 			return settle(value, () => {
 				record(phase, start);
 			}) as T;
 		},
-		serverTiming() {
+		renderServerTiming() {
 			const metrics = phases.flatMap((phase) => {
 				const ms = durations.get(phase);
 				return ms === undefined ? [] : [`${phase};dur=${String(roundToMicroseconds(ms))}`];
@@ -68,7 +72,16 @@ export function createTiming(clock: Clock = () => performance.now()): Timing {
 	};
 }
 
-async function settle<T>(promise: Promise<T>, onSettled: () => void): Promise<T> {
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"then" in value &&
+		typeof value.then === "function"
+	);
+}
+
+async function settle<T>(promise: PromiseLike<T>, onSettled: () => void): Promise<T> {
 	try {
 		return await promise;
 	} finally {
@@ -76,9 +89,9 @@ async function settle<T>(promise: Promise<T>, onSettled: () => void): Promise<T>
 	}
 }
 
-// Microseconds, as the spike's timings (prototypes/persistence/src/timing.ts): the load run (#388)
-// compares this header with the spike's B100 baseline (MUST-13.10), and 0.001 ms is far below
-// the 28 ms budget (MUST-13.8).
+// Microseconds, as the spike's timings (`prototypes/persistence/src/timing.ts`, on the unmerged
+// branch `prototype/persistence`): the load run (#388) compares this header with the spike's B100
+// baseline (MUST-13.10), and 0.001 ms is far below the 28 ms budget (MUST-13.8).
 function roundToMicroseconds(ms: number): number {
 	return Math.round(ms * 1000) / 1000;
 }

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createTiming } from "../index";
+import { createTiming, type Clock } from "../index";
 
 /** A clock that returns each reading in turn, in milliseconds. */
-function fakeClock(...readings: number[]): () => number {
+function fakeClock(...readings: number[]): Clock {
 	return () => {
 		const reading = readings.shift();
 		if (reading === undefined) {
@@ -25,7 +25,7 @@ describe("createTiming", () => {
 		const value = timing.withTiming("load", () => "farm");
 
 		expect(value).toBe("farm");
-		expect(timing.serverTiming()).toBe("load;dur=2.5");
+		expect(timing.renderServerTiming()).toBe("load;dur=2.5");
 	});
 
 	it("sums a phase that runs more than once under one name, as a retry does", () => {
@@ -34,7 +34,7 @@ describe("createTiming", () => {
 		timing.withTiming("commit", () => null);
 		timing.withTiming("commit", () => null);
 
-		expect(timing.serverTiming()).toBe("commit;dur=7");
+		expect(timing.renderServerTiming()).toBe("commit;dur=7");
 	});
 
 	it("records a phase that throws, then rethrows its error", () => {
@@ -46,7 +46,7 @@ describe("createTiming", () => {
 				throw error;
 			}),
 		).toThrow(error);
-		expect(timing.serverTiming()).toBe("load;dur=6");
+		expect(timing.renderServerTiming()).toBe("load;dur=6");
 	});
 
 	it("times an async phase until its promise settles", async () => {
@@ -60,7 +60,7 @@ describe("createTiming", () => {
 		});
 
 		expect(value).toBe("farm");
-		expect(timing.serverTiming()).toBe("load;dur=9");
+		expect(timing.renderServerTiming()).toBe("load;dur=9");
 	});
 
 	it("records an async phase that rejects, then rejects with its error", async () => {
@@ -75,7 +75,28 @@ describe("createTiming", () => {
 		});
 
 		await expect(committing).rejects.toBe(error);
-		expect(timing.serverTiming()).toBe("commit;dur=3");
+		expect(timing.renderServerTiming()).toBe("commit;dur=3");
+	});
+
+	it("times a thenable that isn't a native promise, such as a lazy query builder, until it settles", async () => {
+		let now = 0;
+		const timing = createTiming(() => now);
+		// Lazy, as Drizzle's builders are: the work starts only when `then` is called.
+		const query: PromiseLike<string> = {
+			then(onFulfilled, onRejected) {
+				return Promise.resolve()
+					.then(() => {
+						now = 7;
+						return "farm";
+					})
+					.then(onFulfilled, onRejected);
+			},
+		};
+
+		const value = await timing.withTiming("load", () => query);
+
+		expect(value).toBe("farm");
+		expect(timing.renderServerTiming()).toBe("load;dur=7");
 	});
 
 	it("leaves out a phase that never ran, rather than sending it as 0", () => {
@@ -83,7 +104,7 @@ describe("createTiming", () => {
 
 		timing.withTiming("total", () => timing.withTiming("load", () => null));
 
-		expect(timing.serverTiming()).toBe("load;dur=2, total;dur=4");
+		expect(timing.renderServerTiming()).toBe("load;dur=2, total;dur=4");
 	});
 
 	it("sends a phase that ran in 0 ms, since it did run", () => {
@@ -91,7 +112,7 @@ describe("createTiming", () => {
 
 		timing.withTiming("sim", () => null);
 
-		expect(timing.serverTiming()).toBe("sim;dur=0");
+		expect(timing.renderServerTiming()).toBe("sim;dur=0");
 	});
 
 	it("lists the phases as load, sim, commit, total, whatever order they ran in", () => {
@@ -102,11 +123,11 @@ describe("createTiming", () => {
 		timing.withTiming("sim", () => null);
 		timing.withTiming("load", () => null);
 
-		expect(timing.serverTiming()).toBe("load;dur=4, sim;dur=3, commit;dur=2, total;dur=1");
+		expect(timing.renderServerTiming()).toBe("load;dur=4, sim;dur=3, commit;dur=2, total;dur=1");
 	});
 
 	it("renders null when no phase ran, so the caller sends no header", () => {
-		expect(createTiming(fakeClock()).serverTiming()).toBeNull();
+		expect(createTiming(fakeClock()).renderServerTiming()).toBeNull();
 	});
 
 	it("rounds a duration to the microsecond, as the spike's load runs did", () => {
@@ -114,7 +135,7 @@ describe("createTiming", () => {
 
 		timing.withTiming("sim", () => null);
 
-		expect(timing.serverTiming()).toBe("sim;dur=1.235");
+		expect(timing.renderServerTiming()).toBe("sim;dur=1.235");
 	});
 
 	it("reads the monotonic performance.now when no clock is passed", () => {
@@ -123,6 +144,6 @@ describe("createTiming", () => {
 
 		timing.withTiming("total", () => null);
 
-		expect(timing.serverTiming()).toBe("total;dur=8.5");
+		expect(timing.renderServerTiming()).toBe("total;dur=8.5");
 	});
 });
