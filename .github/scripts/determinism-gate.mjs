@@ -6,9 +6,9 @@
 //
 // The sim's source imports `.js` paths that are `.ts` files, so Node can't run it as it stands.
 // The gate builds the sim's dist/ with the repo's own tsc, the JavaScript Next bundles (#433), and
-// each process imports that (no runner package; admin, 16 Nov). The
-// processes run with different time zones and locales, and each also plays the script twice and
-// replays it from JSON snapshots (packages/sim/src/sim/tests/playScript.ts).
+// each process imports that (no runner package; admin, 16 Nov). The processes run with different
+// time zones and locales, and each also plays the script twice and replays it from JSON snapshots
+// (packages/sim/src/sim/tests/playScript.ts).
 //
 // Usage: node .github/scripts/determinism-gate.mjs [--update | --record]
 //   --update  writes the hash both processes agree on to determinismScript.hash
