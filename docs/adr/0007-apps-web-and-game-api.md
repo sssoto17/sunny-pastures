@@ -88,7 +88,7 @@ threat-model document (the spec's table already is one).
 | `rules/` | `createRules(content)` → `{ sim, newFarm, replay, rulesVersion }`. `replay` folds `apply` over the actions at their `at` (and throws on a refusal, ADR-0001), then `advance`s to `to`. M3 has one version (`rulesVersion = 1`); the M4 registry replaces the implementation behind the same interface |
 | `store/` | the `GameStore` type and `createStore({ db, newFarm, replay })`: B100. The layout grill wrote `sql`; section 5, Q9 hands the store the Drizzle client instead |
 | `auth/` | `createAuth(config)` → `{ readPlayer(request) }` (section 4) |
-| `timing/` | `withTiming(name, fn)` and the `Server-Timing` header |
+| `timing/` | `createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`: one recorder per request; phases `load`, `sim`, `commit`, `total`, summed across retries; the header value, or `null` when no phase ran (#394) |
 | `game/` | `submitAction(deps, playerId, body)` and `loadFarm(deps, playerId)`: ADR-0001's loop and the 422 re-check. Returns results, never `Response`s |
 | `api/` | the composition root: `getApi()` builds config → db → rules → store → auth → deps, and exposes what the routes call |
 
@@ -622,7 +622,7 @@ Actions minutes are tight.
 | Humble Object (thin adapter) | `route.ts` | Framework code that is hard to test holds no logic | Next middleware, a `withPlayer` wrapper |
 | Functional core, imperative shell (ADR-0001) | `game/` with the sim | `game/` returns results; the routes and the store do the I/O | — |
 | Facade with a Strategy slot | `rules/` | One interface over content → sim, `newFarm`, `replay`; M4's registry swaps the implementation | `replay` in the sim, `replay` in `game/` |
-| Decorator | `timing/` (`withTiming`) | Times a step without editing it | — |
+| Decorator | `timing/` (`createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`) | Times a step without editing it | — |
 | Layered architecture, enforced | Fallow zones, `server-only` | The direction of dependencies is checked, not reviewed | ESLint `no-restricted-imports`, dependency-cruiser |
 | Resource scoped to the caller ("me" resource) | `/api/farm` | Ownership comes from identity, so there is no ownership check to forget (T5) | — |
 | Idempotent Receiver | `Idempotency-Key`, `unique (farm_id, idempotency_key)` and the stored `answer` | A retry gets the first answer, stored in the row that claims the seq | the key in the body (the spike) |
