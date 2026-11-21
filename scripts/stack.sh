@@ -4,7 +4,8 @@
 # `gh pr` reach GraphQL, which the cloud proxy refuses. Each part's PR is opened by
 # scripts/open-pr.sh, as sunny-factory[bot], and the open-pr workflow links it into the stack of the
 # part below with the App's token; whatever the run didn't link, this links with the lane's token
-# (#336). It never merges, never takes a part out of
+# (#336). With --as-admin (#385) open-pr.sh opens each part as the admin, no run links it, and this
+# links every part with the lane's token. It never merges, never takes a part out of
 # a stack and never moves a base by hand: merging stays with the admin. It force-pushes only a
 # stack's own part branches, each with a lease (update, refresh), never main or the stack's base.
 # Tests: scripts/stack.test.sh. Needs bash 4+, git and an authenticated gh.
@@ -19,13 +20,15 @@ usage() {
   cat >&2 <<'EOF'
 usage: scripts/stack.sh <command> ...
 
-  open [--base <branch>] [--label <name>]... <branch>=<body-file>...
+  open [--as-admin] [--base <branch>] [--label <name>]... <branch>=<body-file>...
       Push the parts, open each PR on the part below (part 1 on --base, default main), and link
       them as one native stack. Each part must be built on the one below and add commits of its
       own. A body file's first line is the PR title; the rest is the body. Run it again after a
       failure: it reuses the PRs and the stack it finds.
-  add <pr> [--label <name>]... <branch>=<body-file>
+  add <pr> [--as-admin] [--label <name>]... <branch>=<body-file>
       Append a part on top of the stack that holds <pr>.
+  --as-admin is passed to scripts/open-pr.sh for each part: only for admin-owned paths, on a run
+      the admin started with OPEN_PR_AS_ADMIN (#385). The parts are then linked with your token.
   update <pr>
       After an edit to a lower part: rebase each open part onto the new head of the one below,
       then push them, each with a lease on the head it fetched. The stack stays linear.
@@ -47,7 +50,7 @@ die() { # code message
 }
 
 # --- parts --------------------------------------------------------------------------------------
-branches=() bodies=() labels=()
+branches=() bodies=() labels=() open_pr_flags=()
 parse_parts() { # <branch>=<body-file>... -> branches, bodies; checks each before anything runs
   local arg b f
   for arg in "$@"; do
@@ -86,11 +89,17 @@ ensure_pr() { # head base body-file -> "<number> new|reused"; reuses an open PR 
   found=$(open_pr_for "$head")
   if [[ -n $found ]]; then
     refuse_other_base "$head" "$base" "$found"
+    if ((${#open_pr_flags[@]})); then # as open-pr.sh does: the App's PR fails guard / acceptance
+      l=$(gh api "$P/pulls/${found%% *}" --jq .user.login)
+      [[ $l != *'[bot]' ]] ||
+        die 2 "#${found%% *} was opened by $l, so it can't carry admin-owned paths: close it first"
+    fi
     echo "${found%% *} reused"
     return
   fi
-  for l in ${labels[@]+"${labels[@]}"}; do args+=(--label "$l"); done # the App adds them as it opens the PR
-  n=$("$OPEN_PR" --base "$base" ${args[@]+"${args[@]}"} "$head" "$f") # its own line, so a failure stops here
+  for l in ${labels[@]+"${labels[@]}"}; do args+=(--label "$l"); done # open-pr.sh adds them as it opens the PR
+  # its own line, so a failure stops here
+  n=$("$OPEN_PR" ${open_pr_flags[@]+"${open_pr_flags[@]}"} --base "$base" ${args[@]+"${args[@]}"} "$head" "$f")
   echo "$n new"
 }
 
@@ -214,6 +223,7 @@ cmd_open() {
     case $1 in
       --base) (($# >= 2)) || die 2 "--base needs a branch"; base=$2; shift 2 ;;
       --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
+      --as-admin) open_pr_flags=(--as-admin); shift ;;
       *) break ;;
     esac
   done
@@ -248,7 +258,8 @@ cmd_open() {
 }
 
 # The open-pr run links each part into the stack of the part below with the App's token. What it
-# left out (/stacks refused the token, or the part below was a reused PR) is linked here.
+# left out (/stacks refused the token, the part below was a reused PR, or --as-admin opened it with
+# no run) is linked here.
 link_stack() { # pr... in order
   local s n i fields=()
   s=$(stack_of "$1")
@@ -256,7 +267,7 @@ link_stack() { # pr... in order
     for n in "$@"; do fields+=(-F "pull_requests[]=$n"); done
     s=$(gh api -X POST "$P/stacks" "${fields[@]}" --jq .number) ||
       die 1 "PRs $(printf '#%s ' "$@")are open but not stacked; run the same command again"
-    echo "stack: linked $(printf '#%s ' "$@")as stack #$s with your token: the open-pr run didn't" >&2
+    echo "stack: linked $(printf '#%s ' "$@")as stack #$s with your token: the open-pr run didn't (or --as-admin opened it)" >&2
     return
   fi
   for ((i = 2; i <= $#; i++)); do
@@ -264,7 +275,7 @@ link_stack() { # pr... in order
     [[ $(stack_of "$n") == "$s" ]] && continue
     gh api -X POST "$P/stacks/$s/add" -F "pull_requests[]=$n" --jq .number >/dev/null ||
       die 1 "#$n is open but not in stack #$s; run the same command again"
-    echo "stack: linked #$n into stack #$s with your token: the open-pr run didn't" >&2
+    echo "stack: linked #$n into stack #$s with your token: the open-pr run didn't (or --as-admin opened it)" >&2
   done
 }
 
@@ -275,6 +286,7 @@ cmd_add() {
   while (($#)); do
     case $1 in
       --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
+      --as-admin) open_pr_flags=(--as-admin); shift ;;
       *) break ;;
     esac
   done
@@ -297,7 +309,7 @@ cmd_add() {
   if [[ $(stack_of "$n") != "$s" ]]; then
     gh api -X POST "$P/stacks/$s/add" -F "pull_requests[]=$n" --jq .number >/dev/null ||
       die 1 "#$n is open on $top but not in stack #$s; run the same command again"
-    echo "stack: linked #$n into stack #$s with your token: the open-pr run didn't" >&2
+    echo "stack: linked #$n into stack #$s with your token: the open-pr run didn't (or --as-admin opened it)" >&2
   fi
   cmd_status "$n"
 }
