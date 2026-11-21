@@ -25,8 +25,10 @@ describe("createApi", () => {
 		expect(createApi(makeEnv("postgresql://db.test/farm")).health()).toEqual({ status: "ok" });
 	});
 
-	it("fails to build when the config is incomplete", () => {
-		expect(() => createApi({})).toThrow(/DATABASE_URL/);
+	it("builds without reading the environment, and its health check throws the config error (#470)", () => {
+		const api = createApi({});
+
+		expect(() => api.health()).toThrow(/DATABASE_URL/);
 	});
 
 	it("builds auth once with the graph, not once per request (#371)", async () => {

@@ -8,16 +8,30 @@ import {
 	type Problem,
 	type ResponseMeta,
 } from "@/server/http";
+import type { GameStore } from "@/server/store";
 import { createTiming } from "@/server/timing";
 
 /**
  * What the game routes are built from, once per process in `createApi`: `game/`'s deps but the
- * per-request `timing`, which each request makes for itself (#394).
+ * per-request `timing`, which each request makes for itself (#394), and the parts that need the
+ * environment, which `connect` builds inside each request's handling (#470).
  */
-export interface FarmRouteDeps extends Omit<GameDeps, "timing"> {
-	readonly readPlayer: Auth["readPlayer"];
+export interface FarmRouteDeps extends Omit<GameDeps, "timing" | "store"> {
 	/** The server's log, for a store error behind a 503 and a bug behind a 500. Never a body. */
 	readonly logError: (error: unknown) => void;
+	/**
+	 * The parts of the graph that read the environment, built on the first request and memoised by
+	 * `api/` (#329, decision 5). Throws a config error while a variable is missing (a deploy without
+	 * it): each request calls it inside the same try as its response mapping, so that error is the
+	 * contract's 500 with every header, not Next's bare 500 (#470).
+	 */
+	readonly connect: () => Connection;
+}
+
+/** What `connect` builds from the environment: one auth client and one store per process. */
+export interface Connection {
+	readonly readPlayer: Auth["readPlayer"];
+	readonly store: GameStore;
 }
 
 /** The two game routes, each from a `Request` to its `Response` (ADR-0007, section 3). */
@@ -39,8 +53,8 @@ export interface FarmRoutes {
 export function createFarmRoutes(deps: FarmRouteDeps): FarmRoutes {
 	return {
 		getFarm: async (request) =>
-			await respond(deps, async (game) => {
-				const player = await deps.readPlayer(request);
+			await respond(deps, async (readPlayer, game) => {
+				const player = await readPlayer(request);
 				if (!player.ok) return unauthorized;
 
 				const checked = readFarmRequest(request);
@@ -53,8 +67,8 @@ export function createFarmRoutes(deps: FarmRouteDeps): FarmRoutes {
 			}),
 
 		postAction: async (request) =>
-			await respond(deps, async (game) => {
-				const player = await deps.readPlayer(request);
+			await respond(deps, async (readPlayer, game) => {
+				const player = await readPlayer(request);
 				if (!player.ok) return unauthorized;
 
 				const checked = await readActionRequest(request);
@@ -84,22 +98,18 @@ type Outcome =
 const unauthorized: Outcome = { ok: false, problem: { error: "unauthorized" } };
 
 /**
- * Runs one request's handler inside `total`, then builds its response, so the header holds
- * `total` (#394). A throw is a bug: it is logged and answered with 500's fixed message, so no
- * stack trace or SQL reaches the body (ADR-0007, section 3, "Errors").
+ * Connects, runs one request's handler inside `total`, then builds its response, so the header
+ * holds `total` (#394). A throw, a config error from `connect` included (#470), is logged and
+ * answered with 500's fixed message, so no stack trace, SQL or variable name reaches the body
+ * (ADR-0007, section 3, "Errors").
  */
 async function respond(
 	deps: FarmRouteDeps,
-	handle: (game: GameDeps) => Promise<Outcome>,
+	handle: (readPlayer: Connection["readPlayer"], game: GameDeps) => Promise<Outcome>,
 ): Promise<Response> {
 	// One recorder per request (#394): it accumulates this request's phases only.
 	const timing = createTiming();
-	const game: GameDeps = {
-		store: deps.store,
-		rules: deps.rules,
-		timing,
-		serverTime: deps.serverTime,
-	};
+	// The rules need no environment, so even a config error's 500 carries their version.
 	const meta: ResponseMeta = {
 		rulesVersion: deps.rules.rulesVersion,
 		serverTiming: () => timing.renderServerTiming(),
@@ -107,7 +117,11 @@ async function respond(
 
 	let outcome: Outcome;
 	try {
-		outcome = await timing.withTiming("total", async () => await handle(game));
+		outcome = await timing.withTiming("total", async () => {
+			const { readPlayer, store } = deps.connect();
+			const game: GameDeps = { store, rules: deps.rules, timing, serverTime: deps.serverTime };
+			return await handle(readPlayer, game);
+		});
 	} catch (error) {
 		deps.logError(error);
 		outcome = { ok: false, problem: { error: "internal" } };

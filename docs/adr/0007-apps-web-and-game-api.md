@@ -72,8 +72,12 @@ threat-model document (the spec's table already is one).
 **Q1. Next.js and the top level.** `next@16.4.6`, pinned exactly, App Router under `src/`:
 
 - `apps/web/src/app/` holds Next's files only (`page.tsx`, `layout.tsx`, `api/**/route.ts`). A
-  `route.ts` is a thin adapter: it parses the request, calls one function from `server/api` and maps
-  the result to a `Response`. It holds no logic.
+  `route.ts` is a thin adapter (Humble Object): it hands the request to one call into `server/api`
+  and returns what comes back. It holds no logic. For the game routes, the mapping lives in
+  `apps/web/src/server/api/farmRoutes.ts` (#397, #470): `getFarm` and `postAction` each take the
+  `Request` and return the whole `Response`, so each `route.ts` is one call
+  (`getApi().getFarm(request)`), and the checks, the call into `game/` and every status and header
+  are tested in `server/api` without Next.
 - `apps/web/src/server/` holds server-only modules, each an ADR-0005 module (a folder, an
   `index.ts`, a `tests/` folder).
 - `apps/web/src/client/` doesn't exist until M4 needs it.
@@ -91,7 +95,7 @@ threat-model document (the spec's table already is one).
 | `timing/` | `createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`: one recorder per request; phases `load`, `sim`, `commit`, `total`, summed across retries; the header value, or `null` when no phase ran (#394) |
 | `http/` | the HTTP contract (section 3), added by #395: `readActionRequest` and `readFarmRequest` (the 415 → 413 → 400 checks and the action guards), `buildErrorResponse` and `buildJsonResponse` (the one error builder and the headers on every response). Builds `Response`s, so it isn't `game/` |
 | `game/` | `submitAction(deps, playerId, body)` and `loadFarm(deps, playerId)`: ADR-0001's loop and the 422 re-check. Returns results, never `Response`s |
-| `api/` | the composition root: `getApi()` builds config → db → rules → store → auth → deps, and exposes what the routes call |
+| `api/` | the composition root: `getApi()` builds config → db → rules → store → auth → deps, and exposes what the routes call; `farmRoutes.ts` maps each game route from its `Request` to its `Response` (#397) |
 
 Only `api/` wires modules together, and only a `route.ts` imports `api/`. `game/` sees `GameStore`
 and `PlayerId` as types only, so it is tested against a fake store. There is no `inbox/` in M3
@@ -120,9 +124,10 @@ and `PlayerId` as types only, so it is tested against a fake store. There is no 
   `game` → type-only `auth` (for `PlayerId`) was added by the auth grill (section 4, Q4).
   `coverage.requireAllFiles` puts every file under `apps/web/src` in a zone. Section 6 adds a
   test-files-only allowance (`game/**/tests/**` → `store/tests/**`), a second one for the API route
-  files' tests (`routeTests` → `routes` and `api`, #397) and an `acceptance` zone with no
-  allowances. The store gate's one file (`store/tests/storeGate.db.test.ts`) is a zone of its own
-  that may also run `rules` and `sim`, since it plays the script with the real rules (#383).
+  files' tests (`routeTests` → `routes` and `api`, #397), a third for `api`'s own tests (`apiTests`
+  → also `store/tests/**`, #470) and an `acceptance` zone with no allowances. The store gate's one
+  file (`store/tests/storeGate.db.test.ts`) is a zone of its own that may also run `rules` and
+  `sim`, since it plays the script with the real rules (#383).
 
 - Client code imports only the sim's package entry, which is the current content (ADR-0006, "The
   client"). The registry lives in `server/rules/`, out of the client's reach.
@@ -140,6 +145,20 @@ root `references`. ADR-0005 is amended to point here.
 **Q6. Runtime and lifetime.** Game routes set `export const runtime = "nodejs"` (postgres.js needs
 TCP). `getApi()` builds the graph lazily and memoises it per process (Fluid compute reuses it), so
 `next build` needs no `DATABASE_URL`. Tests build `deps` themselves and never call `getApi()`.
+
+**Config errors keep the contract (#470; admin, 21–22 Nov 2026).** `getApi()` itself reads no
+environment: it wires the rules and the routes, which need none. The part that reads it (config → db
+→ store → auth) is `connect`, memoised the same way, and each game handler calls it inside the same
+`try` as its response mapping (`respond` in `farmRoutes.ts`). So a deploy with a missing or bad
+variable answers each game request with the contract's 500 (`internal`, the fixed message,
+`Rules-Version`, `Cache-Control: no-store` and `Server-Timing`), logs the config error to the
+server's log only, and connects on the first request after the variable is set, since a build that
+throws isn't kept. `health()` calls `connect` too and throws, so a deployment with a missing
+variable still fails its health check. Each `route.ts` stays one line, and `next build` still needs
+no database variables. Rejected: a second `try` around `getApi()` in each route (logic in the Humble
+Object, and a second place that builds an error response), and reading the config eagerly in
+`getApi()` (its throw escapes every route as Next's bare 500, with none of the contract's headers,
+which #387's attack tests assume on every 500).
 
 **Rejected:**
 
@@ -247,7 +266,7 @@ M4 client to switch on exhaustively. One builder makes every error, so no stack 
 | 422 | `refused` | the sim (or, from M6, the inbox) refused; `message` is the sim's reason word for word, a sentence a player reads (ADR-0003 section 4, MUST-12.3) | undo the prediction, show `message` |
 | 429 | `rate_limited` | reserved; the limit itself is T7, in M6 | retry after `Retry-After` |
 | 503 | `busy` | still conflicting after 3 retries (MUST-13.3), and, per ADR-0006 (sections 5 and 8), a store error such as an unknown rules version | retry with the same key after `Retry-After: 1` |
-| 500 | `internal` | a bug; a generic message | retry with the same key |
+| 500 | `internal` | a bug, or a config error on a deploy with a missing variable (#470); a generic message | retry with the same key |
 
 There are no 403 or 404 responses in M3: with no ids in the path, there is nothing to forbid and
 nothing to not find.
@@ -541,6 +560,17 @@ sim type-only (#383).
   `server/api`; the acceptance tests still prove the routes over HTTP. Rejected: excluding the route
   files from coverage (a moved threshold), and relying on the acceptance tests alone (they don't
   count for coverage).
+- **`api`'s tests** (#470; admin, 22 Nov 2026) run the game routes on `createMemoryStore`, the same
+  fake that `game/`'s tests use and the contract suite holds to B100, instead of a fake store of
+  their own (the deleted `api/tests/fakeStore.ts`, which nothing held to the contract). They reach
+  it through a test-files-only zone, `apiTests` (`server/api/tests/*.test.ts` → `api`'s own rule,
+  `api` and `store/tests/**`). Like `routeTests`, the pattern takes the test files only, so a helper
+  beside them stays in `api`, and production `api` still builds B100 through `store`. A test sees
+  which store calls a route made through spies on the store's methods, injects a store error by
+  making one reject, and scripts conflicts with the store's `conflicts` array, one entry per
+  conflict the case needs (four for `busy` after MUST-13.3's three retries), so a retry too many
+  writes and fails the test. Deleting the old fake needed an Exceptions row (`test-deleted`, E14),
+  since the floor guard counts every file in a `tests/` folder as a test.
 
 ### Acceptance tests
 
@@ -640,7 +670,7 @@ Actions minutes are tight.
 | --- | --- | --- | --- |
 | Composition Root, dependency injection by argument | `server/api` (`getApi()`), the `deps` parameter | One place knows the whole graph; tests swap collaborators as values | a DI container, a service locator |
 | Lazy initialisation, memoised | `getApi()` | Built once per process, never at build time | eager construction at module scope |
-| Humble Object (thin adapter) | `route.ts` | Framework code that is hard to test holds no logic | Next middleware, a `withPlayer` wrapper |
+| Humble Object (thin adapter) | `route.ts`, one call into `server/api/farmRoutes.ts` (#470) | Framework code that is hard to test holds no logic; the mapping is tested without Next | Next middleware, a `withPlayer` wrapper, the mapping inside `route.ts` |
 | Functional core, imperative shell (ADR-0001) | `game/` with the sim | `game/` returns results; the routes and the store do the I/O | — |
 | Facade with a Strategy slot | `rules/` | One interface over content → sim, `newFarm`, `replay`; M4's registry swaps the implementation | `replay` in the sim, `replay` in `game/` |
 | Decorator | `timing/` (`createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`) | Times a step without editing it | — |
@@ -662,7 +692,7 @@ Actions minutes are tight.
 | Schema as code, generated forward-only migrations | Drizzle → drizzle-kit → `supabase/migrations` | One typed definition, a reviewable SQL history and a drift check between them | Supabase declarative schemas, Drizzle 1.0 rc |
 | Test pyramid by I/O boundary | `unit`, `db`, acceptance, load | Each level runs only where its dependency exists | a separate integration job, acceptance-only store tests |
 | Contract test | `describeGameStore` over the fake and B100 | The fake can't drift from the store without failing the same suite | per-test stubs |
-| Fake object (in-memory repository) | `createMemoryStore` | Retries and conflicts become deterministic | handler tests on the real store |
+| Fake object (in-memory repository) | `createMemoryStore`, in `game/`'s and `api/`'s tests (#470) | Retries and conflicts become deterministic, and one fake is held to the contract | handler tests on the real store, a fake per module |
 | Data isolation by key | a fresh player per test | Parallel tests share one stack without truncation or rollback | truncating between tests |
 | Golden master | the store gate against `determinismScript.hash` | The recorded hash pins the rules; the store must reproduce it | the gate inside `determinism-gate.mjs` |
 | Black-box contract test, protected test oracle | `tests/acceptance/**`, `guard / acceptance` | The tests can't move with the code, and the agent that writes the defence doesn't write its proof | agent-owned attack tests, imports from `apps/` |

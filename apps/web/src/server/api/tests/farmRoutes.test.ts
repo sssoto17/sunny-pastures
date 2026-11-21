@@ -1,12 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { sliceContent, stateHash, type Action } from "@sunny-pastures/sim";
 
 import type { PlayerId, PlayerResult } from "@/server/auth";
 import { createRules } from "@/server/rules";
+import type { GameStore } from "@/server/store";
 
-import { createFarmRoutes, type FarmRouteDeps } from "../farmRoutes";
-import { createFakeStore, type FakeStore, type FakeStoreOptions } from "./fakeStore";
+import { createMemoryStore } from "../../store/tests/memoryStore";
+import { createFarmRoutes, type Connection, type FarmRouteDeps } from "../farmRoutes";
 
 const rules = createRules(sliceContent);
 const plantWheat: Action = { type: "plant", plot: 0, crop: "wheat" };
@@ -37,7 +38,7 @@ describe("GET /api/farm (getFarm)", () => {
 			message: "The request has no valid session. Sign in again.",
 		});
 		expectContractHeaders(response, ["total"]);
-		expect(store.calls).toEqual([]);
+		expectNoStoreCall(store);
 	});
 
 	it("answers 400 to a query naming a farm, and reads nothing (T5)", async () => {
@@ -48,12 +49,13 @@ describe("GET /api/farm (getFarm)", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toMatchObject({ error: "bad_request" });
 		expectContractHeaders(response, ["total"]);
-		expect(store.calls).toEqual([]);
+		expectNoStoreCall(store);
 	});
 
 	it("answers 503 busy and logs the cause when the store throws (ADR-0006, section 8)", async () => {
 		const error = new Error("Store error: rules version 2 is unknown.");
-		const { routes, logged } = setUp({ store: { error } });
+		const { routes, store, logged } = setUp();
+		vi.spyOn(store, "load").mockRejectedValue(error);
 
 		const response = await routes.getFarm(buildGetRequest());
 
@@ -80,6 +82,27 @@ describe("GET /api/farm (getFarm)", () => {
 			message: "Something went wrong on the server. Try again.",
 		});
 		expect(body).not.toContain("secret");
+		expectContractHeaders(response, ["total"]);
+		expect(logged).toEqual([error]);
+	});
+
+	it("answers the contract's 500, and logs the error, when connecting throws a config error (#470)", async () => {
+		const error = new Error("Config error: DATABASE_URL is missing.");
+		const { routes, logged } = setUp({
+			connect: () => {
+				throw error;
+			},
+		});
+
+		const response = await routes.getFarm(buildGetRequest());
+
+		expect(response.status).toBe(500);
+		const body = await response.text();
+		expect(JSON.parse(body)).toEqual({
+			error: "internal",
+			message: "Something went wrong on the server. Try again.",
+		});
+		expect(body).not.toContain("DATABASE_URL");
 		expectContractHeaders(response, ["total"]);
 		expect(logged).toEqual([error]);
 	});
@@ -132,7 +155,7 @@ describe("POST /api/farm/actions (postAction)", () => {
 
 		expect(response.status).toBe(401);
 		expect(await response.json()).toMatchObject({ error: "unauthorized" });
-		expect(store.calls).toEqual([]);
+		expectNoStoreCall(store);
 	});
 
 	it.each([
@@ -185,7 +208,7 @@ describe("POST /api/farm/actions (postAction)", () => {
 		expect(response.status).toBe(status);
 		expect(await response.json()).toMatchObject({ error });
 		expectContractHeaders(response, ["total"]);
-		expect(store.calls).toEqual([]);
+		expectNoStoreCall(store);
 	});
 
 	it("answers 422 with the sim's reason word for word when the rules refuse (MUST-12.3)", async () => {
@@ -204,7 +227,8 @@ describe("POST /api/farm/actions (postAction)", () => {
 	});
 
 	it("answers 503 busy after the 4th conflict, with Retry-After (MUST-13.3)", async () => {
-		const { routes, store, logged } = setUp({ store: { isAlwaysConflicting: true } });
+		// Exactly four scripted conflicts: a fifth commit would write, so a retry too many is a 200.
+		const { routes, store, logged } = setUp({ conflicts: [true, true, true, true] });
 
 		const response = await routes.postAction(
 			buildPostRequest({ action: plantWheat, expectedSeq: 0 }),
@@ -213,14 +237,15 @@ describe("POST /api/farm/actions (postAction)", () => {
 		expect(response.status).toBe(503);
 		expect(response.headers.get("Retry-After")).toBe("1");
 		expect(await response.json()).toMatchObject({ error: "busy" });
-		expect(store.calls.filter((call) => call === "commit")).toHaveLength(4);
+		expect(store.commit).toHaveBeenCalledTimes(4);
 		expectContractHeaders(response, ["load", "sim", "commit", "total"]);
 		expect(logged).toEqual([]);
 	});
 
 	it("answers 503 busy and logs the cause when the store throws", async () => {
 		const error = new Error("Store error: connection lost.");
-		const { routes, logged } = setUp({ store: { error } });
+		const { routes, store, logged } = setUp();
+		vi.spyOn(store, "load").mockRejectedValue(error);
 
 		const response = await routes.postAction(
 			buildPostRequest({ action: plantWheat, expectedSeq: 0 }),
@@ -260,24 +285,35 @@ describe("POST /api/farm/actions (postAction)", () => {
 
 interface SetUpOptions {
 	readonly player?: PlayerResult;
-	readonly readPlayer?: FarmRouteDeps["readPlayer"];
-	readonly store?: FakeStoreOptions;
+	readonly readPlayer?: Connection["readPlayer"];
+	/** The in-memory store's script: entry i makes the i-th commit that would write a conflict. */
+	readonly conflicts?: readonly boolean[];
 	readonly rules?: FarmRouteDeps["rules"];
+	readonly connect?: FarmRouteDeps["connect"];
 }
 
+/**
+ * Routes over the in-memory store that the store contract holds to B100 (ADR-0007, section 6;
+ * #470), with a spy on each store method, so a test can see which calls a route made.
+ */
 function setUp(options: SetUpOptions = {}): {
 	routes: ReturnType<typeof createFarmRoutes>;
-	store: FakeStore;
+	store: GameStore;
 	playerId: PlayerId;
 	logged: unknown[];
 } {
 	const playerId = crypto.randomUUID() as PlayerId;
 	const player = options.player ?? { ok: true, playerId };
-	const store = createFakeStore(rules, options.store);
+	const store = createMemoryStore({
+		newFarm: rules.newFarm,
+		replay: rules.replay,
+		conflicts: options.conflicts ?? [],
+	});
+	for (const method of ["load", "processed", "commit"] as const) vi.spyOn(store, method);
+	const readPlayer = options.readPlayer ?? (() => Promise.resolve(player));
 	const logged: unknown[] = [];
 	const routes = createFarmRoutes({
-		readPlayer: options.readPlayer ?? (() => Promise.resolve(player)),
-		store,
+		connect: options.connect ?? (() => ({ readPlayer, store })),
 		rules: options.rules ?? rules,
 		serverTime: () => serverTime,
 		logError: (error) => {
@@ -314,6 +350,13 @@ function buildTokenHeaders(): Headers {
 	const headers = new Headers();
 	headers.set("Authorization", "Bearer token");
 	return headers;
+}
+
+/** The route made no store call: `http/`'s checks and auth come first (#332, Q4). */
+function expectNoStoreCall(store: GameStore): void {
+	expect(store.load).not.toHaveBeenCalled();
+	expect(store.processed).not.toHaveBeenCalled();
+	expect(store.commit).not.toHaveBeenCalled();
 }
 
 /** `Server-Timing` lists exactly `phases`, in order (MUST-19.1), beside the contract's headers. */
