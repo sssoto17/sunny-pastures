@@ -9,6 +9,20 @@ to `false` (after asking) and reads it back. Re-running it is safe.
 
 Flipping the switch later: ADR-0002, area 2, "The kill switch, built (#106)".
 
+## #103, #454: the Claude seat token
+
+`scripts/setup/ci-claude.sh`, on your own machine: it stores a `claude setup-token` from your
+employer seat as `CLAUDE_CODE_OAUTH_TOKEN` in the environment `claude-seat`, and only there (#454).
+`factory.yml`'s `factory` job and `review.yml`'s `review` job, the two jobs that run Claude, enter
+`claude-seat`; `factory` and `review` hold the Apps' keys and never the seat token (ADR-0002, area
+2, "Which environment holds which secret"). The wizard stops before asking for the token unless
+`claude-seat` exists and admits `main` alone. You paste the token at a hidden prompt and it goes
+straight to `gh secret set` on stdin. The wizard then adds the pinned `claude-code-action` to
+"Allowed actions" (after asking), and lists the secrets of `claude-seat`, `factory` and `review` by
+name only. While `factory` or `review` still holds `CLAUDE_CODE_OAUTH_TOKEN`, it warns and prints
+the `gh secret delete` command, which prints nothing secret; it never deletes anything itself.
+Re-running is safe.
+
 ## #336: lanes open PRs as sunny-factory
 
 `scripts/setup/factory.sh`, on your own machine, before merging #336's PR: it checks that #101's

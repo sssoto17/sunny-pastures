@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Tests for ci-claude.sh through its command line. The wizard reads its answers from stdin (no
 # terminal). `gh` is a fake on PATH: it logs its arguments to $work/calls, saves what
-# `gh secret set` reads on stdin to $work/stdin.<NAME>.<env>, and answers the Actions
-# permission reads from $work/mode and $work/patterns. Each test pastes a token holding a unique
-# marker and checks it reaches `gh secret set` on stdin, with --env, and never appears in the
-# output or in any gh argument.
+# `gh secret set` reads on stdin to $work/stdin.<NAME>.<env>, answers the environment reads from
+# $work/policy and $work/branches, each environment's secret names from $work/secrets.<env>, and
+# the Actions permission reads from $work/mode and $work/patterns. Each test pastes a token
+# holding a unique marker and checks it reaches `gh secret set` on stdin, with --env claude-seat
+# and no other environment (#454), and never appears in the output or in any gh argument.
 # Run: bash scripts/setup/ci-claude.test.sh
 set -uo pipefail
 
@@ -26,9 +27,11 @@ case "$*" in
   "secret set "*)
     if [[ -f $dir/fail-secret ]]; then cat >/dev/null; echo "fake: HTTP 500" >&2; exit 1; fi
     cat >"$dir/stdin.$3.$5"; echo "✓ Set Actions secret $3"; exit 0 ;;
-  "secret list "*) echo CLAUDE_CODE_OAUTH_TOKEN ;;
-  "api repos/sssoto17/sunny-pastures/environments/"*)
-    [[ -f $dir/no-env ]] && exit 1; exit 0 ;;
+  "secret list "*) cat "$dir/secrets.$4" ;;
+  "api repos/sssoto17/sunny-pastures/environments/claude-seat/deployment-branch-policies "*)
+    cat "$dir/branches" ;;
+  "api repos/sssoto17/sunny-pastures/environments/claude-seat "*)
+    [[ -f $dir/no-env ]] && { echo '{"message":"Not Found"}'; exit 1; }; cat "$dir/policy" ;;
   *"actions/permissions --jq .allowed_actions") cat "$dir/mode" ;;
   *"selected-actions --jq .github_owned_allowed") echo true ;;
   *"selected-actions --jq .verified_allowed") echo false ;;
@@ -43,6 +46,11 @@ chmod +x "$work/bin/gh"
 reset() {
   rm -f "$work"/calls "$work"/stdin.* "$work"/no-env "$work"/fail-patterns "$work"/fail-secret
   echo selected >"$work/mode"
+  echo 'false true' >"$work/policy"
+  echo 'branch main' >"$work/branches"
+  echo CLAUDE_CODE_OAUTH_TOKEN >"$work/secrets.claude-seat"
+  echo FACTORY_APP_PRIVATE_KEY >"$work/secrets.factory"
+  echo REVIEWER_APP_PRIVATE_KEY >"$work/secrets.review"
   echo 'supabase/setup-cli@*' >"$work/patterns"
   token="sk-ant-oat01-FAKE$RANDOM$RANDOM"
 }
@@ -84,12 +92,19 @@ expect_code 2
 reset
 run "$(answers "$token")"
 expect_code 0
+assert "expected the token set in claude-seat" \
+  contains "$calls" "secret set CLAUDE_CODE_OAUTH_TOKEN --env claude-seat --repo sssoto17/sunny-pastures"
+assert "expected the token on stdin for claude-seat, exactly" \
+  test "$(cat "$work/stdin.CLAUDE_CODE_OAUTH_TOKEN.claude-seat" 2>/dev/null)" == "$token"
+assert "expected one secret written" test "$(grep -c '^secret set' <<<"$calls")" -eq 1
 for env in factory review; do
-  assert "expected the token set in env $env" \
-    contains "$calls" "secret set CLAUDE_CODE_OAUTH_TOKEN --env $env --repo sssoto17/sunny-pastures"
-  assert "expected the token on stdin for $env, exactly" \
-    test "$(cat "$work/stdin.CLAUDE_CODE_OAUTH_TOKEN.$env" 2>/dev/null)" == "$token"
+  assert "expected nothing written to $env" lacks "$calls" "secret set CLAUDE_CODE_OAUTH_TOKEN --env $env"
+  assert "expected no token on stdin for $env" test ! -e "$work/stdin.CLAUDE_CODE_OAUTH_TOKEN.$env"
+  assert "expected $env's names listed" contains "$calls" "secret list --env $env --repo sssoto17/sunny-pastures"
 done
+assert "expected main-only checked" contains "$calls" "environments/claude-seat/deployment-branch-policies"
+assert "expected no warning while only claude-seat holds it" lacks "$out" "still holds"
+assert "expected nothing deleted" lacks "$calls" "secret delete"
 expect_hidden "$token"
 put=$(grep '^api -X PUT' <<<"$calls")
 assert "expected one write of the selected actions" test "$(grep -c . <<<"$put")" -eq 1
@@ -127,7 +142,7 @@ reset
 touch "$work/fail-secret"
 run "$(answers "$token")"
 expect_code 1
-assert "expected the failing command named" contains "$err" "gh secret set CLAUDE_CODE_OAUTH_TOKEN --env factory failed"
+assert "expected the failing command named" contains "$err" "gh secret set CLAUDE_CODE_OAUTH_TOKEN --env claude-seat failed"
 assert "expected no success line" lacks "$out" "✓ set"
 assert "expected no allowed-actions write after a failed upload" lacks "$calls" "api -X PUT"
 expect_hidden "$token"
@@ -142,7 +157,7 @@ expect_hidden "$odd"
 reset
 run "$(printf '\n\n\n%s\ny\n\ny\n\n\n' "$odd")"
 expect_code 0
-assert "expected it stored on y" test "$(cat "$work/stdin.CLAUDE_CODE_OAUTH_TOKEN.review" 2>/dev/null)" == "$odd"
+assert "expected it stored on y" test "$(cat "$work/stdin.CLAUDE_CODE_OAUTH_TOKEN.claude-seat" 2>/dev/null)" == "$odd"
 expect_hidden "$odd"
 
 # --- an API key pasted by mistake: refused, nothing stored, never shown -----------------------
@@ -160,13 +175,45 @@ run "$(answers "")"
 expect_code 2
 assert "expected no secret set" lacks "$calls" "secret set"
 
-# --- no environments yet: refused before the token is asked for -------------------------------
+# --- no claude-seat yet: refused before the token is asked for ----------------------------------
 reset
 touch "$work/no-env"
 run "$(answers "$token")"
 expect_code 2
-assert "expected a pointer to ci-apps.sh" contains "$err" "ci-apps.sh"
+assert "expected claude-seat named" contains "$err" "no environment claude-seat"
 assert "expected no secret set" lacks "$calls" "secret set"
+assert "expected gh's error body dropped" lacks "$out$err" "Not Found"
+
+# --- claude-seat not limited to selected branches: refused, nothing stored ----------------------
+reset
+echo 'true false' >"$work/policy"
+run "$(answers "$token")"
+expect_code 2
+assert "expected the policy named" contains "$err" "isn't limited to Selected branches"
+assert "expected no secret set" lacks "$calls" "secret set"
+expect_hidden "$token"
+
+# --- claude-seat admits a branch besides main: refused, nothing stored --------------------------
+reset
+printf '%s\n' 'branch main' 'branch throwaway/*' >"$work/branches"
+run "$(answers "$token")"
+expect_code 2
+assert "expected the extra rule named" contains "$err" "may be used by more than main: branch main branch throwaway/*"
+assert "expected no secret set" lacks "$calls" "secret set"
+expect_hidden "$token"
+
+# --- review or factory still holds the seat token: a warning and the command, never a delete ----
+reset
+printf '%s\n' REVIEWER_APP_PRIVATE_KEY CLAUDE_CODE_OAUTH_TOKEN >"$work/secrets.review"
+run "$(answers "$token")"
+expect_code 0
+assert "expected the warning for review" contains "$out" "review still holds CLAUDE_CODE_OAUTH_TOKEN"
+assert "expected no warning for factory" lacks "$out" "factory still holds"
+assert "expected the delete command shown" \
+  contains "$out" "gh secret delete CLAUDE_CODE_OAUTH_TOKEN --env review --repo sssoto17/sunny-pastures"
+assert "expected it listed as still to do" contains "$out" "delete CLAUDE_CODE_OAUTH_TOKEN from review"
+assert "expected nothing deleted" lacks "$calls" "secret delete"
+expect_hidden "$token"
 
 # --- allowed actions not "selected": refused before writing it --------------------------------
 reset
