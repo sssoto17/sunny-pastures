@@ -19,7 +19,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
-	cpSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -40,7 +39,6 @@ const SELF = fileURLToPath(import.meta.url);
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SIM_TESTS = "packages/sim/src/sim/tests";
 const SIM_BUILD = "packages/sim/tsconfig.build.json";
-const SIM_DIST = "packages/sim/dist";
 const SCRIPT = `${SIM_TESTS}/determinismScript.json`;
 const HASH = `${SIM_TESTS}/determinismScript.hash`;
 const STEPS = 500;
@@ -109,22 +107,23 @@ export const evaluate = ({ script, runs, expected }) => {
 
 // The sim as it ships, plus the gate's two helpers, as ES modules in `dir` (#433). The gate checks
 // the JavaScript Next bundles, so a build config that drifts from the sim's checked options can't
-// pass unnoticed: it runs the sim's build (packages/sim/tsconfig.build.json) into dist/, copies
-// dist/ into `dir`, and turns only the helpers into JavaScript, one file at a time, under the sim's
-// own compiler options. A whole-program tsc would follow their relative imports and write the sim
-// out again; `isolatedModules` (tsconfig.base.json) makes the per-file conversion safe, and `tsc -b`
-// type-checks the helpers in the sim's test project. Their `../../index.js` and
-// `../../random/index.js` then land on the copied dist/, which holds all of src/ but the tests.
+// pass unnoticed: it runs the sim's build config (packages/sim/tsconfig.build.json) with its output
+// sent into `dir`, so every run starts from an empty folder (no file left from a deleted module, and
+// no race with a `dev:watch` writing packages/sim/dist). Then it turns only the helpers into
+// JavaScript, one file at a time, under the sim's own compiler options. A whole-program tsc would
+// follow their relative imports and write the sim out again; `isolatedModules`
+// (tsconfig.base.json) makes the per-file conversion safe, and `tsc -b` type-checks the helpers in
+// the sim's test project. Their `../../index.js` and `../../random/index.js` then land on the built
+// sim, which holds all of src/ but the tests.
 const compile = (dir) => {
+	const out = join(dir, "out");
 	const tsc = spawnSync(
 		process.execPath,
-		[join(ROOT, "node_modules/typescript/bin/tsc"), "-p", join(ROOT, SIM_BUILD)],
+		[join(ROOT, "node_modules/typescript/bin/tsc"), "-p", join(ROOT, SIM_BUILD), "--outDir", out],
 		{ encoding: "utf8" },
 	);
 	if (tsc.status !== 0) throw new CannotRun(`the sim's build failed:\n${tsc.stdout}${tsc.stderr}`);
 
-	const out = join(dir, "out");
-	cpSync(join(ROOT, SIM_DIST), out, { recursive: true });
 	writeFileSync(join(out, "package.json"), '{ "type": "module" }\n');
 	const ts = createRequire(import.meta.url)(join(ROOT, "node_modules/typescript"));
 	const simConfig = join(ROOT, "packages/sim/tsconfig.json");
