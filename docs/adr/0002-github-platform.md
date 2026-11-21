@@ -654,11 +654,14 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
     `GET pulls/<n>` shows each part's pushed head and, above part 1, the part below's new head as
     its base. Then they mark those parts ready. A wait that times out fails loudly and leaves the
     parts drafts, so no stale run can report; running the command again marks them ready.
-  - `ci`, `security` and `pr-body` run on `ready_for_review`, and every job skips while
-    `github.event.pull_request.draft` is true. On `push` to `main` `pull_request` is null, so every
-    job runs. A required check skipped on a draft hides nothing, since a draft can't merge, and the
-    ready mark starts the run the merge box reads. `review.yml` already skipped drafts and ran on
-    `ready_for_review`, so the review runs once a head too.
+  - `ci`, `security` and `pr-body` run on `ready_for_review`, and every job skips while the PR is a
+    draft. A first job, `gate`, reads the PR's live draft state (`GET pulls/<n>`, read-only token),
+    never the event payload's (admin, 21 Nov 2026, option (a) of #449's review); every other job has
+    `needs: gate` and `if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}`. On `push` to
+    `main`, or when the read fails, the output is empty and every job runs: the gate fails open
+    toward running CI. A required check skipped on a draft hides nothing, since a draft can't merge,
+    and the ready mark starts the run the merge box reads. `review.yml` already skipped drafts and
+    ran on `ready_for_review`, so the review runs once a head too.
   - The switch goes through the `pr-draft` dispatch ("Lanes open PRs as sunny-factory", below): the
     REST update endpoint has no draft field, and the cloud proxy refuses the GraphQL mutations
     `convertPullRequestToDraft` and `markPullRequestReadyForReview`. The App's token marks ready,
@@ -682,13 +685,15 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   head's newest check suite: on #313 both events came in the same instant and the cancelled run sat
   in the newer suite ("10 cancelled, 3 successful", blocked), while on throwaway stack #391, events
   about 1 s apart, 12 of 12 cancelled runs sat in the older one. If a merge box shows cancelled
-  checks again, #376's guard that restarts the cancelled run is the next step. **What it can't
-  cover:** a `synchronize` raised while the part was still a draft, whose run starts only after the
-  ready run. Its jobs skip, it cancels the ready run, and its skipped checks sit in the newest
-  suite, which reads as passing. The wait before the ready mark narrows that window but can't close
-  it: a head and base GitHub shows prove the `synchronize` events were raised, not that their runs
-  were created. The first real stack checks for it (#358's criteria): after a ready mark, the head's
-  newest suite of `ci` must hold jobs that ran, not skipped ones.
+  checks again, #376's guard that restarts the cancelled run is the next step. **The gap the gate
+  closes:** a `synchronize` raised while the part was still a draft, whose run starts only after the
+  ready run. Read from its payload (`draft: true`), its jobs would skip, it would cancel the ready
+  run, and its skipped checks would sit in the newest suite, which reads as passing. The wait before
+  the ready mark only narrows that window, since a head and base GitHub shows prove the events were
+  raised, not that their runs exist. With the gate, that late run reads the PR as ready and runs in
+  full, so the newest suite holds checks that ran. **The residual** is #313's twin race: two runs
+  created in the same instant, where the cancelled one lands in the newer suite. It fails closed:
+  the merge box shows cancelled checks and blocks, and a re-run clears it.
 - **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). It ran on `pull_request`
   and on `pull_request_review`, and on PR #377 the admin's approval didn't unblock the merge: the
   review run passed in its own check suite, but the merge stayed blocked on the `pull_request` run's

@@ -5,8 +5,8 @@
 # only, not all of ci. No path filter, so each reports on every PR and can be a required check
 # (ADR-0002, area 2). The body is untrusted text: the script reads it from $GITHUB_EVENT_PATH,
 # never through an expression in `run:`. Actions are GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
-# One run per head (#358; ADR-0002, area 2, "Stacks"): both jobs skip on a draft, and the run
-# comes from `ready_for_review`, as in ci.yml.
+# One run per head (#358; ADR-0002, area 2, "Stacks"): both jobs skip while the PR is a draft
+# (the `gate` job reads its live state), and the run comes from `ready_for_review`, as in ci.yml.
 name: pr-body
 
 on:
@@ -24,9 +24,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The draft gate (#358; ADR-0002, area 2, "Stacks"): the PR's live draft state, not the
+  # payload's. A run whose event was raised while the PR was a draft can start after the ready
+  # mark; read from the payload, its jobs would skip, and with cancel-in-progress its skipped checks
+  # would replace the ready run's as the head's newest results, which read as passing. On `push`,
+  # or when the read fails, `draft` stays empty and every job runs: it fails open toward CI.
+  gate:
+    name: pr-body / gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      pull-requests: read
+    outputs:
+      draft: ${{ steps.draft.outputs.draft }}
+    steps:
+      - id: draft
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .draft); then
+            echo "PR #$PR draft: $draft"
+          else
+            draft=""
+            echo "::warning title=draft gate::couldn't read PR #$PR; the jobs run"
+          fi
+          echo "draft=$draft" >>"$GITHUB_OUTPUT"
+
   pr-body:
     name: guard / pr-body
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -43,7 +72,8 @@ jobs:
   # the read-only pull-requests scope and the token in env, never in a `run:` expression.
   stack-base:
     name: guard / stack-base
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

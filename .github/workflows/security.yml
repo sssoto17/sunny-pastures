@@ -6,8 +6,8 @@
 # Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
 # No third-party action: each scanner is a pinned download checked against a hash written here
 # (ADR-0002, areas 8 and 9). Its suppressions and config files are the floor guard's (#40).
-# One run per head (#358; ADR-0002, area 2, "Stacks"): every job skips on a draft, and the run
-# comes from `ready_for_review`, as in ci.yml.
+# One run per head (#358; ADR-0002, area 2, "Stacks"): every job skips while the PR is a draft
+# (the `gate` job reads its live state), and the run comes from `ready_for_review`, as in ci.yml.
 name: security
 
 on:
@@ -24,9 +24,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The draft gate (#358; ADR-0002, area 2, "Stacks"): the PR's live draft state, not the
+  # payload's. A run whose event was raised while the PR was a draft can start after the ready
+  # mark; read from the payload, its jobs would skip, and with cancel-in-progress its skipped checks
+  # would replace the ready run's as the head's newest results, which read as passing. On `push`,
+  # or when the read fails, `draft` stays empty and every job runs: it fails open toward CI.
+  gate:
+    name: security / gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      pull-requests: read
+    outputs:
+      draft: ${{ steps.draft.outputs.draft }}
+    steps:
+      - id: draft
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .draft); then
+            echo "PR #$PR draft: $draft"
+          else
+            draft=""
+            echo "::warning title=draft gate::couldn't read PR #$PR; the jobs run"
+          fi
+          echo "draft=$draft" >>"$GITHUB_OUTPUT"
+
   secrets:
     name: guard / secrets
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -61,7 +90,8 @@ jobs:
 
   audit:
     name: ci / audit
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -78,7 +108,8 @@ jobs:
 
   code-scan:
     name: guard / code-scan
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:

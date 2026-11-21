@@ -9,9 +9,10 @@
 # its `if:` as passing; #264's throwaway ruleset checks it here. `push` to main runs the suite on
 # exactly what landed, so a partial stack merge that breaks main shows at once.
 # One run per head (#358): scripts/open-pr.sh opens a PR as a draft and scripts/stack.sh pushes a
-# stack while its parts are drafts, so every job skips on a draft (a draft can't merge, so a
-# skipped check there hides nothing) and the run comes from `ready_for_review`. On `push` to main
-# `pull_request` is null, so `!github.event.pull_request.draft` holds and every job runs.
+# stack while its parts are drafts, so every job skips while the PR is a draft (a draft can't
+# merge, so a skipped check there hides nothing) and the run comes from `ready_for_review`. The
+# `gate` job reads the PR's live draft state, never the payload's; on `push` to main it reads
+# nothing, and every job runs.
 name: ci
 
 on:
@@ -24,20 +25,50 @@ permissions:
   contents: read
 
 # The backstop (#358, admin decision (c)): a newer run for the same PR cancels the older one, so
-# two runs never go in parallel. A `synchronize` that GitHub raises after the ready mark runs in
-# full and cancels the ready run (ADR-0002, area 2, "Stacks", for the case it can't cover).
+# two runs never go in parallel. A `synchronize` run that starts after the ready mark runs in full
+# and cancels the ready run, even one raised while the PR was a draft, since `gate` reads the live
+# state (ADR-0002, area 2, "Stacks", for the residual).
 # `github.sha` keeps each push to main in a group of its own, so nothing on main is cancelled.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
+  # The draft gate (#358; ADR-0002, area 2, "Stacks"): the PR's live draft state, not the
+  # payload's. A run whose event was raised while the PR was a draft can start after the ready
+  # mark; read from the payload, its jobs would skip, and with cancel-in-progress its skipped checks
+  # would replace the ready run's as the head's newest results, which read as passing. On `push`,
+  # or when the read fails, `draft` stays empty and every job runs: it fails open toward CI.
+  gate:
+    name: ci / gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      pull-requests: read
+    outputs:
+      draft: ${{ steps.draft.outputs.draft }}
+    steps:
+      - id: draft
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .draft); then
+            echo "PR #$PR draft: $draft"
+          else
+            draft=""
+            echo "::warning title=draft gate::couldn't read PR #$PR; the jobs run"
+          fi
+          echo "draft=$draft" >>"$GITHUB_OUTPUT"
+
   # Whether this PR is a stack's lower part. The event can't say so on `opened`, since
   # scripts/stack.sh links the stack after opening the PRs, so the script asks GitHub (read-only
   # token). It writes top=false only for a lower part: if it fails, the jobs below still run.
   stack:
     name: ci / stack
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:
@@ -78,10 +109,10 @@ jobs:
 
   typecheck:
     name: ci / typecheck
-    needs: stack
+    needs: [gate, stack]
     # Once per stack: skipped when `ci / stack` said this is a lower part, and on a draft, where
     # `ci / stack` skips too and so leaves `top` empty.
-    if: ${{ !cancelled() && !github.event.pull_request.draft && needs.stack.outputs.top != 'false' }}
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' && needs.stack.outputs.top != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -100,10 +131,10 @@ jobs:
 
   lint:
     name: ci / lint
-    needs: stack
+    needs: [gate, stack]
     # Once per stack: skipped when `ci / stack` said this is a lower part, and on a draft, where
     # `ci / stack` skips too and so leaves `top` empty.
-    if: ${{ !cancelled() && !github.event.pull_request.draft && needs.stack.outputs.top != 'false' }}
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' && needs.stack.outputs.top != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -133,10 +164,10 @@ jobs:
 
   test:
     name: ci / test
-    needs: stack
+    needs: [gate, stack]
     # Once per stack: skipped when `ci / stack` said this is a lower part, and on a draft, where
     # `ci / stack` skips too and so leaves `top` empty.
-    if: ${{ !cancelled() && !github.event.pull_request.draft && needs.stack.outputs.top != 'false' }}
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' && needs.stack.outputs.top != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -213,7 +244,8 @@ jobs:
   # processes, against the recorded state hash. No path filter: the hash covers every rules change.
   determinism:
     name: ci / determinism
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -227,7 +259,8 @@ jobs:
   # calls, over the whole project. ESLint's sim block in `ci / lint` holds the rest of the purity row.
   boundaries:
     name: ci / boundaries
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -242,7 +275,8 @@ jobs:
   # bench writes both medians as notices. No path filter: a required check must report on every PR.
   bench:
     name: ci / bench
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -258,7 +292,8 @@ jobs:
   # A stacked part is judged on its own diff, from the branch below it.
   mutation:
     name: ci / mutation
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -301,7 +336,8 @@ jobs:
   # call ahead of the real one. The setup step fits the runner to the suites' headers.
   scripts:
     name: ci / scripts
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -332,7 +368,8 @@ jobs:
   floor:
     name: guard / floor
     # A PR guard: on every part of a stack, never on main after a merge, and not on a draft.
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
