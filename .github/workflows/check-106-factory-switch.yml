@@ -26,4 +26,5 @@ jobs:
     timeout-minutes: 2
     permissions: {}
     steps:
-      - run: echo "RESULT stand-in ran: the switch was on, so a factory job would mint its token here"
+      - run: |
+          echo "RESULT stand-in ran: the switch was on, so a factory job would mint its token here"
