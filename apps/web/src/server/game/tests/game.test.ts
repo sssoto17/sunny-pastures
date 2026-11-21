@@ -24,11 +24,8 @@ const rules = createRules(sliceContent);
 describe("loadFarm", () => {
 	it("gives a player with no action a new farm at seq 0", async () => {
 		const playerId = newPlayerId();
-		const store = createMemoryStore({ newFarm: rules.newFarm, replay: rules.replay });
 
-		expect(
-			await loadFarm({ store, rules, timing: createTiming(), now: () => 0 }, playerId),
-		).toEqual({
+		expect(await loadFarm(makeDeps(), playerId)).toEqual({
 			kind: "loaded",
 			farm: { seq: 0, at: 0, state: rules.newFarm(playerId), rulesVersion: 1 },
 		});
@@ -37,7 +34,11 @@ describe("loadFarm", () => {
 	it("returns the farm as committed, not advanced past its last action, and never writes (MUST-11.5)", async () => {
 		const playerId = newPlayerId();
 		const store = newStore();
-		const submitted = await submitAction(makeDeps({ store }), playerId, request(plantWheat(0), 0));
+		const submitted = await submitAction(
+			makeDeps({ store }),
+			playerId,
+			buildRequest(plantWheat(0), 0),
+		);
 		const commits: unknown[] = [];
 		const readOnly: GameStore = {
 			...store,
@@ -50,7 +51,7 @@ describe("loadFarm", () => {
 		const timing = createTiming(() => ticks++);
 
 		const loaded = await loadFarm(
-			makeDeps({ store: readOnly, now: () => 3_600_000, timing }),
+			makeDeps({ store: readOnly, serverTime: () => 3_600_000, timing }),
 			playerId,
 		);
 
@@ -64,7 +65,7 @@ describe("loadFarm", () => {
 	});
 
 	it("answers busy when the store throws, as on an unknown rules version (ADR-0006, section 8)", async () => {
-		const error = new Error("Store error: rules version 2 is unknown.");
+		const error = storeError();
 		const store = { ...newStore(), load: () => Promise.reject(error) };
 
 		expect(await loadFarm(makeDeps({ store }), newPlayerId())).toEqual({
@@ -79,9 +80,9 @@ describe("submitAction", () => {
 	it("commits a first action at server time and answers with the farm after it", async () => {
 		const playerId = newPlayerId();
 		const store = newStore();
-		const deps = makeDeps({ store, now: () => 1_000 });
+		const deps = makeDeps({ store, serverTime: () => 1_000 });
 
-		const result = await submitAction(deps, playerId, request(plantWheat(0), 0));
+		const result = await submitAction(deps, playerId, buildRequest(plantWheat(0), 0));
 
 		const stored = await store.load(playerId);
 		expect(stored).toMatchObject({ seq: 1, at: 1_000 });
@@ -97,26 +98,34 @@ describe("submitAction", () => {
 		const playerId = newPlayerId();
 		const store = newStore();
 		const key = crypto.randomUUID();
-		const first = await submitAction(makeDeps({ store }), playerId, request(plantWheat(0), 0, key));
-		await submitAction(makeDeps({ store, now: () => 2_000 }), playerId, request(plantWheat(1), 1));
+		const first = await submitAction(
+			makeDeps({ store }),
+			playerId,
+			buildRequest(plantWheat(0), 0, key),
+		);
+		await submitAction(
+			makeDeps({ store, serverTime: () => 2_000 }),
+			playerId,
+			buildRequest(plantWheat(1), 1),
+		);
 
 		let ticks = 0;
 		const timing = createTiming(() => ticks++);
 		const resent = await submitAction(
-			makeDeps({ store, now: () => 3_000, timing }),
+			makeDeps({ store, serverTime: () => 3_000, timing }),
 			playerId,
-			request(plantWheat(0), 0, key),
+			buildRequest(plantWheat(0), 0, key),
 		);
 
 		// Plot 1 is growing now, so the rules would refuse the action; the farm is a fresh load.
-		const now = await loadFarm(makeDeps({ store }), playerId);
+		const reloaded = await loadFarm(makeDeps({ store }), playerId);
 		expect(first).toMatchObject({ kind: "answered", answer: { seq: 1, retries: 0 } });
 		expect(resent).toStrictEqual({
 			kind: "answered",
 			answer: answerOf(first),
-			farm: farmOf(now),
+			farm: farmOf(reloaded),
 		});
-		expect(now).toMatchObject({ farm: { seq: 2, at: 2_000 } });
+		expect(reloaded).toMatchObject({ farm: { seq: 2, at: 2_000 } });
 		// Asked first, so the rules never ran: `processed`, then the fresh load.
 		expect(timing.renderServerTiming()).toBe("load;dur=2");
 	});
@@ -124,13 +133,13 @@ describe("submitAction", () => {
 	it("refuses an action the rules refuse with the sim's reason word for word, and writes nothing", async () => {
 		const playerId = newPlayerId();
 		const store = newStore();
-		await submitAction(makeDeps({ store }), playerId, request(plantWheat(0), 0));
+		await submitAction(makeDeps({ store }), playerId, buildRequest(plantWheat(0), 0));
 		const key = crypto.randomUUID();
 
 		const result = await submitAction(
-			makeDeps({ store, now: () => 2_000 }),
+			makeDeps({ store, serverTime: () => 2_000 }),
 			playerId,
-			request(plantWheat(0), 1, key),
+			buildRequest(plantWheat(0), 1, key),
 		);
 
 		expect(result).toStrictEqual({ kind: "refused", reason: "Plot 1 isn't empty." });
@@ -138,7 +147,7 @@ describe("submitAction", () => {
 		expect((await store.load(playerId)).seq).toBe(1);
 	});
 
-	it("rebases an action whose expectedSeq is stale, at the time of the farm's last action", async () => {
+	it("marks an action on a stale expectedSeq rebased, at the time of the farm's last action", async () => {
 		const playerId = newPlayerId();
 		const store = newStore();
 		// Another tab's action, committed straight to the store at a later server time than this
@@ -155,9 +164,9 @@ describe("submitAction", () => {
 		});
 
 		const result = await submitAction(
-			makeDeps({ store, now: () => 1_000 }),
+			makeDeps({ store, serverTime: () => 1_000 }),
 			playerId,
-			request(plantWheat(0), 0),
+			buildRequest(plantWheat(0), 0),
 		);
 
 		const stored = await store.load(playerId);
@@ -173,7 +182,11 @@ describe("submitAction", () => {
 		const playerId = newPlayerId();
 		const store = newStore([true]);
 
-		const result = await submitAction(makeDeps({ store }), playerId, request(plantWheat(0), 0));
+		const result = await submitAction(
+			makeDeps({ store }),
+			playerId,
+			buildRequest(plantWheat(0), 0),
+		);
 
 		expect(result).toMatchObject({
 			kind: "answered",
@@ -187,7 +200,11 @@ describe("submitAction", () => {
 		const playerId = newPlayerId();
 		const store = newStore([true, true, true]);
 
-		const result = await submitAction(makeDeps({ store }), playerId, request(plantWheat(0), 0));
+		const result = await submitAction(
+			makeDeps({ store }),
+			playerId,
+			buildRequest(plantWheat(0), 0),
+		);
 
 		expect(result).toMatchObject({ kind: "answered", answer: { seq: 1, retries: 3 } });
 	});
@@ -200,7 +217,7 @@ describe("submitAction", () => {
 		const result = await submitAction(
 			makeDeps({ store }),
 			playerId,
-			request(plantWheat(0), 0, key),
+			buildRequest(plantWheat(0), 0, key),
 		);
 
 		expect(result).toStrictEqual({ kind: "busy", cause: "conflicts" });
@@ -208,7 +225,7 @@ describe("submitAction", () => {
 		expect((await store.load(playerId)).seq).toBe(0);
 		// The script is used up: the same key commits on the client's retry.
 		expect(
-			await submitAction(makeDeps({ store }), playerId, request(plantWheat(0), 0, key)),
+			await submitAction(makeDeps({ store }), playerId, buildRequest(plantWheat(0), 0, key)),
 		).toMatchObject({ kind: "answered", answer: { seq: 1, retries: 0 } });
 	});
 
@@ -216,15 +233,15 @@ describe("submitAction", () => {
 		const playerId = newPlayerId();
 		const store = newStore([true, true]);
 		let reads = 0;
-		const now = (): number => {
+		const serverTime = (): number => {
 			reads++;
 			return reads * 1_000;
 		};
 
 		const result = await submitAction(
-			makeDeps({ store, now }),
+			makeDeps({ store, serverTime }),
 			playerId,
-			request(plantWheat(0), 0),
+			buildRequest(plantWheat(0), 0),
 		);
 
 		expect(reads).toBe(1);
@@ -236,7 +253,11 @@ describe("submitAction", () => {
 		const playerId = newPlayerId();
 		const store = newStore();
 		const key = crypto.randomUUID();
-		const first = await submitAction(makeDeps({ store }), playerId, request(plantWheat(0), 0, key));
+		const first = await submitAction(
+			makeDeps({ store }),
+			playerId,
+			buildRequest(plantWheat(0), 0, key),
+		);
 		// `processed` ran before the first commit landed; the load after it sees the commit.
 		let asked = 0;
 		const racing: GameStore = {
@@ -248,9 +269,9 @@ describe("submitAction", () => {
 		};
 
 		const resent = await submitAction(
-			makeDeps({ store: racing, now: () => 2_000 }),
+			makeDeps({ store: racing, serverTime: () => 2_000 }),
 			playerId,
-			request(plantWheat(0), 0, key),
+			buildRequest(plantWheat(0), 0, key),
 		);
 
 		expect(resent).toMatchObject({ kind: "answered", farm: { seq: 1 } });
@@ -261,14 +282,18 @@ describe("submitAction", () => {
 		const playerId = newPlayerId();
 		const store = newStore();
 		const key = crypto.randomUUID();
-		const first = await submitAction(makeDeps({ store }), playerId, request(plantWheat(0), 0, key));
+		const first = await submitAction(
+			makeDeps({ store }),
+			playerId,
+			buildRequest(plantWheat(0), 0, key),
+		);
 		// `processed` misses the key, and the resend's action is one the rules would accept.
 		const missing: GameStore = { ...store, processed: () => Promise.resolve(null) };
 
 		const resent = await submitAction(
-			makeDeps({ store: missing, now: () => 2_000 }),
+			makeDeps({ store: missing, serverTime: () => 2_000 }),
 			playerId,
-			request(plantWheat(1), 1, key),
+			buildRequest(plantWheat(1), 1, key),
 		);
 
 		expect(resent).toMatchObject({ kind: "answered", farm: { seq: 1, at: 1_000 } });
@@ -280,13 +305,13 @@ describe("submitAction", () => {
 		async (method) => {
 			const playerId = newPlayerId();
 			const store = newStore();
-			const error = new Error("Store error: rules version 2 is unknown.");
+			const error = storeError();
 			const failing: GameStore = { ...store, [method]: () => Promise.reject(error) };
 
 			const result = await submitAction(
 				makeDeps({ store: failing }),
 				playerId,
-				request(plantWheat(0), 0),
+				buildRequest(plantWheat(0), 0),
 			);
 
 			expect(result).toStrictEqual({ kind: "busy", cause: "store", error });
@@ -302,7 +327,7 @@ describe("submitAction", () => {
 		await submitAction(
 			makeDeps({ store: newStore([true]), timing }),
 			newPlayerId(),
-			request(plantWheat(0), 0),
+			buildRequest(plantWheat(0), 0),
 		);
 
 		// load: processed, then a load per attempt; sim and commit: once per attempt.
@@ -312,16 +337,16 @@ describe("submitAction", () => {
 
 interface DepsOptions {
 	readonly store?: GameStore;
-	readonly now?: () => number;
+	readonly serverTime?: () => number;
 	readonly timing?: Timing;
 }
 
 function makeDeps({
 	store = newStore(),
-	now = () => 1_000,
+	serverTime = () => 1_000,
 	timing = createTiming(),
 }: DepsOptions = {}): GameDeps {
-	return { store, rules, timing, now };
+	return { store, rules, timing, serverTime };
 }
 
 /** The in-memory store on the slice's rules, with `conflicts` scripted (#383). */
@@ -329,7 +354,7 @@ function newStore(conflicts: readonly boolean[] = []): GameStore {
 	return createMemoryStore({ newFarm: rules.newFarm, replay: rules.replay, conflicts });
 }
 
-function request(
+function buildRequest(
 	action: Action,
 	expectedSeq: number,
 	idempotencyKey = crypto.randomUUID(),
@@ -339,6 +364,11 @@ function request(
 
 function plantWheat(plot: number): Action {
 	return { type: "plant", plot, crop: "wheat" };
+}
+
+/** What B100's `load` throws for a farm on rules the running code doesn't know (ADR-0006, s. 8). */
+function storeError(): Error {
+	return new Error("Store error: rules version 2 is unknown.");
 }
 
 /** The answer of a result that must be `answered`. */

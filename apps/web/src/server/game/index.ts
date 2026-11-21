@@ -16,8 +16,8 @@ export interface GameDeps {
 	readonly rules: Pick<Rules, "sim" | "rulesVersion">;
 	/** This request's recorder: `load` (store reads), `sim` and `commit` (#394). */
 	readonly timing: Timing;
-	/** Server wall-clock time in ms (`Date.now` in `api/`). `submitAction` reads it once (T1). */
-	readonly now: () => number;
+	/** Server time in ms (`Date.now` in `api/`). `submitAction` reads it once per request (T1). */
+	readonly serverTime: () => number;
 }
 
 /**
@@ -83,11 +83,11 @@ export async function submitAction(
 	const { action, idempotencyKey } = request;
 	// Server time, read once per request and never taken from the client (T1, MUST-11.1): every
 	// attempt below starts from it.
-	const stampedAt = deps.now();
+	const stampedAt = deps.serverTime();
 
-	const first = await callStore(deps, "load", () => store.processed(playerId, idempotencyKey));
-	if (!first.ok) return first.busy;
-	if (first.value !== null) return await answerResend(deps, playerId, first.value);
+	// Asked before the rules run, as a resent action may no longer be valid (ADR-0001).
+	const resent = await findResend(deps, playerId, idempotencyKey);
+	if (resent !== null) return resent;
 
 	for (let retries = 0; retries <= maxRetries; retries++) {
 		const loaded = await callStore(deps, "load", () => store.load(playerId));
@@ -96,12 +96,22 @@ export async function submitAction(
 		const farm = loaded.value;
 		// A request that lost a race loads the winner's action, stamped later than its own: it takes
 		// effect at the farm's time instead, as the rules refuse a time before it (ADR-0003, D7), and
-		// the loser must still commit on its retry (MUST-13.3). Both times are the server's. The
-		// farm's own time, the one `apply` checks, so a store inconsistency can't reach the player
-		// as a refusal about time.
+		// the loser must still commit on its retry (MUST-13.3). Both times are the server's. It
+		// takes the farm's own time, the one `apply` checks, so a store inconsistency can't reach
+		// the player as a refusal about time.
 		const at = Math.max(stampedAt, farm.state.time);
 		const step = timing.withTiming("sim", () => runStep(rules, farm, request, at, retries));
-		if (!step.ok) return await refuse(deps, playerId, idempotencyKey, step.reason);
+		if (!step.ok) {
+			// Asked again before a refusal: a resend that raced its first commit missed it above, then
+			// loaded that commit, so the rules refused the action a second time. It gets its first
+			// answer, not a 422 (ADR-0001, amended 6 Nov after #8).
+			return (
+				(await findResend(deps, playerId, idempotencyKey)) ?? {
+					kind: "refused",
+					reason: step.reason,
+				}
+			);
+		}
 
 		const { next, answer } = step;
 		const committed = await callStore(deps, "commit", () =>
@@ -114,7 +124,7 @@ export async function submitAction(
 			return {
 				kind: "answered",
 				answer,
-				farm: toEnvelope(deps, { seq: outcome.seq, at, state: next }),
+				farm: buildEnvelope(deps, { seq: outcome.seq, at, state: next }),
 			};
 		}
 
@@ -132,7 +142,7 @@ export async function loadFarm(deps: GameDeps, playerId: PlayerId): Promise<Load
 	const loaded = await callStore(deps, "load", () => deps.store.load(playerId));
 	if (!loaded.ok) return loaded.busy;
 
-	return { kind: "loaded", farm: toEnvelope(deps, loaded.value) };
+	return { kind: "loaded", farm: buildEnvelope(deps, loaded.value) };
 }
 
 /** One attempt's sim work: the farm after the action, and the answer to commit with it. */
@@ -179,21 +189,21 @@ async function answerResend(
 }
 
 /**
- * Before a refusal, asks for the key again: a resend that raced its first commit missed it in
- * `processed`, then loaded that commit, so the rules refused the action a second time. It gets its
- * first answer, not a 422 (ADR-0001, amended 6 Nov after #8).
+ * The result for a key the farm has used: its stored answer, unchanged, with the farm as it is now
+ * (MUST-13.2; ADR-0007, section 3). `null` when no commit has used the key.
  */
-async function refuse(
+async function findResend(
 	deps: GameDeps,
 	playerId: PlayerId,
 	idempotencyKey: string,
-	reason: string,
-): Promise<SubmitResult> {
-	const again = await callStore(deps, "load", () => deps.store.processed(playerId, idempotencyKey));
-	if (!again.ok) return again.busy;
-	if (again.value !== null) return await answerResend(deps, playerId, again.value);
+): Promise<SubmitResult | null> {
+	const processed = await callStore(deps, "load", () =>
+		deps.store.processed(playerId, idempotencyKey),
+	);
+	if (!processed.ok) return processed.busy;
+	if (processed.value === null) return null;
 
-	return { kind: "refused", reason };
+	return await answerResend(deps, playerId, processed.value);
 }
 
 /** A store call's value, or the `busy` its throw becomes. */
@@ -218,6 +228,6 @@ async function callStore<T>(
 	}
 }
 
-function toEnvelope({ rules }: GameDeps, { seq, at, state }: FarmRecord): FarmEnvelope {
+function buildEnvelope({ rules }: GameDeps, { seq, at, state }: FarmRecord): FarmEnvelope {
 	return { seq, at, state, rulesVersion: rules.rulesVersion };
 }
