@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -60,8 +59,8 @@ describe("the store gate (B100 with the slice's rules)", () => {
 			const playerId = await createPlayer();
 			// Seeded from the script's id, not the player's (which production uses, MUST-10.3): the
 			// recorded hash is for the script's farm, and the player id is only the uuid B100's
-			// foreign key needs. This `newFarm` ignores the id the store hands it, so the contract
-			// suite, not this gate, covers which id that is.
+			// foreign key needs. This `newFarm` ignores the id the store hands it; the contract
+			// suite checks that the store hands it the farm's id.
 			const store = createStore({
 				db,
 				newFarm: () => rules.newFarm(script.farmId),
@@ -76,10 +75,11 @@ describe("the store gate (B100 with the slice's rules)", () => {
 			let refused = 0;
 			const checked: string[] = [];
 
-			async function expectLoaded(when: string): Promise<void> {
+			async function expectLoaded(when: string): Promise<FarmState> {
 				checked.push(when);
 				const loaded = await store.load(playerId);
 				expect(loaded, `load() ${when}`).toStrictEqual({ state: farm, seq, at });
+				return loaded.state;
 			}
 
 			for (const [i, step] of script.steps.entries()) {
@@ -95,7 +95,7 @@ describe("the store gate (B100 with the slice's rules)", () => {
 					expectedSeq: seq,
 					action: step.action,
 					at: step.at,
-					idempotencyKey: randomUUID(),
+					idempotencyKey: crypto.randomUUID(),
 					next,
 					answer: { seq: seq + 1, hash: stateHash(next), rebased: false, retries: 0 },
 				});
@@ -117,7 +117,7 @@ describe("the store gate (B100 with the slice's rules)", () => {
 			// below isn't the sim's (ci / determinism checks the same in two processes).
 			expect(stateHash(farm), "the in-memory farm's hash").toBe(recordedHash);
 			expect({ accepted: seq, refused }).toEqual({ accepted: 475, refused: 25 });
-			await expectLoaded(`at the end, at seq ${String(seq)}`);
+			const end = await expectLoaded(`at the end, at seq ${String(seq)}`);
 
 			// What the gate covered, so a script re-recorded short of a snapshot or a gap can't pass
 			// it quietly: from a new farm, four snapshots and the gap, as recorded on 21 Nov 2026.
@@ -131,7 +131,7 @@ describe("the store gate (B100 with the slice's rules)", () => {
 				"at snapshot seq 400",
 				expect.stringMatching(/^at the end/u),
 			]);
-			expect(stateHash((await store.load(playerId)).state)).toBe(recordedHash);
+			expect(stateHash(end), "the loaded farm's hash").toBe(recordedHash);
 		},
 		gateTimeout,
 	);

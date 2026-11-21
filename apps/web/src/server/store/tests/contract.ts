@@ -8,8 +8,8 @@ import { makeEntry, newFarm, plant, recordReplay, replay } from "./farms";
 // store as a `unit` test, so the fake can't drift from the store without failing it (Contract
 // test). The cases came over from #373's store.db.test.ts as they were (#383).
 
-/** Builds a store with the stand-in rules (`./farms`), or with the `replay` a test hands in. */
-export type MakeStore = (rules?: Partial<Pick<StoreDeps, "replay">>) => GameStore;
+/** Builds a store with the stand-in rules (`./farms`), or with the ones a test hands in. */
+export type MakeStore = (rules?: Partial<Pick<StoreDeps, "newFarm" | "replay">>) => GameStore;
 
 /**
  * A new farm id no other test uses ("Isolation by farm"): a player made on the stack for B100,
@@ -26,6 +26,20 @@ export function describeGameStore(
 		const farmId = await makePlayer();
 
 		expect(await makeStore().load(farmId)).toEqual({ state: newFarm(), seq: 0, at: 0 });
+	});
+
+	it("builds a farm with no action from newFarm, handing it the farm's id", async () => {
+		const farmId = await makePlayer();
+		const ids: string[] = [];
+
+		await makeStore({
+			newFarm: (id) => {
+				ids.push(id);
+				return newFarm();
+			},
+		}).load(farmId);
+
+		expect(ids).toEqual([farmId]);
 	});
 
 	it("loads a committed farm back as it was committed, types included", async () => {

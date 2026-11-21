@@ -29,7 +29,7 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 	const farms = new Map<string, MemoryFarm>();
 	let scripted = 0;
 
-	function readFarm(playerId: string): MemoryFarm {
+	function findOrAddFarm(playerId: string): MemoryFarm {
 		const found = farms.get(playerId);
 		if (found !== undefined) return found;
 
@@ -41,7 +41,7 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 	return {
 		async load(playerId) {
 			await Promise.resolve();
-			const { rows, snapshots } = readFarm(playerId);
+			const { rows, snapshots } = findOrAddFarm(playerId);
 			const snapshotSeq = Math.floor(rows.length / snapshotEvery) * snapshotEvery;
 			const snapshot = snapshots.get(snapshotSeq);
 			const from: FarmRecord =
@@ -59,7 +59,7 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 
 		async processed(playerId, idempotencyKey) {
 			await Promise.resolve();
-			return findAnswer(readFarm(playerId), idempotencyKey);
+			return findAnswer(findOrAddFarm(playerId), idempotencyKey);
 		},
 
 		async commit(playerId, entry): Promise<CommitResult> {
@@ -72,7 +72,7 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 				);
 			}
 
-			const farm = readFarm(playerId);
+			const farm = findOrAddFarm(playerId);
 			const answer = findAnswer(farm, entry.idempotencyKey);
 			if (answer !== null) return { kind: "duplicate", answer };
 
