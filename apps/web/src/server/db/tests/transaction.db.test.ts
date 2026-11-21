@@ -1,19 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import postgres from "postgres";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { readStack } from "@/server/tests/stack";
 
 import { createDb } from "../index";
 
-// Against the local stack (pnpm test:stack:db; #372). Drizzle 0.45.4 on postgres.js 4.x is untested
+// Against the local stack (Vitest's db project; #372, #382). Drizzle 0.45.4 on postgres.js 4.x is untested
 // upstream (#331 decision 10), so this proves `db.transaction` (postgres.js `sql.begin`), run as
 // game_api through createDb, commits what it wrote: the admin connection, another session, reads
 // the row back after the transaction ends, which it can't see unless it was committed. A scratch
 // table the admin creates (game_api may create none) keeps it out of the store's tables, which
 // this module doesn't own.
-const stack = inject("stack");
-if (!stack) throw new Error("db.stack.ts runs only under pnpm test:stack:db.");
-
+const stack = readStack();
 const admin = postgres(stack.adminDatabaseUrl, { max: 1 });
 const db = createDb({ databaseUrl: stack.databaseUrl });
 // Unique per run, so a run that stopped before its afterAll can't collide with the next.

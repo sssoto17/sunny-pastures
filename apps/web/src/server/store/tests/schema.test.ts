@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { actions, snapshots } from "../schema";
 
 // The table definitions drizzle-kit generates the migrations from (#372, criterion 2; #331
-// decisions 1, 3, 4 and 5). grants.stack.ts checks what the database then does with them.
+// decisions 1, 3, 4 and 5). grants.db.test.ts checks what the database then does with them.
 function describeTable(table: PgTable) {
 	const config = getTableConfig(table);
 	return {

@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 // Coverage counts source files under apps/ and packages/ only (CONSTRAINTS.md, "What counts for
 // coverage"). Widening `coverage.exclude` or narrowing `coverage.include` is a moved threshold.
@@ -19,6 +19,14 @@ const propertyTimeout = Math.max(5_000, 15 * simPropertyRuns);
 // src/, and `server-only` is Next's own empty module on the server side, with no package to install.
 const fromRoot = (path: string) => decodeURIComponent(new URL(path, import.meta.url).pathname);
 
+// Two projects in one coverage run (#382; ADR-0007 section 6, "The `db` project"), so
+// coverage-gate.mjs still reads one lcov. `db` is every `*.db.test.ts`: it needs the local Supabase
+// stack, and its global setup fails the run, naming `pnpm db:start`, when none answers. It never
+// skips. `unit` is everything else. Both inherit this file's options (Vitest 5's inline projects
+// extend the root), and arrays merge, so the include lists live in the projects, not at the root.
+// `ci / test` picks `--project unit` when a PR can't reach the database (ci.yml).
+const dbTests = "{apps,packages}/*/src/**/*.db.test.ts";
+
 export default defineConfig({
 	resolve: {
 		alias: [
@@ -31,7 +39,30 @@ export default defineConfig({
 	},
 	test: {
 		provide: { fastCheck: { seed: 0x5eed, numRuns: simPropertyRuns }, propertyTimeout },
-		include: ["{apps,packages}/*/src/**/*.{test,spec}.{ts,tsx}", ".github/scripts/**/*.test.mjs"],
+		projects: [
+			{
+				test: {
+					name: "unit",
+					include: [
+						"{apps,packages}/*/src/**/*.{test,spec}.{ts,tsx}",
+						".github/scripts/**/*.test.mjs",
+					],
+					exclude: [...configDefaults.exclude, dbTests],
+				},
+			},
+			{
+				test: {
+					name: "db",
+					include: [dbTests],
+					globalSetup: ["apps/web/src/server/tests/setup.ts"],
+					// A round trip to the stack's Auth or Postgres takes longer than a unit test.
+					testTimeout: 15_000,
+					// The benchmarks are the unit project's: here they would run twice, and `ci / bench`
+					// has no stack for this project's global setup.
+					benchmark: { include: [] },
+				},
+			},
+		],
 		coverage: {
 			provider: "v8",
 			reporter: ["lcov", "text-summary"],

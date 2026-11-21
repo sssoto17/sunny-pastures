@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createDb } from "../index";
 
 // postgres.js connects on the first query, never when the client is built, so this needs no
-// database (#329 decision 5). The round trip against the local stack is db.stack.ts (#372).
+// database (#329 decision 5). The round trip against the local stack is transaction.db.test.ts (#372).
 describe("createDb", () => {
 	it("builds a Drizzle client over postgres.js without connecting", async () => {
 		const db = createDb({ databaseUrl: "postgresql://game_api@127.0.0.1:1/postgres" });

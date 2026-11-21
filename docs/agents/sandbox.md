@@ -146,6 +146,7 @@ print credentials, and what to use instead:
 | Prints secrets | Use instead |
 |---|---|
 | `supabase start` (keys, S3 credentials, DB URL with password) | `pnpm db:start` |
+| `supabase db reset` (a secret-shaped line seen on 21 Nov, #382) | `pnpm db:reset`, which shows the CLI's output, redacted, only on failure |
 | `supabase status` | `pnpm db:status`; `pnpm db:env` sets `game_api`'s password (the one already in `.env`, or a new one) and writes `DATABASE_URL` (`game_api`) and `ADMIN_DATABASE_URL` to `.env` without echoing either |
 | `env`, `printenv`, `cat .env` (denied by permission rules) | `test -n "${NAME:+x}" && echo set` to check a variable is set |
 

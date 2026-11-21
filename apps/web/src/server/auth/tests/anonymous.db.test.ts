@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createAuth } from "../index";
-import { readStackConfig, signUpAnonymous } from "./anonymous";
+import { readStack } from "@/server/tests/stack";
 
-// Needs the local Supabase stack, so `pnpm test` leaves this file out and `pnpm test:stack` runs it
-// (vitest.config.stack.mjs). CI has no stack until #49.
-const config = readStackConfig(process.env);
+import { createAuth } from "../index";
+import { signUpAnonymous } from "./anonymous";
+
+// Against the local stack's Auth (Vitest's db project; #371, #382): real anonymous sign-ups belong
+// to the auth module's tests (ADR-0007 section 6), so this file signs up rather than createPlayer.
+const config = readStack();
 const auth = createAuth(config);
 
 function makeBearerRequest(token: string): Request {

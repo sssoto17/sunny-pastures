@@ -2,20 +2,20 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { createPlayer, readStack } from "@/server/tests/stack";
 
 import { actions, snapshots } from "../schema";
 
-// Against the local stack after `supabase db reset` (pnpm test:stack:db; #372, #331 decision 2): what
-// the migrations let game_api, anon and authenticated do with the game schema. The admin
-// connection (postgres) sets up users in auth.users, as the tests set up their own data (#331
-// decision 8), and takes on PostgREST's roles with `set local role`.
-const stack = inject("stack");
-if (!stack) throw new Error("grants.stack.ts runs only under pnpm test:stack:db.");
-
+// Against the local stack after `pnpm db:reset` (Vitest's db project; #372, #382, #331 decision
+// 2): what the migrations let game_api, anon and authenticated do with the game schema. Each farm
+// belongs to a player made with createPlayer, as the tests set up their own data (#331 decision 8),
+// and the admin connection (postgres) takes on PostgREST's roles with `set local role`.
+const stack = readStack();
 const admin = postgres(stack.adminDatabaseUrl, { max: 1 });
 const gameApi = drizzle(postgres(stack.databaseUrl, { max: 1 }));
-const farmId = randomUUID();
+const farmId = await createPlayer();
 
 const action = {
 	farmId,
@@ -32,7 +32,6 @@ const insufficientPrivilege = { cause: { code: "42501" } };
 const checkViolation = { cause: { code: "23514" } };
 
 beforeAll(async () => {
-	await admin`insert into auth.users (id) values (${farmId})`;
 	await gameApi.insert(actions).values(action);
 	await gameApi.insert(snapshots).values(snapshot);
 });
@@ -115,8 +114,7 @@ describe("the check constraints", () => {
 
 describe("a farm's rows", () => {
 	it("go when its user is deleted from auth.users", async () => {
-		const goneId = randomUUID();
-		await admin`insert into auth.users (id) values (${goneId})`;
+		const goneId = await createPlayer();
 		await gameApi.insert(actions).values({ ...action, farmId: goneId });
 		await gameApi.insert(snapshots).values({ ...snapshot, farmId: goneId });
 

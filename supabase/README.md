@@ -23,38 +23,49 @@ Run them from the repo root (or a worktree's root).
 | Info   | `pnpm db:status`            | Same list again.                                                       |
 | `.env` | `pnpm db:env`               | Sets `game_api`'s password; writes `DATABASE_URL`, `ADMIN_DATABASE_URL`, `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` to `./.env` without printing them. |
 | Stop   | `supabase stop`             | Keeps the data in Docker volumes.                                      |
-| Reset  | `supabase db reset`         | Recreates the local database and reruns migrations and seed. Then `pnpm db:env`. |
+| Reset  | `pnpm db:reset`             | `supabase db reset`: recreates the local database and reruns migrations and seed. Shows its output, redacted, only on failure. Then `pnpm db:env`. |
 | Wipe   | `supabase stop --no-backup` | Stops and deletes the local data.                                      |
 
-**Don't run `supabase start` or `supabase status` directly.** They print the local keys, S3
-credentials and the database password on stdout _and_ stderr (even when piped), and terminal output
-often gets pasted into a session. `supabase/db.sh` captures both streams and hides every value
-except URLs, which keep the password hidden.
+**Don't run `supabase start`, `supabase status` or `supabase db reset` directly.** The first two
+print the local keys, S3 credentials and the database password on stdout _and_ stderr (even when
+piped), and `db reset`'s output has shown a secret-shaped line too (#382). Terminal output often
+gets pasted into a session. `supabase/db.sh` captures both streams and hides every value except
+URLs, which keep the password hidden. `pnpm db:start` passes extra flags on to `supabase start`
+(`pnpm db:start --exclude studio`).
 
 ## Migrations
 
 The `game` schema's tables are Drizzle code in `apps/web/src/server/store/schema.ts` (#331, #372).
 `pnpm db:generate` writes a migration for a change to it into `supabase/migrations/`, named the way
 the Supabase CLI reads (`<timestamp>_<name>.sql`), beside drizzle-kit's `meta/` folder.
-`supabase db reset` applies them. Grants, roles and anything else drizzle-kit can't express go in a
+`pnpm db:reset` applies them. Grants, roles and anything else drizzle-kit can't express go in a
 custom migration: `pnpm db:generate --custom --name <name>`, then write the SQL.
 
 - **Forward-only.** Never edit, rename or delete a migration once it's on `main`; a fix is a new
   migration (CONSTRAINTS.md, "Migrations").
 - `pnpm db:check` (CI, `ci / lint`) fails on an edited migration, and on drift: a `schema.ts` change
   with no migration. It needs no database.
-- `pnpm test:stack:db` runs the `*.stack.ts` tests (grants, RLS, the transaction round trip) against
-  the local stack, after `supabase db reset` and `pnpm db:env`.
+
+## Tests against the stack: the `db` project
+
+Tests that need the stack are `*.db.test.ts` files, Vitest's `db` project (vitest.config.mts; #382,
+ADR-0007 section 6): grants, RLS, the transaction round trip, real anonymous sign-ups. `pnpm test`
+runs them with the `unit` project in one coverage run, and `pnpm test --project db` runs them alone.
+They need `pnpm db:start`, `pnpm db:reset` and `pnpm db:env` first. With no stack, the project's
+global setup fails the run and says so; a `db` test never skips. Each test makes its own player with
+`createPlayer` (`apps/web/src/server/tests/stack.ts`), so nothing is truncated. `ci / test` starts a
+stack (`.github/actions/supabase-stack`) when a PR touches `apps/web/src/server/` or `supabase/`,
+and on every push to `main`; other PRs run `--project unit`.
 
 ## Connection: `DATABASE_URL`
 
 Code reads the connection string from `DATABASE_URL` only, never from a literal in the repo. The app
 connects as `game_api`, which may only read and append to the `game` tables. The migration creates
-it with no password, so run `pnpm db:env` once after `supabase db reset`, then copy `.env` into
-other worktrees: every worktree shares one local stack and one `game_api` password. It sets the
-password (`alter role`, over `psql`'s stdin): the one in `.env`'s `game_api` `DATABASE_URL` if there
-is one, otherwise a new random one. It writes `DATABASE_URL` (`game_api`) and `ADMIN_DATABASE_URL`
-(`postgres`, for `pnpm test:stack:db` only) to `.env` (ignored by git), replacing earlier values. It
+it with no password, so run `pnpm db:env` once after `pnpm db:reset`, then copy `.env` into other
+worktrees: every worktree shares one local stack and one `game_api` password. It sets the password
+(`alter role`, over `psql`'s stdin): the one in `.env`'s `game_api` `DATABASE_URL` if there is one,
+otherwise a new random one. It writes `DATABASE_URL` (`game_api`) and `ADMIN_DATABASE_URL`
+(`postgres`, for the `db` tests only) to `.env` (ignored by git), replacing earlier values. It
 prints neither. `.env.example` shows the shape. It uses a local `psql` if there is one, or the one
 in the stack's Postgres image.
 

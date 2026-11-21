@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Wraps the Supabase CLI so its output never shows a secret value.
 # The CLI prints keys and the database password on stdout and stderr, so both are captured.
-#   start   start the local stack, then show `status`
+#   start   start the local stack, then show `status`. Any further arguments go to
+#           `supabase start` (CI excludes the services the tests don't use, #382)
+#   reset   `supabase db reset`: recreate the local database and apply the migrations and seed.
+#           Its output can show the database URL, so only a failure is shown, redacted (#382)
 #   status  list the stack's variables: URLs with the password hidden, every other value hidden
 #   env     set the game_api role's password and write its DATABASE_URL, and the postgres role's
 #           ADMIN_DATABASE_URL, into ./.env, printing neither (#372). Reuses the password of a
@@ -131,8 +134,9 @@ set_env() {
 }
 
 case "${1:-}" in
-  start) run start > /dev/null; status ;;
+  start) shift; run start "$@" > /dev/null; status ;;
+  reset) run db reset > /dev/null; echo "Reset the local database: migrations and seed applied. Next: pnpm db:env" ;;
   status) status ;;
   env) write_env ;;
-  *) echo "usage: supabase/db.sh start|status|env" >&2; exit 2 ;;
+  *) echo "usage: supabase/db.sh start [supabase start flags]|reset|status|env" >&2; exit 2 ;;
 esac

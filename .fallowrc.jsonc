@@ -37,6 +37,10 @@
       { "name": "auth", "patterns": ["apps/web/src/server/auth/**"] },
       { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
       { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
+      // The `db` tests' shared helpers (#382; ADR-0007 section 6): the `db` project's global setup
+      // and `createPlayer`. Test code only, since ESLint stops source importing any tests/ folder,
+      // so the zones that may import it are only letting their tests in.
+      { "name": "serverTests", "patterns": ["apps/web/src/server/tests/**"] },
       { "name": "sim", "patterns": ["packages/sim/src/**"] }
     ],
     "rules": [
@@ -51,13 +55,14 @@
         "allow": ["rules", "timing", "sim"],
         "allowTypeOnly": ["store", "auth"]
       },
-      { "from": "store", "allow": [], "allowTypeOnly": ["db", "sim"] },
+      { "from": "store", "allow": ["serverTests"], "allowTypeOnly": ["db", "sim"] },
       { "from": "rules", "allow": ["sim"] },
-      { "from": "auth", "allow": ["config"] },
-      { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
+      { "from": "auth", "allow": ["config", "serverTests"] },
+      { "from": "db", "allow": ["serverTests"], "allowTypeOnly": ["config"] },
       { "from": "config", "allow": [] },
       { "from": "timing", "allow": [] },
-      { "from": "sim", "allow": [] }
+      { "from": "sim", "allow": [] },
+      { "from": "serverTests", "allow": [] }
     ],
     // A pattern matches a call and a constructor call, also through an import or a namespace.
     "calls": {
