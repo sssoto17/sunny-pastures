@@ -25,7 +25,7 @@ export interface Rules {
 	 * order, each at its own `at`, then advances to `to`. `state` is a snapshot's farm, or
 	 * `newFarm` when the farm has none, and `actions` are the rows logged after it. A `to` before
 	 * the last row's `at` doesn't throw: the farm comes back at that row's time, as `advance` never
-	 * goes back (D7).
+	 * goes back (ADR-0003, D7).
 	 *
 	 * Throws if the rules refuse a logged action, and never skips one: every row was accepted once,
 	 * so a refusal means a corrupt log or other rules, and skipping it would replay into another farm

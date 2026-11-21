@@ -100,6 +100,15 @@ describe("replay", () => {
 		expect(replay(snapshot, [], to)).toEqual(createSim(sliceContent).advance(snapshot, to));
 	});
 
+	it("returns the farm at the last row's time when `to` is before it", () => {
+		// The last row is at 200 s; `advance` never goes back (ADR-0003, D7), so a `to` before it
+		// leaves the farm where the log put it rather than throwing (#373 relies on this).
+		const replayed = replay(newFarm(farmId), log, 150_000);
+
+		expect(replayed.time).toBe(200_000);
+		expect(stateHash(replayed)).toBe(stateHash(playLive(log)));
+	});
+
 	it("throws when the rows aren't in seq order with no gaps", () => {
 		const swapped = [log[1], log[0], ...log.slice(2)].filter((row) => row !== undefined);
 		const gap = log.filter((row) => row.seq !== 2);
