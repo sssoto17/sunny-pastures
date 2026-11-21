@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildErrorResponse, buildJsonResponse, type ResponseMeta } from "../index";
+import {
+	buildErrorResponse,
+	buildJsonResponse,
+	readActionRequest,
+	type ResponseMeta,
+} from "../index";
 
 const meta: ResponseMeta = { rulesVersion: 3, serverTiming: () => "load;dur=4, total;dur=9" };
 
@@ -25,6 +30,26 @@ describe("buildErrorResponse", () => {
 
 		expect(response.status).toBe(status);
 		expect(await response.json()).toStrictEqual({ error, message });
+	});
+
+	it.each([
+		[415, "unsupported_media_type", "text/plain", "{}"],
+		[413, "too_large", "application/json", "x".repeat(4097)],
+		[400, "bad_request", "application/json", "{"],
+	] as const)("sends the checks' refusal as %i %s", async (status, error, type, body) => {
+		const request = new Request("http://app.test/api/farm/actions", {
+			method: "POST",
+			headers: { "Content-Type": type },
+			body,
+		});
+		const checked = await readActionRequest(request);
+		if (checked.ok) throw new Error("expected the checks to refuse the request");
+
+		const response = buildErrorResponse(checked.problem, meta);
+
+		expect(response.status).toBe(status);
+		expect(await response.json()).toStrictEqual(checked.problem);
+		expect(checked.problem.error).toBe(error);
 	});
 
 	it("carries the rules version, no-store and the timing on an error", () => {
