@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { createTiming, type Clock } from "../index";
 
@@ -93,9 +93,13 @@ describe("createTiming", () => {
 			},
 		};
 
-		const value = await timing.withTiming("load", () => query);
+		const settling = timing.withTiming("load", () => query);
 
-		expect(value).toBe("farm");
+		// A native promise comes back, and the type says so, so a caller can't chain builder
+		// methods on it.
+		expectTypeOf(settling).toEqualTypeOf<Promise<string>>();
+		expect(settling).toBeInstanceOf(Promise);
+		expect(await settling).toBe("farm");
 		expect(timing.renderServerTiming()).toBe("load;dur=7");
 	});
 
