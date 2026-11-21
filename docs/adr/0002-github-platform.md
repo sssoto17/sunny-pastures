@@ -559,7 +559,9 @@ which secret", below).
   annotation. Failing, not warning: a green job with a warning goes unread, and `review` isn't a
   required check, so the red job blocks no merge. The transcript and the execution file exist only
   on Claude's runner, so the Report step stays in the `review` job (#454); a failed proof fails that
-  job, and `post` still posts the verdict (its `if:` is `!cancelled()` and a verdict).
+  job, and `post` still posts the verdict (its `if:` asks for a `review` job that wasn't cancelled
+  and a verdict). GitHub drops a job output that holds a secret's value, so a verdict quoting the
+  seat token never reaches `post`, and nothing is posted.
 - **Apply, in its own job (#454).** `post` runs on a fresh runner that never ran the model, and is
   the only job that enters `review` and mints the App's token, scoped to contents and pull requests.
   The hand-off is the `review` job's outputs: the verdict, the head, the base and its commit as the

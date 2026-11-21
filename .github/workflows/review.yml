@@ -242,7 +242,9 @@ jobs:
   post:
     name: post
     needs: review
-    if: ${{ !cancelled() && needs.review.outputs.verdict != '' }}
+    # `review`'s own concurrency cancels that job, not the run, so its result is read as well: a
+    # verdict set before the cancel landed must not post.
+    if: ${{ !cancelled() && needs.review.result != 'cancelled' && needs.review.outputs.verdict != '' }}
     # Its own group, never cancelled: an older run's post never cancels a newer run's review, and
     # a post that started finishes its review. post-review.sh posts nothing once the head moved.
     concurrency:

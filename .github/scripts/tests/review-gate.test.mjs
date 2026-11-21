@@ -540,7 +540,9 @@ describe("review.yml", () => {
 		// A failed skill proof fails Claude's job but still posts; a cancelled run never posts, and
 		// an older run's post never cancels a newer run's review.
 		it("posts after a failed proof, never after a cancel, in a group of its own", () => {
-			expect(post).toContain("if: ${{ !cancelled() && needs.review.outputs.verdict != '' }}");
+			expect(post).toContain(
+				"if: ${{ !cancelled() && needs.review.result != 'cancelled' && needs.review.outputs.verdict != '' }}",
+			);
 			expect(post).toMatch(
 				/concurrency:\n\s+group: review-post-\$\{\{ github\.event\.pull_request\.number \}\}\n\s+cancel-in-progress: false/,
 			);
