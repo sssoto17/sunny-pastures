@@ -27,6 +27,18 @@ describe("buildErrorResponse", () => {
 		expect(await response.json()).toStrictEqual({ error, message });
 	});
 
+	it("carries the rules version, no-store and the timing on an error", () => {
+		const response = buildErrorResponse({ error: "busy" }, meta);
+
+		expect(Object.fromEntries(response.headers)).toStrictEqual({
+			"cache-control": "no-store",
+			"content-type": "application/json",
+			"retry-after": "1",
+			"rules-version": "3",
+			"server-timing": "load;dur=4, total;dur=9",
+		});
+	});
+
 	it("asks a client to retry after a second only when the farm is busy", () => {
 		expect(buildErrorResponse({ error: "busy" }, meta).headers.get("Retry-After")).toBe("1");
 		expect(buildErrorResponse({ error: "internal" }, meta).headers.get("Retry-After")).toBeNull();
