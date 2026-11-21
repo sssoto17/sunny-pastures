@@ -4,8 +4,8 @@ Scripts the admin runs by hand; each header says what it does. Runbooks of sever
 
 ## #106: the factory's kill switch
 
-`scripts/setup/factory-switch.sh`, on your own machine: it sets the repo variable
-`FACTORY_ENABLED` to `false` (after asking) and reads it back. Re-running it is safe.
+`scripts/setup/factory-switch.sh`, on your own machine: it sets the repo variable `FACTORY_ENABLED`
+to `false` (after asking) and reads it back. Re-running it is safe.
 
 Flipping the switch later: ADR-0002, area 2, "The kill switch, built (#106)".
 

@@ -3,7 +3,7 @@
 # (#106)"): sets the repo variable FACTORY_ENABLED to `false` (after asking) and reads it back.
 # Only the admin runs it: creating or changing a repo variable needs the admin's token, which a
 # lane lacks.
-# Nothing it prints is secret: the variable's value is `true`, `false` or unset.
+# Nothing it prints is secret: FACTORY_ENABLED is a repo variable, not a secret.
 # Tests: scripts/setup/factory-switch.test.sh. Run with --help for usage and exit codes.
 #
 # A wizard walks a human through a manual procedure, step by step.
