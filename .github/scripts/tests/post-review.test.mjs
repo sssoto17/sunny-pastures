@@ -19,11 +19,13 @@ const CODEOWNERS = fileURLToPath(new URL("../../CODEOWNERS", import.meta.url)); 
 
 // A fake gh: logs each call on one line, answers reads from fixtures, and refuses the comments
 // the test asks it to (FAIL_LINE: every line comment; FAIL_FILE: file comments on that path).
+// A label it adds shows on later reads, unless FAKE_NO_LABEL (as once #104 retires review:admin).
 const FAKE_GH = `#!/usr/bin/env bash
 d=$(dirname "$0")
 a="$*"; printf '%s\\n' "\${a//$'\\n'/\\\\n}" >>"$d/calls"
 case "$*" in
-  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-abc}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" ;;
+  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-abc}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" "\${FAKE_AUTHOR_TYPE:-User}" ;;
+  "api -X POST repos/o/r/issues/7/labels"*) [ -n "$FAKE_NO_LABEL" ] || echo true >"$d/labels" ;;
   *"enablePullRequestAutoMerge"*) [ -z "$FAIL_AUTO" ] ;;
   *"disablePullRequestAutoMerge"*) [ -z "$FAIL_DISABLE" ] ;;
   "api repos/o/r/issues/7/labels --jq"*) head -n1 "$d/labels"; tail -n +2 "$d/labels" >"$d/l2"; [ -s "$d/l2" ] && mv "$d/l2" "$d/labels"; true ;;
@@ -152,6 +154,108 @@ describe("post-review.sh", () => {
 			threads: [thread("E1", "escalated: Code-owned path, Interface change")],
 		});
 		expect(again.calls).not.toContain("body=escalated");
+	});
+
+	// #322: the escalation thread alone holds the merge, so the bot approves a clean escalated PR,
+	// but only one the admin's account opened: the author's login and type come from REST, never
+	// from text the PR wrote. On an App-opened PR (#336) it withholds (ADR-0002 area 2, #264).
+	const ADMIN_PR = { FAKE_AUTHOR: "o", FAKE_AUTHOR_TYPE: "User" };
+	const escRows = { escalation_rows: ["Feature slice"], escalation_path: "a.ts" };
+	const changesRequested = [
+		{ id: 55, user: { login: "sunny-reviewer[bot]" }, state: "CHANGES_REQUESTED" },
+	];
+
+	it("approves a clean escalated PR the admin's account opened, posting the thread that holds it", () => {
+		const r = run(verdict(escRows), { env: { ...ADMIN_PR, FAKE_NO_LABEL: "1" } });
+		expect(r.code).toBe(0);
+		expect(r.calls).toContain("-f path=a.ts -f subject_type=file -f body=escalated: Feature slice");
+		expect(r.calls).toMatch(
+			/body=escalated[\s\S]*-f event=APPROVE[\s\S]*enablePullRequestAutoMerge/,
+		);
+		expect(r.calls).not.toContain("reviewers[]=o");
+		expect(r.out).toContain("escalated=true");
+
+		// On a later run its open thread is the memory, and still the gate: approve, never resolve.
+		const again = run(verdict(), {
+			threads: [thread("E1", "escalated: Feature slice")],
+			env: ADMIN_PR,
+		});
+		expect(again.calls).toContain("-f event=APPROVE");
+		expect(again.calls).not.toContain("-F id=E1");
+		expect(again.calls).not.toContain("body=escalated");
+
+		// A thread someone else resolved is reopened first, so it holds the approval again.
+		const reopened = run(verdict(), {
+			threads: [thread("E1", "escalated: Feature slice", { resolved: true, by: "sunny-factory" })],
+			env: ADMIN_PR,
+		});
+		expect(reopened.calls).toMatch(/-F id=E1 [^\n]*unresolveReviewThread[\s\S]*-f event=APPROVE/);
+	});
+
+	it.each([
+		["an App opened (#336)", { FAKE_AUTHOR: "sunny-factory[bot]", FAKE_AUTHOR_TYPE: "Bot" }],
+		["another account opened", { FAKE_AUTHOR: "sssoto17", FAKE_AUTHOR_TYPE: "User" }],
+		["a Bot with the admin's login opened", { FAKE_AUTHOR: "o", FAKE_AUTHOR_TYPE: "Bot" }],
+	])("withholds its approval on a clean escalated PR %s", (_name, env) => {
+		const reviews = changesRequested;
+		const first = run(verdict(escRows), { reviews, env: { ...env, FAKE_NO_LABEL: "1" } });
+		expect(first.calls).toContain("-f subject_type=file -f body=escalated: Feature slice");
+		expect(first.calls).toContain("-f event=COMMENT");
+		expect(first.calls).not.toContain("event=APPROVE");
+		expect(first.calls).not.toContain("enablePullRequestAutoMerge");
+		// Withheld for good, so its own fixed Request changes mustn't block the admin's approval.
+		expect(first.calls).toContain("pulls/7/reviews/55/dismissals");
+
+		const later = run(verdict(), { threads: [thread("E1", "escalated: Feature slice")], env });
+		expect(later.calls).toContain("-f event=COMMENT");
+		expect(later.calls).not.toContain("event=APPROVE");
+	});
+
+	it("approves an escalated PR only while its escalation thread is on the PR", () => {
+		// No file took the thread: nothing would hold the merge, so it withholds.
+		const files = [{ filename: "gone.yml", status: "removed" }];
+		const r = run(verdict(escRows), { files, env: { ...ADMIN_PR, FAKE_NO_LABEL: "1" } });
+		expect(r.calls).toContain("Escalation thread not posted");
+		expect(r.calls).toContain("-f event=COMMENT");
+		expect(r.calls).not.toContain("event=APPROVE");
+	});
+
+	it("until #104, the review:admin it adds on escalating holds the approval", () => {
+		const r = run(verdict(escRows), { env: ADMIN_PR });
+		expect(r.calls).toContain("-f subject_type=file -f body=escalated: Feature slice");
+		expect(r.calls).toContain("labels[]=review:admin");
+		expect(r.calls).toContain("-f event=COMMENT");
+		expect(r.calls).not.toContain("event=APPROVE");
+	});
+
+	it("requests changes on an escalated PR with a Required finding, and still posts the thread", () => {
+		const findings = [{ path: "a.ts", line: 3, body: "bug" }];
+		const r = run(verdict({ ...escRows, findings }), {
+			reviews: changesRequested,
+			env: { ...ADMIN_PR, FAKE_NO_LABEL: "1" },
+		});
+		expect(r.calls).toContain("-f subject_type=file -f body=escalated: Feature slice");
+		expect(r.calls).toContain("-f event=REQUEST_CHANGES");
+		expect(r.calls).not.toContain("dismissals");
+
+		// An open earlier finding of its own holds the approval too, and its Request changes stays.
+		const open = run(verdict(), {
+			threads: [thread("E1", "escalated: Feature slice"), thread("T1", "a finding")],
+			reviews: changesRequested,
+			env: ADMIN_PR,
+		});
+		expect(open.calls).toContain("-f event=COMMENT");
+		expect(open.calls).not.toContain("dismissals");
+	});
+
+	it("on an escalated PR it approves, its Approve replaces its own Request changes", () => {
+		const r = run(verdict(), {
+			threads: [thread("E1", "escalated: Feature slice")],
+			reviews: changesRequested,
+			env: ADMIN_PR,
+		});
+		expect(r.calls).toContain("-f event=APPROVE");
+		expect(r.calls).not.toContain("dismissals");
 	});
 
 	// A verdict with no rows still escalates on the rows a path decides (#240 review, 12 Nov).
