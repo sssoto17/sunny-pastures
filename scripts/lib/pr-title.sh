@@ -3,10 +3,12 @@
 # Commit type, an optional (scope) and !, then ": " and a summary, since it is also the squash
 # commit's subject (docs/agents/triage-labels.md, the PR title prefixes). A body file's first line is
 # the title, so a body that starts with its `Closes #N` or `Part of #N` line is refused here rather
-# than opened with that line as its title (#466). Callers bring bash 4.4+; nothing here exits.
+# than opened with that line as its title (#466). Callers bring bash 4.4+ and
+# set -euo pipefail; nothing here exits.
 # Tests: scripts/open-pr.test.sh, scripts/stack.test.sh.
 
-# The types a title may start with. `spike` is the spike PRs' prefix in triage-labels.md.
+# The types a title may start with. `spike` is the spike PRs' prefix in triage-labels.md. Keep the
+# list the same as triage-labels.md ("PR title prefix") and open-pr.sh's usage text.
 PR_TITLE_TYPES=(feat fix chore docs test ci build refactor perf style revert spike)
 
 pr_title_problem() { # title -> nothing when it passes, else what's wrong and the fix, on stdout
