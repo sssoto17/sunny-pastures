@@ -351,6 +351,19 @@ describe("factory.yml", () => {
 		expect(yml.match(/environment: factory$/gm)).toHaveLength(1);
 	});
 
+	// #107's live test: Claude Code refuses to start with the scrub on and no bubblewrap.
+	it("installs bubblewrap and smoke-tests it before Claude, keeping the env scrub on", () => {
+		const install = factory.indexOf("name: Install bubblewrap for the env scrub");
+		expect(install).toBeGreaterThan(-1);
+		expect(install).toBeLessThan(factory.indexOf("id: claude"));
+		const step = factory.slice(install, factory.indexOf("id: claude"));
+		expect(step).toMatch(/sudo apt-get install -y .*bubblewrap/);
+		expect(step).toContain("bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid true");
+		expect(step).not.toMatch(/uses:/);
+		expect(factory).toMatch(/CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'/);
+		expect(yml).not.toMatch(/CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '?0/);
+	});
+
 	it("pins the App's bot user id once, for Claude's commits and for publish's identity check", () => {
 		expect(yml).toMatch(/^ {2}FACTORY_BOT_ID: '355564973'$/m);
 		expect(factory).toContain("bot_id: ${{ env.FACTORY_BOT_ID }}");
