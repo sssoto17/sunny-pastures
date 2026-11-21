@@ -301,12 +301,14 @@ options, and the package's `exports` give Next and Node `dist/`. Source readers 
 `tsc -b` and editors through the `@sunny-pastures/source` condition (`customConditions` in
 `tsconfig.base.json`), Vitest, its coverage and Stryker through an exact alias in
 `vitest.config.mts`. So no test reads a stale or missing `dist/`. `apps/web`'s `build` and `dev`
-build the sim first, and the determinism gate runs the built `dist/`. _Pattern:_ a compiled internal
-package (Turborepo's "Compiled package", as against "Just-in-Time"), with a build artefact at the
-package boundary. Rejected: **webpack with `resolve.extensionAlias`** (it works, but gives up Next's
-default bundler), **a custom Turbopack loader** that strips `.js` (#82945's community workaround; a
-regex over source that misses dynamic imports) and **dropping `.js` from the sim's imports** (it
-breaks NodeNext and this section's rule). Revisit once Turbopack maps `.js` to `.ts`.)
+build the sim first, and the determinism gate builds the sim with `tsconfig.build.json` into its own
+temp folder and runs that, so it checks the JavaScript that ships without reading a stale `dist/`.
+_Pattern:_ a compiled internal package (Turborepo's "Compiled package", as against "Just-in-Time"),
+with a build artefact at the package boundary. Rejected: **webpack with `resolve.extensionAlias`**
+(it works, but gives up Next's default bundler), **a custom Turbopack loader** that strips `.js`
+(#82945's community workaround; a regex over source that misses dynamic imports) and **dropping
+`.js` from the sim's imports** (it breaks NodeNext and this section's rule). Revisit once Turbopack
+maps `.js` to `.ts`.)
 
 ### Naming in code (Q21; C9)
 
