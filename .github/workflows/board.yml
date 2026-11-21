@@ -23,7 +23,7 @@
 name: board
 
 on:
-  # The PR's own state: opened or reopened (work started), marked ready (In review if green),
+  # The PR's own state: opened or reopened (work started), marked ready (its CI run decides In review),
   # turned into a draft or closed (back to In progress), and edited (a `Closes #N` added).
   # Every base, so a stack's closing part on another part's branch counts too: the event runs the
   # default branch's copy of this file whatever the base ("Events that trigger workflows",

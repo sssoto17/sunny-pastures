@@ -382,6 +382,16 @@ case_ decide pr 12
 expect_code 1
 expect_out ""
 expect_err "could not read the issues PR #12 closes"
+# A deleted issue (410) is left out like a missing one.
+reset
+pr 12 open false false
+stacked 12 417-part-2 "Closes #417, closes #418"
+issue 417 open
+echo "gh: Gone (HTTP 410)" >"$st/fail_GET_${R//\//_}_issues_418"
+green
+case_ decide pr 12
+expect_code 0
+expect_out "moves=417:review"
 # A failed issue read stops it too; only a missing issue (404) is left out.
 reset
 pr 12 open false false

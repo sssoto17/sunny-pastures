@@ -123,7 +123,7 @@ BODY_FILTER='(.body // "") | ascii_downcase
   | [scan("\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \\t]+(?:sssoto17/sunny-pastures)?#([0-9]{1,7})\\b")]
   | .[][0]'
 # A failed read returns 1, so the caller stops instead of reading "closes nothing"; an issue that
-# doesn't exist (404) is only left out. Explicit returns: errexit is off in a `|| die` caller.
+# doesn't exist (404) or was deleted (410) is only left out. Explicit returns: errexit is off in a `|| die` caller.
 body_closing() { # pr -> issue numbers, one a line
   local nums n row err
   nums=$(gh api "$R/pulls/$1" --jq "$BODY_FILTER") || return 1
@@ -133,7 +133,7 @@ body_closing() { # pr -> issue numbers, one a line
   while read -r n; do
     valid_number "$n" || continue
     if ! row=$(gh api "$R/issues/$n" --jq '[.state, has("pull_request")] | @tsv' 2>"$err"); then
-      if grep -q 'HTTP 404' "$err"; then continue; fi
+      if grep -qE 'HTTP (404|410)' "$err"; then continue; fi
       cat "$err" >&2
       rm -f "$err"
       return 1
@@ -179,8 +179,10 @@ decide_pr() { # pr [checks|<action>] -> moves on stdout, one a line
   elif [[ $draft == true ]]; then
     kind=back verdict="a draft"
   else
-    verdict=$(checks "$sha")
-    case $verdict in
+    local checked
+    checked=$(checks "$sha")
+    verdict="open, checks $checked"
+    case $checked in
       green)
         if [[ $mode == ready_for_review ]]; then
           kind=start verdict="just marked ready, checks not run yet"
@@ -197,7 +199,6 @@ decide_pr() { # pr [checks|<action>] -> moves on stdout, one a line
         kind=start
         ;;
     esac
-    [[ $verdict == just* ]] || verdict="open, checks $verdict"
   fi
   local n
   while read -r n; do
