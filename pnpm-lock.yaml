@@ -214,6 +214,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@sunny-pastures/sim':
+        specifier: workspace:*
+        version: link:../../packages/sim
       '@supabase/supabase-js':
         specifier: 2.119.0
         version: 2.119.0
