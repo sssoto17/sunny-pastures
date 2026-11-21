@@ -27,11 +27,19 @@ git config --global advice.detachedHead false
 # POST dispatches, so a part opens as sunny-factory[bot] and the App links the stack (#336).
 cp "$(dirname "$script")/lib/gh-fake.sh" "$work/bin/gh"
 chmod +x "$work/bin/gh"
-export FAKE_WORKFLOW_SCRIPT OPEN_PR_POLL=0
+export FAKE_WORKFLOW_SCRIPT OPEN_PR_POLL=0 PR_DRAFT_POLL=0 STACK_WAIT_POLL=0
 FAKE_WORKFLOW_SCRIPT="$(cd "$(dirname "$script")/.." && pwd)/.github/scripts/open-pr.sh"
-# A git on PATH that records each push's arguments, then runs the real git.
-printf '#!/usr/bin/env bash\n[[ $1 == push ]] && printf "%%s\\n" "$*" >>"%s/pushes"\nexec "%s" "$@"\n' \
-  "$work" "$(command -v git)" >"$work/bin/git"
+# A git on PATH that records each push's arguments, and in the fake's events (#358) which PRs were
+# drafts as it pushed, then runs the real git.
+cat >"$work/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ \$1 == push ]]; then
+  printf '%s\n' "\$*" >>"$work/pushes"
+  echo "push drafts=\$(cat "$work"/gh/pulls/*.json 2>/dev/null | jq -rs '[.[] | select(.draft) | .number] | join(",")')" \
+    >>"$work/gh/events"
+fi
+exec "$(command -v git)" "\$@"
+EOF
 chmod +x "$work/bin/git"
 
 # --- fixtures ---------------------------------------------------------------------------------
@@ -68,6 +76,8 @@ three_parts() {
   part 7-p3 7-p2 c.txt
 }
 pr_field() { jq -r "$2" "$work/gh/pulls/$1.json"; }
+events() { grep -v '^opened ' "$work/gh/events" 2>/dev/null; } # the drafts, pushes and ready marks
+drafts() { cat "$work"/gh/pulls/*.json | jq -rs '[.[] | select(.draft) | .number] | join(",")'; }
 
 run() { # args... -> sets code, out, err, calls
   out=$(cd "$repo" && PATH="$work/bin:$PATH" bash "$script" "$@" 2>"$work/err")
@@ -129,6 +139,12 @@ expect_call "api -X POST repos/sssoto17/sunny-pastures/issues/403/labels --silen
 expect_eq "opened by the App" "$(pr_field 400 .user.login) $(pr_field 403 .user.login)" "sunny-factory[bot] sunny-factory[bot]"
 expect_no_call "api -X POST repos/sssoto17/sunny-pastures/stacks/402/add -F pull_requests[]=403 --jq"
 expect_out "stack #402"
+# #358: each part opens as a draft. The run marks parts 2 and 3 ready after linking them; part 1
+# waits as a draft until the stack exists, then pr-draft marks it ready. A push to open is no update.
+expect_eq "every part opened as a draft" "$(grep -c 'draft=true' "$work/gh/events")" 3
+expect_eq "part 1 kept a draft, then marked ready after the links" "$(events)" \
+  $'push drafts=\nmarked 401 ready\nmarked 403 ready\nready 400\nmarked 400 ready'
+expect_eq "no draft left" "$(drafts)" ""
 # the push never forces and never sets an upstream
 assert "pushed" test -s "$work/pushes"
 assert "no forced push" bash -c "! grep -qE -- ' (-f|--force[^ ]*|\+[^ ]+)( |$)' '$work/pushes'"
@@ -244,10 +260,13 @@ OPEN_PR_AS_ADMIN=264 case_ open --as-admin 7-p1="$(body 7-p1 'test: one')" 7-p2=
 expect_code 0
 expect_eq "opened by the admin" "$(pr_field 400 .user.login) $(pr_field 401 .user.login)" "sssoto17 sssoto17"
 expect_eq "linked by stack.sh" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401]"
+expect_eq "drafts until linked, then ready by the App" "$(events)" $'push drafts=\nready 400,401\nmarked 400 ready\nmarked 401 ready'
+rm -f "$work/gh/events"
 OPEN_PR_AS_ADMIN=264 case_ add 401 --as-admin 7-p3="$(body 7-p3 'test: three')"
 expect_code 0
 expect_eq "the added part by the admin" "$(pr_field 403 .user.login)" sssoto17
 expect_eq "added to the stack" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401,403]"
+expect_eq "the added part a draft until linked" "$(events)" $'push drafts=\nready 403\nmarked 403 ready'
 reset
 three_parts
 case_ open --as-admin 7-p1="$(body 7-p1 'test: one')" 7-p2="$(body 7-p2 'test: two')"
@@ -265,9 +284,11 @@ expect_err "#400 was opened by sunny-factory[bot]"
 reset
 three_parts
 run open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$(body 7-p2 'feat: two')"
+rm -f "$work/gh/events"
 case_ add 401 7-p3="$(body 7-p3 'feat: three')"
 expect_code 0
 expect_eq "new part on the top part" "$(pr_field 403 .base.ref)" 7-p2
+expect_eq "the run links it, then marks it ready" "$(events)" $'push drafts=\nmarked 403 ready'
 expect_eq "appended to the stack" "$(jq -c .prs "$work/gh/stacks/402.json")" "[400,401,403]"
 reset
 three_parts
@@ -308,8 +329,13 @@ git -C "$repo" commit -qam "7-p1: fix"
 git -C "$repo" switch -q 7-p3
 rm -f "$work/pushes"
 fetched_p2=$(remote_sha 7-p2)
+rm -f "$work/gh/events"
 case_ update 403
 expect_code 0
+# #358: the moved parts are drafts while pushed, then ready once GitHub shows the new heads
+expect_eq "drafts around the push" "$(events)" \
+  $'draft 400,401,403\nmarked 400 draft\nmarked 401 draft\nmarked 403 draft\npush drafts=400,401,403\nready 400,401,403\nmarked 400 ready\nmarked 401 ready\nmarked 403 ready'
+expect_eq "no draft left" "$(drafts)" ""
 assert "7-p2 is on the new 7-p1" git -C "$repo" merge-base --is-ancestor 7-p1 7-p2
 assert "7-p3 is on the new 7-p2" git -C "$repo" merge-base --is-ancestor 7-p2 7-p3
 expect_eq "no merge commits" "$(git -C "$repo" rev-list --merges main..7-p3 | wc -l)" 0
@@ -319,9 +345,45 @@ expect_eq "7-p1 pushed" "$(remote_sha 7-p1)" "$(git -C "$repo" rev-parse 7-p1)"
 expect_eq "7-p3 pushed" "$(remote_sha 7-p3)" "$(git -C "$repo" rev-parse 7-p3)"
 assert "the lease is the fetched head" grep -q -- "--force-with-lease=refs/heads/7-p2:$fetched_p2" "$work/pushes"
 assert "never a bare force" bash -c "! grep -qE -- ' (-f|--force)( |$)| \+' '$work/pushes'"
+rm -f "$work/gh/events"
 case_ update 403
 expect_code 0
 expect_out "up to date"
+expect_eq "nothing pushed, nothing switched" "$(events)" ""
+# an edit to part 2 moves parts 2 and 3 only: part 1's head is unchanged, so it stays ready and
+# gets no second run
+git -C "$repo" switch -q 7-p2
+git -C "$repo" commit -q --allow-empty -m "7-p2: more"
+rm -f "$work/gh/events"
+case_ update 403
+expect_code 0
+expect_eq "only the moved parts as drafts" "$(events | head -n4)" \
+  $'draft 401,403\nmarked 401 draft\nmarked 403 draft\npush drafts=401,403'
+# GitHub hasn't shown the new heads before the timeout: fail loudly, the pushed parts stay drafts;
+# once it shows them, update again marks them ready without pushing
+git -C "$repo" switch -q 7-p1
+git -C "$repo" commit -q --allow-empty -m "7-p1: again"
+touch "$work/gh/stale_heads"
+STACK_WAIT_TIMEOUT=0 case_ update 403
+expect_code 1
+expect_err "after 0 s GitHub doesn't show the pushed heads of #400 #401 #403"
+expect_err "they stay drafts"
+expect_err "scripts/pr-draft.sh ready 400 401 403"
+expect_eq "pushed" "$(remote_sha 7-p3)" "$(git -C "$repo" rev-parse 7-p3)"
+expect_eq "still drafts" "$(drafts)" "400,401,403"
+rm "$work/gh/stale_heads" "$work/gh/events"
+case_ update 403
+expect_code 0
+expect_eq "marked ready, nothing pushed" "$(events)" $'ready 400,401,403\nmarked 400 ready\nmarked 401 ready\nmarked 403 ready'
+if contains "$out" "(draft)"; then bad "status shows no draft after ready"; else ok; fi
+# the wait reads the base too: a part whose base GitHub doesn't show at the new head of the part
+# below isn't ready yet (here the base points at a branch the fake can't resolve)
+git -C "$repo" switch -q 7-p1
+git -C "$repo" commit -q --allow-empty -m "7-p1: base"
+jq '.base.ref = "7-p1-old"' "$work/gh/pulls/401.json" >"$work/t" && mv "$work/t" "$work/gh/pulls/401.json"
+STACK_WAIT_TIMEOUT=0 case_ update 403
+expect_code 1
+expect_err "pushed heads of #401"
 # a part that already sits on the part below but holds a merge commit (the old merge-upward
 # update made them) is rebuilt as one commit with the same tree, so the stack turns linear
 reset
@@ -447,6 +509,12 @@ expect_err "push refused"
 expect_eq "7-p2 restored" "$(git -C "$repo" rev-parse 7-p2)" "$was_p2"
 expect_eq "7-p1 kept" "$(git -C "$repo" rev-parse 7-p1)" "$was_p1"
 expect_eq "still on 7-p1" "$(git -C "$repo" branch --show-current)" 7-p1
+expect_eq "the moved parts stay drafts: no second run on an unchanged head" "$(drafts)" "400,401"
+rm "$work/remote.git/hooks/pre-receive"
+case_ update 400
+expect_code 0
+expect_eq "run again: pushed, and ready" "$(drafts) $(remote_sha 7-p2)" " $(git -C "$repo" rev-parse 7-p2)"
+printf '#!/bin/sh\nexit 1\n' >"$work/remote.git/hooks/pre-receive"
 rm "$work/remote.git/hooks/pre-receive"
 
 # --- refresh: restack the open parts after a lower part merged -----------------------------------
@@ -474,6 +542,8 @@ expect_eq "7-p3 adds one commit on 7-p2" "$(git -C "$repo" rev-list --count 7-p2
 expect_eq "7-p2 pushed" "$(remote_sha 7-p2)" "$(git -C "$repo" rev-parse 7-p2)"
 expect_eq "7-p3 pushed" "$(remote_sha 7-p3)" "$(git -C "$repo" rev-parse 7-p3)"
 expect_eq "7-p3 still checked out" "$(git -C "$repo" branch --show-current)" 7-p3
+expect_eq "refresh pushes the open parts as drafts" "$(grep '^push' "$work/gh/events" | tail -n1)" "push drafts=401,403"
+expect_eq "then marks them ready" "$(drafts)" ""
 
 # --- status: each part with its base, approvals and checks ---------------------------------------
 reset
@@ -493,6 +563,9 @@ expect_out "failing: guard / floor"
 expect_out "1 passing, failing: guard / floor;"
 expect_out "2/2 #401"
 expect_out "base 7-p1"
+jq '.draft = true' "$work/gh/pulls/401.json" >"$work/t" && mv "$work/t" "$work/gh/pulls/401.json"
+case_ status 401
+expect_out "2/2 #401 7-p2 (draft) base 7-p1"
 # status never writes
 expect_no_call "-X POST"
 expect_no_call "-X PATCH"

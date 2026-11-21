@@ -4,6 +4,11 @@
 # open-pr workflow on main opens the PR as sunny-factory[bot] with the App's token, which never
 # enters a session. So the admin is a reviewer of the PR, not its author. It waits for that run
 # and prints the PR's number, alone, on stdout. scripts/stack.sh opens each stack part through it.
+# Every PR opens as a draft and is marked ready once open (#358; ADR-0002, area 2, "Stacks"), so
+# ready_for_review starts its one CI run; --draft leaves it a draft for scripts/stack.sh, which marks
+# a stack's parts ready once they are linked. The open-pr run makes the ready mark, as the App; a PR
+# still a draft when this runs again for it (a failed mark) is marked ready through scripts/pr-draft.sh.
+# A stack part whose link the run couldn't make stays a draft for scripts/stack.sh to link and mark.
 # REST only (`gh api`), since the cloud GitHub proxy refuses GraphQL (`gh pr create` uses it).
 # --as-admin (#385; ADR-0007, "Acceptance tests") opens the PR with the session's own credentials,
 # the admin's, for work the admin commissions on admin-owned paths such as tests/acceptance/**. It
@@ -15,11 +20,12 @@ shopt -s inherit_errexit
 REPO=sssoto17/sunny-pastures
 P=repos/$REPO
 RUNS="$P/actions/workflows/open-pr.yml/runs?event=repository_dispatch&per_page=30"
+PR_DRAFT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pr-draft.sh
 TIMEOUT=${OPEN_PR_TIMEOUT:-300} POLL=${OPEN_PR_POLL:-5}
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/open-pr.sh [--as-admin] [--base <branch>] [--label <name>]... [--dry-run]
+usage: scripts/open-pr.sh [--as-admin] [--base <branch>] [--label <name>]... [--draft] [--dry-run]
                           <branch> <body-file>
 
   Opens <branch>'s PR as sunny-factory[bot] and prints its number. Push the branch first. The
@@ -28,6 +34,7 @@ usage: scripts/open-pr.sh [--as-admin] [--base <branch>] [--label <name>]... [--
              below, and the workflow links it into that part's stack. Use scripts/stack.sh for
              stacks: it calls this for each part.
   --label    a label the App adds (it must exist); repeat for more.
+  --draft    leave the PR a draft; without it the PR opens as a draft and is marked ready (#358).
   --dry-run  check and print the dispatch request, send nothing.
   --as-admin open the PR as the admin, not the App, for admin-owned paths such as
              tests/acceptance/** only (#385). Refused unless OPEN_PR_AS_ADMIN, set by the admin's
@@ -35,7 +42,8 @@ usage: scripts/open-pr.sh [--as-admin] [--base <branch>] [--label <name>]... [--
              gets a line saying a lane opened it as the admin. A stack part opened this way is
              linked by scripts/stack.sh, not the workflow.
 
-A branch that already has an open PR prints that PR's number and sends nothing. The workflow
+A branch that already has an open PR prints that PR's number and sends nothing but, without
+--draft, the ready mark (scripts/pr-draft.sh) when that PR is still a draft. The workflow
 refuses main, names outside the lanes' (<N>-<slug>, claude/<name>) and a base with no open PR;
 this script then prints the run's link. OPEN_PR_TIMEOUT (seconds, default 300) bounds the wait.
 Exit codes: 0 the PR is open; 1 a gh command, the run or the wait failed (with --as-admin, a
@@ -48,13 +56,14 @@ die() { # code message
   exit "$1"
 }
 
-base=main labels=() dry=0 as_admin=0
+base=main labels=() dry=0 as_admin=0 ready=true
 while (($#)); do
   case $1 in
     -h | --help) usage; exit 0 ;;
     --base) (($# >= 2)) || die 2 "--base needs a branch"; base=$2; shift 2 ;;
     --label) (($# >= 2)) || die 2 "--label needs a name"; labels+=("$2"); shift 2 ;;
     --dry-run) dry=1; shift ;;
+    --draft) ready=false; shift ;;
     --as-admin) as_admin=1; shift ;;
     -*) usage; die 2 "unknown option: $1" ;;
     *) break ;;
@@ -109,6 +118,7 @@ fi
 if [[ -n $found ]]; then
   printf 'open-pr: %s already open as #%s\n' "$branch" "$found" >&2
   echo "$found"
+  ((dry)) || [[ $ready == false ]] || "$PR_DRAFT" ready "$found" || exit 1
   exit 0
 fi
 
@@ -123,7 +133,7 @@ if ((as_admin)); then
     die 2 "the base $base has no open PR: a stack part goes onto the part below's PR"
   fi
   request=$(jq -n --arg head "$branch" --arg base "$base" --arg title "$title" --arg body "$body" \
-    '{title: $title, head: $head, base: $base, body: $body}')
+    '{title: $title, head: $head, base: $base, body: $body, draft: true}')
   if ((dry)); then
     echo "open-pr: dry run, nothing sent; the request to open the PR as the admin:" >&2
     printf '%s\n' "$request"
@@ -140,14 +150,16 @@ if ((as_admin)); then
   done
   echo "open-pr: opened #$pr as the admin" >&2
   echo "$pr"
+  # The App marks it ready (a draft can't be switched over REST, and this session can't GraphQL).
+  [[ $ready == false ]] || "$PR_DRAFT" ready "$pr" || code=1
   exit "$code"
 fi
 
-# Five properties of the ten client_payload allows; the whole payload stays under 64 KB.
+# Six properties of the ten client_payload allows; the whole payload stays under 64 KB.
 request=$(jq -n --arg branch "$branch" --arg base "$base" --arg title "$title" --arg body "$body" \
-  --arg labels "$(IFS=,; echo "${labels[*]-}")" \
+  --arg labels "$(IFS=,; echo "${labels[*]-}")" --arg ready "$ready" \
   '{event_type: "open-pr", client_payload: {branch: $branch, base: $base, title: $title,
-    body: $body, labels: $labels}}')
+    body: $body, labels: $labels, ready: $ready}}')
 (($(jq -c .client_payload <<<"$request" | wc -c) < 65536)) ||
   die 2 "the title and body are over client_payload's 64 KB: shorten the body"
 

@@ -618,7 +618,8 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
 - **`guard / stack-base`** fails a PR whose base isn't `main` unless it's in a native stack, so a
   hand-chained PR can't slip in. On `opened` the event's `pull_request.stack` is `null`, because
   `stack.sh` links the stack after opening the PRs (seen on throwaway stack #315), so the guard asks
-  GitHub again for up to 60 s before it fails.
+  GitHub again for up to 60 s before it fails. Since #358 its run comes from `ready_for_review`,
+  after the stack is linked, so the retry is a fallback.
 - **Approvals.** The reviewer approves each clean part, escalated ones included when the admin's
   account opened them; the escalation thread alone holds the merge ("Approvals", above). GitHub's
   stack merge needs "all pull requests below it … approved and … passing checks", and its restack
@@ -654,20 +655,65 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   already contains (REST compare: `ahead` or `identical`), so a push to a lower part without
   `scripts/stack.sh update`, or a top part that left the stack, runs the suite on that part rather
   than leaving a stale green above it (#264's fix round). Both jobs take the script from `main`, as
-  the floor job does (#99), so a PR can't switch off its own tests. Part 1 of a stack on `main`
-  still runs them once at open, since it's opened before the stack exists; later pushes skip it.
-  Shown on #315: skipped on the lower parts, run on the top one (runs 43939156451, 43939157918,
-  43939156505). A required job skipped by its `if:` counts as passing: #312 showed ci/lint, ci/test
-  and ci/typecheck "Skipped · Required" with a green summary ("3 skipped, 10 successful"; admin, 16
-  Nov).
-- **No cancelled twins on a head.** One push to a stacked part fires two `pull_request` events on
-  the same head. With `cancel-in-progress`, one run was cancelled, and GitHub read the cancelled
-  checks as the latest results: #313 showed "10 cancelled, 3 successful" and couldn't merge although
-  the same checks had passed. So `ci`, `security` and `pr-body` have no concurrency group: nothing
-  is cancelled, and both twins run to completion. The cost: runs for a superseded head finish too,
-  and a flaky job gets two draws at turning a head red. On `150dbda`, `ci / test` timed out on one
-  twin and passed on the other, and `ci / scripts`' `issue-fields.test.sh` failed on one and passed
-  on the other.
+  the floor job does (#99), so a PR can't switch off its own tests. Before #358, part 1 of a stack
+  on `main` ran them once at open, since it was opened before the stack existed; it now stays a
+  draft until the stack does. Shown on #315: skipped on the lower parts, run on the top one (runs
+  43939156451, 43939157918, 43939156505). A required job skipped by its `if:` counts as passing:
+  #312 showed ci/lint, ci/test and ci/typecheck "Skipped · Required" with a green summary ("3
+  skipped, 10 successful"; admin, 16 Nov).
+- **One CI run per head: drafts around every push** (#358; admin, 21 Nov 2026). A push to a stacked
+  part fires `pull_request` `synchronize` twice on the same head, about a second apart:
+  `scripts/stack.sh update` pushes the parts in one atomic push, so the part above gets a new head
+  and a new base at once (PR #376's evidence: #365, #366, and throwaway stack #391 over 4 rounds).
+  No event filter tells the two apart (same action, head and merge commit), and no push from
+  `stack.sh` or `gh stack` avoids them. So they land on drafts:
+  - `scripts/open-pr.sh` opens every PR as a draft (`draft: true` on REST create). The `open-pr` run
+    links a stack part into the stack, then marks it ready; `stack.sh` keeps part 1 a draft until
+    the stack exists, then marks it ready. So `ready_for_review` carries `pull_request.stack`.
+  - `stack.sh update` and `refresh` turn the parts they move into drafts, push, and wait until
+    `GET pulls/<n>` shows each part's pushed head and, above part 1, the part below's new head as
+    its base. Then they mark those parts ready. A wait that times out fails loudly and leaves the
+    parts drafts, so no stale run can report; running the command again marks them ready.
+  - `ci`, `security` and `pr-body` run on `ready_for_review`, and every job skips while the PR is a
+    draft. A first job, `gate`, reads the PR's live draft state (`GET pulls/<n>`, read-only token),
+    never the event payload's (admin, 21 Nov 2026, option (a) of #449's review); every other job has
+    `needs: gate` and `if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}`. On `push` to
+    `main`, or when the read fails, the output is empty and every job runs: the gate fails open
+    toward running CI. A required check skipped on a draft hides nothing, since a draft can't merge,
+    and the ready mark starts the run the merge box reads. `review.yml` already skipped drafts and
+    ran on `ready_for_review`, so the review runs once a head too.
+  - The switch goes through the `pr-draft` dispatch ("Lanes open PRs as sunny-factory", below): the
+    REST update endpoint has no draft field, and the cloud proxy refuses the GraphQL mutations
+    `convertPullRequestToDraft` and `markPullRequestReadyForReview`. The App's token marks ready,
+    never `GITHUB_TOKEN`, since events `GITHUB_TOKEN` causes start no workflows.
+  - Whether turning an approved part into a draft keeps its approval is unknown, and is checked on
+    the first real stack after #358 (its criteria); the admin decides if it doesn't.
+
+  _Alternatives_ (PR #376, options (a) to (d)): no concurrency group, from #264 to #358, where both
+  twins ran in full and a flaky job got two draws (on #366 `ci / test` timed out on one twin and
+  passed on the other); a twin gate whose second run replays the first's result, which still runs
+  twice and so breaks "two runs never go in parallel" (admin, 19 Nov); a group without cancelling,
+  where both runs cost in full and a third event cancels the pending one; stages and filters, which
+  can't tell the twins apart.
+
+- **The backstop: cancel-in-progress** (#358, admin decision (c)). `ci`, `security` and `pr-body`
+  have a `concurrency` group per workflow and PR number, `github.sha` on a push, with
+  `cancel-in-progress: true` (the workflows' headers hold the expression). A newer run for a PR
+  cancels the older one, and `github.sha` gives each push to `main` a group of its own, so nothing
+  on `main` is cancelled. A `synchronize` that GitHub raises after the ready mark carries
+  `draft: false`, runs in full, and cancels the ready run. The merge box reads each check from the
+  head's newest check suite: on #313 both events came in the same instant and the cancelled run sat
+  in the newer suite ("10 cancelled, 3 successful", blocked), while on throwaway stack #391, events
+  about 1 s apart, 12 of 12 cancelled runs sat in the older one. If a merge box shows cancelled
+  checks again, #376's guard that restarts the cancelled run is the next step. **The gap the gate
+  closes:** a `synchronize` raised while the part was still a draft, whose run starts only after the
+  ready run. Read from its payload (`draft: true`), its jobs would skip, it would cancel the ready
+  run, and its skipped checks would sit in the newest suite, which reads as passing. The wait before
+  the ready mark only narrows that window, since a head and base GitHub shows prove the events were
+  raised, not that their runs exist. With the gate, that late run reads the PR as ready and runs in
+  full, so the newest suite holds checks that ran. **The residual** is #313's twin race: two runs
+  created in the same instant, where the cancelled one lands in the newer suite. It fails closed:
+  the merge box shows cancelled checks and blocks, and a re-run clears it.
 - **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). It ran on `pull_request`
   and on `pull_request_review`, and on PR #377 the admin's approval didn't unblock the merge: the
   review run passed in its own check suite, but the merge stayed blocked on the `pull_request` run's
@@ -678,11 +724,11 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   that head runs it; whether the stale-approval dismissal on a push fires `dismissed`, and so runs
   it at once, is checked on #379's throwaway PRs. The job has no `if:`: a skipped required check
   reads as passing (above), so a COMMENTED review would turn it green; it always runs and passes or
-  fails on the diff and the reviews. Unlike `ci`, `security` and `pr-body` (above), it has a
-  `concurrency` group per PR with `cancel-in-progress` (admin, 19 Nov): reviews don't come in twins
-  on one push, and a run that a newer review cancels is followed by the newer run on the same head.
-  Whether GitHub then reads the cancelled run as the head's result, as on #313, is unproven for
-  review runs; #379's throwaway PRs check two reviews seconds apart. The workflow comes from the
+  fails on the diff and the reviews. Like `ci`, `security` and `pr-body` since #358 (above), it has
+  a `concurrency` group per PR with `cancel-in-progress` (admin, 19 Nov): reviews don't come in
+  twins on one push, and a run that a newer review cancels is followed by the newer run on the same
+  head. Whether GitHub then reads the cancelled run as the head's result, as on #313, is unproven
+  for review runs; #379's throwaway PRs check two reviews seconds apart. The workflow comes from the
   PR's merge ref, as for `pull_request`; the script and CODEOWNERS still come from the default
   branch (#337). The label `review:admin` it adds now lands at the first review, not at open; the
   agent and the reviewer bot still add it earlier (CONSTRAINTS.md, "Escalation criteria").
@@ -841,6 +887,73 @@ the switch, only the factory jobs (the sweep, the chain and the factory job) do 
   (`scripts/setup/README.md`). The run with the switch off is posted on #106; the throwaway workflow
   that made it is removed.
 
+**The factory workflow, built (#107).** `.github/workflows/factory.yml` is the `workflow_dispatch`
+run above: an `issue` input, and a `max_turns` input that can only lower the cap. Pattern: a
+pipeline of guard jobs, each skipped unless the one before says go, so a refusal never reaches a
+secret or Claude; and a split between the model and the writer, so Claude never shares a runner with
+a write credential (the rule `review.yml` follows too). Concurrency 1 (group `factory`, never
+cancelling a running job), and `GITHUB_TOKEN` read-only in every job.
+
+**Ready and Mode (admin, 21 Nov 2026, option b).** The workflow doesn't read the Project: no Actions
+token can read this user-owned board (#102). `factory:ready` stands for Mode Factory, which
+`triage-labels.md` keeps in step with it, and the admin's manual dispatch stands for Ready. Only the
+admin and collaborators can set labels. The sweep (#108) waits for #102's native issue fields, since
+its dispatch isn't the admin's choice.
+
+1. **`switch`** calls `factory-switch.yml`, exactly as its header shows. With the switch off the run
+   logs `SWITCH off` and stops; that is how the workflow is tested without turning the factory on.
+2. **`gate`** has no environment and only the read-only `GITHUB_TOKEN`.
+   `.github/scripts/factory-gather.sh` reads the issue, the open PRs and the issue's `<n>-`
+   branches, and `.github/scripts/factory-gate.sh` refuses (`GATE refused: …`) unless the input is
+   an issue number and the issue exists, is open, isn't a PR, was opened by the owner or a
+   collaborator (`author_association`: the repo is public, and an issue's author can edit its body
+   after it is labelled), carries `factory:ready`, and has no open PR and no `<n>-` branch yet (one
+   factory branch per issue).
+3. **`factory`** (`timeout-minutes: 60`; environment `claude-seat`, which holds only
+   `CLAUDE_CODE_OAUTH_TOKEN`) checks out `main` and installs. It runs the gate again on a fresh
+   read, then writes the issue and only its owner's and collaborators' comments to files.
+   `claude-code-action` runs on the setup-token with `--max-turns` from the gate (100 unless
+   lowered, the Claude step stopped at 55 minutes), only the read-only `GITHUB_TOKEN` (as
+   `github_token`, which the action also hands to git and its GitHub tools), and
+   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. The prompt is `/implement #N` plus
+   `.github/factory-prompt.md`. Claude commits locally and writes the branch name, PR body and
+   labels to files, and a plain step packs them with a git bundle of the new commits into the job's
+   output (the hand-off, under 900 kB). The project's settings load, so an `ask` rule denies (no one
+   can answer it) and the hooks run; web tools are off.
+4. **`publish`** runs on a fresh runner that never ran the model, with `main`'s checkout.
+   `.github/scripts/factory-publish.sh` refuses (`PUBLISH refused: …`, a failed job) a hand-off with
+   any entry but the four files, a branch that isn't `<n>-<slug>`, a body without `Closes #<n>`, a
+   label outside `review:admin` and `area:*`, a diff that touches `.github/workflows/` or
+   `tests/acceptance/` (a pathspec, so a quoted non-ASCII name or a move counts), or a commit whose
+   author or committer isn't `sunny-factory[bot]`. Only then does it mint the App's token
+   (`contents: write` to push and to send `open-pr`'s dispatch, `pull-requests: read`), push the
+   branch with hooks off, and run `scripts/open-pr.sh`, so `open-pr.yml` opens the PR as
+   `sunny-factory[bot]`. The PR's author and every commit's author and committer are the App.
+5. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
+   rounds each job up) and their sum, and the PR.
+
+**Caps.** `--max-turns` doesn't count the turns of `Task` subagents, so the 55-minute step timeout
+and the job's 60 are the real bound on a run.
+
+**Two environments, both `main` only (admin, 21 Nov 2026, in the coordinator session).** The Claude
+job runs in `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN` and is named for the seat, not
+the factory, so `review.yml` can share it later. The App's key stays in `factory`, which only
+`publish` (and `open-pr.yml`) enters, so nothing on Claude's runner can reach the key, whatever
+GitHub hands a job.
+
+**Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
+environment, but the runner user has sudo, so a prompt injection could still read it from the
+action's own process. It reaches Claude's model calls only, and rotates with `claude setup-token`.
+Claude's Bash also has open network access, so whatever it can read can leave the runner. No write
+token exists on the model's runner: what the model wrote reaches GitHub only through the publish
+checks, and the App can't push workflows, approve, merge or bypass a ruleset.
+
+Alternatives considered: everything in one job with `if:` on each step (every refusal would start
+the 60-minute job; and a write step after Claude on the same runner is reachable from anything
+Claude left running, with sudo); handing the work over as an artifact (`actions/upload-artifact` is
+a new action, which the admin ruled out; a job output carries a small bundle); reading the board (no
+Actions token can, #102).
+
 **Until the factory App runs, every session acts as `sssoto17`.** Elsewhere in this ADR, "until #37"
 means until then: the build issues under #58, after the checks #101–#103. Cloud and local sessions
 alike, factory or not, use the admin's account, so they hold the admin's "For pull requests only"
@@ -965,18 +1078,24 @@ separate: this is only the identity step for lanes in Claude Code.
   deployment branch is `main`. It mints the App's token with `contents: read` and
   `pull_requests: write` only, checks out `main`'s `.github/scripts`, and
   `.github/scripts/open-pr.sh` opens the PR over REST, adds the labels that already exist, and links
-  a stack part into the stack of the part below. Its PRs start CI and the review as any App's do
-  ("The factory's identity", above).
+  a stack part into the stack of the part below. The PR opens as a draft, and the run marks it ready
+  after the link (#358, "Stacks", above), with the App's token, so its ready mark starts CI and the
+  review as any App's events do ("The factory's identity", above). The sixth payload property,
+  `ready: "false"`, leaves it a draft: `scripts/stack.sh` sends it for part 1, which it marks ready
+  through `pr-draft` once the stack is linked.
 - **The key never enters a session.** It lives only in the secret `FACTORY_APP_PRIVATE_KEY` of
-  #101's environment `factory`, which #107's factory job uses too; the client ID is that
-  environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh` checks both, and stores
-  a new key only through stdin.
+  #101's environment `factory`, which #107's `publish` job uses too (its Claude job doesn't); the
+  client ID is that environment's variable `FACTORY_APP_CLIENT_ID`. `scripts/setup/factory.sh`
+  checks both, and stores a new key only through stdin.
 - **One environment, `main` only (admin, 17 Nov 2026).** The lanes and #107's factory share
   `factory`, and its only deployment rule is `main`: the admin removed #101's `throwaway/*` rule,
   and the setup script stops while any other rule remains. With one App, a second key in a second
   environment would add no protection, since either key acts as the same App. The risk is a workflow
   on any branch other than `main` reading the key: a branch's own copy of a workflow could print it.
   So #107's throwaway test dispatches from `main` instead of running on a `throwaway/*` branch.
+  (Amended 21 Nov 2026, #107: the key still has one environment, but #107's Claude job runs in a
+  second one, `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN`, so Claude's runner never
+  enters the environment with the key; "The factory workflow, built (#107)", above.)
 - **The payload is untrusted.** Anyone with write access can dispatch, a prompt-injected session
   included. Its fields reach the shell only through `env:`, never as `${{ }}` inside `run:` (the
   run's name uses the branch, which is display text no shell reads), and go to GitHub as values
@@ -997,6 +1116,20 @@ separate: this is only the identity step for lanes in Claude Code.
   and `stack.sh` needed no fallback
   ([#336, results](https://github.com/sssoto17/sunny-pastures/issues/336#issuecomment-6934736098)).
   The fallback stays in case a later GitHub change refuses the App's token.
+- **Drafts and ready through a second dispatch, `pr-draft`** (#358; "Stacks", above). The REST
+  update endpoint has no draft field, and the switch needs GraphQL's `convertPullRequestToDraft` and
+  `markPullRequestReadyForReview`, which the cloud proxy refuses.
+  `scripts/pr-draft.sh draft|ready <pr>...` sends event type `pr-draft` with two properties, `state`
+  (`draft` or `ready`) and `prs` (the PR numbers, comma-separated), leaving out PRs already in that
+  state. It waits until `GET pulls/<n>` shows each one switched, and fails with the run's link on a
+  failed run or after `PR_DRAFT_TIMEOUT` (120 s). `.github/workflows/pr-draft.yml` is modelled on
+  `open-pr.yml`: `main`'s copy, environment `factory`, `GITHUB_TOKEN` with `contents: read` for the
+  checkout only, and the App's token with `pull_requests: write` alone. That token marks ready,
+  never `GITHUB_TOKEN`, whose events start no workflows. `.github/scripts/pr-draft.sh` checks the
+  payload and every PR before any write: the state is `draft` or `ready`, `prs` holds 1 to 20
+  numbers, and each PR is open, from this repository, with a lane branch as its head. The node id
+  goes to GraphQL as a variable. The blast radius: a caller can switch an open lane PR between draft
+  and ready, as it could in the UI, and a draft only holds a merge.
 
 **What changes.** The admin approves lane PRs instead of bypass-merging them: a code-owned PR, a
 code-owned part of a stack (so such a stack can merge as one), and an escalated PR, on which the
@@ -1046,9 +1179,11 @@ its PR as the admin instead.
   passes it on) skips the dispatch and opens the PR over REST (`POST /repos/{o}/{r}/pulls`) with the
   session's own credentials, the admin's; pushes are the admin's already (#336, above). It adds the
   labels after opening, refusing first any that don't exist, and `stack.sh` links the parts with the
-  lane's token. Since no workflow runs, the script repeats the workflow's refusals (main, a non-lane
-  branch or base, a base with no open PR, the length limits), and refuses an open PR the App already
-  opened for the branch. Off by default: without it nothing changes.
+  lane's token. The PR opens as a draft, and the `pr-draft` dispatch marks it ready as the App
+  (#358), at once for a single PR and after the link for a stack's parts, since the session can't
+  switch a draft over REST. Since no workflow runs, the script repeats the workflow's refusals
+  (main, a non-lane branch or base, a base with no open PR, the length limits), and refuses an open
+  PR the App already opened for the branch. Off by default: without it nothing changes.
 - **The gate.** The script refuses unless `OPEN_PR_AS_ADMIN` holds an issue number and the body
   links that issue (`Closes #N` or `Part of #N`). Only the admin's launch sets it: locally
   `OPEN_PR_AS_ADMIN=<N> claude …`, in the cloud the environment's variables for that run. A brief
