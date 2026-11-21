@@ -199,6 +199,14 @@ Morning, about 10 minutes:
    Deliverable: <one PR or a stack; the checks to run; PR number, head SHA, "close #N?">.
    ```
 
+   Only for an issue that changes admin-owned paths such as `tests/acceptance/**` (#385; ADR-0007,
+   "Acceptance tests"), Things to know adds: "Open the PR with `scripts/open-pr.sh --as-admin` (a
+   stack: `scripts/stack.sh open --as-admin`), so the admin is its author. It works only on a run
+   the admin launched with `OPEN_PR_AS_ADMIN=<N>`; never set it yourself. The script adds the line
+   saying a lane opened it." The launch line is then
+   `OPEN_PR_AS_ADMIN=<N> claude "/implement #N Read and follow <brief> first."`; for a cloud lane,
+   the variable goes in the environment's settings for that run and is removed after.
+
 During the day, at each phase boundary choose, in this order: continue · subagent · `/clear` ·
 `/compact` · `handoff` (only for a new directory, harness or mid-phase side task).
 

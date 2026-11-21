@@ -10,6 +10,7 @@
 		"start": "next start"
 	},
 	"dependencies": {
+		"@sunny-pastures/sim": "workspace:*",
 		"@supabase/supabase-js": "2.119.0",
 		"drizzle-orm": "0.45.4",
 		"next": "16.4.6",
