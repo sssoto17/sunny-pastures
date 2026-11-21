@@ -30,11 +30,13 @@ const checkViolation = { cause: { code: "23514" } };
  * (index 0 is the new farm), as the game loop computed it.
  */
 async function play(store: GameStore, farmId: string, count: number) {
-	const farms = [newFarm()];
+	let farm = newFarm();
+	const farms = [farm];
 	for (let seq = 1; seq <= count; seq++) {
-		const entry = makeEntry(farms[seq - 1] ?? newFarm(), seq - 1, seq * 1_000);
+		const entry = makeEntry(farm, seq - 1, seq * 1_000);
 		expect(await store.commit(farmId, entry)).toEqual({ kind: "committed", seq });
-		farms.push(entry.next);
+		farm = entry.next;
+		farms.push(farm);
 	}
 	return farms;
 }
@@ -132,9 +134,10 @@ function describeGameStore(name: string, makeStore: MakeStore) {
 		it("commits one of two concurrent commits at the same expectedSeq; the other conflicts (MUST-13.3)", async () => {
 			const farmId = await createPlayer();
 			const store = makeStore();
-			const [, , farm] = await play(store, farmId, 2);
-			const left = makeEntry(farm ?? newFarm(), 2, 3_000);
-			const right = makeEntry(farm ?? newFarm(), 2, 3_001);
+			await play(store, farmId, 2);
+			const { state: farm } = await store.load(farmId);
+			const left = makeEntry(farm, 2, 3_000);
+			const right = makeEntry(farm, 2, 3_001);
 
 			const results = await Promise.all([store.commit(farmId, left), store.commit(farmId, right)]);
 

@@ -136,13 +136,7 @@ export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
 			return { state: replay(from.state, logged, last.at), seq: last.seq, at: last.at };
 		},
 
-		async processed(playerId, idempotencyKey) {
-			const [row] = await db
-				.select({ answer: actions.answer })
-				.from(actions)
-				.where(and(eq(actions.farmId, playerId), eq(actions.idempotencyKey, idempotencyKey)));
-			return row === undefined ? null : readAnswer(row.answer);
-		},
+		processed: async (playerId, idempotencyKey) => await findAnswer(db, playerId, idempotencyKey),
 
 		async commit(playerId, entry) {
 			const { expectedSeq } = entry;
@@ -177,15 +171,8 @@ export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
 				if (appended.length === 0) {
 					// Nothing was written. A key committed by now is visible to this new statement
 					// under read committed; one still in flight isn't, so that call gets `conflict`.
-					const [row] = await tx
-						.select({ answer: actions.answer })
-						.from(actions)
-						.where(
-							and(eq(actions.farmId, playerId), eq(actions.idempotencyKey, entry.idempotencyKey)),
-						);
-					return row === undefined
-						? { kind: "conflict" }
-						: { kind: "duplicate", answer: readAnswer(row.answer) };
+					const answer = await findAnswer(tx, playerId, entry.idempotencyKey);
+					return answer === null ? { kind: "conflict" } : { kind: "duplicate", answer };
 				}
 
 				if (seq % snapshotEvery === 0) {
@@ -201,6 +188,19 @@ export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
 			}, readCommitted);
 		},
 	};
+}
+
+/** The answer stored with the key on this farm, read on `handle`: the client, or a transaction. */
+async function findAnswer(
+	handle: Pick<Db, "select">,
+	playerId: string,
+	idempotencyKey: string,
+): Promise<Answer | null> {
+	const [row] = await handle
+		.select({ answer: actions.answer })
+		.from(actions)
+		.where(and(eq(actions.farmId, playerId), eq(actions.idempotencyKey, idempotencyKey)));
+	return row === undefined ? null : readAnswer(row.answer);
 }
 
 // The jsonb columns come back as parsed JSON with no runtime check (ADR-0007, section 5, Q4): the
