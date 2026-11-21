@@ -1,0 +1,111 @@
+# The board follows the PRs (#417; docs/agents/issue-tracker.md, "Status rules"): an issue goes to
+# In progress when work starts on it, to In review when the PR that closes it is ready and its
+# checks are green (`guard / code-owned` apart, admin 21 Nov), and back to In progress when that PR
+# turns red, becomes a draft or closes unmerged. Done is the Project's built-in "Item closed" and
+# "Pull request merged" workflows; this never sets Done, Ready or Mode, never moves an issue out of
+# Backlog, and leaves an issue that isn't on the Project alone. The rules are in
+# scripts/board-status.sh; the field writes go through scripts/issue-fields.sh's guarded form.
+#
+# Two jobs, so the Project token never shares a job with anything a PR wrote:
+# - `board / decide` reads the PR, its head's checks and the issues it closes with the run's own
+#   read-only token, and outputs only `<issue>:<kind>` pairs (digits and a fixed word).
+# - `board / move` holds the token: environment `board`, which lets only main read the secret
+#   BOARD_PROJECT_TOKEN (a classic PAT with the `project` scope alone: fine-grained PATs can't reach
+#   a user-owned Project). It sees only those pairs, checks each again, and calls main's script
+#   with the token on the Project's calls only (PROJECT_GH_TOKEN). GITHUB_TOKEN reads the issue.
+# Every event here runs main's copy of this file with main's checkout: pull_request_target and
+# workflow_run never check out or run the PR's code. Event values reach the shell only through
+# `env:`, and the script checks every number before use. Actions are GitHub-owned and pinned to a
+# full SHA, the pin main already uses (ADR-0002, area 8).
+name: board
+
+on:
+  # The PR's own state: opened or reopened (work started), marked ready (In review if green),
+  # turned into a draft or closed (back to In progress), and edited (a `Closes #N` added).
+  pull_request_target:
+    types: [opened, reopened, edited, ready_for_review, converted_to_draft, closed]
+  # A PR's checks finished: every workflow that reports a check on a PR head, by its `name:`.
+  # `code-owned` is left out on purpose (its result doesn't count). A new workflow that reports
+  # on PRs joins this list. `board-branch` reports a new branch (board-branch.yml).
+  workflow_run:
+    workflows: [ci, security, pr-body, acceptance-guard, review, Labeler, board-branch]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  decide:
+    name: board / decide
+    # Not a fork's PR: the board follows the lanes' branches only.
+    if: >-
+      github.event_name == 'workflow_run' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # main's checkout of scripts/
+      pull-requests: read # the PR and the PRs of a commit
+      issues: read # the issues a PR closes, a branch's issue
+      checks: read # the head's check runs
+      statuses: read # the head's commit statuses
+    outputs:
+      moves: ${{ steps.decide.outputs.moves }}
+    steps:
+      # No `ref`: on both events the run's ref is main, never the PR head.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - id: decide
+        name: Decide the moves (read-only token)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          if [[ $EVENT == pull_request_target ]]; then
+            bash scripts/board-status.sh decide pr "$PR" >>"$GITHUB_OUTPUT"
+          elif [[ $RUN_EVENT == create ]]; then
+            if [[ $RUN_CONCLUSION == success ]]; then
+              bash scripts/board-status.sh decide branch "$HEAD_BRANCH" >>"$GITHUB_OUTPUT"
+            else
+              echo "board: a create run that didn't succeed (a tag): nothing moves"
+            fi
+          else
+            bash scripts/board-status.sh decide commit "$HEAD_SHA" >>"$GITHUB_OUTPUT"
+          fi
+
+  move:
+    name: board / move
+    needs: decide
+    if: needs.decide.outputs.moves != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: board
+    permissions:
+      contents: read # main's checkout of scripts/
+      issues: read # issue-fields.sh reads the issue and the repo's issue types
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: Move the issues (Project token on the Project's calls only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_GH_TOKEN: ${{ secrets.BOARD_PROJECT_TOKEN }}
+          MOVES: ${{ needs.decide.outputs.moves }}
+        run: |
+          set -euo pipefail
+          [[ -n $PROJECT_GH_TOKEN ]] || { echo "::error::BOARD_PROJECT_TOKEN isn't set in environment board"; exit 1; }
+          read -ra moves <<<"$MOVES"
+          for m in "${moves[@]}"; do
+            bash scripts/board-status.sh move "$m"
+          done

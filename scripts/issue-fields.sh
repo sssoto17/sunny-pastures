@@ -7,8 +7,10 @@
 # field names are checked by the finishing run). REST only (`gh api`), local and cloud alike (#346): the issue through
 # repos/<owner>/<repo>, the Project through the REST Projects API, which the cloud proxy refuses;
 # then the issue's part is done and exit 4 prints the command that finishes the rest.
+# --from makes it a guarded move of Status alone, for the board workflow (#417).
 # Tests: scripts/issue-fields.test.sh.
-# Needs bash 4.4+ (empty arrays under set -u) and an authenticated gh with the `project` scope.
+# Needs bash 4.4+ (empty arrays under set -u) and an authenticated gh with the `project` scope, or
+# PROJECT_GH_TOKEN holding a token with it (then gh uses that token for the Project's calls only).
 set -euo pipefail
 
 if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
@@ -27,6 +29,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: scripts/issue-fields.sh <issue> [--type NAME] [--track NAME] [--mode NAME] [--size NAME]
                                [--priority NAME] [--week NAME] [--status NAME]
+       scripts/issue-fields.sh <issue> --status NAME --from NAME[,NAME...]
 
 Adds the issue to the Sunny Pastures Project if it's missing, sets the named fields, then prints
 the fields as GitHub stored them. Names ignore case; --week takes "Wk 2" or the full title.
@@ -42,6 +45,15 @@ Status: a new item, or one with no Status, gets Backlog. A Status already set is
 unless --status is given (--status Backlog may move an issue back). Admin-only values are
 refused: --status Ready and --mode Factory.
 
+Guarded move (--from, the board workflow's form, #417): sets Status alone, and only when the
+issue is on the Project and its Status is now one of the --from names. Otherwise it changes
+nothing, says why, and exits 0. It never adds the issue to the Project, never sets another field
+and never removes `triage`. --from never names Backlog: only the admin moves an issue out of it.
+It takes no other flag but --status.
+
+PROJECT_GH_TOKEN, when set, is the token for the Project's calls only; the issue's calls keep
+gh's own (GH_TOKEN). The board workflow keeps its Project token away from the repo that way.
+
 After the writes it reads the issue and its item back and fails if a field doesn't show the
 value it set, or if `triage` is still on once all four are set.
 
@@ -50,7 +62,7 @@ Where GitHub refuses the Project (HTTP 403, as the cloud's GitHub proxy does), i
 finishes it from a local session, and exits 4. The Project's field names (--size XL, --week
 "Wk 99") can't be checked then: only --type is. The finishing run checks them.
 
-Exit codes: 0 done, 1 a gh call failed or the read-back differs, 2 bad arguments or an unknown
+Exit codes: 0 done (or, with --from, left alone), 1 a gh call failed or the read-back differs, 2 bad arguments or an unknown
 name (nothing changed), 4 the Project step was skipped: the issue's type is set, the Project
 wasn't touched and its field names weren't checked; run the printed command where the Project
 can be reached.
@@ -62,6 +74,11 @@ EOF
 die() { # code message
   printf 'issue-fields: %s\n' "$2" >&2
   exit "$1"
+}
+
+# The Project's calls: with PROJECT_GH_TOKEN set, gh uses it for them and nothing else (#417).
+project_gh() { # gh args...
+  if [[ -n ${PROJECT_GH_TOKEN-} ]]; then GH_TOKEN=$PROJECT_GH_TOKEN gh "$@"; else gh "$@"; fi
 }
 
 # Values only the admin sets (docs/agents/issue-tracker.md, Status rules; triage-labels.md,
@@ -84,9 +101,12 @@ shift
 # Requested fields, in the order given: parallel arrays of field name and option name.
 req_fields=()
 req_names=()
+from_names=() # --from: the Statuses a guarded move starts from
+from_given=""
 while (($#)); do
   flag=${1%%=*}
   case $flag in
+    --from) field=From ;;
     --type) field=Type ;;
     --track) field=Track ;;
     --mode) field=Mode ;;
@@ -107,6 +127,19 @@ while (($#)); do
   else
     die 2 "$flag needs a value"
   fi
+  if [[ $field == From ]]; then
+    [[ -z $from_given ]] || die 2 "--from given twice"
+    from_given=1
+    IFS=, read -ra parts <<<"$value"
+    for name in "${parts[@]}"; do
+      name=${name#"${name%%[![:space:]]*}"} name=${name%"${name##*[![:space:]]}"}
+      [[ -n $name ]] || die 2 "--from has an empty name: \"$value\""
+      [[ ${name,,} != backlog ]] ||
+        die 2 "--from never names Backlog: only the admin moves an issue out of it (docs/agents/issue-tracker.md, Status rules)"
+      from_names+=("$name")
+    done
+    continue
+  fi
   for f in "${req_fields[@]}"; do
     [[ $f == "$field" ]] && die 2 "$flag given twice"
   done
@@ -119,6 +152,9 @@ while (($#)); do
   req_fields+=("$field")
   req_names+=("$value")
 done
+if [[ -n $from_given && "${req_fields[*]}" != Status ]]; then
+  die 2 "--from moves Status alone: give --status and no other field"
+fi
 
 # --- the lookup ---------------------------------------------------------------------------------
 # All REST (docs/agents/github-rest.md): the issue (its id, native type and labels) and the
@@ -157,7 +193,7 @@ load() { # what-it-means-on-failure
   rows+=$'\n'$(gh api "repos/$OWNER/$REPO/issue-types" --jq "$TYPES_FILTER") ||
     die 1 "could not read the issue types of $OWNER/$REPO from GitHub; $1"
   project_ok=1
-  if ! fields=$(gh api "$PROJECT_API/fields?per_page=100" --jq "$FIELDS_FILTER" 2>"$project_err"); then
+  if ! fields=$(project_gh api "$PROJECT_API/fields?per_page=100" --jq "$FIELDS_FILTER" 2>"$project_err"); then
     [[ -n ${refusal_shown-} ]] || cat "$project_err" >&2 # once, not again on the read-back
     refusal_shown=1
     project_refused "$project_err" || die 1 "could not read Project $PROJECT_NUMBER of $OWNER from GitHub; $1"
@@ -166,7 +202,7 @@ load() { # what-it-means-on-failure
   if ((project_ok)); then
     ids=$(cut -f3 <<<"$fields" | sort -u | paste -sd, -)
     rows+=$'\n'$fields
-    rows+=$'\n'$(gh api --paginate "$PROJECT_API/items?per_page=100&fields=$ids" \
+    rows+=$'\n'$(project_gh api --paginate "$PROJECT_API/items?per_page=100&fields=$ids" \
       --jq "${ITEM_FILTER//\$id/$issue_id}") ||
       die 1 "could not read the items of Project $PROJECT_NUMBER from GitHub; $1"
   fi
@@ -218,6 +254,37 @@ join() { # items... -> "a, b, c", or "nothing"
   printf '%s' "${s%, }"
 }
 
+# A guarded move (--from) goes ahead only for an issue on the Project whose Status is one it
+# starts from; anything else is left as it is (#417). Names are checked first, as for any field.
+if [[ -n $from_given ]]; then
+  ((project_ok)) || die "$PROJECT_SKIPPED" "skipped the move: GitHub refused the Project here ($PROJECT_REFUSED_WHY), so nothing changed. Finish where the Project can be reached: $(project_rerun scripts/issue-fields.sh "${all_args[@]}")"
+  from_canon=()
+  for name in "${from_names[@]}"; do
+    found=""
+    for j in "${!opt_fields[@]}"; do
+      if [[ ${opt_fields[j]} == Status && ${opt_names[j],,} == "${name,,}" ]]; then
+        found=${opt_names[j]}
+      fi
+    done
+    [[ -n $found ]] || die 2 "unknown Status \"$name\" in --from. Nothing was changed."
+    from_canon+=("$found")
+  done
+  now=$(current Status)
+  why=""
+  if [[ -z $item_id ]]; then
+    why="it isn't on the Project"
+  else
+    why="a move to ${req_names[0]} starts only from $(join "${from_canon[@]}")"
+    for name in "${from_canon[@]}"; do
+      [[ $name == "$now" ]] && why=""
+    done
+  fi
+  if [[ -n $why ]]; then
+    printf '%s\n%-9s %s\n' "$issue_url" "Status:" "${now:--} (left alone: $why)"
+    exit 0
+  fi
+fi
+
 # Status defaults to Backlog when the item is new or has none. A Status already set is left
 # alone, so fixing a field on an issue never undoes the admin's move to Ready.
 if ((project_ok)) && [[ " ${req_fields[*]} " != *" Status "* && -z $(current Status) ]]; then
@@ -263,7 +330,7 @@ done
 names_of() { local j; for j in "$@"; do printf '%s\n' "${opt_fields[j]}"; done; }
 
 if ((${#field_plan[@]})) && [[ -z $item_id ]]; then
-  item_id=$(gh api -X POST "$PROJECT_API/items" -f type=Issue -F id="$issue_id" --jq .id) ||
+  item_id=$(project_gh api -X POST "$PROJECT_API/items" -f type=Issue -F id="$issue_id" --jq .id) ||
     die 1 "could not add $issue_url to the Project; nothing was set"
 fi
 
@@ -286,7 +353,7 @@ if ((${#field_plan[@]})); then
     sep=,
   done
   body="{\"fields\":[$body]}"
-  if ! gh api -X PATCH "$PROJECT_API/items/$item_id" --input - --silent <<<"$body"; then
+  if ! project_gh api -X PATCH "$PROJECT_API/items/$item_id" --input - --silent <<<"$body"; then
     mapfile -t left < <(names_of "${field_plan[@]}")
     die 1 "could not set $(join "${left[@]}"). set: $(join "${done_fields[@]}"); not set: $(join "${left[@]}"). Re-run the same command."
   fi
@@ -308,7 +375,7 @@ missing_four() {
 has_triage() { [[ $labels == *" triage "* ]]; }
 mapfile -t missing < <(missing_four)
 removed=""
-if ((project_ok && ${#missing[@]} == 0)) && has_triage; then
+if ((project_ok && ${#missing[@]} == 0)) && has_triage && [[ -z $from_given ]]; then
   gh api -X DELETE "repos/$OWNER/$REPO/issues/$issue/labels/triage" --silent ||
     die 1 "the fields are set, but \`triage\` couldn't be removed. Run: gh api -X DELETE repos/$OWNER/$REPO/issues/$issue/labels/triage"
   removed=1
@@ -335,7 +402,7 @@ fi
 printf '%-9s %s\n' "Triage:" "$triage"
 
 mismatches=()
-if ((project_ok && ${#missing[@]} == 0)) && has_triage; then
+if ((project_ok && ${#missing[@]} == 0)) && has_triage && [[ -z $from_given ]]; then
   mismatches+=("triage is still on, though all four are set")
 fi
 for j in "${plan[@]}"; do

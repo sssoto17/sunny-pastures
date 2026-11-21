@@ -1302,10 +1302,49 @@ corrected to `is:issue`.
 |---|---|---|
 | → Backlog | The auto-add / item-added workflows | — |
 | Backlog → Ready | **The admin**, always | Yes. Ready is the admin's chosen focus (`issue-tracker.md`). No automation ever sets Ready. |
-| Ready → In progress | The session that starts the work, through #32's script, when it creates the branch | Automatable later with #17 (a `create` event Action; it needs a token with the `project` scope, because `GITHUB_TOKEN` can't edit a user-owned Project). |
-| In progress → In review | The session, when the PR is open with `Closes #N` and checks are green | Later: an Action on `check_suite` completion, same token. Not before CI exists. |
+| Ready → In progress | The `board` workflow (#417), when a branch `<N>-<slug>` is created or a PR with `Closes #N` opens | No. |
+| In progress → In review | The `board` workflow, when that PR is ready and its checks are green, `guard / code-owned` apart | No. |
+| In review → In progress | The `board` workflow, when that PR turns red, becomes a draft or closes unmerged | No. |
 | In review → Done | The built-in "Item closed" workflow, after the merge (auto-merge on the bot's approval, or the admin's merge for an admin-review PR) closes the issue | — |
 | Any → Backlog | The admin, or an agent that finds the issue isn't ready (with a `blocked:*` label) | Yes. |
+
+### Status automation (#417)
+
+`.github/workflows/board.yml` moves Status by the rows above; the transition table is
+`scripts/board-status.sh`, and the write is `scripts/issue-fields.sh --from`, a guarded move that
+sets Status only when the issue is on the Project and its Status is one the move starts from. A
+built-in workflow can't do these rows: "Pull request linked to issue" sets one Status for every
+linked issue, Backlog included, and can't see checks or drafts.
+
+- **Events.** `pull_request_target` (opened, reopened, edited, ready_for_review, converted_to_draft,
+  closed) for the PR's own state, and `workflow_run` on the completion of each workflow that reports
+  a check on a PR head, for the checks. `check_suite` can't be used: it never fires for a suite
+  GitHub Actions created, which is every suite here. A new branch comes through `board-branch.yml`
+  (`create`), whose finished run starts `board.yml` by `workflow_run`: a `create` run's ref is the
+  new branch, which the `board` environment refuses.
+- **Two jobs.** `board / decide` reads the PR, its checks and its closing references (GraphQL
+  `closingIssuesReferences`, with the run's read-only token) and outputs only `<issue>:<kind>`
+  pairs. `board / move` holds the token, in environment `board` (main only), sees only those pairs
+  and checks them again. Both run main's copy and main's checkout, never the PR's code.
+- **The token.** A classic PAT with the `project` scope alone, secret `BOARD_PROJECT_TOKEN`. A
+  fine-grained PAT can't reach a user-owned Project: GitHub's "Managing your personal access tokens"
+  lists "access Projects owned by a user account" under "Fine-grained personal access tokens
+  limitations", and the endpoint lists the REST reference is built from (`github/docs`,
+  `src/github-apps/data/fpt-2022-11-28/`, read 21 Nov 2026) give fine-grained PATs and Apps only the
+  `/orgs/{org}/projectsV2` endpoints, never `/users/{username}/projectsV2`. `GITHUB_TOKEN` can't
+  reach any Project ("Automating Projects using Actions"), which recommends a classic PAT for a
+  user's Project. The token goes to the Project's calls only (`PROJECT_GH_TOKEN`); the job's
+  `GITHUB_TOKEN` reads the issue. The repo is public, so the item's issue isn't redacted for it; if
+  the repo goes private again, the token needs `repo` too.
+
+Patterns: a pipeline of a pure decision and a guarded command (the decide job computes, the move job
+applies), and the guarded transition itself (a compare-and-set on Status: move only from the listed
+states). Alternatives considered: one job holding the token (rejected: it would read PR text in the
+job that can write the Project); a GitHub App (rejected: an App can't call the user-owned Project's
+endpoints, above); polling on a schedule (rejected: minutes of lag and a run every few minutes
+whether or not anything changed); parsing `Closes #N` from the body (rejected: GitHub's own record
+of what will close is `closingIssuesReferences`, which also leaves out a stack part whose base isn't
+`main` yet).
 
 Mode stays in step with `factory:ready` by hand until the "Mode ↔ `factory:ready` sync" candidate in
 `triage-labels.md` reaches 3 repetitions.
