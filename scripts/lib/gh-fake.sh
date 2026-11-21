@@ -175,6 +175,8 @@ case "$method $path" in
   "POST graphql")
     m=$(jq -r .query <<<"$input" | grep -oE 'convertPullRequestToDraft|markPullRequestReadyForReview')
     n=$(jq -r .id <<<"$input"); n=${n#PR_}
+    # the cloud proxy refuses a session's GraphQL: only a simulated workflow run gets this far
+    [[ -n ${FAKE_APP:-} ]] || { echo "gh: GraphQL is not available from Claude Code sessions (HTTP 403)" >&2; exit 1; }
     [[ -n $m && -f $st/pulls/$n.json ]] || { echo "gh: Could not resolve to a node (HTTP 200)" >&2; exit 1; }
     d=$([[ $m == convertPullRequestToDraft ]] && echo true || echo false)
     jq --argjson d "$d" '.draft = $d' "$st/pulls/$n.json" >"$st/tmp" && mv "$st/tmp" "$st/pulls/$n.json"

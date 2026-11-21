@@ -6,8 +6,9 @@
 # and prints the PR's number, alone, on stdout. scripts/stack.sh opens each stack part through it.
 # Every PR opens as a draft and is marked ready once open (#358; ADR-0002, area 2, "Stacks"), so
 # ready_for_review starts its one CI run; --draft leaves it a draft for scripts/stack.sh, which marks
-# a stack's parts ready once they are linked. The ready mark is the App's, through scripts/pr-draft.sh
-# when the open-pr run didn't make it.
+# a stack's parts ready once they are linked. The open-pr run makes the ready mark, as the App; a PR
+# still a draft when this runs again for it (a failed mark) is marked ready through scripts/pr-draft.sh.
+# A stack part whose link the run couldn't make stays a draft for scripts/stack.sh to link and mark.
 # REST only (`gh api`), since the cloud GitHub proxy refuses GraphQL (`gh pr create` uses it).
 # --as-admin (#385; ADR-0007, "Acceptance tests") opens the PR with the session's own credentials,
 # the admin's, for work the admin commissions on admin-owned paths such as tests/acceptance/**. It

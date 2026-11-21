@@ -169,7 +169,7 @@ they stay drafts, so no run reports on an old head. Run this again to mark them 
 }
 
 ready_parts() { # head... : wait for GitHub, then mark the drafts among them ready
-  ((${#@})) || return 0
+  (($#)) || return 0
   wait_github "$@"
   "$PR_DRAFT" ready $(prs_of "$@") ||
     die 1 "the parts are pushed, but marking them ready failed: run this again"
@@ -261,17 +261,18 @@ restack() { # stack-base onto upstream branch...
   # The parts that move: the lowest pushed part and every part above it (#358).
   for i in "${!heads[@]}"; do [[ " ${refs[*]} " == *" ${heads[i]} "* ]] && break; done
   local moved=("${heads[@]:i}")
-  undo() { # message : every branch back where it was, the moved parts ready again, then stop
+  # A failure leaves the parts it turned into drafts as drafts: marking an unchanged head ready again
+  # would run its CI a second time. Running this again pushes and marks them ready.
+  undo() { # message : every branch back where it was, then stop
     git switch -q --detach HEAD
     for b in "${heads[@]}"; do git update-ref "refs/heads/$b" "${was_local[$b]}"; done
     git switch -q "$start" 2>/dev/null || git switch -q --detach "$start"
-    "$PR_DRAFT" ready $(prs_of "${moved[@]}") || true
     die 1 "$1"
   }
   "$PR_DRAFT" draft $(prs_of "${moved[@]}") ||
-    undo "turning the moved parts into drafts failed: nothing pushed, every branch is back where it was"
+    undo "turning the moved parts into drafts failed: nothing pushed, every branch is back where it was; run this again"
   git push -q --atomic "${leases[@]}" origin "${refs[@]}" ||
-    undo "push refused (a lease or a rule): every branch is back where it was; fetch and run this again"
+    undo "push refused (a lease or a rule): every branch is back where it was, and the moved parts stay drafts; fetch and run this again"
 }
 
 # --- commands -----------------------------------------------------------------------------------

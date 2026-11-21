@@ -508,7 +508,12 @@ expect_err "push refused"
 expect_eq "7-p2 restored" "$(git -C "$repo" rev-parse 7-p2)" "$was_p2"
 expect_eq "7-p1 kept" "$(git -C "$repo" rev-parse 7-p1)" "$was_p1"
 expect_eq "still on 7-p1" "$(git -C "$repo" branch --show-current)" 7-p1
-expect_eq "the drafts marked ready again" "$(drafts)" ""
+expect_eq "the moved parts stay drafts: no second run on an unchanged head" "$(drafts)" "400,401"
+rm "$work/remote.git/hooks/pre-receive"
+case_ update 400
+expect_code 0
+expect_eq "run again: pushed, and ready" "$(drafts) $(remote_sha 7-p2)" " $(git -C "$repo" rev-parse 7-p2)"
+printf '#!/bin/sh\nexit 1\n' >"$work/remote.git/hooks/pre-receive"
 rm "$work/remote.git/hooks/pre-receive"
 
 # --- refresh: restack the open parts after a lower part merged -----------------------------------
