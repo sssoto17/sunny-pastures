@@ -1013,11 +1013,15 @@ and never pushes.
 a `[bot]`-authored PR that touches them. A lane the admin deliberately starts for such work opens
 its PR as the admin instead.
 
+- **Pattern: a feature toggle off by default, behind a guard clause.** The default path, the
+  dispatch to the App, is unchanged; the switch branches off before it.
 - **The switch.** `scripts/open-pr.sh --as-admin` (and `scripts/stack.sh open|add --as-admin`, which
   passes it on) skips the dispatch and opens the PR over REST (`POST /repos/{o}/{r}/pulls`) with the
   session's own credentials, the admin's; pushes are the admin's already (#336, above). It adds the
   labels after opening, refusing first any that don't exist, and `stack.sh` links the parts with the
-  lane's token. Off by default: without it nothing changes.
+  lane's token. Since no workflow runs, the script repeats the workflow's refusals (main, a non-lane
+  branch or base, a base with no open PR, the length limits), and refuses an open PR the App already
+  opened for the branch. Off by default: without it nothing changes.
 - **The gate.** The script refuses unless `OPEN_PR_AS_ADMIN` holds an issue number and the body
   links that issue (`Closes #N` or `Part of #N`). Only the admin's launch sets it: locally
   `OPEN_PR_AS_ADMIN=<N> claude …`, in the cloud the environment's variables for that run. A brief

@@ -230,6 +230,41 @@ expect_code 0
 expect_eq "on the part below" "$(pr_field 401 .base.ref)" 336-a
 expect_eq "part 2 by the admin" "$(pr_field 401 .user.login)" sssoto17
 
+# the workflow's own refusals hold with the switch too, before anything is sent
+reset
+branch feature/z main
+OPEN_PR_AS_ADMIN=386 run --as-admin feature/z "$work/admin.md"
+expect_code 2
+expect_err "isn't a lane branch"
+OPEN_PR_AS_ADMIN=386 run --as-admin main "$work/admin.md"
+expect_code 2
+expect_err "never from main"
+OPEN_PR_AS_ADMIN=386 run --as-admin --base feature/z 336-a "$work/admin.md"
+expect_code 2
+expect_err "isn't main or a lane branch"
+OPEN_PR_AS_ADMIN=386 run --as-admin --label 'a b' 336-a "$work/admin.md"
+expect_code 2
+expect_err "not a label name"
+branch 336-c main
+OPEN_PR_AS_ADMIN=386 run --as-admin --base 336-c 336-a "$work/admin.md"
+expect_code 2
+expect_err "has no open PR"
+assert "nothing opened" test ! -e "$work/gh/pulls/400.json"
+
+# an open PR the App opened can't stand in for the admin's
+run 336-a "$work/body.md"
+OPEN_PR_AS_ADMIN=386 run --as-admin 336-a "$work/admin.md"
+expect_code 2
+expect_err "#400 was opened by sunny-factory[bot]"
+
+# a label GitHub refuses after the PR opened: exit 1, the number still on stdout
+reset
+echo "gh: Forbidden (HTTP 403)" >"$work/gh/fail_POST_repos_sssoto17_sunny-pastures_issues_400_labels"
+OPEN_PR_AS_ADMIN=386 run --as-admin --label review:admin 336-a "$work/admin.md"
+expect_code 1
+expect_eq "the PR's number" "$out" 400
+expect_err "adding the label review:admin failed"
+
 # a dry run prints the request and opens nothing
 reset
 OPEN_PR_AS_ADMIN=386 run --as-admin --dry-run 336-a "$work/admin.md"
