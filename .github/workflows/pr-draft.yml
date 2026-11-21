@@ -1,0 +1,54 @@
+# Lanes turn their PRs into drafts and back (#358; ADR-0002, area 2, "Stacks" and "Lanes open PRs as
+# sunny-factory"). scripts/stack.sh pushes a stack while its parts are drafts, so the two
+# `synchronize` events a stacked push fires skip CI, and the ready mark starts one run per head. The
+# REST update endpoint has no draft field and the cloud proxy refuses GraphQL, so scripts/pr-draft.sh
+# sends repository_dispatch, as scripts/open-pr.sh does, and this job switches the PRs over GraphQL
+# with the factory App's token. That token, never GITHUB_TOKEN, marks ready: events GITHUB_TOKEN
+# causes start no workflows, so ready_for_review would start no CI.
+#
+# Modelled on open-pr.yml: repository_dispatch always runs main's copy of this file, and the
+# environment `factory` lets only main read the App's key. The payload is untrusted: its two fields
+# (state, prs) reach the shell only through `env:`, never as ${{ }} inside `run:`, and
+# .github/scripts/pr-draft.sh checks them, and every PR, before any write.
+name: pr-draft
+# Its runs read "pr-draft <state> <prs>", so scripts/pr-draft.sh finds its own. A name is display
+# text that no shell reads.
+run-name: pr-draft ${{ github.event.client_payload.state }} ${{ github.event.client_payload.prs }}
+
+on:
+  repository_dispatch:
+    types: [pr-draft]
+
+permissions: {}
+
+jobs:
+  pr-draft:
+    name: pr-draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: factory
+    # GITHUB_TOKEN reads main's scripts for the checkout and nothing else; the App's token is the
+    # only identity the switch acts through.
+    permissions:
+      contents: read
+    steps:
+      # Only what switching a PR needs: pull requests: write, no contents, issues or workflows.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          permission-pull-requests: write
+
+      # main's scripts only (no `ref`: the run's ref is main), with GITHUB_TOKEN; not kept in .git.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Switch the PRs as sunny-factory
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          STATE: ${{ github.event.client_payload.state }}
+          PRS: ${{ github.event.client_payload.prs }}
+        run: bash .github/scripts/pr-draft.sh
