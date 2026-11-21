@@ -31,16 +31,19 @@
       { "name": "pages", "patterns": ["apps/web/src/app/**"] },
       { "name": "api", "patterns": ["apps/web/src/server/api/**"] },
       { "name": "config", "patterns": ["apps/web/src/server/config/**"] },
+      // Test-file zones (#382; ADR-0007 section 6, an allowance for test files only): the db
+      // module's tests/ holds the `db` project's global setup, `readStack` and `createPlayer`,
+      // which the store's and auth's stack tests use. Each sits before its module's zone, so it
+      // takes the module's tests/ folder only, and the module's source keeps its own rule.
+      { "name": "dbTests", "patterns": ["apps/web/src/server/db/tests/**"] },
+      { "name": "storeTests", "patterns": ["apps/web/src/server/store/tests/**"] },
+      { "name": "authTests", "patterns": ["apps/web/src/server/auth/tests/**"] },
       { "name": "db", "patterns": ["apps/web/src/server/db/**"] },
       { "name": "rules", "patterns": ["apps/web/src/server/rules/**"] },
       { "name": "store", "patterns": ["apps/web/src/server/store/**"] },
       { "name": "auth", "patterns": ["apps/web/src/server/auth/**"] },
       { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
       { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
-      // The `db` tests' shared helpers (#382; ADR-0007 section 6): the `db` project's global setup
-      // and `createPlayer`. Test code only, since ESLint stops source importing any tests/ folder,
-      // so the zones that may import it are only letting their tests in.
-      { "name": "serverTests", "patterns": ["apps/web/src/server/tests/**"] },
       { "name": "sim", "patterns": ["packages/sim/src/**"] }
     ],
     "rules": [
@@ -55,14 +58,17 @@
         "allow": ["rules", "timing", "sim"],
         "allowTypeOnly": ["store", "auth"]
       },
-      { "from": "store", "allow": ["serverTests"], "allowTypeOnly": ["db", "sim"] },
+      { "from": "store", "allow": [], "allowTypeOnly": ["db", "sim"] },
       { "from": "rules", "allow": ["sim"] },
-      { "from": "auth", "allow": ["config", "serverTests"] },
-      { "from": "db", "allow": ["serverTests"], "allowTypeOnly": ["config"] },
+      { "from": "auth", "allow": ["config"] },
+      { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
       { "from": "config", "allow": [] },
       { "from": "timing", "allow": [] },
       { "from": "sim", "allow": [] },
-      { "from": "serverTests", "allow": [] }
+      // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
+      { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
+      { "from": "storeTests", "allow": ["store", "dbTests"], "allowTypeOnly": ["db", "sim"] },
+      { "from": "authTests", "allow": ["auth", "config", "dbTests"] }
     ],
     // A pattern matches a call and a constructor call, also through an import or a namespace.
     "calls": {

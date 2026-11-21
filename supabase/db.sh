@@ -9,7 +9,7 @@
 #   env     set the game_api role's password and write its DATABASE_URL, and the postgres role's
 #           ADMIN_DATABASE_URL, into ./.env, printing neither (#372). Reuses the password of a
 #           game_api DATABASE_URL already in ./.env, since every worktree shares one local stack;
-#           makes a random one only when there is none. Run it after `supabase db reset`, which
+#           makes a random one only when there is none. Run it after `pnpm db:reset`, which
 #           applies the migration that creates game_api with no password. Also copies
 #           SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from the running stack (#371), each skipped
 #           if already set, without printing them.
@@ -85,7 +85,7 @@ write_env() {
   fi
   # On stdin, never in argv, so `ps` doesn't show it either.
   if ! printf "alter role game_api with password '%s';\n" "$password" | run_sql "$admin" "$password"; then
-    echo "Could not set game_api's password. Has supabase db reset applied the migrations?" >&2
+    echo "Could not set game_api's password. Has pnpm db:reset applied the migrations?" >&2
     exit 1
   fi
   # Parameter expansion, not sed: a command's arguments show in `ps`, so neither password goes there.

@@ -3,9 +3,8 @@ import { sql } from "drizzle-orm";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { readStack } from "@/server/tests/stack";
-
 import { createDb } from "../index";
+import { readStack } from "./stack";
 
 // Against the local stack (Vitest's db project; #372, #382). Drizzle 0.45.4 on postgres.js 4.x is untested
 // upstream (#331 decision 10), so this proves `db.transaction` (postgres.js `sql.begin`), run as

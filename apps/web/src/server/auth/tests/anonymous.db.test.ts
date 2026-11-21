@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readStack } from "@/server/tests/stack";
-
+import { readStack } from "../../db/tests/stack";
 import { createAuth } from "../index";
 import { signUpAnonymous } from "./anonymous";
 

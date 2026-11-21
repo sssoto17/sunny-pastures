@@ -119,7 +119,7 @@ check "exits 1 when psql fails" "$([[ $status -eq 1 ]] && echo ok)"
 check "leaves .env unchanged when psql fails" "$(cmp -s "$work/env-before" "$work/repo/.env" && echo ok)"
 check "hides the password psql quotes back" \
   "$([[ -n $tried ]] && ! grep -q "$tried" "$work/out" && grep -q 'does not exist' "$work/out" && echo ok)"
-check "says what to do" "$(grep -q 'supabase db reset' "$work/out" && echo ok)"
+check "says what to do" "$(grep -q 'pnpm db:reset' "$work/out" && echo ok)"
 rm "$work/fail-psql"
 
 echo "db-env.test.sh: $pass passed, $fail failed"

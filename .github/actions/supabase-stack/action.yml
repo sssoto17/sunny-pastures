@@ -4,7 +4,7 @@ description: >-
   one (#49's ci / acceptance): the Supabase CLI from its release, checked against a hash written
   here, then pnpm db:start, pnpm db:reset and pnpm db:env, which leave DATABASE_URL,
   ADMIN_DATABASE_URL, SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in ./.env. Run
-  ./.github/actions/setup first. No step prints a key, token or database URL (docs/agents/sandbox.md,
+  ./.github/actions/setup first. No step prints a key, token or URL (#382; docs/agents/sandbox.md,
   "Secrets in output"): supabase/db.sh captures both of the CLI's streams and hides every value.
 inputs:
   exclude:
@@ -37,12 +37,15 @@ runs:
     - name: Check the Supabase CLI's version
       shell: bash
       run: pnpm supabase:check
-    # Prints the stack's URLs with the password hidden and every other value hidden.
+    # db:start lists the stack's URLs (password hidden) on stdout; #382 asks for no URL in the log,
+    # so stdout is dropped. A failure still shows the CLI's output, redacted, on stderr.
     - name: Start the stack
       shell: bash
       env:
         EXCLUDE: ${{ inputs.exclude }}
-      run: pnpm db:start --exclude "$EXCLUDE"
+      run: |
+        pnpm db:start --exclude "$EXCLUDE" > /dev/null
+        echo "The Supabase stack is up (excluded: $EXCLUDE)."
     - name: Reset the database
       shell: bash
       run: pnpm db:reset

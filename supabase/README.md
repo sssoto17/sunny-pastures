@@ -53,9 +53,9 @@ ADR-0007 section 6): grants, RLS, the transaction round trip, real anonymous sig
 runs them with the `unit` project in one coverage run, and `pnpm test --project db` runs them alone.
 They need `pnpm db:start`, `pnpm db:reset` and `pnpm db:env` first. With no stack, the project's
 global setup fails the run and says so; a `db` test never skips. Each test makes its own player with
-`createPlayer` (`apps/web/src/server/tests/stack.ts`), so nothing is truncated. `ci / test` starts a
-stack (`.github/actions/supabase-stack`) when a PR touches `apps/web/src/server/` or `supabase/`,
-and on every push to `main`; other PRs run `--project unit`.
+`createPlayer` (`apps/web/src/server/db/tests/stack.ts`), so nothing is truncated. `ci / test`
+starts a stack (`.github/actions/supabase-stack`) when a PR touches `apps/web/src/server/` or
+`supabase/`, and on every push to `main`; other PRs run `--project unit`.
 
 ## Connection: `DATABASE_URL`
 

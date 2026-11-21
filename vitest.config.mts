@@ -54,7 +54,7 @@ export default defineConfig({
 				test: {
 					name: "db",
 					include: [dbTests],
-					globalSetup: ["apps/web/src/server/tests/setup.ts"],
+					globalSetup: ["apps/web/src/server/db/tests/stackSetup.ts"],
 					// A round trip to the stack's Auth or Postgres takes longer than a unit test.
 					testTimeout: 15_000,
 					// The benchmarks are the unit project's: here they would run twice, and `ci / bench`

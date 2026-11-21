@@ -4,8 +4,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createPlayer, readStack } from "@/server/tests/stack";
-
+import { createPlayer, readStack } from "../../db/tests/stack";
 import { actions, snapshots } from "../schema";
 
 // Against the local stack after `pnpm db:reset` (Vitest's db project; #372, #382, #331 decision
