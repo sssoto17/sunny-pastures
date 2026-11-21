@@ -27,12 +27,13 @@ labelled=$(jq '.labels | index("review:admin") != null' "$PR_JSON")
 # the event: the event's is null on `opened` (ADR-0002, "Stacks"). Parts open as drafts and are
 # marked ready once linked (#358), so a ready part already has its stack.
 if [[ $base != "$DEFAULT_BRANCH" ]]; then
-  [[ $(jq '.stack != null' "$PR_JSON") == true ]] ||
-    skip "hand-chained: based on $base, not $DEFAULT_BRANCH, and in no native stack"
+  stacked=$(jq -e 'has("stack") and .stack != null' "$PR_JSON") || [[ $stacked == false ]]
+  [[ $stacked == true ]] || skip "hand-chained: based on $base, not $DEFAULT_BRANCH, and in no native stack"
   # claude-code-action restores these paths from origin/<base.ref> before Claude starts
   # (SENSITIVE_PATHS in src/github/operations/restore-config.ts at the pinned SHA). Above part 1
   # that ref is the part below's branch, not yet merged, so a review there would run with config
   # nobody has reviewed. The compare lists at most 300 files: 300 may hide one, so it skips too.
+  # Re-check this list against SENSITIVE_PATHS whenever review.yml's claude-code-action pin moves.
   restored=$(jq '(length >= 300) or any(.[]; test(
     "^(\\.claude|\\.mcp\\.json|\\.claude\\.json|\\.gitmodules|\\.ripgreprc|CLAUDE\\.md|CLAUDE\\.local\\.md|\\.husky)(/|$)"))' \
     "$BASE_FILES")

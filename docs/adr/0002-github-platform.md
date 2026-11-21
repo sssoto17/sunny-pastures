@@ -604,9 +604,9 @@ apply_: Claude proposes and plain code applies.
   mergeable, whatever `allow_auto_merge` says. So Q16 still holds at the repo setting: while
   `allow_auto_merge` is off, GitHub refuses, the approval stands and the log reads
   `auto_merge=refused`. Squash only for now; the PR template's merge-commit choice isn't read. On a
-  PR based on anything but `main`, a stacked part, it never turns auto-merge on (#404): that would
-  squash the part into the part below on its own, and a stack merges whole. The log reads
-  `auto_merge=stacked`.
+  PR based on anything but `main`, a stacked part, it never turns auto-merge on, and turns off one
+  already on (#404): that would squash the part into the part below on its own, and a stack merges
+  whole. The log reads `auto_merge=stacked`.
 - **Alternatives considered.** Claude writing to GitHub itself with the App's token, through `gh` or
   the action's comment tools: rejected, because the model that reads the PR's text would then hold a
   token that can approve. A Bash allow-list (`gh pr view:*` and the like): rejected, because Bash

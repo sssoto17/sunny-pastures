@@ -9,7 +9,7 @@
 # the reviewed head, and when it doesn't approve it turns off auto-merge that is on (ADR-0002 area
 # 2, flow step 3). It never merges: with the repo's allow_auto_merge off, GitHub refuses, and the
 # review still stands (Q16). On a PR based on anything but DEFAULT_BRANCH, a stacked part (#404), it
-# never turns auto-merge on: that would merge the part into the part below, and a stack merges whole.
+# never leaves auto-merge on: that would merge the part into the part below, and a stack merges whole.
 # Tests: .github/scripts/tests/post-review.test.mjs.
 #
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
@@ -18,6 +18,7 @@
 # shellcheck disable=SC2016 # single-quoted jq programs, by design
 set -euo pipefail
 
+: "${DEFAULT_BRANCH:?}" # a missing one must not read as "every PR is a stacked part"
 r="repos/$GITHUB_REPOSITORY" v="$RUNNER_TEMP/verdict.json" t="$RUNNER_TEMP/threads.json"
 printf '%s' "$VERDICT" >"$v"
 # The whole shape, or nothing is posted: a missing or null field must never read as "none".
@@ -193,9 +194,11 @@ body=$(jq -r .summary "$v")
 body+=$note
 gh api -X POST "$r/pulls/$PR/reviews" --silent -f commit_id="$HEAD" -f event="$event" -f body="$body"
 auto=off
-if [[ $event == APPROVE && $base_ref != "${DEFAULT_BRANCH:?}" ]]; then
-  [[ $auto_on != true ]] || auto=on # someone else turned it on: left as it is
-  [[ $auto_on == true ]] || auto=stacked
+if [[ $event == APPROVE && $base_ref != "$DEFAULT_BRANCH" ]]; then
+  auto=stacked
+  if [[ $auto_on == true ]] && ! set_auto disable; then
+    echo "::warning::auto-merge is on for a stacked part: turn it off by hand (gh pr merge $PR --disable-auto)"
+  fi
 elif [[ $event == APPROVE ]]; then
   # Refused while allow_auto_merge is off (or the PR merges as it is): the approval stands.
   if [[ $auto_on == true ]] || set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi

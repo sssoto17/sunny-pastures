@@ -450,12 +450,18 @@ describe("post-review.sh", () => {
 
 	// #404: the reviewer now approves stacked parts. Auto-merge on a part based on the part below
 	// would merge it into that branch on its own, and a stack merges whole (CONSTRAINTS.md).
-	it("approves a stacked part but never turns on its auto-merge", () => {
+	it("approves a stacked part but never leaves its auto-merge on", () => {
 		const r = run(verdict(), { env: { FAKE_BASE: "lane-part1" } });
 		expect(r.code).toBe(0);
 		expect(r.calls).toContain("-f event=APPROVE");
 		expect(r.calls).not.toContain("AutoMerge");
 		expect(r.out).toContain("auto_merge=stacked");
+
+		// Someone turned it on before: the approval turns it off rather than let the part merge.
+		const on = run(verdict(), { env: { FAKE_BASE: "lane-part1", FAKE_AUTO: "true" } });
+		expect(on.calls).toMatch(/event=APPROVE[\s\S]*disablePullRequestAutoMerge/);
+		expect(on.calls).not.toContain("enablePullRequestAutoMerge");
+		expect(on.out).toContain("auto_merge=stacked");
 
 		const findings = [{ path: "a.ts", line: 3, body: "bug" }];
 		const held = run(verdict({ findings }), {

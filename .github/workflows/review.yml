@@ -1,15 +1,17 @@
 # The reviewer App, sunny-reviewer (ADR-0002, area 2; #68). It reviews every non-draft PR to main,
-# and every part of a native stack whatever its base (#404), by REVIEW.md and posts as sunny-reviewer[bot]: Required findings become line comments plus
-# Request changes, Optional and Nit go in the review's summary, and a clean PR gets Approve. A PR
-# that meets a CONSTRAINTS.md escalation row, or carries review:admin, never gets Approve.
+# and every part of a native stack whatever its base (#404), by REVIEW.md and posts as
+# sunny-reviewer[bot]: Required findings become line comments plus Request changes, Optional and
+# Nit go in the review's summary, and a clean PR gets Approve. A PR that meets a CONSTRAINTS.md
+# escalation row, or carries review:admin, never gets Approve.
 #
 # Why pull_request_target: the run takes this file and its checkout from main, so a PR can't
 # change how it is reviewed. On github.com that holds whatever the PR's base: GitHub's docs give
 # GITHUB_REF "Default branch" and GITHUB_SHA "Last commit on default branch" for this event, and
-# "the workflow, and any subsequent actions/checkout call that does not specify a ref, is taken from
-# the base repository's default branch" (events-that-trigger-workflows.md, pull_request_target;
-# securely-using-pull_request_target.md). A stacked part's base branch never supplies this file. That hands this job secrets on a PR, so (docs/security.md of the
-# action, "Using this action with pull_request_target"):
+# "the workflow, and any subsequent actions/checkout call that does not specify a ref, is taken
+# from the base repository's default branch" (events-that-trigger-workflows.md,
+# pull_request_target; securely-using-pull_request_target.md). A stacked part's base branch never
+# supplies this file. That hands this job secrets on a PR, so (docs/security.md of the action,
+# "Using this action with pull_request_target"):
 # - nothing from the PR is checked out or run: the checkout has no `ref` (main), and the PR's
 #   diff and text reach Claude as files of data in $RUNNER_TEMP/review-context;
 # - Claude gets Read, Grep and Glob only (no Bash, no writes, no Skill tool, no MCP servers) and
