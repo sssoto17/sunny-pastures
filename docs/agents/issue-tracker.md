@@ -307,8 +307,13 @@ _automatic_. The workflow `.github/workflows/board.yml` does the In progress and
 through `scripts/board-status.sh` and `scripts/issue-fields.sh --from`; the Project's built-in "Item
 closed" and "Pull request merged" workflows do Done. The automation never sets Ready, never moves an
 issue out of Backlog, never sets Mode, and leaves an issue that isn't on the Project alone. Only the
-PR GitHub records as closing the issue moves it (its `Closes #N`, while its base is `main`), so the
-`Part of #N` parts of a split or stack don't.
+PR that closes the issue moves it, so the `Part of #N` parts of a split or stack don't: on `main`,
+the issues GitHub records the PR as closing; on another base (a stack's closing part, for which
+GitHub records none until it sits on `main`), the body's closing keyword, which `guard / pr-body`
+allows only on the closing part. A lane PR opens as a draft and is marked ready once linked (#358):
+it's In progress as a draft, and In review once ready and green. A finished check moves an issue
+only when the PR's checks turn green or red; the PR's own events (opened, ready, draft, closed) do
+the rest.
 
 <!-- prettier-ignore -->
 | Move                     | When                                                                                     |

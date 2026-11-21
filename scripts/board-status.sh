@@ -14,8 +14,14 @@
 #                                               green, `guard / code-owned` apart (admin, 21 Nov)
 #
 # Never Ready, never out of Backlog, never Mode: issue-fields.sh refuses each, and an issue that
-# isn't on the Project is left alone. Only the PR GitHub records as closing #N moves #N (its
-# closingIssuesReferences), so the `Part of #N` parts of a split don't.
+# isn't on the Project is left alone. Only the PR that closes #N moves #N: on main, the issues
+# GitHub records (closingIssuesReferences); on another base (a stack's closing part, for which
+# GitHub records none), the body's closing keyword, which `guard / pr-body` allows only on the
+# closing part. So the `Part of #N` parts of a split don't move it.
+# A finished check run (`decide commit`) only says whether checks turned green or red: the PR's own
+# events already moved it to In progress, so a pending, draft or closed PR there moves nothing, and
+# the token's job doesn't start for it. Whether the issue is already where a move would put it
+# can't be read here: the Project needs the token.
 # It prints numbers, kinds and fixed text only, never a name or text a PR or a check chose, so
 # nothing it logs can run as a workflow command.
 # Tests: scripts/board-status.test.sh. Needs bash 4.4+, jq and an authenticated gh.
@@ -41,10 +47,12 @@ usage: scripts/board-status.sh decide pr <number>
 decide  reads GitHub (read-only) and prints one line, `moves=` then the moves, each
         <issue>:<kind> and space-separated, or nothing after `=` when nothing moves.
         pr      a PR: the open issues it closes, by its state, draft flag and checks; a
-                fork's PR moves nothing
+                fork's PR moves nothing. On a base other than main, the issues come from the
+                body's closing keywords (#N or sssoto17/sunny-pastures#N), open issues only
         commit  every open PR whose head is this commit, and each <pr> given (a finished
                 workflow run's head and its pull_requests: a pull_request_target run's head
-                may be main's commit, so its PRs come from the event)
+                may be main's commit, so its PRs come from the event). Checks only: review
+                when a ready PR is green, back when it's red, nothing otherwise
         branch  a new branch: <N>-<slug>, optionally after one `<prefix>/` and `issue-`
 move    one move: scripts/issue-fields.sh <issue> --status <Status> --from <list>
         start  -> In progress from Ready
@@ -91,7 +99,7 @@ checks() { # sha
   runs=$(gh api --paginate "$R/commits/$1/check-runs?per_page=100" \
     --jq '.check_runs[] | [.id, .status, (.conclusion // "-"), .name] | @tsv') ||
     die 1 "could not read the check runs of $1"
-  statuses=$(gh api "$R/commits/$1/status" --jq '.statuses[] | [.state, .context] | @tsv') ||
+  statuses=$(gh api --paginate "$R/commits/$1/status?per_page=100" --jq '.statuses[] | [.state, .context] | @tsv') ||
     die 1 "could not read the commit statuses of $1"
   {
     # The latest run of each name: a re-run or a newer event's run replaces the older one.
@@ -107,11 +115,27 @@ checks() { # sha
     END { print (red ? "red" : (pending || !green) ? "pending" : "green") }'
 }
 
-decide_pr() { # pr -> moves on stdout, one a line
-  local pr=$1 row state draft merged sha head_repo kind verdict issues
-  row=$(gh api "$R/pulls/$pr" --jq '[.state, .draft, .merged, .head.sha, (.head.repo.full_name // "-")] | @tsv') ||
+# A stack's closing part, before it sits on main: the issues its body closes, digits only. The
+# keywords are GitHub's nine, any case, an optional colon, then #N or this repo's owner/name#N;
+# another repo's reference doesn't match. Each must be an open issue of this repo, not a PR.
+BODY_FILTER='(.body // "") | ascii_downcase
+  | [scan("\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \\t]+(?:sssoto17/sunny-pastures)?#([0-9]{1,7})\\b")]
+  | .[][0]'
+body_closing() { # pr -> issue numbers, one a line
+  local n row
+  gh api "$R/pulls/$1" --jq "$BODY_FILTER" | sort -un | while read -r n; do
+    valid_number "$n" || continue
+    row=$(gh api "$R/issues/$n" --jq '[.state, has("pull_request")] | @tsv' 2>/dev/null) || continue
+    [[ $row == $'open\tfalse' ]] && printf '%s\n' "$n"
+  done
+  return 0
+}
+
+decide_pr() { # pr [checks] -> moves on stdout, one a line
+  local pr=$1 mode=${2-event} row state draft merged sha head_repo base kind verdict issues
+  row=$(gh api "$R/pulls/$pr" --jq '[.state, .draft, .merged, .head.sha, (.head.repo.full_name // "-"), .base.ref] | @tsv') ||
     die 1 "could not read PR #$pr"
-  IFS=$'\t' read -r state draft merged sha head_repo <<<"$row"
+  IFS=$'\t' read -r state draft merged sha head_repo base <<<"$row"
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die 1 "unexpected answer from GitHub for PR #$pr"
   if [[ $head_repo != "$REPO" ]]; then
     say "PR #$pr comes from another repository: nothing moves"
@@ -121,7 +145,15 @@ decide_pr() { # pr -> moves on stdout, one a line
     say "PR #$pr merged: Done is the Project's built-in workflow"
     return 0
   fi
-  issues=$(closing "$pr") || die 1 "could not read the issues PR #$pr closes"
+  if [[ $mode == checks && ($state != open || $draft == true) ]]; then
+    say "PR #$pr isn't open and ready: its own events moved it, a check run moves nothing"
+    return 0
+  fi
+  if [[ $base == main ]]; then
+    issues=$(closing "$pr") || die 1 "could not read the issues PR #$pr closes"
+  else
+    issues=$(body_closing "$pr") || die 1 "could not read the issues PR #$pr closes"
+  fi
   if [[ -z $issues ]]; then
     say "PR #$pr closes no open issue of $REPO: nothing moves"
     return 0
@@ -135,7 +167,13 @@ decide_pr() { # pr -> moves on stdout, one a line
     case $verdict in
       green) kind=review ;;
       red) kind=back ;;
-      *) kind=start ;;
+      *)
+        if [[ $mode == checks ]]; then
+          say "PR #$pr checks still pending: nothing moves until they're green or red"
+          return 0
+        fi
+        kind=start
+        ;;
     esac
     verdict="open, checks $verdict"
   fi
@@ -158,7 +196,7 @@ decide_commit() { # sha [pr...]
   [[ -n $prs ]] || { say "no open PR has $sha as its head: nothing moves"; return 0; }
   while read -r pr; do
     valid_number "$pr" || die 1 "unexpected PR number from GitHub for $sha"
-    decide_pr "$pr"
+    decide_pr "$pr" checks
   done <<<"$prs"
 }
 

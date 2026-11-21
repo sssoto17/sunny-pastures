@@ -46,13 +46,19 @@ reset() {
   rm -rf "$st"
   mkdir -p "$st/get/$R/pulls" "$st/get/$R/issues" "$st/get/$R/commits/$SHA" "$st/get/$R/commits/$OTHER"
   cp "$work/hook" "$st/hook"
+  echo '[]' >"$st/get/$R/commits/$OTHER/pulls" # main's commit: no PR has it as its head
   rm -f "$work/move/calls"
 }
 pr() { # number state draft merged [sha]
   jq -n --argjson n "$1" --arg s "$2" --argjson d "$3" --argjson m "$4" --arg h "${5:-$SHA}" \
     '{number: $n, state: $s, draft: $d, merged: $m, title: "::error::not a command",
-      head: {sha: $h, ref: "x", repo: {full_name: "sssoto17/sunny-pastures"}}}' \
+      head: {sha: $h, ref: "x", repo: {full_name: "sssoto17/sunny-pastures"}}, base: {ref: "main"},
+      body: "Closes #999 (only GitHub'"'"'s record counts on main)"}' \
     >"$st/get/$R/pulls/$1"
+}
+stacked() { # pr base body -> the PR sits on another part's branch, with this body
+  jq --arg b "$2" --arg t "$3" '.base.ref = $b | .body = $t' "$st/get/$R/pulls/$1" >"$work/p" &&
+    mv "$work/p" "$st/get/$R/pulls/$1"
 }
 closes() { # pr "number:STATE[:owner/repo]"...
   local p=$1 spec
@@ -282,6 +288,58 @@ case_ decide pr 99
 expect_code 1
 expect_err "could not read PR #99"
 
+# --- a stack's closing part, before it sits on main ----------------------------------------------
+issue() { # number state [pr]
+  jq -n --argjson n "$1" --arg s "$2" --arg p "${3-}" \
+    '{number: $n, state: $s} + (if $p == "" then {} else {pull_request: {}} end)' >"$st/get/$R/issues/$1"
+}
+# GitHub records no closing reference on another base, so the body's keyword names the issue.
+reset
+pr 12 open false false
+stacked 12 417-part-2 $'## What\nCloses #417\n\nThe earlier parts: #401, #402.'
+issue 417 open
+green
+case_ decide pr 12
+expect_code 0
+expect_out "moves=417:review"
+# Each form GitHub reads: any case, a colon, this repo's owner/name; a draft is still back.
+for body in "fixes: #417" "RESOLVED #417" "closes sssoto17/sunny-pastures#417" "- Close #417."; do
+  reset
+  pr 12 open true false
+  stacked 12 417-part-2 "$body"
+  issue 417 open
+  case_ decide pr 12
+  expect_out "moves=417:back"
+done
+# A `Part of` part names no closing keyword: nothing moves.
+reset
+pr 11 open false false
+stacked 11 417-part-1 "Part of #417"
+issue 417 open
+green
+case_ decide pr 11
+expect_out "moves="
+expect_err "closes no open issue"
+# Another repo's issue, a closed issue, a PR, a missing issue, and a keyword glued to a word.
+reset
+pr 12 open false false
+stacked 12 417-part-2 "Closes someone/else#417, closes #300, closes #301, closes #302, encloses #303"
+issue 417 open
+issue 300 closed
+issue 301 open pr
+issue 303 open
+green
+case_ decide pr 12
+expect_code 0
+expect_out "moves="
+# On main, the body doesn't count: only GitHub's record (the fixture's body names #999).
+reset
+pr 12 open false false
+issue 999 open
+green
+case_ decide pr 12
+expect_out "moves="
+
 # --- decide commit: a finished run's head ---------------------------------------------------------
 reset
 pr 12 open false false
@@ -317,6 +375,33 @@ case_ decide pr 12
 expect_out "moves="
 expect_err "another repository"
 
+# A check run moves a ready PR only on green or red: pending, a draft or a closed PR moves nothing
+# (their own events did), so the token's job doesn't start.
+reset
+pr 12 open false false
+closes 12 417:OPEN
+checks "1|completed|failure|ci / lint"
+statuses
+case_ decide commit "$OTHER" 12
+expect_out "moves=417:back"
+reset
+pr 12 open false false
+closes 12 417:OPEN
+checks "1|in_progress||ci / lint"
+statuses
+case_ decide commit "$OTHER" 12
+expect_out "moves="
+expect_err "still pending"
+for st_dr in "open true" "closed false"; do
+  reset
+  read -r s d <<<"$st_dr"
+  pr 12 "$s" "$d" false
+  closes 12 417:OPEN
+  green
+  case_ decide commit "$OTHER" 12
+  expect_out "moves="
+done
+
 # A commit on main (the merged PR) moves nothing.
 reset
 jq -n '[{number: 12, state: "closed", head: {sha: "x"}}]' >"$st/get/$R/commits/$SHA/pulls"
@@ -325,10 +410,6 @@ expect_code 0
 expect_out "moves="
 
 # --- decide branch: a new branch for an issue -------------------------------------------------------
-issue() { # number state [pr]
-  jq -n --argjson n "$1" --arg s "$2" --arg p "${3-}" \
-    '{number: $n, state: $s} + (if $p == "" then {} else {pull_request: {}} end)' >"$st/get/$R/issues/$1"
-}
 for b in 417-board-status claude/issue-417-project-status-5ecmfs chore/417-x issue-417-x; do
   reset
   issue 417 open

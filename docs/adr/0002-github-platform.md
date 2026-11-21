@@ -1458,9 +1458,13 @@ linked issue, Backlog included, and can't see checks or drafts.
   (`create`), whose finished run starts `board.yml` by `workflow_run`: a `create` run's ref is the
   new branch, which the `board` environment refuses.
 - **Two jobs.** `board / decide` reads the PR, its checks and its closing references (GraphQL
-  `closingIssuesReferences`, with the run's read-only token) and outputs only `<issue>:<kind>`
-  pairs. `board / move` holds the token, in environment `board` (main only), sees only those pairs
-  and checks them again. Both run main's copy and main's checkout, never the PR's code.
+  `closingIssuesReferences`, with the run's read-only token; for a PR on another base, which GitHub
+  gives none, the body's closing keywords, digits of this repo only) and outputs only
+  `<issue>:<kind>` pairs. A finished check run yields a move only when the checks turn green or red,
+  so the token's job doesn't start on every check. It can't skip a move that would change nothing:
+  reading the Status needs the token. `board / move` holds the token, in environment `board` (main
+  only), sees only those pairs and checks them again. Both run main's copy and main's checkout,
+  never the PR's code.
 - **The token.** A classic PAT with the `project` scope alone, secret `BOARD_PROJECT_TOKEN`. A
   fine-grained PAT can't reach a user-owned Project: GitHub's "Managing your personal access tokens"
   lists "access Projects owned by a user account" under "Fine-grained personal access tokens
@@ -1478,8 +1482,10 @@ states; not atomic, so two close events can land out of order until the next one
 considered: one job holding the token (rejected: it would read PR text in the job that can write the
 Project); a GitHub App (rejected: an App can't call the user-owned Project's endpoints, above);
 polling on a schedule (rejected: minutes of lag and a run every few minutes whether or not anything
-changed); parsing `Closes #N` from the body (rejected: GitHub's own record of what will close is
-`closingIssuesReferences`, which also leaves out a stack part whose base isn't `main` yet).
+changed); parsing `Closes #N` from the body for every PR (rejected on `main`, where GitHub's own
+record, `closingIssuesReferences`, is what will close; used only for a stack part on another base,
+which GitHub gives no record); `branches: [main]` on the PR event (rejected: it skipped a stack's
+closing part, so a stack went from In progress straight to Done).
 
 Mode stays in step with `factory:ready` by hand until the "Mode ↔ `factory:ready` sync" candidate in
 `triage-labels.md` reaches 3 repetitions.
