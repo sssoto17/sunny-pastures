@@ -20,7 +20,7 @@ export type MakePlayer = () => Promise<string>;
 /** Declares the contract's cases on the stores `makeStore` builds; call it inside a `describe`. */
 export function describeGameStore(
 	makeStore: MakeStore,
-	makePlayer: MakePlayer = async () => await Promise.resolve(crypto.randomUUID()),
+	makePlayer: MakePlayer = () => Promise.resolve(crypto.randomUUID()),
 ): void {
 	it("loads a farm with no action as a new farm at seq 0", async () => {
 		const farmId = await makePlayer();
@@ -164,19 +164,49 @@ export function describeGameStore(
 		expect((await store.load(farmId)).seq).toBe(1);
 	});
 
-	it("loads from the snapshot at seq 100, replaying only the actions after it", async () => {
+	it("replays the whole log up to seq 99, then loads from the snapshot at seq 100", async () => {
 		const farmId = await makePlayer();
 		const recorded = recordReplay();
 		// One store for the whole case, as the in-memory store keeps its farms per store; commits
-		// never replay, so the calls recorded are the load's alone.
+		// never replay, so the calls recorded are the loads' alone.
 		const store = makeStore({ replay: recorded.replay });
-		const farms = await playActions(store, farmId, 130);
+		const farms = await playActions(store, farmId, 99);
 
-		const loaded = await store.load(farmId);
+		// No snapshot before seq 100, so any other interval below 100 shows here (B100; ADR-0001).
+		expect(await store.load(farmId)).toStrictEqual({ state: farms[99], seq: 99, at: 99_000 });
 
-		expect(loaded).toStrictEqual({ state: farms[130], seq: 130, at: 130_000 });
-		expect(recorded.calls).toEqual([Array.from({ length: 30 }, (_, i) => 101 + i)]);
+		let farm = farms[99] ?? newFarm();
+		for (let seq = 100; seq <= 130; seq++) {
+			const entry = makeEntry(farm, seq - 1, seq * 1_000);
+			expect(await store.commit(farmId, entry)).toEqual({ kind: "committed", seq });
+			farm = entry.next;
+		}
+
+		expect(await store.load(farmId)).toStrictEqual({ state: farm, seq: 130, at: 130_000 });
+		expect(recorded.calls).toEqual([seqsFrom(1, 99), seqsFrom(101, 130)]);
 	});
+
+	it("refuses a farm id or an idempotency key that isn't a UUID, and writes nothing", async () => {
+		const farmId = await makePlayer();
+		const store = makeStore();
+		const entry = makeEntry(newFarm(), 0, 1_000);
+
+		// B100's columns are uuid, so Postgres refuses the value; the fake checks it the same way.
+		await expect(store.load(notUuid)).rejects.toThrow();
+		await expect(store.processed(notUuid, entry.idempotencyKey)).rejects.toThrow();
+		await expect(store.processed(farmId, notUuid)).rejects.toThrow();
+		await expect(store.commit(notUuid, entry)).rejects.toThrow();
+		await expect(store.commit(farmId, { ...entry, idempotencyKey: notUuid })).rejects.toThrow();
+		expect((await store.load(farmId)).seq).toBe(0);
+	});
+}
+
+/** A value no uuid column takes. */
+const notUuid = "farm-1";
+
+/** The seqs `from` to `to`, both included. */
+function seqsFrom(from: number, to: number): number[] {
+	return Array.from({ length: to - from + 1 }, (_, i) => from + i);
 }
 
 /**

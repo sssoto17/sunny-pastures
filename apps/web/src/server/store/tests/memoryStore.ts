@@ -41,6 +41,7 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 	return {
 		async load(playerId) {
 			await Promise.resolve();
+			checkUuid(playerId, "playerId");
 			const { rows, snapshots } = findOrAddFarm(playerId);
 			const snapshotSeq = Math.floor(rows.length / snapshotEvery) * snapshotEvery;
 			const snapshot = snapshots.get(snapshotSeq);
@@ -59,6 +60,8 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 
 		async processed(playerId, idempotencyKey) {
 			await Promise.resolve();
+			checkUuid(playerId, "playerId");
+			checkUuid(idempotencyKey, "idempotencyKey");
 			return findAnswer(findOrAddFarm(playerId), idempotencyKey);
 		},
 
@@ -72,6 +75,8 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 				);
 			}
 
+			checkUuid(playerId, "playerId");
+			checkUuid(entry.idempotencyKey, "idempotencyKey");
 			const farm = findOrAddFarm(playerId);
 			const answer = findAnswer(farm, entry.idempotencyKey);
 			if (answer !== null) return { kind: "duplicate", answer };
@@ -115,6 +120,19 @@ interface MemoryRow {
 
 /** B100's snapshot interval (ADR-0001), which the contract's seq-100 case pins. */
 const snapshotEvery = 100;
+
+/**
+ * B100's uuid columns refuse anything else (Postgres's 22P02), so the fake does too, and a test
+ * that passes on the fake with a made-up id can't fail on B100 (#383's review). The canonical
+ * hyphenated form only: Postgres takes a few more spellings, which no caller sends.
+ */
+function checkUuid(value: string, name: string): void {
+	if (!uuidPattern.test(value)) {
+		throw new TypeError(`Store error: ${name} must be a UUID, got ${JSON.stringify(value)}.`);
+	}
+}
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 function findAnswer(farm: MemoryFarm, idempotencyKey: string): Answer | null {
 	const row = farm.rows.find((candidate) => candidate.idempotencyKey === idempotencyKey);
