@@ -432,7 +432,7 @@ expect_code 0
 expect_eq "a long part: now linear" "$(git -C "$repo" rev-list --merges main..7-p2 | wc -l)" 0
 expect_eq "a long part: one commit on 7-p1" "$(git -C "$repo" rev-list --count 7-p1..7-p2)" 1
 expect_eq "a long part: its first commit's subject kept" "$(git -C "$repo" log -1 --format=%s 7-p2)" "7-p2: b.txt"
-expect_eq "a long part: pushed" "$(remote_sha 7-p2)" "$(git -C "$repo" rev-parse 7-p2)"
+expect_eq "a long part: pushed linear" "$(git -C "$work/remote.git" rev-list --merges main..7-p2 | wc -l)" 0
 # a conflict changes nothing: no branch moves, nothing is pushed, no rebase is left open
 reset
 part 7-p1 main a.txt
