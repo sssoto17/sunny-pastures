@@ -1,53 +1,57 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = fileURLToPath(new URL("../factory-gate.sh", import.meta.url));
+const GATHER = fileURLToPath(new URL("../factory-gather.sh", import.meta.url));
 const WORKFLOW = fileURLToPath(new URL("../../workflows/factory.yml", import.meta.url));
-const BOARD = "https://github.com/users/sssoto17/projects/3";
 
 // The issue as `GET /repos/{o}/{r}/issues/{n}` returns it, trimmed to what the gate reads.
-const issue = ({ number = 42, state = "open", labels = ["factory:ready", "chore"], pr } = {}) => ({
+const issue = ({
+	number = 42,
+	state = "open",
+	labels = ["factory:ready", "chore"],
+	author = "OWNER",
+	pr,
+} = {}) => ({
 	number,
 	state,
+	author_association: author,
 	labels: labels.map((name) => ({ name })),
 	...(pr ? { pull_request: { url: "x" } } : {}),
-});
-
-// The GraphQL answer for the issue's Project items, as factory.yml's board step writes it.
-const item = ({ url = BOARD, status = "Ready", mode = "Factory" } = {}) => ({
-	project: { url },
-	status: status === null ? null : { name: status },
-	mode: mode === null ? null : { name: mode },
-});
-const board = (...items) => ({
-	data: { repository: { issue: { projectItems: { nodes: items } } } },
 });
 
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
-function gate({ input = "42", turns, issueJson = issue(), boardJson, raw } = {}) {
+function gate({ input = "42", turns, issueJson = issue(), pulls = [], refs = [] } = {}) {
 	dir = mkdtempSync(join(tmpdir(), "factory-gate-"));
 	writeFileSync(join(dir, "issue.json"), JSON.stringify(issueJson));
+	writeFileSync(join(dir, "pulls.json"), JSON.stringify(pulls));
+	writeFileSync(join(dir, "refs.json"), JSON.stringify(refs));
 	writeFileSync(join(dir, "out"), "");
 	writeFileSync(join(dir, "summary"), "");
 	const env = {
 		PATH: process.env.PATH,
 		ISSUE: input,
 		ISSUE_JSON: join(dir, "issue.json"),
-		PROJECT_URL: BOARD,
+		PULLS_JSON: join(dir, "pulls.json"),
+		REFS_JSON: join(dir, "refs.json"),
 		GITHUB_OUTPUT: join(dir, "out"),
 		GITHUB_STEP_SUMMARY: join(dir, "summary"),
 	};
 	if (turns !== undefined) env.MAX_TURNS = turns;
-	if (boardJson !== undefined || raw !== undefined) {
-		writeFileSync(join(dir, "board.json"), raw ?? JSON.stringify(boardJson));
-		env.BOARD_JSON = join(dir, "board.json");
-	}
 	const res = spawnSync("bash", [SCRIPT], { cwd: dir, encoding: "utf8", env });
 	const out = readFileSync(join(dir, "out"), "utf8");
 	const field = (k) => out.match(new RegExp(`^${k}=(.*)$`, "m"))?.[1];
@@ -56,20 +60,25 @@ function gate({ input = "42", turns, issueJson = issue(), boardJson, raw } = {})
 		log: res.stdout + res.stderr,
 		outFile: out,
 		run: field("run"),
-		issueOk: field("issue_ok"),
 		issue: field("issue"),
 		turns: field("turns"),
 	};
 }
 
-describe("factory-gate.sh, the issue phase (no BOARD_JSON)", () => {
-	it("passes an open issue that carries factory:ready, but never says run=true", () => {
+describe("factory-gate.sh", () => {
+	it("says run=true for an open factory:ready issue the owner opened, with the 100-turn cap", () => {
 		const g = gate();
 		expect(g.code).toBe(0);
-		expect(g.issueOk).toBe("true");
-		expect(g.run).toBe("false");
+		expect(g.run).toBe("true");
 		expect(g.issue).toBe("42");
-		expect(g.log).toMatch(/^GATE issue ok: #42 is open and carries factory:ready/m);
+		expect(g.turns).toBe("100");
+		expect(g.log).toMatch(
+			/^GATE run: #42 is open, opened by a OWNER, carries factory:ready and has no PR or branch \(max-turns 100\)/m,
+		);
+	});
+
+	it.each(["MEMBER", "COLLABORATOR"])("passes an issue opened by a %s", (author) => {
+		expect(gate({ issueJson: issue({ author }) }).run).toBe("true");
 	});
 
 	it.each([
@@ -85,124 +94,117 @@ describe("factory-gate.sh, the issue phase (no BOARD_JSON)", () => {
 	])("refuses an issue input that is %s, before reading anything", (_n, input) => {
 		const g = gate({ input });
 		expect(g.code).toBe(0);
-		expect(g.issueOk).toBe("false");
 		expect(g.run).toBe("false");
 		expect(g.log).toMatch(/^GATE refused: the issue input .* isn't an issue number/m);
 		expect(g.outFile).not.toMatch(/^run=true$/m);
+		expect(g.outFile).not.toMatch(/^issue=/m);
+	});
+
+	// The repo is public: a stranger's issue text must never reach a Claude.
+	it.each(["NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER"])(
+		"refuses an issue opened by a %s",
+		(author) => {
+			const g = gate({ issueJson: issue({ author }) });
+			expect(g.run).toBe("false");
+			expect(g.log).toMatch(
+				new RegExp(
+					`^GATE refused: #42 was opened by a ${author}, not the owner or a collaborator`,
+					"m",
+				),
+			);
+		},
+	);
+
+	it("refuses an issue that doesn't say who opened it", () => {
+		const bare = issue();
+		delete bare.author_association;
+		const g = gate({ issueJson: bare });
+		expect(g.run).toBe("false");
+		expect(g.log).toMatch(/opened by a NONE/);
 	});
 
 	it("refuses an issue without factory:ready", () => {
 		const g = gate({ issueJson: issue({ labels: ["chore"] }) });
-		expect(g.issueOk).toBe("false");
+		expect(g.run).toBe("false");
 		expect(g.log).toMatch(/^GATE refused: #42 doesn't carry factory:ready/m);
 	});
 
 	it("refuses a closed issue", () => {
 		const g = gate({ issueJson: issue({ state: "closed" }) });
-		expect(g.issueOk).toBe("false");
+		expect(g.run).toBe("false");
 		expect(g.log).toMatch(/^GATE refused: #42 is closed/m);
 	});
 
 	it("refuses a pull request (the issues endpoint returns those too)", () => {
 		const g = gate({ issueJson: issue({ pr: true }) });
-		expect(g.issueOk).toBe("false");
+		expect(g.run).toBe("false");
 		expect(g.log).toMatch(/^GATE refused: #42 is a pull request/m);
 	});
 
 	it("refuses when the JSON describes another issue", () => {
 		const g = gate({ issueJson: issue({ number: 7 }) });
-		expect(g.issueOk).toBe("false");
+		expect(g.run).toBe("false");
 		expect(g.log).toMatch(/^GATE refused: .*#7.*not #42/m);
 	});
 
-	it("fails the step on an unreadable issue file rather than guess", () => {
+	it("refuses an issue that doesn't exist (the read left {}), rather than fail the step", () => {
+		const g = gate({ issueJson: {} });
+		expect(g.code).toBe(0);
+		expect(g.run).toBe("false");
+		expect(g.log).toMatch(/^GATE refused: #42 doesn't exist or can't be read/m);
+	});
+
+	// The duplicate guard (admin, 21 Nov 2026, decision 10).
+	it("refuses an issue that already has an open PR from a <n>- branch", () => {
+		const g = gate({ pulls: [{ number: 7, head: { ref: "42-earlier-try" } }] });
+		expect(g.run).toBe("false");
+		expect(g.log).toMatch(/^GATE refused: #42 already has PR #7 from a 42- branch/m);
+	});
+
+	it("refuses an issue that already has a <n>- branch", () => {
+		const g = gate({ refs: [{ ref: "refs/heads/42-half-done" }] });
+		expect(g.run).toBe("false");
+		expect(g.log).toMatch(/^GATE refused: #42 already has the branch 42-half-done/m);
+	});
+
+	it("ignores other issues' PRs and branches, 420- included", () => {
+		const g = gate({
+			pulls: [
+				{ number: 8, head: { ref: "420-other" } },
+				{ number: 9, head: { ref: "claude/42-x" } },
+			],
+			refs: [{ ref: "refs/heads/420-other" }],
+		});
+		expect(g.run).toBe("true");
+	});
+
+	it("fails the step on a PR list that isn't JSON, rather than guess", () => {
 		dir = mkdtempSync(join(tmpdir(), "factory-gate-"));
-		writeFileSync(join(dir, "out"), "");
+		for (const [f, c] of [
+			["issue.json", JSON.stringify(issue())],
+			["pulls.json", "gh: HTTP 502"],
+			["refs.json", "[]"],
+			["out", ""],
+		])
+			writeFileSync(join(dir, f), c);
 		const res = spawnSync("bash", [SCRIPT], {
 			encoding: "utf8",
 			env: {
 				PATH: process.env.PATH,
 				ISSUE: "42",
-				ISSUE_JSON: join(dir, "missing.json"),
-				PROJECT_URL: BOARD,
+				ISSUE_JSON: join(dir, "issue.json"),
+				PULLS_JSON: join(dir, "pulls.json"),
+				REFS_JSON: join(dir, "refs.json"),
 				GITHUB_OUTPUT: join(dir, "out"),
 			},
 		});
 		expect(res.status).not.toBe(0);
-		expect(readFileSync(join(dir, "out"), "utf8")).not.toMatch(/^(run|issue_ok)=true$/m);
+		expect(readFileSync(join(dir, "out"), "utf8")).not.toMatch(/^run=true$/m);
 	});
 
 	it("writes a refusal to the step summary as well as the log", () => {
 		gate({ issueJson: issue({ labels: [] }) });
 		expect(readFileSync(join(dir, "summary"), "utf8")).toMatch(/Refused: #42 doesn't carry/);
-	});
-});
-
-describe("factory-gate.sh, the board phase (BOARD_JSON set)", () => {
-	it("says run=true for Ready, Mode Factory and factory:ready, with the 100-turn cap", () => {
-		const g = gate({ boardJson: board(item()) });
-		expect(g.code).toBe(0);
-		expect(g.run).toBe("true");
-		expect(g.turns).toBe("100");
-		expect(g.log).toMatch(
-			/^GATE run: #42 is Ready, Mode Factory and carries factory:ready \(max-turns 100\)/m,
-		);
-	});
-
-	it("still refuses on the issue alone: the board can't make up for a missing label", () => {
-		const g = gate({ issueJson: issue({ labels: [] }), boardJson: board(item()) });
-		expect(g.run).toBe("false");
-		expect(g.log).toMatch(/doesn't carry factory:ready/);
-	});
-
-	it.each([
-		["Backlog", "Factory", /Status is Backlog, not Ready/],
-		["In progress", "Factory", /Status is In progress, not Ready/],
-		["Ready", "Manual", /Mode is Manual, not Factory/],
-		[null, "Factory", /Status is unset, not Ready/],
-		["Ready", null, /Mode is unset, not Factory/],
-	])("refuses Status %s with Mode %s", (status, mode, why) => {
-		const g = gate({ boardJson: board(item({ status, mode })) });
-		expect(g.run).toBe("false");
-		expect(g.log).toMatch(why);
-	});
-
-	it("reads only the Sunny Pastures board, never another Project's item", () => {
-		const g = gate({
-			boardJson: board(item({ url: "https://github.com/users/someone/projects/1" })),
-		});
-		expect(g.run).toBe("false");
-		expect(g.log).toMatch(/^GATE refused: #42 isn't on the board .* or the App can't read it/m);
-	});
-
-	it("finds the board's item among others", () => {
-		const other = item({ url: "https://github.com/users/x/projects/9", status: "Done" });
-		expect(gate({ boardJson: board(other, item()) }).run).toBe("true");
-	});
-
-	// #102: the App's token couldn't resolve user Project 3. Fail closed, and say so.
-	it("refuses, failing closed, when GraphQL answers with errors", () => {
-		const g = gate({
-			boardJson: {
-				data: null,
-				errors: [{ message: "Could not resolve to a ProjectV2 with the number 3." }],
-			},
-		});
-		expect(g.run).toBe("false");
-		expect(g.log).toMatch(/^GATE refused: BOARD unreadable: Could not resolve to a ProjectV2/m);
-	});
-
-	it("refuses when the board file isn't JSON (the read itself failed)", () => {
-		const g = gate({ raw: "gh: HTTP 502" });
-		expect(g.code).toBe(0);
-		expect(g.run).toBe("false");
-		expect(g.log).toMatch(/^GATE refused: BOARD unreadable/m);
-	});
-
-	it("keeps a multi-line error on one log line, so it can't start a workflow command", () => {
-		const g = gate({ boardJson: { errors: [{ message: "bad\n::add-mask::x" }] } });
-		expect(g.log).not.toMatch(/^::add-mask::/m);
-		expect(g.log).toMatch(/bad%0A::add-mask::x/);
 	});
 
 	it.each([
@@ -210,7 +212,7 @@ describe("factory-gate.sh, the board phase (BOARD_JSON set)", () => {
 		["100", "100"],
 		["", "100"],
 	])("takes max_turns %j as %s", (turns, want) => {
-		const g = gate({ turns, boardJson: board(item()) });
+		const g = gate({ turns });
 		expect(g.run).toBe("true");
 		expect(g.turns).toBe(want);
 	});
@@ -218,27 +220,90 @@ describe("factory-gate.sh, the board phase (BOARD_JSON set)", () => {
 	it.each(["0", "101", "1000", "-1", "5 --dangerously-skip-permissions", "ten"])(
 		"refuses max_turns %j: the input may only lower the cap",
 		(turns) => {
-			const g = gate({ turns, boardJson: board(item()) });
+			const g = gate({ turns });
 			expect(g.run).toBe("false");
 			expect(g.log).toMatch(/^GATE refused: max_turns .* must be a whole number from 1 to 100/m);
 		},
 	);
 });
 
-// The script only answers; the workflow makes that answer stop the run before a token or Claude.
+// The reads, with a fake gh that answers from files and logs each call.
+function gather({ input = "42", issueStatus = 0 } = {}) {
+	dir = mkdtempSync(join(tmpdir(), "factory-gather-"));
+	mkdirSync(join(dir, "bin"));
+	writeFileSync(join(dir, "issue.json"), JSON.stringify(issue()));
+	writeFileSync(
+		join(dir, "bin", "gh"),
+		`#!/usr/bin/env bash
+printf '%s\\n' "$*" >>"${dir}/calls"
+case "$*" in
+  */issues/*) [ "${issueStatus}" = 0 ] || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }; cat "${dir}/issue.json" ;;
+  *pulls*) echo '{"number":3,"head":{"ref":"5-x"}}' ;;
+  *matching-refs*) echo '[]' ;;
+  *) exit 99 ;;
+esac
+`,
+	);
+	chmodSync(join(dir, "bin", "gh"), 0o755);
+	writeFileSync(join(dir, "out"), "");
+	const res = spawnSync("bash", [GATHER], {
+		encoding: "utf8",
+		env: {
+			PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+			ISSUE: input,
+			GITHUB_REPOSITORY: "o/r",
+			RUNNER_TEMP: dir,
+			GITHUB_OUTPUT: join(dir, "out"),
+		},
+	});
+	const calls = existsSync(join(dir, "calls")) ? readFileSync(join(dir, "calls"), "utf8") : "";
+	return {
+		code: res.status,
+		log: res.stdout + res.stderr,
+		out: readFileSync(join(dir, "out"), "utf8"),
+		calls,
+	};
+}
+
+describe("factory-gather.sh", () => {
+	it("reads the issue, the open PRs and the issue's branches, then gates", () => {
+		const g = gather();
+		expect(g.code).toBe(0);
+		expect(g.out).toMatch(/^run=true$/m);
+		expect(g.calls).toContain("api repos/o/r/issues/42");
+		expect(g.calls).toContain("repos/o/r/pulls?state=open&per_page=100");
+		expect(g.calls).toContain("api repos/o/r/git/matching-refs/heads/42-");
+	});
+
+	it("logs a missing issue as a GATE refusal, not a failed step", () => {
+		const g = gather({ issueStatus: 1 });
+		expect(g.code).toBe(0);
+		expect(g.log).toMatch(/^GATE refused: #42 doesn't exist or can't be read/m);
+	});
+
+	it("puts nothing but a number in a URL", () => {
+		const g = gather({ input: "../../x" });
+		expect(g.code).toBe(0);
+		expect(g.calls).toBe("");
+		expect(g.log).toMatch(/^GATE refused: the issue input/m);
+	});
+});
+
+// The scripts only answer; the workflow makes those answers stop the run before a token or Claude.
 // Read as text, as factory-enabled.test.mjs reads the switch: the repo has no YAML parser, and
 // adding one needs the admin. Comments are dropped, since the header quotes snippets.
 describe("factory.yml", () => {
-	const text = readFileSync(WORKFLOW, "utf8");
-	const yml = text
+	const yml = readFileSync(WORKFLOW, "utf8")
 		.split("\n")
 		.filter((l) => !l.trimStart().startsWith("#"))
 		.join("\n");
 	// One job's lines: from its two-space key to the next one.
 	const job = (name) =>
 		yml.match(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  \\S|(?![\\s\\S]))`, "m"))[0];
-	const gate = job("gate");
+	const gateJob = job("gate");
 	const factory = job("factory");
+	const publish = job("publish");
+	const report = job("report");
 
 	it("starts only from workflow_dispatch, with an issue number", () => {
 		expect(yml).toMatch(/^on:\n {2}workflow_dispatch:\n {4}inputs:\n {6}issue:\n/m);
@@ -251,10 +316,11 @@ describe("factory.yml", () => {
 		expect(job("switch")).toBe(
 			"  switch:\n    uses: ./.github/workflows/factory-switch.yml\n    permissions:\n      contents: read\n\n",
 		);
-		expect(gate).toMatch(/^ {4}needs: switch\n {4}if: needs\.switch\.outputs\.run == 'true'\n/m);
+		expect(gateJob).toMatch(/^ {4}needs: switch\n {4}if: needs\.switch\.outputs\.run == 'true'\n/m);
 		expect(factory).toMatch(
 			/^ {4}needs: \[switch, gate\]\n {4}if: needs\.switch\.outputs\.run == 'true' && needs\.gate\.outputs\.run == 'true'\n/m,
 		);
+		expect(publish).toMatch(/^ {4}if: needs\.factory\.outputs\.handoff != ''\n/m);
 	});
 
 	it("keeps GITHUB_TOKEN read-only in every job", () => {
@@ -268,30 +334,53 @@ describe("factory.yml", () => {
 		expect(yml).toMatch(/^concurrency:\n {2}group: factory\n {2}cancel-in-progress: false\n/m);
 	});
 
-	it("checks the issue before the App's key mints a token, and that token only reads", () => {
-		expect(gate.indexOf("id: issue")).toBeLessThan(gate.indexOf("id: app"));
-		expect(gate).toMatch(/id: app\n {8}if: steps\.issue\.outputs\.issue_ok == 'true'\n/);
-		const perms = [...gate.matchAll(/permission-([a-z-]+): (\w+)/g)];
-		expect(perms.map((m) => m[0])).toEqual(["permission-issues: read"]);
-		// The factory job's writes are contents only: no workflows, issues or administration.
-		const writes = [...factory.matchAll(/permission-([a-z-]+): write/g)].map((m) => m[1]);
-		expect(writes).toEqual(["contents"]);
+	it("gates with the read-only token and no environment, so a refusal never reaches a secret", () => {
+		expect(gateJob).not.toMatch(/environment:|secrets\.|create-github-app-token/);
+		expect(gateJob).toContain("run: bash .github/scripts/factory-gather.sh");
 	});
 
-	it("caps the factory job at 60 minutes and Claude at the gate's turns (at most 100)", () => {
+	// Required (review of 39bcd47): the model never shares a runner with a write credential.
+	it("gives Claude no write credential: no App token, no GH_TOKEN, a scrubbed environment", () => {
+		expect(factory).not.toMatch(
+			/create-github-app-token|FACTORY_APP_PRIVATE_KEY|GH_TOKEN: \$\{\{ steps\.app/,
+		);
+		const claude = factory.slice(factory.indexOf("id: claude"), factory.indexOf("id: handoff"));
+		expect(claude).toContain("github_token: ${{ github.token }}");
+		expect(claude).not.toContain("GH_TOKEN");
+		expect(claude).toMatch(/CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'/);
+	});
+
+	it("mints the App's token only on the fresh publish runner, after the hand-off is checked", () => {
+		expect(publish.indexOf("factory-publish.sh")).toBeLessThan(
+			publish.indexOf("create-github-app-token"),
+		);
+		expect(publish).not.toMatch(/claude-code-action/);
+		const writes = [...yml.matchAll(/permission-([a-z-]+): write/g)].map((m) => m[1]);
+		expect(writes).toEqual(["contents"]);
+		expect(publish).toContain("scripts/open-pr.sh");
+		expect(publish).toContain("core.hooksPath=/dev/null");
+	});
+
+	it("caps the factory job at 60 minutes, Claude's step at 55, and Claude at the gate's turns", () => {
 		expect(factory).toMatch(/^ {4}timeout-minutes: 60$/m);
-		// The Claude step stops first, so Report still runs on a runaway (its cost and minutes).
 		expect(factory).toMatch(/id: claude\n {8}timeout-minutes: 55\n/);
 		expect(factory).toContain("--max-turns ${{ needs.gate.outputs.turns }}");
 	});
 
-	it("runs Claude on the setup-token as sunny-factory, never on an API key", () => {
+	it("runs Claude on the setup-token, never on an API key, with /implement and no web tools", () => {
 		expect(factory).toContain("claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}");
-		expect(factory).toContain("github_token: ${{ steps.app.outputs.token }}");
 		expect(factory).toMatch(/ANTHROPIC_API_KEY: ''/);
-		expect(gate).toMatch(/^ {4}environment: factory$/m);
-		expect(factory).toMatch(/^ {4}environment: factory$/m);
 		expect(factory).toContain("/implement #${{ needs.gate.outputs.issue }}");
+		expect(factory).toMatch(/--disallowedTools "WebFetch,WebSearch/);
+	});
+
+	it("re-checks the gate before Claude reads the issue, and hands it only trusted comments", () => {
+		const ctx = factory.slice(factory.indexOf("id: context"), factory.indexOf("id: claude"));
+		expect(ctx).toContain("bash .github/scripts/factory-gather.sh");
+		expect(ctx).toMatch(
+			/select\(\.author_association\s*\|\s*IN\("OWNER", "MEMBER", "COLLABORATOR"\)\)/,
+		);
+		expect(factory).toContain("--add-dir ${{ runner.temp }}/factory-context");
 	});
 
 	it("reuses main's pins of the actions, by full SHA, and adds no other action", () => {
@@ -305,8 +394,7 @@ describe("factory.yml", () => {
 		);
 	});
 
-	it("never expands an input inside run:, and later steps use the gate's checked values", () => {
-		// A run: block holds no expression at all; inputs reach the gate only through env:.
+	it("never expands an input or the hand-off inside run:", () => {
 		for (const [, body] of yml.matchAll(/^ {8}run: \|\n((?: {10}.*\n|\n)+)/gm))
 			expect(body).not.toContain("${{");
 		const uses = [...yml.matchAll(/\$\{\{\s*inputs\.(\w+)\s*\}\}/g)].map((m) => m[0]);
@@ -316,27 +404,13 @@ describe("factory.yml", () => {
 			"${{ inputs.max_turns }}",
 		]);
 		expect(yml).toMatch(/^run-name: 'factory #\$\{\{ inputs\.issue \}\}'$/m);
-		expect(gate).toMatch(/^ {6}ISSUE: \$\{\{ inputs\.issue \}\}$/m);
-		expect(gate).toMatch(/^ {6}MAX_TURNS: \$\{\{ inputs\.max_turns \}\}$/m);
+		expect(publish).toMatch(/^ {10}DATA: \$\{\{ needs\.factory\.outputs\.handoff \}\}$/m);
 	});
 
-	// The repo is public: a stranger's comment must never reach a Claude holding a write token.
-	it("hands Claude the issue and only the owner's and collaborators' comments", () => {
-		expect(factory).toMatch(
-			/select\(\.author_association\s*\|\s*IN\("OWNER", "MEMBER", "COLLABORATOR"\)\)/,
-		);
-		expect(factory.indexOf("Gather the issue")).toBeLessThan(factory.indexOf("id: claude"));
-		expect(factory).toContain("--add-dir ${{ runner.temp }}/factory-context");
-	});
-
-	it("reports the factory's own PR by its <N>- head, not a lane's PR for the same issue", () => {
-		expect(factory).toMatch(/\.head\.ref \| startswith\(\$n \+ "-"\)/);
-	});
-
-	it("logs total_cost_usd and the job's minutes, whatever happened", () => {
-		const report = factory.slice(factory.indexOf("name: Report"));
-		expect(report).toMatch(/^ {8}if: always\(\)$/m);
-		expect(report).toContain("total_cost_usd");
+	it("reports cost and every job's minutes, whatever happened", () => {
+		expect(report).toMatch(/^ {4}if: always\(\)$/m);
+		expect(report).toMatch(/needs: \[switch, gate, factory, publish\]/);
 		expect(report).toContain("job_minutes");
+		expect(factory).toContain("total_cost_usd");
 	});
 });

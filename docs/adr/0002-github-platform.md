@@ -823,40 +823,64 @@ the switch, only the factory jobs (the sweep, the chain and the factory job) do 
 
 **The factory workflow, built (#107).** `.github/workflows/factory.yml` is the `workflow_dispatch`
 run above: an `issue` input, and a `max_turns` input that can only lower the cap. Pattern: a
-pipeline of guard jobs, each skipped unless the one before says go, so a refusal never reaches the
-App's key or Claude. Concurrency 1 (group `factory`, never cancelling a running job), and
-`GITHUB_TOKEN` read-only in every job.
+pipeline of guard jobs, each skipped unless the one before says go, so a refusal never reaches a
+secret or Claude; and a split between the model and the writer, so Claude never shares a runner with
+a write credential (the rule `review.yml` follows too). Concurrency 1 (group `factory`, never
+cancelling a running job), and `GITHUB_TOKEN` read-only in every job.
+
+**Ready and Mode (admin, 21 Nov 2026, option b).** The workflow doesn't read the Project: no Actions
+token can read this user-owned board (#102). `factory:ready` stands for Mode Factory, which
+`triage-labels.md` keeps in step with it, and the admin's manual dispatch stands for Ready. Only the
+admin and collaborators can set labels. The sweep (#108) waits for #102's native issue fields, since
+its dispatch isn't the admin's choice.
 
 1. **`switch`** calls `factory-switch.yml`, exactly as its header shows. With the switch off the run
    logs `SWITCH off` and stops; that is how the workflow is tested without turning the factory on.
-2. **`gate`** runs `.github/scripts/factory-gate.sh` twice. First, with the read-only `GITHUB_TOKEN`
-   and before any key is touched: the input is an issue number, the issue is open, it isn't a PR,
-   and it carries `factory:ready`. Then, with a read-only `sunny-factory` token (`issues: read`), it
-   reads the issue's Project items over GraphQL and wants Status `Ready` and Mode `Factory` on the
-   Sunny Pastures board. An error, an empty answer or another board's item is a refusal
-   (`GATE refused: …`). #102 found the App's token can't resolve this user-owned Project, so until
-   that is settled the gate is expected to refuse every issue at the board step: it fails closed
-   rather than skip the Ready check the admin decided on.
-3. **`factory`** (`timeout-minutes: 60`) mints the write token (`contents: write` to push and to
-   send `open-pr`'s dispatch; `pull-requests` and `issues` read; no workflows), checks out `main`,
-   installs, and runs `claude-code-action` on the setup-token with `--max-turns` from the gate (100
-   unless lowered), the App's token as `github_token` and its bot user for commits. The prompt is
-   `/implement #N` plus `.github/factory-prompt.md`; Claude opens the PR with `scripts/open-pr.sh`,
-   so `open-pr.yml` opens it as `sunny-factory[bot]`. The project's settings load, so an `ask` rule
-   denies (no one can answer it) and the hooks run; web tools are off. `Report` logs
-   `total_cost_usd`, turns, the job's seconds and billed minutes, and the PR.
+2. **`gate`** has no environment and only the read-only `GITHUB_TOKEN`.
+   `.github/scripts/factory-gather.sh` reads the issue, the open PRs and the issue's `<n>-`
+   branches, and `.github/scripts/factory-gate.sh` refuses (`GATE refused: …`) unless the input is
+   an issue number and the issue exists, is open, isn't a PR, was opened by the owner or a
+   collaborator (`author_association`: the repo is public, and an issue's author can edit its body
+   after it is labelled), carries `factory:ready`, and has no open PR and no `<n>-` branch yet (one
+   factory branch per issue).
+3. **`factory`** (`timeout-minutes: 60`; environment `factory` for `CLAUDE_CODE_OAUTH_TOKEN` only)
+   checks out `main` and installs. It runs the gate again on a fresh read, then writes the issue and
+   only its owner's and collaborators' comments to files. `claude-code-action` runs on the
+   setup-token with `--max-turns` from the gate (100 unless lowered, the Claude step stopped at 55
+   minutes), the read-only `GITHUB_TOKEN` as `github_token`, no `GH_TOKEN`, and
+   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. The prompt is `/implement #N` plus
+   `.github/factory-prompt.md`. Claude commits locally and writes the branch name, PR body and
+   labels to files, and a plain step packs them with a git bundle of the new commits into the job's
+   output (the hand-off, under 900 kB). The project's settings load, so an `ask` rule denies (no one
+   can answer it) and the hooks run; web tools are off.
+4. **`publish`** runs on a fresh runner that never ran the model, with `main`'s checkout.
+   `.github/scripts/factory-publish.sh` refuses (`PUBLISH refused: …`, a failed job) a hand-off with
+   any entry but the four files, a branch that isn't `<n>-<slug>`, a body without `Closes #<n>`, a
+   label outside `review:admin` and `area:*`, or a diff that touches `.github/workflows/` or
+   `tests/acceptance/`. Only then does it mint the App's token (`contents: write` to push and to
+   send `open-pr`'s dispatch, `pull-requests: read`), push the branch with hooks off, and run
+   `scripts/open-pr.sh`, so `open-pr.yml` opens the PR as `sunny-factory[bot]`. Commits and PR both
+   carry the App.
+5. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
+   rounds each job up) and their sum, and the PR.
 
-Claude reads the issue from files the workflow wrote: its body and only the comments whose author is
-the owner or a collaborator, since anyone can comment on a public issue. **Residual risk:** Claude
-has Bash and the write token in `GH_TOKEN`, so a prompt injection that got past that filter could
-read it (`/proc/self/environ` isn't blocked by the `env`/`printenv` deny rules). The token lives for
-the job only, and the App can't push workflows, approve, merge or bypass a ruleset.
+**Caps.** `--max-turns` doesn't count the turns of `Task` subagents, so the 55-minute step timeout
+and the job's 60 are the real bound on a run.
 
-Alternatives considered: everything in the `factory` job with `if:` on each step (every refusal
-would start the 60-minute job and its setup; `gate` holds the environment too, but only for its
-read-only token, and its issue phase runs before that token is minted); reading the board with REST
-(`/users/{u}/projectsV2/{n}/items` has no per-issue lookup, and it faces the same App limit);
-trusting the dispatcher's choice instead of reading Ready (the sweep, #108, isn't the admin).
+**Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
+environment, but the runner user has sudo, so a prompt injection could still read it from the
+action's own process. The token reaches Claude's model calls only, and rotates with
+`claude setup-token`. Whether GitHub hands the `factory` job the environment's other secret, the
+App's key, though the job never references it, isn't documented; if it does, sudo could reach it
+too. Splitting the setup-token into an environment of its own would close that (a question for the
+admin). No write token exists on the model's runner: what the model wrote reaches GitHub only
+through the publish checks, and the App can't push workflows, approve, merge or bypass a ruleset.
+
+Alternatives considered: everything in one job with `if:` on each step (every refusal would start
+the 60-minute job; and a write step after Claude on the same runner is reachable from anything
+Claude left running, with sudo); handing the work over as an artifact (`actions/upload-artifact` is
+a new action, which the admin ruled out; a job output carries a small bundle); reading the board (no
+Actions token can, #102).
 
 **Until the factory App runs, every session acts as `sssoto17`.** Elsewhere in this ADR, "until #37"
 means until then: the build issues under #58, after the checks #101–#103. Cloud and local sessions
