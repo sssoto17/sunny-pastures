@@ -227,6 +227,8 @@ describe("post-review.sh", () => {
 		const findings = [{ path: "a.ts", line: 3, body: "escalated: not really" }];
 		const r = run(verdict({ findings }));
 		expect(r.calls).toContain("-F line=3 -f side=RIGHT -f body=Finding: escalated: not really");
+		const padded = run(verdict({ findings: [{ ...findings[0], body: "  escalated: x" }] }));
+		expect(padded.calls).toContain("-f body=Finding:   escalated: x");
 	});
 
 	it("approves an escalated PR only while its escalation thread is on the PR", () => {

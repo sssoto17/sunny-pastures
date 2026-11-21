@@ -108,7 +108,9 @@ still_open=$(pick '[.[] | select(open_finding and (fixed | not))] | length')
 needs_admin=false # an escalation row now, or an escalation thread of its own from before
 [[ -z $rows && $escalated_before != true ]] || needs_admin=true
 # An escalation thread of its own still open (one someone else resolved was reopened above) holds
-# the merge. Once the admin resolved it, nothing holds a later head, so that one isn't approved.
+# the merge. Once the admin resolved it, nothing holds the PR any more, so no run after that
+# approves it: not a later head, and not a re-review of the same head either (review-gate.sh runs
+# that only for review:admin, which holds the approval anyway).
 # Posting a new escalation thread below sets it too.
 held=$(pick 'any(.[]; own and esc and ((.isResolved | not) or .resolvedBy.login != $admin))')
 escalated=false
@@ -124,7 +126,7 @@ unplaced="" note=""
 while IFS= read -r f; do
   path=$(jq -r '.path // ""' <<<"$f") line=$(jq -r '.line // 0' <<<"$f") body=$(jq -r '.body // ""' <<<"$f")
   # "escalated:" marks its escalation threads, which no finding may pass for (open_finding).
-  [[ $body != escalated:* ]] || body="Finding: $body"
+  [[ ! $body =~ ^[[:space:]]*escalated: ]] || body="Finding: $body"
   [[ $line =~ ^[0-9]+$ ]] || line=0
   if ((line > 0)) && comment "$path" "$body" "$line"; then continue; fi
   if [[ -n $path ]] && comment "$path" "Line $line: $body"; then continue; fi

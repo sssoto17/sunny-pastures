@@ -861,7 +861,7 @@ own. It has one, and GitHub enforces the limits on it:
 | What a session on the admin's account can do | What stops the factory App |
 |---|---|
 | Bypass-merge an admin-review PR | It's on no bypass list. Code-owner review and the 1 required approval hold the merge |
-| Clear an escalation | It can resolve the escalation thread, but the reviewer never approves an escalated PR an App opened (only one the admin's account opened, #264), and it unresolves a thread the admin didn't resolve, which holds the merge again (area 2, "Approvals") |
+| Clear an escalation | It can resolve the escalation thread on any PR. The reviewer never approves an escalated PR an App opened (only one the admin's account opened, #264), and on its next run it unresolves a thread the admin didn't resolve. But resolving starts no workflow, so on an escalated PR the admin's account opened, which the reviewer approved with auto-merge on, a thread the App resolves lets the PR merge before any re-check (the admin's rule of 16 Nov, #322; "The honest limit", below) |
 | Push a `v*` tag | The tag ruleset restricts creation, and only the Repository admin role bypasses it (A8). An App installation doesn't hold that role |
 | Edit a ruleset | That needs the Administration permission, which the factory App doesn't get |
 
@@ -881,6 +881,13 @@ classifier, never by GitHub:
   it, removing `review:admin`); the resolve-thread hook and `deny` rule back the instruction (#264);
 - pushing a `v*` tag from a local session, which ships to production (area 4);
 - editing a ruleset.
+
+One gap holds for the factory App as well, by the admin's rule of 16 Nov (#264, #322): on an
+escalated PR the admin's account opened, the reviewer approves and turns on auto-merge while the
+escalation thread holds the merge. Any account with write access, the factory App included, can
+resolve that thread, and resolving starts no workflow, so the PR merges at once, before the reviewer
+can reopen a thread the admin didn't resolve. Only instructions (agents never resolve review
+threads) and the resolve-thread hook stand in the way.
 
 PR #52 makes Claude Code ask before tag pushes and before `--remove-label review:admin` (permission
 rules, commit `523f745`), so two of the four become a prompt the admin sees. The factory is outside
