@@ -817,9 +817,9 @@ the switch, only the factory jobs (the sweep, the chain and the factory job) do 
   `gh variable set FACTORY_ENABLED --repo sssoto17/sunny-pastures --body false` (`true` to turn it
   on). Read it with `gh variable get FACTORY_ENABLED --repo sssoto17/sunny-pastures`. The next run
   reads the new value; a job already past the switch finishes, and `gh run cancel <id>` stops it.
-- **Its first value** is set by `scripts/setup/factory-switch.sh`, which also dispatches the
-  throwaway `check-106-factory-switch.yml` with the switch unset and then `false`, and writes both
-  runs' results for #106 (`scripts/setup/README.md`).
+- **Its first value** is set by `scripts/setup/factory-switch.sh`, which sets it to `false` after
+  asking and reads it back (`scripts/setup/README.md`). #106's run with the switch off is posted on
+  #106; the throwaway workflow that made it is removed.
 
 **Until the factory App runs, every session acts as `sssoto17`.** Elsewhere in this ADR, "until #37"
 means until then: the build issues under #58, after the checks #101–#103. Cloud and local sessions
