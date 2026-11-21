@@ -236,6 +236,9 @@ areas 4 and 8.
 with read access, several can stack, and they can target tags too
 ([about rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)).
 
+**The local layers in front of the rulesets** (the main-folder guard hooks and the git hooks that
+refuse commits on `main`) are [ADR-0008](0008-main-folder-guard.md) (#118).
+
 ### Ruleset `main`
 
 Target: the default branch. Enforcement: active.
