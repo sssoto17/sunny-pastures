@@ -1113,6 +1113,20 @@ separate: this is only the identity step for lanes in Claude Code.
   and `stack.sh` needed no fallback
   ([#336, results](https://github.com/sssoto17/sunny-pastures/issues/336#issuecomment-6934736098)).
   The fallback stays in case a later GitHub change refuses the App's token.
+- **Drafts and ready through a second dispatch, `pr-draft`** (#358; "Stacks", above). The REST
+  update endpoint has no draft field, and the switch needs GraphQL's `convertPullRequestToDraft` and
+  `markPullRequestReadyForReview`, which the cloud proxy refuses.
+  `scripts/pr-draft.sh draft|ready <pr>...` sends event type `pr-draft` with two properties, `state`
+  (`draft` or `ready`) and `prs` (the PR numbers, comma-separated), leaving out PRs already in that
+  state. It waits until `GET pulls/<n>` shows each one switched, and fails with the run's link on a
+  failed run or after `PR_DRAFT_TIMEOUT` (120 s). `.github/workflows/pr-draft.yml` is modelled on
+  `open-pr.yml`: `main`'s copy, environment `factory`, `GITHUB_TOKEN` with `contents: read` for the
+  checkout only, and the App's token with `pull_requests: write` alone. That token marks ready,
+  never `GITHUB_TOKEN`, whose events start no workflows. `.github/scripts/pr-draft.sh` checks the
+  payload and every PR before any write: the state is `draft` or `ready`, `prs` holds 1 to 20
+  numbers, and each PR is open, from this repository, with a lane branch as its head. The node id
+  goes to GraphQL as a variable. The blast radius: a caller can switch an open lane PR between draft
+  and ready, as it could in the UI, and a draft only holds a merge.
 
 **What changes.** The admin approves lane PRs instead of bypass-merging them: a code-owned PR, a
 code-owned part of a stack (so such a stack can merge as one), and an escalated PR, on which the
