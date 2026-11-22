@@ -6,7 +6,7 @@
 # audit let the command through, and how .claude/settings.json registers it. One part is ours, not
 # Fallow's: the clone check between the gate's "sunny-pastures (#504)" markers, which blocks a clone
 # group the change introduces although Fallow 3.43.1's verdict is only `warn`; a reinstall drops it,
-# and the clone checks below fail then. A throwaway git repo
+# and every check that expects a clone to block fails then. A throwaway git repo
 # stands in for the work tree, with a copy of the gate in its .claude/hooks/; the `fallow` first on
 # PATH is a fake that logs its arguments and prints the report the test chose. The real audit is
 # shown in #504's PR. Run: bash .claude/hooks/fallow-gate.test.sh
@@ -49,12 +49,12 @@ report() { # status json
 }
 # A new clone group, as `fallow audit --format json` (3.43.1) reports one (trimmed): verdict `warn`.
 group() { # file introduced
-  printf '{"instances":[{"file":"%s","start_line":96},{"file":"%s","start_line":231}],"actions":[{"type":"extract-shared"}],"introduced":%s}' "$1" "$1" "$2"
+  printf '{"instances":[{"file":"%s","start_line":96,"end_line":120},{"file":"%s","start_line":231,"end_line":255}],"actions":[{"type":"extract-shared"}],"introduced":%s}' "$1" "$1" "$2"
 }
 clones() { # gate group-json
   printf '{"verdict":"warn","attribution":{"gate":"%s"},"duplication":{"clone_groups":[%s]}}' "$1" "$2"
 }
-clone=$(clones new-only "$(group packages/sim/src/pens/index.ts true)")
+new_clone=$(clones new-only "$(group packages/sim/src/pens/index.ts true)")
 # A finding Fallow itself fails on: a new unused export.
 unused='{"verdict":"fail","attribution":{"gate":"new-only"},"dead_code":{"unused_exports":[{"path":"apps/web/src/server/http/index.ts","line":12,"export_name":"spare","actions":[{"type":"remove-export"}],"introduced":true}]}}'
 clean='{"verdict":"pass","attribution":{"gate":"new-only"}}'
@@ -110,13 +110,13 @@ not_audited() { # name
 }
 
 # --- a new finding blocks a commit or a push, and names the finding ---------------------------
-report 0 "$clone"
+report 0 "$new_clone"
 check 'commit with a new clone' 2 'git commit -m "feat(sim): feed again"' \
   'duplication packages/sim/src/pens/index.ts:96'
 audited 'commit with a new clone'
 check 'block names the verdict' 2 'git commit -am x' 'verdict fail, 1 finding(s) caused the block'
 check 'block says why a warn blocks' 2 'git commit -am x' \
-  "fallow's verdict is warn, but a clone group in this change fails CONSTRAINTS.md's Duplication row"
+  "fallow's verdict is warn, but a clone group in this change fails CONSTRAINTS.md's Duplication row:"
 check 'push with a new clone' 2 'git push -u origin claude/x'
 check 'commit after cd and &&' 2 "cd $repo && git add -A && git commit -m x"
 check 'commit with git options' 2 'git -c core.editor=true commit --amend --no-edit'
@@ -129,9 +129,23 @@ check 'commit with a new unused export' 2 'git commit -m x' \
 report 0 "$(clones new-only "$(group apps/web/src/server/game/index.ts false)")"
 check 'inherited clone outside the sim' 0 'git commit -m x'
 report 0 "$(clones new-only "$(group packages/sim/src/pens/index.ts false)")"
-check 'inherited clone in a changed sim file' 2 'git commit -m x' 'Duplication row'
+check 'inherited clone in a changed sim file' 2 'git commit -m x' \
+  'packages/sim/src/pens/index.ts:96-120, packages/sim/src/pens/index.ts:231-255'
 report 0 "$(clones all "$(group apps/web/src/server/game/index.ts false)")"
-check 'any clone under gate all' 2 'git commit -m x' 'Duplication row'
+check 'any clone under gate all' 2 'git commit -m x' 'apps/web/src/server/game/index.ts:96-120'
+# Without node the clone check fails open with a notice: a PATH of the system's tools but node (the
+# system folders only, so no wrapper from the session's own PATH stands in for rm or git).
+nonode="$tmp/nonode"
+mkdir -p "$nonode"
+for d in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do
+  for t in "$d"/*; do
+    n=${t##*/}
+    [[ -x $t && ! -e $nonode/$n && $n != node ]] && ln -s "$t" "$nonode/$n"
+  done
+done
+report 0 "$new_clone"
+check 'no node: clone check skipped with a notice' 0 'git commit -m x' \
+  'no node on PATH, clone check skipped' "PATH='$bin:$nonode' ./.claude/hooks/fallow-gate.sh"
 
 # --- other commands never run the audit --------------------------------------------------------
 check 'not git' 0 'ls -la'
@@ -176,7 +190,7 @@ done
 # own copy), so run it as written, from a folder inside the throwaway repo.
 registered=$(jq -r '.[0].command' <<<"$entry")
 mkdir -p "$repo/packages/sim"
-report 0 "$clone"
+report 0 "$new_clone"
 input=$(printf '{"session_id":"t","cwd":%s,"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' \
   "$(json_str "$repo/packages/sim")")
 : >"$log"

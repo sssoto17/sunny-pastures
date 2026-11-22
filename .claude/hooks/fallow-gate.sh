@@ -925,17 +925,25 @@ run_audit() {
   # Duplication row fails one, as `pnpm audit:changed` does in CI
   # (.github/scripts/audit-changed.mjs, failingClones): every group under
   # `gate = "all"`, else an introduced group or one with a copy in packages/sim.
-  # Keep the two in step. Without node the check is skipped and CI still gates.
-  if [ "$VERDICT" != "fail" ] && [ "$IS_ERROR" != "true" ] && command -v node >/dev/null 2>&1 &&
-    node -e '
+  # Keep the two in step. Without node the check is skipped with a notice, and CI
+  # still gates.
+  if [ "$VERDICT" != "fail" ] && [ "$IS_ERROR" != "true" ]; then
+    if ! command -v node >/dev/null 2>&1; then
+      echo "fallow-gate: no node on PATH, clone check skipped (CI's pnpm audit:changed still runs it)." >&2
+    elif CLONES="$(node -e '
       const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
       const groups = r.duplication?.clone_groups ?? [];
       const failing = r.attribution?.gate !== "new-only" ? groups : groups.filter(
         (g) => g.introduced === true || g.instances.some((i) => i.file.startsWith("packages/sim/")));
-      process.exit(failing.length > 0 ? 0 : 1);
-    ' "$TMP_JSON" 2>/dev/null; then
-    echo "fallow-gate: fallow's verdict is ${VERDICT:-unknown}, but a clone group in this change fails CONSTRAINTS.md's Duplication row." >&2
-    VERDICT="fail"
+      for (const g of failing)
+        console.log("  " + g.instances.map((i) => `${i.file}:${i.start_line}-${i.end_line}`).join(", "));
+    ' "$TMP_JSON" 2>/dev/null)" && [ -n "$CLONES" ]; then
+      {
+        echo "fallow-gate: fallow's verdict is ${VERDICT:-unknown}, but a clone group in this change fails CONSTRAINTS.md's Duplication row:"
+        printf '%s\n' "$CLONES" | tr -d '\000-\010\013-\037\177'
+      } >&2
+      VERDICT="fail"
+    fi
   fi
   # --- end sunny-pastures
 
