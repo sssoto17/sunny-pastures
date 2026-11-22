@@ -90,7 +90,7 @@ threat-model document (the spec's table already is one).
 | `config/` | `readConfig(env)`: typed config; a missing variable is a config error |
 | `db/` | `createDb(config)`: the Drizzle client over postgres.js (section 5) |
 | `rules/` | `createRules(content)` → `{ sim, newFarm, replay, rulesVersion }`. `replay` folds `apply` over the actions at their `at` (and throws on a refusal, ADR-0001), then `advance`s to `to`. M3 has one version (`rulesVersion = 1`); the M4 registry replaces the implementation behind the same interface |
-| `store/` | the `GameStore` type and `createStore({ db, newFarm, replay })`: B100. The layout grill wrote `sql`; section 5, Q9 hands the store the Drizzle client instead |
+| `store/` | the `GameStore` type and `createStore({ db, newFarm, replay, rulesVersion })`: B100. The layout grill wrote `sql`; section 5, Q9 hands the store the Drizzle client instead. `rulesVersion` is `Rules.rulesVersion`, wired in `api/`, so the version stamped on each row is the rules' own (#443) |
 | `auth/` | `createAuth(config)` → `{ readPlayer(request) }` (section 4) |
 | `timing/` | `createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`: one recorder per request; phases `load`, `sim`, `commit`, `total`, summed across retries; the header value, or `null` when no phase ran (#394) |
 | `http/` | the HTTP contract (section 3), added by #395: `readActionRequest` and `readFarmRequest` (the 415 → 413 → 400 checks and the action guards), `buildErrorResponse` and `buildJsonResponse` (the one error builder and the headers on every response). Builds `Response`s, so it isn't `game/` |

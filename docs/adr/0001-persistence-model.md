@@ -73,7 +73,10 @@ Every store checks what it loads before returning it: `seq` and `at` must be saf
 (`Number.isSafeInteger`), or `load` throws a store error. Postgres drivers return `bigint` columns
 as strings by default, and a string `at` would otherwise reach the state hash and look like a
 simulation bug. The driver is also configured to parse `bigint` as a number, but the check at the
-boundary is the guard; the driver setting is only a convenience.
+boundary is the guard; the driver setting is only a convenience. (Amended 22 Nov, #443: for B100 the
+database's check constraints replaced this check, so `load` doesn't repeat it. They refuse a `seq`
+or `at` that isn't a safe integer on write; [ADR-0007](0007-apps-web-and-game-api.md), section 5,
+Q4.)
 
 A farm with no accepted action loads as `{ state: newFarm, seq: 0, at: 0 }`. The store is given a
 `newFarm(playerId)` function when it is created; that builds content, it doesn't run the simulation.
@@ -85,7 +88,10 @@ Store B is also given `replay(state, actions, to)` when it is created, the same 
 rules refuse a logged action, `replay` throws instead of skipping it. (Amended 11 Nov after #31:
 from M3, every log row and snapshot carries a rules version, and `replay`, `load` and `stateAt` take
 those versions and give a farm a version upgrade where the log steps up;
-[ADR-0006](0006-rules-versions-and-replay.md), section 5.)
+[ADR-0006](0006-rules-versions-and-replay.md), section 5.) `replay` checks the seqs between the rows
+it is handed; B's `load` checks the boundary, that the first row after the snapshot is at the
+snapshot's seq + 1 (seq 1 with no snapshot), and throws a store error otherwise. (Amended 22 Nov,
+#443.)
 
 A repeated idempotency key returns the first answer. The handler asks `processed` before it runs the
 simulation, because a resent action may no longer be valid (a resent "plant plot 0" finds the plot

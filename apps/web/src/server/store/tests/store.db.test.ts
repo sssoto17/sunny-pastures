@@ -20,7 +20,8 @@ afterAll(async () => {
 	await db.$client.end();
 });
 
-const makeB100: MakeStore = (rules = {}) => createStore({ db, newFarm, replay, ...rules });
+const makeB100: MakeStore = (rules = {}) =>
+	createStore({ db, newFarm, replay, rulesVersion: 1, ...rules });
 
 const checkViolation = { cause: { code: "23514" } };
 
@@ -77,9 +78,11 @@ describe("createStore (B100) over the game schema", () => {
 		).rejects.toMatchObject(checkViolation);
 	});
 
-	it("stamps every row and every 100th-action snapshot with rules version 1", async () => {
+	it("stamps every row and every 100th-action snapshot with the rules version it was given", async () => {
 		const farmId = await createPlayer();
-		await playActions(makeB100(), farmId, 100);
+		// Not 1, so a constant left in the store would fail this (#443).
+		const store = createStore({ db, newFarm, replay, rulesVersion: 2 });
+		await playActions(store, farmId, 100);
 
 		const [rows, snapshotRows] = await Promise.all([
 			db
@@ -92,7 +95,44 @@ describe("createStore (B100) over the game schema", () => {
 				.where(eq(snapshots.farmId, farmId)),
 		]);
 
-		expect(rows).toEqual([{ rulesVersion: 1 }]);
-		expect(snapshotRows).toEqual([{ seq: 100, rulesVersion: 1 }]);
+		expect(rows).toEqual([{ rulesVersion: 2 }]);
+		expect(snapshotRows).toEqual([{ seq: 100, rulesVersion: 2 }]);
+	});
+
+	// `replay` checks the gaps between the rows it is handed, not the first row against the
+	// snapshot's seq, which the farm doesn't carry: the store checks that boundary (#443).
+	it("throws a store error when the first row after the snapshot isn't the snapshot's seq + 1", async () => {
+		const farmId = await createPlayer();
+		await playActions(makeB100(), farmId, 100);
+		// The row for seq 101 is lost: seq 102 is written straight into the table.
+		await insertRow(farmId, 102);
+		const recorded = recordReplay();
+
+		await expect(makeB100({ replay: recorded.replay }).load(farmId)).rejects.toThrow(
+			"Store error: the first log row after seq 100 is seq 102, not seq 101.",
+		);
+		expect(recorded.calls).toEqual([]);
+	});
+
+	it("throws a store error when a farm with no snapshot has no row at seq 1", async () => {
+		const farmId = await createPlayer();
+		await insertRow(farmId, 2);
+
+		await expect(makeB100().load(farmId)).rejects.toThrow(
+			"Store error: the first log row after seq 0 is seq 2, not seq 1.",
+		);
 	});
 });
+
+/** A log row written straight into the table, past the store's gap-free append (ADR-0007 Q6). */
+async function insertRow(farmId: string, seq: number): Promise<void> {
+	await db.insert(actions).values({
+		farmId,
+		seq,
+		at: seq * 1_000,
+		action: makeEntry(newFarm(), seq - 1, seq * 1_000).action,
+		idempotencyKey: crypto.randomUUID(),
+		answer: {},
+		rulesVersion: 1,
+	});
+}
