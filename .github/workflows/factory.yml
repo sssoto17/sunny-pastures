@@ -22,22 +22,45 @@
 #   opens it as sunny-factory[bot].
 # - report: total_cost_usd, turns, each job's billed minutes and the PR, whatever happened.
 #
+# Fix mode (#588; ADR-0002, area 2, "Fix rounds (#588)"): with `pr` and `head` instead of `issue`
+# (the sweep sends them when sunny-reviewer[bot] asks for fixes on a factory PR), the same jobs fix
+# that PR. gate runs factory-fix-gate.mjs (via factory-gather.sh): an open PR the factory made, still
+# at `head`, whose newest verdict on that head asks for fixes with Required findings. factory makes
+# the PR's branch at `head` and gives Claude only those findings (fix mode in
+# .github/factory-prompt.md); the hand-off may carry a body, labels to add and an `escalated:`
+# comment beside the commits. publish checks it (factory-publish.sh with FIX_BRANCH), then with the
+# App's token adds the labels, replaces the body, posts the comment and pushes the new commits to
+# the same branch, never forced, so the push starts the next review. Its token adds
+# `pull-requests: write` for the labels, body and comment, in fix mode only. Same switch,
+# environments, read-only GITHUB_TOKEN, turn and time caps and protected paths as an issue run.
+#
 # Caps (admin, 21 Nov 2026): --max-turns 100 (the max_turns input may only lower it) and
 # timeout-minutes 60 on the factory job, its Claude step stopping at 55. --max-turns doesn't count
 # Task subagents' turns, so the timeout is the real bound. Concurrency 1: one factory run at a
 # time; a newer dispatch waits, and one waiting run is replaced by a newer one (GitHub's rule).
 # GITHUB_TOKEN is read-only in every job. Actions pinned to full SHAs, main's pins.
 name: factory
-# Runs read "factory #<n>", so the sweep (#108) and the admin can find an issue's runs. A name is
-# display text that no shell reads.
-run-name: 'factory #${{ inputs.issue }}'
+# Runs read "factory #<n>", so the sweep (#108) and the admin can find an issue's runs, and a fix
+# round "factory fix #<pr> at <head SHA>": the sweep's only record of the rounds it ran (#588). A
+# name is display text that no shell reads.
+run-name: >-
+  ${{ inputs.pr != '' && format('factory fix #{0} at {1}', inputs.pr, inputs.head)
+  || format('factory #{0}', inputs.issue) }}
 
 on:
   workflow_dispatch:
     inputs:
       issue:
-        description: The issue to work (open, factory:ready, opened by the owner or a collaborator)
-        required: true
+        description: The issue to work (open, factory:ready, opened by the owner or a collaborator); empty for a fix
+        required: false
+        type: string
+      pr:
+        description: Fix mode (#588), instead of issue - the factory PR whose Required findings to fix
+        required: false
+        type: string
+      head:
+        description: Fix mode - the PR's head commit SHA the review is on (the run refuses a PR that moved)
+        required: false
         type: string
       max_turns:
         description: Claude's turn cap, from 1 to 100 (only ever lower than the default)
@@ -76,6 +99,9 @@ jobs:
       run: ${{ steps.gate.outputs.run }}
       issue: ${{ steps.gate.outputs.issue }}
       turns: ${{ steps.gate.outputs.turns }}
+      pr: ${{ steps.gate.outputs.pr }} # fix mode only, as are branch and head
+      branch: ${{ steps.gate.outputs.branch }}
+      head: ${{ steps.gate.outputs.head }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,10 +109,12 @@ jobs:
           sparse-checkout: .github/scripts
 
       - id: gate
-        name: Check the issue (read-only token)
+        name: Check the issue or the PR (read-only token)
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ inputs.issue }}
+          PR: ${{ inputs.pr }}
+          HEAD: ${{ inputs.head }}
           MAX_TURNS: ${{ inputs.max_turns }}
         run: bash .github/scripts/factory-gather.sh
 
@@ -107,6 +135,9 @@ jobs:
       cost: ${{ steps.result.outputs.cost }}
     env:
       ISSUE: ${{ needs.gate.outputs.issue }}
+      FIX_PR: ${{ needs.gate.outputs.pr }}
+      FIX_BRANCH: ${{ needs.gate.outputs.branch }}
+      FIX_HEAD: ${{ needs.gate.outputs.head }}
       OUT: ${{ github.workspace }}/../factory-out
       ANTHROPIC_API_KEY: '' # never an API key: the setup-token is the only credential
     steps:
@@ -121,18 +152,33 @@ jobs:
 
       # The issue as Claude reads it, as files (the repo is public): the gate runs again on a fresh
       # read, so an issue that changed hands or got a branch since stops here, then its body and
-      # only the comments of the owner and collaborators.
+      # only the comments of the owner and collaborators. In fix mode: the gate again, then the
+      # PR's title, body, branch and labels and the review's Required findings, and the PR's
+      # branch made locally at the head the gate checked, for Claude to switch to.
       - id: context
-        name: Gather the issue (read-only token)
+        name: Gather the issue or the PR (read-only token)
         env:
           GH_TOKEN: ${{ github.token }}
           MAX_TURNS: ${{ needs.gate.outputs.turns }}
+          PR: ${{ needs.gate.outputs.pr }}
+          HEAD: ${{ needs.gate.outputs.head }}
         run: |
           set -euo pipefail
+          if [[ -n $PR ]]; then ISSUE=""; fi
           bash .github/scripts/factory-gather.sh
-          grep -qx 'run=true' "$GITHUB_OUTPUT" || { echo "::error::the issue no longer passes the gate"; exit 1; }
+          grep -qx 'run=true' "$GITHUB_OUTPUT" || { echo "::error::the issue or PR no longer passes the gate"; exit 1; }
           ctx=$RUNNER_TEMP/factory-context
           mkdir -p "$ctx" "$OUT"
+          if [[ -n $PR ]]; then
+            g=$RUNNER_TEMP/factory-gate
+            jq '{number, title, body, branch: .head.ref, labels: [.labels[].name]}' "$g/pr.json" >"$ctx/pr.json"
+            cp "$g/findings.md" "$ctx/findings.md"
+            git fetch -q --no-tags origin "refs/heads/$FIX_BRANCH"
+            [[ $(git rev-parse FETCH_HEAD) == "$FIX_HEAD" ]] || { echo "::error::PR #$PR moved since the gate"; exit 1; }
+            git branch "$FIX_BRANCH" "$FIX_HEAD"
+            echo "RESULT fix=#$PR branch=$FIX_BRANCH head=$FIX_HEAD"
+            exit 0
+          fi
           r="repos/$GITHUB_REPOSITORY/issues/$ISSUE"
           # The copy the gate just checked, so the text Claude reads is the text whose author passed.
           jq '{number, title, body, labels: [.labels[].name]}' "$RUNNER_TEMP/factory-gate/issue.json" >"$ctx/issue.json"
@@ -208,10 +254,15 @@ jobs:
           bot_name: ${{ env.FACTORY_APP }}[bot]
           bot_id: ${{ env.FACTORY_BOT_ID }}
           allowed_bots: github-actions # sweep.yml's dispatch (#582)
+          # Built from the gate's checked values only (numbers and a <n>-<slug> branch).
           prompt: >-
-            /implement #${{ needs.gate.outputs.issue }} Read .github/factory-prompt.md and follow
-            it. The issue is #${{ needs.gate.outputs.issue }}; its context folder is
-            ${{ runner.temp }}/factory-context; write your hand-off files to ${{ env.OUT }}.
+            ${{ needs.gate.outputs.pr != '' && format('Read .github/factory-prompt.md and follow
+            its "Fix mode" section. You are fixing PR #{0} on the branch {1}; its context folder is
+            {2}/factory-context; write your hand-off files to {3}.', needs.gate.outputs.pr,
+            needs.gate.outputs.branch, runner.temp, env.OUT) || format('/implement #{0} Read
+            .github/factory-prompt.md and follow it. The issue is #{0}; its context folder is
+            {1}/factory-context; write your hand-off files to {2}.', needs.gate.outputs.issue,
+            runner.temp, env.OUT) }}
           claude_args: >-
             --max-turns ${{ needs.gate.outputs.turns }}
             --permission-mode default
@@ -221,12 +272,37 @@ jobs:
             --disallowedTools "WebFetch,WebSearch,Read(//proc/**)"
 
       # The hand-off: data for publish to check, never trusted here. The bundle holds only the
-      # commits past the main this run checked out.
+      # commits past the main this run checked out. In fix mode: the commits past the PR's head
+      # (an empty file when there are none), and `comment`; an empty file means "nothing", and a
+      # hand-off with nothing in it isn't handed on.
       - id: handoff
         name: Pack the hand-off
         if: steps.claude.outcome == 'success'
         run: |
           set -euo pipefail
+          if [[ -n $FIX_PR ]]; then
+            h=$RUNNER_TEMP/handoff
+            mkdir -p "$h"
+            printf '%s\n' "$FIX_BRANCH" >"$h/branch"
+            for f in pr-body.md labels comment; do
+              if [ -f "$OUT/$f" ]; then cp "$OUT/$f" "$h/$f"; else : >"$h/$f"; fi
+            done
+            n=$(git rev-list --count "$FIX_HEAD..refs/heads/$FIX_BRANCH")
+            if ((n > 0)); then
+              git bundle create -q "$h/commits.bundle" "$FIX_HEAD..refs/heads/$FIX_BRANCH"
+            else
+              : >"$h/commits.bundle"
+            fi
+            if [[ ! -s $h/commits.bundle && ! -s $h/pr-body.md && ! -s $h/comment ]] && ! grep -q '[^[:space:]]' "$h/labels"; then
+              echo "RESULT handoff=none: the fix changed nothing"
+              exit 0
+            fi
+            data=$(tar -C "$h" -czf - branch comment commits.bundle labels pr-body.md | base64 -w0)
+            ((${#data} < 900000)) || { echo "RESULT handoff=none: ${#data} bytes, over the 900 kB cap"; exit 0; }
+            echo "handoff=$data" >>"$GITHUB_OUTPUT"
+            echo "RESULT handoff=fix $FIX_BRANCH commits=$n bytes=${#data}"
+            exit 0
+          fi
           [ -s "$OUT/branch" ] || { echo "RESULT handoff=none: Claude wrote no branch"; exit 0; }
           b=$(head -n1 "$OUT/branch")
           [[ $b =~ ^$ISSUE-[a-z0-9-]+$ ]] || { echo "RESULT handoff=none: bad branch name"; exit 0; }
@@ -283,9 +359,12 @@ jobs:
     permissions:
       contents: read
     outputs:
-      pr: ${{ steps.open.outputs.pr }}
+      pr: ${{ steps.open.outputs.pr || steps.fix.outputs.pr }}
     env:
       ISSUE: ${{ needs.gate.outputs.issue }}
+      FIX_PR: ${{ needs.gate.outputs.pr }}
+      FIX_BRANCH: ${{ needs.gate.outputs.branch }}
+      FIX_HEAD: ${{ needs.gate.outputs.head }}
     steps:
       # main's scripts and history, the base the hand-off is checked against. Fresh: no model ran
       # on this runner, so its git config and hooks are main's.
@@ -302,21 +381,33 @@ jobs:
           set -euo pipefail
           printf '%s' "$DATA" | base64 -d >"$RUNNER_TEMP/handoff.tgz"
           mkdir -p "$RUNNER_TEMP/handoff"
-          HANDOFF=$RUNNER_TEMP/handoff.tgz WORK=$RUNNER_TEMP/handoff BASE=$(git rev-parse HEAD) \
+          base=$(git rev-parse HEAD)
+          if [[ -n $FIX_PR ]]; then
+            # The PR's branch as it is now: still the head the gate checked, so the push is a
+            # fast-forward of what the reviewer saw.
+            git fetch -q --no-tags origin "refs/heads/$FIX_BRANCH"
+            base=$(git rev-parse FETCH_HEAD)
+            [[ $base == "$FIX_HEAD" ]] || { echo "::error::PR #$FIX_PR moved since the gate"; exit 1; }
+          else
+            unset FIX_BRANCH
+          fi
+          HANDOFF=$RUNNER_TEMP/handoff.tgz WORK=$RUNNER_TEMP/handoff BASE=$base \
             BOT="${FACTORY_APP}[bot]" BOT_ID=$FACTORY_BOT_ID bash .github/scripts/factory-publish.sh
 
       # Only what publishing needs: contents write pushes the branch and sends open-pr's
-      # repository_dispatch; pull requests read for open-pr.sh's lookup. No workflows.
+      # repository_dispatch; pull requests read for open-pr.sh's lookup, write in fix mode only
+      # (the PR's labels, body and comment). No workflows.
       - id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
           private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
           permission-contents: write
-          permission-pull-requests: read
+          permission-pull-requests: ${{ needs.gate.outputs.pr != '' && 'write' || 'read' }}
 
       - id: open
         name: Push and open the PR as sunny-factory
+        if: needs.gate.outputs.pr == ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           BRANCH: ${{ steps.check.outputs.branch }}
@@ -333,6 +424,34 @@ jobs:
           pr=$(scripts/open-pr.sh ${args[@]+"${args[@]}"} "$BRANCH" "$BODY")
           echo "pr=$pr" >>"$GITHUB_OUTPUT"
           echo "RESULT pr=#$pr branch=$BRANCH"
+
+      # Fix mode: labels, body and comment first, so the review the push starts reads them; then
+      # the new commits, a plain push that GitHub refuses unless it fast-forwards the branch.
+      - id: fix
+        name: Fix the PR as sunny-factory
+        if: needs.gate.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          LABELS: ${{ steps.check.outputs.labels }}
+          BODY: ${{ steps.check.outputs.body }}
+          COMMENT: ${{ steps.check.outputs.comment }}
+          COMMITS: ${{ steps.check.outputs.commits }}
+        run: |
+          set -euo pipefail
+          r="repos/$GITHUB_REPOSITORY"
+          args=()
+          IFS=, read -r -a wanted <<<"$LABELS"
+          for l in ${wanted[@]+"${wanted[@]}"}; do args+=(-f "labels[]=$l"); done
+          if ((${#args[@]})); then gh api -X POST "$r/issues/$FIX_PR/labels" "${args[@]}" --silent; fi
+          if [[ -n $BODY ]]; then gh api -X PATCH "$r/pulls/$FIX_PR" -F "body=@$BODY" --silent; fi
+          if [[ -n $COMMENT ]]; then gh api -X POST "$r/issues/$FIX_PR/comments" -F "body=@$COMMENT" --silent; fi
+          if ((COMMITS > 0)); then
+            git -c core.hooksPath=/dev/null push --no-verify \
+              "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" \
+              "refs/heads/$FIX_BRANCH:refs/heads/$FIX_BRANCH"
+          fi
+          echo "pr=$FIX_PR" >>"$GITHUB_OUTPUT"
+          echo "RESULT fix=#$FIX_PR commits=$COMMITS labels=${LABELS:-none} body=${BODY:+replaced}${BODY:-unchanged} comment=${COMMENT:+posted}${COMMENT:-none}"
 
   # Report data (ADR-0002, "Caps"): cost and turns, each job's billed minutes (GitHub rounds each
   # job up to a whole minute) and the PR. Non-secret fields only.

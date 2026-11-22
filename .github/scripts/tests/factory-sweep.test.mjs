@@ -11,6 +11,10 @@ const SCRIPT = fileURLToPath(new URL("../factory-sweep.mjs", import.meta.url));
 const GATHER = fileURLToPath(new URL("../factory-sweep-gather.sh", import.meta.url));
 const REPO = "https://api.github.com/repos/sssoto17/sunny-pastures";
 const BOT = "sunny-factory[bot]";
+const HEAD = "f6cd23e7243ac2e33c0f65a4024a352086d1a6aa";
+const OLD = "0123456789abcdef0123456789abcdef01234567";
+const FIXES =
+	"merge after fixes: PR #586 at f6cd23e, full\n\nFindings\n1. [Required, confirmed] x\n";
 
 // A factory run as factory-sweep-gather.sh trims `GET …/actions/workflows/factory.yml/runs`, with
 // `claude_ran` from its jobs (#582).
@@ -55,8 +59,29 @@ const issue = (
 	updated_at: updated,
 	...(pr ? { pull_request: { url: "x" } } : {}),
 });
-// An open PR, trimmed.
-const pull = (number, ref, login = "sssoto17") => ({ number, head: { ref }, user: { login } });
+// An open PR, trimmed, with `factory` as the gather sets it (every commit the App's bot user's).
+const pull = (number, ref, login = "sssoto17", { sha = HEAD, factory = false } = {}) => ({
+	number,
+	head: { ref, sha },
+	user: { login },
+	factory,
+});
+// A factory PR, and a review of it by sunny-reviewer[bot] as the gather trims it (#588).
+const factoryPull = (number, sha = HEAD) =>
+	pull(number, `${number}-x`, BOT, { sha, factory: true });
+const review = (pr, { state = "CHANGES_REQUESTED", commit = HEAD, body = FIXES } = {}) => ({
+	pr,
+	user: { login: "sunny-reviewer[bot]" },
+	state,
+	commit_id: commit,
+	submitted_at: "2026-11-22T22:47:40Z",
+	body,
+});
+// A finished fix round, by factory.yml's run-name.
+const fixRun = (pr, sha, id = 90) => ({
+	...run(0, "2026-11-22T20:00:00Z", { id, conclusion: "success" }),
+	display_title: `factory fix #${pr} at ${sha}`,
+});
 
 const decide = (over = {}) =>
 	decideSweep({
@@ -68,6 +93,7 @@ const decide = (over = {}) =>
 		pulls: [],
 		refs: [],
 		comments: [],
+		reviews: [],
 		...over,
 	});
 
@@ -218,6 +244,79 @@ describe("decideSweep", () => {
 		expect(ran.skipped[0].why).toMatch(/^last run failed: run 6/);
 	});
 
+	describe("fix rounds (#588)", () => {
+		it("chooses a fix round before a new issue, whatever the cap", () => {
+			const pulls = [factoryPull(586), ...[1, 2, 3].map((n) => factoryPull(600 + n, OLD))];
+			const d = decide({ pulls, reviews: [review(586)] });
+			expect(d).toMatchObject({ fix: { pr: 586, head: HEAD, round: 1 }, dispatch: null, open: 4 });
+			expect(d.reason).toBe("fix round 1 of 2 on PR #586 at f6cd23e");
+		});
+
+		it("reads a 'merge after fixes' verdict left as a comment, and takes the lowest PR first", () => {
+			const reviews = [review(590, { state: "COMMENTED" }), review(586)];
+			const d = decide({ pulls: [factoryPull(590), factoryPull(586)], reviews });
+			expect(d.fix.pr).toBe(586);
+			expect(decide({ pulls: [factoryPull(590)], reviews }).fix.pr).toBe(590);
+		});
+
+		it("never picks a lane PR, opened as the App but with commits of its own", () => {
+			const lane = pull(586, "586-x", BOT, { factory: false });
+			const d = decide({ pulls: [lane], reviews: [review(586)] });
+			expect(d).toMatchObject({ fix: null, dispatch: 10, fixSkipped: [] });
+		});
+
+		it("ignores a verdict on an older head, or one that doesn't ask for fixes", () => {
+			const pulls = [factoryPull(586)];
+			for (const r of [
+				review(586, { commit: OLD }),
+				review(586, { state: "APPROVED", body: "merge: PR #586" }),
+				review(586, { state: "COMMENTED", body: "merge after admin review: PR #586" }),
+			]) {
+				expect(decide({ pulls, reviews: [r] })).toMatchObject({ fix: null, dispatch: 10 });
+			}
+		});
+
+		it("never runs twice for the same head, and says why", () => {
+			const d = decide({
+				pulls: [factoryPull(586)],
+				reviews: [review(586)],
+				runs: [fixRun(586, HEAD)],
+			});
+			expect(d).toMatchObject({ fix: null, dispatch: 10 });
+			expect(d.fixSkipped).toEqual([{ pr: 586, why: "a fix round already ran at f6cd23e" }]);
+		});
+
+		it("stops at 2 rounds a PR, and says why", () => {
+			const runs = [fixRun(586, OLD, 91), fixRun(586, "a".repeat(40), 92), fixRun(5860, OLD, 93)];
+			const two = decide({ pulls: [factoryPull(586)], reviews: [review(586)], runs });
+			expect(two).toMatchObject({ fix: null, dispatch: 10 });
+			expect(two.fixSkipped).toEqual([{ pr: 586, why: "2 fix rounds already, the limit is 2" }]);
+			const one = decide({
+				pulls: [factoryPull(586)],
+				reviews: [review(586)],
+				runs: runs.slice(1),
+			});
+			expect(one.fix).toEqual({ pr: 586, head: HEAD, round: 2 });
+		});
+
+		it("waits for a running factory run, and still holds new issues at the cap", () => {
+			const busy = decide({
+				pulls: [factoryPull(586)],
+				reviews: [review(586)],
+				runs: [run(9, "2026-11-22T21:00:00Z", { status: "queued", conclusion: null, id: 77 })],
+			});
+			expect(busy).toMatchObject({ fix: null, dispatch: null });
+			const full = decide({
+				maxOpenPrs: "1",
+				pulls: [factoryPull(586)],
+				reviews: [review(586)],
+				runs: [fixRun(586, HEAD)],
+			});
+			expect(full).toMatchObject({ fix: null, dispatch: null });
+			expect(full.reason).toMatch(/^open-PR cap reached/);
+		});
+	});
+
 	it("dispatches nothing when no issue is eligible", () => {
 		const d = decide({ items: [item(50, { status: "Backlog" })], issues: [issue(50)] });
 		expect(d).toMatchObject({ dispatch: null, eligible: [], reason: "no eligible issue" });
@@ -237,6 +336,7 @@ describe("factory-sweep.mjs", () => {
 			pulls: [],
 			refs: [],
 			comments: [],
+			reviews: [],
 			...files,
 		};
 		for (const [k, v] of Object.entries(data))
@@ -264,7 +364,7 @@ describe("factory-sweep.mjs", () => {
 	it("writes the issue to dispatch, a SWEEP line and the job summary", () => {
 		const r = cli({ FACTORY_ENABLED: "true" }, { pulls: [pull(7, "7-x", BOT)] });
 		expect(r.code).toBe(0);
-		expect(r.out).toBe("issue=60\n");
+		expect(r.out).toBe("issue=60\npr=\nhead=\n");
 		expect(r.log).toMatch(/^SWEEP dispatch #60 \(P2\) open=1 cap=4$/m);
 		expect(r.summary).toContain("- Switch: on");
 		expect(r.summary).toContain("- Open factory PRs: 1 of 4");
@@ -275,9 +375,22 @@ describe("factory-sweep.mjs", () => {
 	it("writes an empty issue and says why when the switch is off, without reading the files", () => {
 		const r = cli({ FACTORY_ENABLED: "false", SWEEP_DIR: "/nonexistent" });
 		expect(r.code).toBe(0);
-		expect(r.out).toBe("issue=\n");
+		expect(r.out).toBe("issue=\npr=\nhead=\n");
 		expect(r.log).toMatch(/^SWEEP none: switch off: FACTORY_ENABLED is "false"$/m);
 		expect(r.summary).toContain("- Switch: off");
+	});
+
+	it("writes the fix round's PR and head, and a SWEEP line naming the PRs it skipped", () => {
+		const pulls = [factoryPull(586), factoryPull(587)];
+		const reviews = [review(586), review(587)];
+		const r = cli({ FACTORY_ENABLED: "true" }, { pulls, reviews, runs: [fixRun(586, HEAD)] });
+		expect(r.code).toBe(0);
+		expect(r.out).toBe(`issue=\npr=587\nhead=${HEAD}\n`);
+		expect(r.log).toMatch(
+			/^SWEEP fix round 1 of 2 on PR #587 at f6cd23e open=2 cap=4; skipped PR #586: a fix round already ran at f6cd23e$/m,
+		);
+		expect(r.summary).toContain("- PR #586: a fix round already ran at f6cd23e");
+		expect(r.summary).toContain("Chosen: a fix round 1 of 2 on PR #587 at f6cd23e");
 	});
 
 	it("fails rather than guess on a file that isn't the JSON array it expects", () => {
@@ -309,6 +422,10 @@ case "$*" in
   *"labels=factory:ready"*) echo "\${FAKE_ISSUES-}" ;;
   *"/runs/5/jobs"*) echo true ;;
   *"/jobs"*) echo false ;;
+  *"pulls?state=open"*) echo "\${FAKE_PULLS-}" ;;
+  *"/pulls/7/commits"*) echo true ;;
+  *"/commits"*) echo false ;;
+  *"/reviews"*) echo '{"pr":7,"state":"CHANGES_REQUESTED"}' ;;
 esac
 `,
 		);
@@ -346,7 +463,9 @@ esac
 			"repos/sssoto17/sunny-pastures/actions/workflows/factory.yml/runs?per_page=100",
 		);
 		expect(g.calls).toContain("users/sssoto17/projectsV2/3/items?per_page=100&fields=1,2,3");
-		expect(g.log).toMatch(/^SWEEP gather: runs=0 issues=0 pulls=0 branches=0 comments=0 items=0$/m);
+		expect(g.log).toMatch(
+			/^SWEEP gather: runs=0 issues=0 pulls=0 branches=0 comments=0 reviews=0 items=0$/m,
+		);
 		const calls = g.calls.trim().split("\n");
 		expect(calls).toHaveLength(6);
 		for (const c of calls) {
@@ -388,5 +507,31 @@ esac
 			[7, false],
 			[8, false],
 		]);
+	});
+
+	// #588: lanes open PRs as sunny-factory[bot] too, so the factory's own are those whose every
+	// commit is its bot user's, and only their reviews are read.
+	it("marks the App's PRs whose commits are all its bot user's as factory, and reads their reviews", () => {
+		const p = (number, login) =>
+			JSON.stringify({ number, head: { ref: "x", sha: "s" }, user: { login } });
+		const g = gather({
+			FACTORY_ENABLED: "true",
+			FAKE_PULLS: [p(7, BOT), p(8, BOT), p(9, "sssoto17")].join("\n"),
+		});
+		expect(g.code).toBe(0);
+		const reads = g.calls.split("\n").filter((c) => /\/(commits|reviews)\?/.test(c));
+		expect(reads).toEqual([
+			"repos/sssoto17/sunny-pastures/pulls/7/commits?per_page=100 token=repo-token",
+			"repos/sssoto17/sunny-pastures/pulls/7/reviews?per_page=100 token=repo-token",
+			"repos/sssoto17/sunny-pastures/pulls/8/commits?per_page=100 token=repo-token",
+		]);
+		const pulls = JSON.parse(readFileSync(join(dir, "sweep", "pulls.json"), "utf8"));
+		expect(pulls.map((x) => [x.number, x.factory])).toEqual([
+			[7, true],
+			[8, false],
+			[9, false],
+		]);
+		const reviews = JSON.parse(readFileSync(join(dir, "sweep", "reviews.json"), "utf8"));
+		expect(reviews).toEqual([{ pr: 7, state: "CHANGES_REQUESTED" }]);
 	});
 });

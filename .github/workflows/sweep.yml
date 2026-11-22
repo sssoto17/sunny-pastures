@@ -1,6 +1,7 @@
 # The factory sweep and chain (#108; ADR-0002, area 2, "The factory sweep, built (#108)"): each run
-# dispatches at most ONE eligible issue to the factory (factory.yml), so a queue drains one factory
-# run at a time without the admin starting each one.
+# dispatches at most ONE factory run (factory.yml): a fix round on a factory PR the reviewer sent
+# back (#588, "Fix rounds (#588)"), or else one eligible issue, so a queue drains one factory run at
+# a time without the admin starting each one.
 #
 # Triggers: every hour (minute 23, UTC; the hour doesn't matter, so no DST to handle), the
 # factory's own runs finishing (`workflow_run`, the chain; a cancelled factory run is ignored), and
@@ -19,16 +20,21 @@
 #   says so. No permissions.
 # - select: environment `board` (main only), for BOARD_PROJECT_TOKEN, which reads the Project
 #   (REST, on the Project's calls only, as board.yml's `move` does); the read-only GITHUB_TOKEN reads
-#   the factory's runs, the issues, PRs and branches. factory-sweep-gather.sh reads, then
+#   the factory's runs, the issues, PRs (with the commits and the reviewer's reviews of the App's
+#   PRs) and branches. factory-sweep-gather.sh reads, then
 #   factory-sweep.mjs decides, logs one SWEEP line and writes the job summary: the switch, the open
 #   factory PRs against the cap, the eligible issues in order, the skipped ones and why, and the one
 #   dispatched or why none. It dispatches nothing while a factory run is queued, waiting or in
-#   progress, or while the open PRs by sunny-factory[bot] (drafts included) reach the repo variable
+#   progress. Next comes a fix round (#588): a factory PR whose reviewer's newest verdict on its head
+#   asks for fixes, at most 2 rounds a PR and never twice on one head (the header of
+#   factory-sweep.mjs); the cap doesn't hold it back. It dispatches no new issue while the open PRs
+#   by sunny-factory[bot] (drafts included) reach the repo variable
 #   FACTORY_MAX_OPEN_PRS (default 4 when unset; admin, 22 Nov 2026), and skips an issue whose last
 #   factory run ran Claude (its "Claude ran" step) and opened no PR until the issue is edited after
 #   that run; a run that failed before Claude ran doesn't count (#582).
 # - dispatch: `actions: write` on this job only, and nothing else: GITHUB_TOKEN dispatches
-#   factory.yml on main with the one issue, then waits until the new run is listed, so a sweep
+#   factory.yml on main with the one issue (or the fix round's `pr` and `head`), then waits until
+#   the new run is listed, so a sweep
 #   queued behind this one sees it. A workflow_dispatch is one of the two events a
 #   GITHUB_TOKEN may start a run with ("Triggering a workflow from a workflow",
 #   https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
@@ -90,6 +96,8 @@ jobs:
       pull-requests: read # the open PRs
     outputs:
       issue: ${{ steps.decide.outputs.issue }}
+      pr: ${{ steps.decide.outputs.pr }}
+      head: ${{ steps.decide.outputs.head }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,7 +115,7 @@ jobs:
         run: bash .github/scripts/factory-sweep-gather.sh
 
       - id: decide
-        name: Choose at most one issue
+        name: Choose at most one fix round or issue
         env:
           FACTORY_ENABLED: ${{ vars.FACTORY_ENABLED }}
           FACTORY_MAX_OPEN_PRS: ${{ vars.FACTORY_MAX_OPEN_PRS }}
@@ -116,7 +124,7 @@ jobs:
 
   dispatch:
     needs: select
-    if: needs.select.outputs.issue != ''
+    if: needs.select.outputs.issue != '' || needs.select.outputs.pr != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 4
     permissions:
@@ -126,20 +134,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ needs.select.outputs.issue }}
+          PR: ${{ needs.select.outputs.pr }}
+          HEAD: ${{ needs.select.outputs.head }}
         run: |
           set -euo pipefail
-          [[ $ISSUE =~ ^[1-9][0-9]{0,6}$ ]] || { echo "::error::not an issue number"; exit 1; }
+          if [[ -n $PR ]]; then
+            [[ $PR =~ ^[1-9][0-9]{0,6}$ && $HEAD =~ ^[0-9a-f]{40}$ ]] || { echo "::error::not a PR number and head SHA"; exit 1; }
+            inputs=(-f "inputs[pr]=$PR" -f "inputs[head]=$HEAD")
+            title="factory fix #$PR at $HEAD" # factory.yml's run-name
+          else
+            [[ $ISSUE =~ ^[1-9][0-9]{0,6}$ ]] || { echo "::error::not an issue number"; exit 1; }
+            inputs=(-f "inputs[issue]=$ISSUE")
+            title="factory #$ISSUE"
+          fi
           gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/factory.yml/dispatches" \
-            -f ref=main -f "inputs[issue]=$ISSUE" --silent
-          echo "SWEEP dispatched factory #$ISSUE"
-          echo "Dispatched factory #$ISSUE on main." >>"$GITHUB_STEP_SUMMARY"
+            -f ref=main "${inputs[@]}" --silent
+          echo "SWEEP dispatched $title"
+          echo "Dispatched $title on main." >>"$GITHUB_STEP_SUMMARY"
           # The dispatch API answers before the run is listed. A sweep queued behind this one starts
           # when it ends, so it waits (up to 2 minutes) until the run shows: the next sweep then sees
           # it and stays strictly serial. A run that never shows is a warning, not a failure.
           for _ in $(seq 24); do
             n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/factory.yml/runs?per_page=10" \
-              --jq "[.workflow_runs[] | select(.display_title == \"factory #$ISSUE\" and .status != \"completed\")] | length")
-            if ((n > 0)); then echo "SWEEP factory #$ISSUE is listed"; exit 0; fi
+              --jq "[.workflow_runs[] | select(.display_title == \"$title\" and .status != \"completed\")] | length")
+            if ((n > 0)); then echo "SWEEP $title is listed"; exit 0; fi
             sleep 5
           done
-          echo "::warning title=sweep::factory #$ISSUE wasn't listed within 2 minutes; the next sweep may not see it"
+          echo "::warning title=sweep::$title wasn't listed within 2 minutes; the next sweep may not see it"
