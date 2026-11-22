@@ -33,8 +33,8 @@ for a in "$@"; do
 done
 case "$*" in
   *"actions/workflows/review.yml/runs"*) f=runs.json ;;
-  *"repos/o/r/issues -f labels"*"state=open"*) f=open.json ;;
-  *"repos/o/r/issues -f labels"*"state=closed"*) f=closed.json ;;
+  *"repos/o/r/issues -f per_page"*"state=open"*) f=open.json ;;
+  *"repos/o/r/issues -f per_page"*"state=closed"*) f=closed.json ;;
   *"issues/"*"/comments --jq"*) n=\${s#*issues/}; f=comments-\${n%%/*}.json ;;
   "api repos/o/r/issues/"*" --jq"*) n=\${s#*issues/}; f=issue-\${n%% *}.json ;;
   *"--silent repos/o/r/issues/"*"/comments"*) printf 'BODY<<\\n%s\\n>>\\n' "$(cat "$body")" >>"$d/calls"; exit 0 ;;
@@ -51,7 +51,17 @@ const run = (id, created = "2026-11-22T11:00:00Z") => ({
 	html_url: `https://github.com/o/r/actions/runs/${id}`,
 	conclusion: "startup_failure",
 });
-const issue = (number, state, title = TITLE) => ({ number, state, title, labels: [] });
+const BOT = "github-actions[bot]";
+// An issue as the issues list gives it; by default one this workflow opened.
+const issue = (number, state, { title = TITLE, author = BOT } = {}) => ({
+	number,
+	state,
+	title,
+	user: { login: author },
+});
+// A comment: a plain string is the workflow's own, [author, body] someone else's.
+const comment = (c) =>
+	typeof c === "string" ? { user: { login: BOT }, body: c } : { user: { login: c[0] }, body: c[1] };
 
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
@@ -63,7 +73,7 @@ function alert({
 	bodies = {},
 	comments = {},
 	env = {},
-	extra = [],
+	others = [],
 } = {}) {
 	dir = mkdtempSync(join(tmpdir(), "reviewer-stopped-"));
 	const bin = join(dir, "bin");
@@ -75,12 +85,12 @@ function alert({
 		join(bin, "runs.json"),
 		JSON.stringify({ total_count: runs.length, workflow_runs: runs }),
 	);
-	writeFileSync(join(bin, "open.json"), JSON.stringify([...open, ...extra]));
+	writeFileSync(join(bin, "open.json"), JSON.stringify([...open, ...others]));
 	writeFileSync(join(bin, "closed.json"), JSON.stringify(closed));
 	for (const [n, body] of Object.entries(bodies))
 		writeFileSync(join(bin, `issue-${n}.json`), JSON.stringify({ number: Number(n), body }));
 	for (const [n, list] of Object.entries(comments))
-		writeFileSync(join(bin, `comments-${n}.json`), JSON.stringify(list.map((body) => ({ body }))));
+		writeFileSync(join(bin, `comments-${n}.json`), JSON.stringify(list.map(comment)));
 	const res = spawnSync("bash", [SCRIPT], {
 		cwd: dir,
 		encoding: "utf8",
@@ -120,7 +130,8 @@ describe("reviewer-stopped.sh", () => {
 		expect(a.writes).toHaveLength(1);
 		const [create] = a.writes;
 		expect(create).toContain(`-f title=${TITLE}`);
-		expect(create).toContain("-f labels[]=blocked:admin");
+		for (const label of ["blocked:admin", "chore", "area:ci-cd", "triage"])
+			expect(create).toContain(`-f labels[]=${label}`);
 		// The links, oldest first.
 		expect(a.calls).toMatch(
 			/- \[1\]\(https:\/\/github\.com\/o\/r\/actions\/runs\/1\), 2026-11-22T11:00:00Z\n- \[2\]\(https:\/\/github\.com\/o\/r\/actions\/runs\/2\)/,
@@ -188,10 +199,31 @@ describe("reviewer-stopped.sh", () => {
 		expect(a.log).toMatch(/^ALERT commented: #40, 1 run\(s\)$/m);
 	});
 
-	it("ignores an open blocked:admin issue with another title", () => {
-		const a = alert({ runs: [run(1)], extra: [issue(41, "open", "Something else")] });
+	it.each([
+		["another title", { title: "Something else" }],
+		["the same title, opened by someone else", { author: "stranger" }],
+	])("ignores an open issue with %s", (_n, fields) => {
+		const a = alert({ runs: [run(1)], others: [issue(41, "open", fields)] });
 		expect(a.log).toMatch(/^ALERT opened: #99/m);
 		expect(a.calls).not.toContain("issues/41");
+	});
+
+	it("doesn't count a run linked only in someone else's comment, or another repo's run", () => {
+		const a = alert({
+			runs: [run(1), run(2)],
+			open: [issue(40, "open")],
+			bodies: { 40: "https://github.com/x/y/actions/runs/2" },
+			comments: { 40: [["stranger", "https://github.com/o/r/actions/runs/1"]] },
+		});
+		expect(a.log).toMatch(/^ALERT commented: #40, 2 run\(s\)$/m);
+	});
+
+	it("reads open issues of any age, and closed ones only from the window", () => {
+		const a = alert({ runs: [run(1)] });
+		expect(a.calls).toMatch(
+			/^api -X GET --paginate repos\/o\/r\/issues -f per_page=100 -f state=open --jq/m,
+		);
+		expect(a.calls).toContain(`-f state=closed -f since=${SINCE} --jq`);
 	});
 
 	it.each([

@@ -5,8 +5,8 @@
 #
 # Lists review.yml's runs that ended in startup_failure since SINCE (REST: GET
 # .../actions/workflows/review.yml/runs?status=startup_failure&created=>=SINCE). A run already
-# linked from a "Reviewer stopped" issue, open or closed since SINCE, is left out, so each
-# run is reported once and a closed issue isn't filed again for the runs it already holds. Then:
+# linked from a "Reviewer stopped" issue this workflow opened, open or closed since SINCE, is left
+# out, so each run is reported once and a closed issue isn't filed again for its runs. Then:
 # - no new run: nothing is written;
 # - an open "Reviewer stopped" issue: one comment on it, linking the new runs;
 # - none open: one new issue, labelled blocked:admin, linking them.
@@ -32,10 +32,9 @@ dry=${DRY_RUN:-false}
 }
 repo=$GITHUB_REPOSITORY
 TITLE="Reviewer stopped: startup_failure on review.yml"
-LABEL="blocked:admin"
-# The labels every issue in this repo carries (docs/agents/triage-labels.md): one type, one area,
-# and `triage` because a workflow can't set the Project's fields.
-LABELS=("$LABEL" chore area:ci-cd triage)
+# blocked:admin (#514), and the labels every issue here carries (docs/agents/triage-labels.md): one
+# type, one area, and `triage` because a workflow can't set the Project's fields.
+LABELS=(blocked:admin chore area:ci-cd triage)
 
 # The failed runs, oldest first: `<id>\t<created_at>\t<html_url>`.
 runs=$(gh api -X GET --paginate "repos/$repo/actions/workflows/review.yml/runs" \
@@ -47,18 +46,21 @@ if [[ -z $runs ]]; then
   exit 0
 fi
 
-# The "Reviewer stopped" issues: every open one, and those closed and updated in the window (their
-# runs count as reported). `<number>\t<state>`, open first, oldest first.
+# The "Reviewer stopped" issues this workflow opened: every open one, and those closed and updated
+# in the window (their runs count as reported). Found by title and author, not by label, so an issue
+# the admin relabels still gets the comments. `<number>\t<state>`, open first, oldest first.
+BOT="github-actions[bot]" # the author of GITHUB_TOKEN's writes
 list_issues() { # extra query fields
-  gh api -X GET --paginate "repos/$repo/issues" -f "labels=$LABEL" -f per_page=100 "$@" \
-    --jq ".[] | select(has(\"pull_request\") | not) | select(.title == \"$TITLE\") | [.number, .state] | @tsv"
+  gh api -X GET --paginate "repos/$repo/issues" -f per_page=100 "$@" \
+    --jq ".[] | select(has(\"pull_request\") | not) | select(.title == \"$TITLE\" and .user.login == \"$BOT\") | [.number, .state] | @tsv"
 }
 issues=$({
   list_issues -f state=open
   list_issues -f state=closed -f "since=$SINCE"
 } | sort -t$'\t' -k2,2r -k1,1n)
 
-# The run ids those issues already link, from their bodies and comments.
+# The run ids those issues already link: from their bodies and this workflow's own comments only, so
+# a comment someone else posts can't mark a run as reported.
 seen=""
 while IFS=$'\t' read -r n _; do
   [[ -n $n ]] || continue
@@ -69,15 +71,15 @@ while IFS=$'\t' read -r n _; do
   seen+=$(
     {
       gh api "repos/$repo/issues/$n" --jq '.body // ""'
-      gh api --paginate "repos/$repo/issues/$n/comments" --jq '.[].body'
-    } | grep -oE 'actions/runs/[0-9]+' || true
+      gh api --paginate "repos/$repo/issues/$n/comments" --jq ".[] | select(.user.login == \"$BOT\") | .body"
+    } | grep -oE "$repo/actions/runs/[0-9]+" || true
   )$'\n'
 done <<<"$issues"
 
 new=()
 while IFS=$'\t' read -r id created url; do
   [[ $id =~ ^[0-9]+$ ]] || continue
-  grep -qxF "actions/runs/$id" <<<"$seen" && continue
+  grep -qxF "$repo/actions/runs/$id" <<<"$seen" && continue
   new+=("- [$id]($url), $created")
 done <<<"$runs"
 
