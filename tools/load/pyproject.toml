@@ -1,0 +1,19 @@
+# M3's load and concurrency run (#388; ADR-0007, "Load and concurrency"; ADR-0001, "Method"),
+# ported from the persistence spike's harness on prototype/persistence. Its own uv project and
+# lockfile, separate from the Node workspace. See README.md.
+[project]
+name = "sunny-pastures-load"
+version = "0"
+description = "Locust load and concurrency runs against the game API (M3)"
+requires-python = "==3.13.*"
+# Locust as the spike pinned it (approved as an existing tool, #388). The concurrency script uses
+# gevent and requests, which Locust already brings, so nothing else is added.
+dependencies = ["locust==2.47.0"]
+
+[tool.uv]
+package = false
+# .devcontainer/post-create.sh installs exactly this uv, checked against its hash.
+required-version = "==0.13.6"
+# The Python twin of pnpm's minimumReleaseAge (7 days): nothing published after this date is
+# resolved. Move it forward deliberately, at least 7 days behind the day you re-lock.
+exclude-newer = "2026-11-15T00:00:00Z"
