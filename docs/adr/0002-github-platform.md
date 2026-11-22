@@ -1177,8 +1177,8 @@ cancelling a running job), and `GITHUB_TOKEN` read-only in every job.
 **Ready and Mode (admin, 21 Nov 2026, option b).** The workflow doesn't read the Project: no Actions
 token can read this user-owned board (#102). `factory:ready` stands for Mode Factory, which
 `triage-labels.md` keeps in step with it, and the admin's manual dispatch stands for Ready. Only the
-admin and collaborators can set labels. The sweep (#108) waits for #102's native issue fields, since
-its dispatch isn't the admin's choice.
+admin and collaborators can set labels. The sweep (#108, below) reads Ready and Mode from the board
+before it dispatches, since its dispatch isn't the admin's choice.
 
 1. **`switch`** calls `factory-switch.yml`, exactly as its header shows. With the switch off the run
    logs `SWITCH off` and stops; that is how the workflow is tested without turning the factory on.
@@ -1214,6 +1214,49 @@ its dispatch isn't the admin's choice.
 
 **Caps.** `--max-turns` doesn't count the turns of `Task` subagents, so the 55-minute step timeout
 and the job's 60 are the real bound on a run.
+
+**The factory sweep, built (#108).** `.github/workflows/sweep.yml` dispatches at most **one**
+eligible issue to `factory.yml` per run, so a queue drains one factory run at a time without the
+admin starting each. It replaces the three daily slots above (admin, 22 Nov 2026). Pattern: the same
+pipeline of guard jobs as the factory (`switch`, then `select`, then `dispatch`, each skipped unless
+the one before says go), with the choice a pure function over gathered data
+(`.github/scripts/factory-sweep.mjs`, tested on fixtures), and the reads in a separate script
+(`factory-sweep-gather.sh`). Alternatives considered: one bash script that reads and decides (harder
+to test on fixtures, as the gate's split shows), and one job that both reads the board and
+dispatches (it would hold the Project token and `actions: write` together).
+
+- **Triggers:** every hour (`23 * * * *` UTC: any hour will do, so DST needs no handling), the
+  factory's runs finishing (`workflow_run`, the chain; a cancelled run is ignored, so a run the
+  concurrency group replaced doesn't start a sweep of its own), and `workflow_dispatch` for the
+  admin. Concurrency group `factory-sweep`, not cancelling, so two sweeps never overlap.
+- **Credentials (admin, 22 Nov 2026; #102 closed as moot):** `select` enters environment `board`
+  (main only) for `BOARD_PROJECT_TOKEN`, used on the Project's calls only (`PROJECT_GH_TOKEN`, as
+  `board.yml`'s `move` does), REST only; the read-only `GITHUB_TOKEN` reads the runs, issues, PRs
+  and branches. `dispatch` alone has `actions: write`, and `GITHUB_TOKEN` dispatches `factory.yml`
+  on `main`: a `workflow_dispatch` is one of the two events a `GITHUB_TOKEN` may start a run with
+  ([triggering a workflow from a workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)).
+- **The decision**, in order, the first that holds deciding: the kill switch (`FACTORY_ENABLED`,
+  read before anything else, so nothing is read with it off); a factory run that is queued, waiting,
+  pending, requested or in progress (strictly serial); the **open-PR cap**: open PRs by
+  `sunny-factory[bot]`, drafts included, at or above the repo variable `FACTORY_MAX_OPEN_PRS`
+  (default 4 when unset; a value that isn't a whole number dispatches nothing). It is backpressure
+  on the review queue, and works the same before and after auto-merge: a PR that merges lowers the
+  count and the chain goes on (admin, 22 Nov 2026, replacing a per-day run cap). Then the eligible
+  issues: on the board in this repo, Status Ready, Mode Factory or not set, open, carrying
+  `factory:ready`, opened by the owner or a collaborator, with no open PR from a `<n>-` branch and
+  no `<n>-` branch (the gate's rules, so the sweep doesn't dispatch what the gate would refuse).
+- **A run that opens no PR** doesn't raise the count, so the loop could re-dispatch one issue for
+  ever. The sweep skips an issue whose newest factory run (by its `run-name`, `factory #<n>`) is not
+  older than the issue's `updated_at`: editing the issue retries it (admin, 22 Nov 2026).
+- **Order:** Priority (P0 first, unset last), then board order, read as the order the REST items
+  list returns. `/today`'s agreed order isn't wired to the sweep yet: the sweep has no input for it,
+  and the admin steers by Priority and by what is Ready with `factory:ready`.
+- **The chaining limit:** `workflow_run` doesn't chain more than three levels of workflows. Whether
+  a `workflow_dispatch` between the sweep and the factory resets that count is **unproven**: not
+  tested here, and the docs say nothing on it. The hourly schedule restarts a chain that stops, so
+  the queue still drains, at worst one issue an hour.
+- **Logs:** one `SWEEP` line and a job summary per run: the switch, the open factory PRs against the
+  cap, the eligible issues in order, the skipped ones and why, and the one dispatched or why none.
 
 **Two environments, both `main` only (admin, 21 Nov 2026, in the coordinator session).** The Claude
 job runs in `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN` and is named for the seat, not

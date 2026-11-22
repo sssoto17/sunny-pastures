@@ -6,9 +6,9 @@
 # warning annotation and a line in the step summary, and exits 0 (a refusal isn't a failure).
 #
 # Signals (admin, 21 Nov 2026, option b): `factory:ready` stands for Mode Factory, which
-# triage-labels.md keeps in step with it, and the admin's dispatch stands for Ready. Only the admin
-# and collaborators can set labels. The Project isn't read: no Actions token can read this
-# user-owned board (#102), and the sweep (#108) waits for #102's native issue fields.
+# triage-labels.md keeps in step with it, and the dispatch stands for Ready. Only the admin and
+# collaborators can set labels. The gate doesn't read the Project: the sweep (sweep.yml, #108) reads
+# it with the board token before it dispatches, and the admin's own dispatch is the admin's choice.
 #
 # Env: ISSUE and MAX_TURNS (the dispatch inputs, through env:, never ${{ }} in run:), ISSUE_JSON
 # (GET /repos/{o}/{r}/issues/{n}, or {} when that read failed), PULLS_JSON (the open PRs, as one
