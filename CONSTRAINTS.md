@@ -150,7 +150,7 @@ in a PR of its own.
 |---|---|---|---|---|
 | Project coverage | 99.8% | must not fall | 0.5 points | #40 |
 | First-load JS of the game route | not yet: recorded at the first preview deploy | must not grow | 5% per PR | #43 |
-| CI runner time per PR | 15.1 minutes per PR over the CI workflow's first week, 8 to 14 Nov 2026 (1,633 minutes for 108 PRs, across every workflow a PR starts; #98). With the 19 minutes of runs outside any PR, 1,652 that week: about 7,100 minutes a month at that pace, 2.4 times the 3,000 minutes that $18 buys at $0.006 a minute | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume | n/a: a breach is reviewed, not blocked | #40 |
+| CI runner time per PR | 15.1 minutes per PR over the CI workflow's first week, 8 to 14 Nov 2026 (1,633 minutes for 108 PRs, across every workflow a PR starts; #98). With the 19 minutes of runs outside any PR, 1,652 that week: about 7,100 minutes a month at that pace, 2.4 times the 3,000 minutes that $18 buys at $0.006 a minute | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume; must not grow past that budget (#309) | n/a: a breach is reviewed, not blocked | #40 |
 | Reviewer cost per PR | $0.31 of Claude per reviewed PR, 12 Nov 2026 to the morning of 16 Nov ($6.55 over 44 reviews of 21 PRs, 7 of them cancelled before Claude ran; #98). Wk 2 total, 9 to 15 Nov 2026: about $14.25, from 1,749 runner minutes (about $10.49 at $0.006 a minute) and $3.76 of Claude | must not grow past the weekly budget set from this first data (ADR-0002, "Caps") | n/a: a breach is reviewed, not blocked | #98 |
 
 Note: the runner time of `ci / acceptance` (#49), recorded here next to the CI cost figure as a note
@@ -385,6 +385,11 @@ project). The admin approves the PR, because it changes this file.
 IDs run `E1`, `E2`, …, and are never reused. The floor guard reads rows matching `| E<n> |` and
 fails every PR once a row's expiry date has passed, until the row is removed or the admin renews it.
 
+Only a row a PR adds waives anything, so a row already in `main`'s table is spent. The floor guard
+names each spent row as a warning, and the next PR that edits `CONSTRAINTS.md` removes it. A PR that
+doesn't otherwise edit this file leaves it there, since the edit would make the PR code-owned
+(#310).
+
 What a row must hold, checked by the floor guard (#99):
 
 - **Rule** names the findings it waives, as the guard prints them, separated by commas. The waivable
@@ -425,13 +430,7 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 <!-- prettier-ignore -->
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| E8 | config-loosened | eslint.config.mjs | ESLint ignores `next-env.d.ts`, which `next build` and `next dev` write into `apps/web/` and Next says not to commit (git-ignored, like `.next/`). Without the ignore, `eslint .` fails locally after any build, on the file-name and import-privacy rules (#342; admin, 18 Nov). Remove this row when the floor guard learns git-ignored generated paths, or renew it | Soto | 2026-12-18 |
-| E10 | check-removed | .github/workflows/ci.yml | `ci / test` picks its Vitest projects (#382; ADR-0007 section 6, admin 19 Nov and 21 Nov): a PR that touches none of `apps/web/src/server/`, `supabase/`, `.github/actions/supabase-stack/` and `vitest.config.mts` runs `pnpm test --project unit` and the coverage gate with `--skip-ratchet`; every other PR, and every push to `main`, starts the Supabase stack and runs both projects and the full gate. That rewrites the `pnpm test` and coverage-gate steps and adds the stack step's `if:`. Remove this row once the PR has merged | Soto | 2026-12-05 |
-| E11 | config-loosened | vitest.config.mts | The root `include` moves into the `unit` and `db` projects (Vitest 5's inline projects merge arrays, so a root `include` would put every unit test in `db` too), and `unit` excludes `*.db.test.ts`, which `db` includes: together they run every test file the old `include` did (#382; ADR-0007 section 6). Coverage `include`/`exclude` are unchanged. Remove this row once the PR has merged | Soto | 2026-12-05 |
-| E12 | assertion-removed | .github/scripts/tests/factory-enabled.test.mjs | The throwaway `.github/workflows/check-106-factory-switch.yml` is deleted now that its switch-off run is posted on #106 (follow-up to #106, admin 21 Nov), so the `describe` block that read that file goes with it. The tests of the switch itself, `factory-enabled.sh` and `factory-switch.yml`, are unchanged. Remove this row once the PR has merged | Soto | 2026-12-05 |
-| E13 | assertion-removed | apps/web/src/server/store/tests/store.db.test.ts | The store contract's cases move, unchanged, from B100's own test file into `apps/web/src/server/store/tests/contract.ts` (`describeGameStore`), which `store.db.test.ts` still runs against B100 and `memoryStore.test.ts` runs against the in-memory store, so each assertion now runs on both stores (#383; ADR-0007 section 6, Contract test; admin, 21 Nov, review of #445). The guard counts assertions per file, so the move reads as a removal. Remove this row once the PR has merged | Soto | 2026-12-05 |
-| E14 | test-deleted | apps/web/src/server/api/tests/fakeStore.ts | `api`'s tests drop their own fake store for `createMemoryStore` (`apps/web/src/server/store/tests/memoryStore.ts`), which the store contract holds to B100, through a test-files-only Fallow allowance (`apiTests` → `storeTests`; #470's criteria, ADR-0007 section 6). The deleted file is a test helper with no assertions; every case that used it still runs, in `farmRoutes.test.ts`, on the in-memory store. Remove this row once the PR has merged | Soto | 2026-12-06 |
-| E15 | check-removed | .github/workflows/review.yml | `review.yml` splits into two jobs (#454; admin, 21 Nov 2026): `review` runs Claude in `claude-seat`, and the new `post` job mints the reviewer App's token and posts from the environment `review`. `post` needs a job-level `if:` (not cancelled, and a verdict from the `review` job), so a gate skip never mints a token and a failed skill proof still posts, as one job did before. `review` is not a required check, and no step that runs a check is removed. Remove this row once the PR has merged | Soto | 2026-12-05 |
+| _none_ | | | | | |
 
 ## Interview record
 

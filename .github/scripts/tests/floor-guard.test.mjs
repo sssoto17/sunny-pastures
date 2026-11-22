@@ -1480,11 +1480,34 @@ describe("floor guard, end to end", () => {
 		it("lets the coverage ratchet get its first value, then holds it", () => {
 			realRepo(coverageToday(NOT_YET));
 			repo.write({ "CONSTRAINTS.md": coverageToday("92.5%") });
-			expect(guard().code).toBe(0);
+			const first = guard();
+			expect(first.code).toBe(0);
+			// #302's proposed issue 1 (#309): "not yet" giving way to a number drops no negation.
+			expect(first.out).not.toContain('drops "not"');
 			realRepo(coverageToday("92.5%"));
 			repo.write({ "CONSTRAINTS.md": coverageToday("90%") });
 			expect(guard().out).toContain("[threshold-loosened] CONSTRAINTS.md");
 			repo.write({ "CONSTRAINTS.md": coverageToday("93%") });
+			expect(guard().code).toBe(0);
+		});
+
+		// #309: the cost rows' Directions say they must not grow, so a higher recorded value is the
+		// loosening and a lower one passes, on the real rows.
+		it.each([
+			[
+				"CI runner time per PR",
+				"15.1 minutes per PR",
+				"16.4 minutes per PR",
+				"12.3 minutes per PR",
+			],
+			["Reviewer cost per PR", "$0.31 of Claude", "$0.45 of Claude", "$0.20 of Claude"],
+		])("holds the %s ratchet down: higher fails, lower passes", (_, today, higher, lower) => {
+			realRepo();
+			repo.write({ "CONSTRAINTS.md": edit(REAL, today, higher) });
+			const worse = guard();
+			expect(worse.code).toBe(1);
+			expect(worse.out).toContain("[threshold-loosened] CONSTRAINTS.md");
+			repo.write({ "CONSTRAINTS.md": edit(REAL, today, lower) });
 			expect(guard().code).toBe(0);
 		});
 	});
