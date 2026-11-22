@@ -87,7 +87,10 @@
       { "name": "sim", "patterns": ["packages/sim/src/**"] },
       // The acceptance suite (#386; ADR-0007 section 6, "Acceptance tests"): black-box over HTTP,
       // so it imports no zone, and a refactor of the app or the sim can't reshape what it expects.
-      { "name": "acceptance", "patterns": ["tests/acceptance/**"] }
+      { "name": "acceptance", "patterns": ["tests/acceptance/**"] },
+      // The load run's seeder (#388; ADR-0007, "Load and concurrency"): it reaches the sim and
+      // postgres.js through apps/web's resolution at run time, never an import of a zone.
+      { "name": "load", "patterns": ["tools/load/**"] }
     ],
     "rules": [
       { "from": "routes", "allow": ["api"] },
@@ -134,6 +137,7 @@
       { "from": "sim", "allow": [] },
       // No allowances, type-only included: the suite's expected values are written out literally.
       { "from": "acceptance", "allow": [] },
+      { "from": "load", "allow": [] },
       // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
       { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
       { "from": "storeTests", "allow": ["store", "dbTests"], "allowTypeOnly": ["db", "sim"] },
