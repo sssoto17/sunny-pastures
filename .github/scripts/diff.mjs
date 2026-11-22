@@ -164,3 +164,55 @@ export const readChange = (mergeBase) => {
 // A file's content at the merge base, as lines (index 0 is line 1). Null when it didn't exist.
 export const oldContent = (mergeBase, path) =>
 	git(["show", `${mergeBase}:${path}`])?.split("\n") ?? null;
+
+// THROWAWAY (#503 evidence): a clone, a function over the thresholds and an unused export.
+export const throwaway503 = (x) => {
+	if (x === 1) return 1;
+	if (x === 2) return 2;
+	if (x === 3) return 3;
+	if (x === 4) return 4;
+	if (x === 5) return 5;
+	if (x === 6) return 6;
+	if (x === 7) return 7;
+	if (x === 8) return 8;
+	if (x === 9) return 9;
+	if (x === 10) return 10;
+	if (x === 11) return 11;
+	if (x === 12) return 12;
+	if (x === 13) return 13;
+	if (x === 14) return 14;
+	if (x === 15) return 15;
+	if (x === 16) return 16;
+	if (x === 17) return 17;
+	if (x === 18) return 18;
+	if (x === 19) return 19;
+	if (x === 20) return 20;
+	if (x === 21) return 21;
+	if (x === 22) return 22;
+	if (x === 23) return 23;
+	if (x === 24) return 24;
+	if (x === 25) return 25;
+	return -1;
+};
+export function throwawayClone() {
+		getPull: () => get(`pulls/${number}`),
+		listFiles: () => all(`pulls/${number}/files`),
+	});
+	for (const p of r.touched) console.log(`acceptance: ${JSON.stringify(p)}`);
+	if (r.ok) {
+		console.log(`acceptance: pass (${r.message})`);
+		return 0;
+	}
+	console.log(`::error title=guard / acceptance::${r.message}`);
+	console.error(`acceptance: fail: ${r.message}`);
+	return 1;
+};
+
+if (isMain(import.meta.url)) {
+	try {
+		process.exitCode = await main();
+	} catch (e) {
+		console.error(
+			`acceptance: cannot run: ${e instanceof CannotRun ? e.message : (e?.stack ?? e)}`,
+		);
+}
