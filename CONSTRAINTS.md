@@ -157,10 +157,11 @@ The runner time of `ci / acceptance` (#49), recorded here next to the CI cost fi
 rather than in the row, because a new value in a ratchet row goes in a PR of its own: 2 to 3 billed
 minutes a run, measured on PR #508's own runs on 22 Nov 2026 (runs 45043493394 and 45043983689: 1
 min 55 s and 2 min 17 s, of which 1 min 39 s and 1 min 53 s start the Supabase stack, and 8 s and 11
-s build the app and run the 12 tests). At the first week's 108 PRs and one run each, that is about
-930 to 1,400 minutes a month more, and more again because it also runs on drafts. It runs on every
-PR with no path filter, since the repository is public and its Actions minutes are free (admin, 22
-Nov).
+s build the app and run the 12 tests). It is path-filtered (admin, 22 Nov): of the 107 commits that
+landed on `main` in the first week, 8 to 14 Nov, 47 touch what it covers. At that share, about 47
+runs a week run the tests (about 95 to 140 minutes), and the other 60 bill about 1 minute each for
+the filter alone: about 650 to 870 minutes a month at the first week's pace, against 930 to 1,400
+unfiltered.
 
 To keep CI cost down, the expensive checks run only when they're relevant. Stryker runs only when
 `packages/sim` changes. Lighthouse, axe and the latency smoke run only on preview deploys. Semgrep
