@@ -138,6 +138,35 @@ expect_code 1
 expect_err "the open-pr run failed"
 expect_eq "open, still a draft" "$(pr_field 400 .draft)" true
 
+# --- the title (#471): a conventional one, and never the body's Closes / Part of link ------------
+reset
+printf 'Closes #336.\n\nMore text.\n' >"$work/link.md"
+run 336-a "$work/link.md"
+expect_code 2
+expect_err "which here is the link \"Closes #336.\""
+expect_err "put a title line such as \`fix(tools): <summary>\` above it"
+printf 'Part of #336.\n' >"$work/link.md"
+run --draft 336-a "$work/link.md"
+expect_code 2
+expect_err "which here is the link \"Part of #336.\""
+for t in "Open PRs as the App" "feature: x" "feat:x" "feat(): x" "feat(ci) : x" "Feat: x" "feat: "; do
+  printf '%s\n\nCloses #336.\n' "$t" >"$work/bad.md"
+  run 336-a "$work/bad.md"
+  expect_code 2
+  expect_err "doesn't start with a conventional type"
+done
+expect_err "with <type> one of feat, fix, chore, docs, test, ci, build, refactor, perf, style, revert"
+OPEN_PR_AS_ADMIN=336 run --as-admin 336-a "$work/link.md"
+expect_code 2
+expect_err "which here is the link"
+assert "nothing dispatched or opened" bash -c "! test -s '$work/gh/dispatches' && ! test -e '$work/gh/pulls/400.json'"
+for t in "fix: x" "docs(review): x" "feat(ci)!: x" "refactor!: x" "revert: feat: x" "spike(sim): x"; do
+  printf '%s\n\nCloses #336.\n' "$t" >"$work/good.md"
+  run --dry-run 336-a "$work/good.md"
+  expect_code 0
+  expect_eq "the title $t passes" "$(jq -r .client_payload.title <<<"$out")" "$t"
+done
+
 # --- refused before the dispatch -----------------------------------------------------------------
 reset
 git -C "$repo" switch -q -c 336-local main
