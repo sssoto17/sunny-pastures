@@ -241,14 +241,13 @@ jobs:
           fi
 
   # CONSTRAINTS.md, Acceptance row (MUST-15.3, #49): the admin-owned tests/acceptance/** over HTTP,
-  # as a black box, against a fresh local Supabase stack on this runner. The stack comes from the
-  # same composite action as `ci / test`'s db project (#39: no container, no Postgres service
-  # container); its db:env writes ./.env, which `pnpm test:acceptance` (tests/acceptance/run.mjs)
-  # reads to build the app, start it, wait on /api/health, run the suite and stop the app. No step
-  # prints a key, token or URL (docs/agents/sandbox.md, "Secrets in output"): the stack action hides
-  # them, and the runner passes .env to the app and the suite without echoing it.
-  # No path filter, and on every part of a stack: a required check must report on every PR, and any
-  # change can break the app over HTTP. Its runner time is in CONSTRAINTS.md, "CI runner time per PR".
+  # as a black box, against a fresh local Supabase stack on this runner, started by the same
+  # composite action as `ci / test`'s db project (#39: no job `container:`, no Postgres `services:`).
+  # Its db:env writes ./.env, which `pnpm test:acceptance` (tests/acceptance/run.mjs) reads to build
+  # the app, start it, wait on /api/health, run the suite and stop it. No step prints a key, token or
+  # URL (docs/agents/sandbox.md, "Secrets in output"). No path filter, and on every part of a stack:
+  # a required check must report on every PR, and any change can break the app over HTTP. Its
+  # measured runner time is in CONSTRAINTS.md, "CI runner time per PR".
   acceptance:
     name: ci / acceptance
     needs: gate
