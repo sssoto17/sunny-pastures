@@ -1,0 +1,41 @@
+# `ci / devcontainer` (#501; ADR-0009, section 6): builds the load VM's devcontainer whenever a PR
+# changes .devcontainer/, then starts it, which runs post-create.sh (the frozen install and the
+# hash-checked Supabase CLI and uv). `devcontainer build` alone never runs postCreateCommand.
+# Its own workflow, so the path filter can sit on the event: a PR that touches nothing under
+# .devcontainer/ starts no run and shows no check, rather than a skipped job that reads as passing
+# (ADR-0002, area 2). It is not required on main: a required check that never reports blocks the
+# merge (ADR-0009, section 6).
+# No draft gate (#358), as in workflow-lint.yml: the job has no `if:`, so it never skips, and a
+# draft's `opened` run builds the head the ready mark would. A newer push cancels the older run.
+# Actions are GitHub-owned and pinned to a full commit SHA (ADR-0002, area 8). `--frozen-lockfile`
+# fails the run if the Feature doesn't match the digest in .devcontainer/devcontainer-lock.json.
+name: devcontainer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.devcontainer/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  devcontainer:
+    name: ci / devcontainer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Node, pnpm and the frozen install on the runner, for `pnpm exec devcontainer`.
+      - uses: ./.github/actions/setup
+      - name: Build the devcontainer
+        run: pnpm exec devcontainer build --workspace-folder . --frozen-lockfile
+      - name: Start it (runs post-create.sh)
+        run: pnpm exec devcontainer up --workspace-folder . --frozen-lockfile
