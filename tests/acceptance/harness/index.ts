@@ -21,7 +21,10 @@ export interface ApiRequest {
 	readonly player?: Player;
 	/** Sent as is, after the defaults, so a test can replace or remove one (`null` removes). */
 	readonly headers?: Readonly<Record<string, string | null>>;
-	/** A string is sent as is; anything else is sent as JSON. */
+	/**
+	 * A string is sent as is, and a stream as is with no `Content-Length`, so it goes out chunked
+	 * (T8); anything else is sent as JSON.
+	 */
 	readonly body?: unknown;
 }
 
@@ -30,6 +33,8 @@ export interface ApiResponse {
 	readonly status: number;
 	readonly headers: Headers;
 	readonly body: unknown;
+	/** The body as received, for a byte-for-byte comparison ("the farm reads byte-identical"). */
+	readonly text: string;
 }
 
 /**
@@ -76,13 +81,27 @@ export async function callApi(path: string, request: ApiRequest = {}): Promise<A
 	}
 
 	const body = encodeBody(request.body);
-	const response = await fetch(`${inject("target").baseUrl}${path}`, {
+	// Node's fetch sends a stream body only with `duplex: "half"`, which the DOM types don't know.
+	const init: RequestInit & { duplex?: "half" } = {
 		method,
 		headers,
 		...(body === null ? {} : { body }),
-	});
+		...(body instanceof ReadableStream ? { duplex: "half" } : {}),
+	};
+	const response = await fetch(`${inject("target").baseUrl}${path}`, init);
 	const text = await response.text();
-	return { status: response.status, headers: response.headers, body: parseBody(text) };
+	return { status: response.status, headers: response.headers, body: parseBody(text), text };
+}
+
+/**
+ * Loads the player's farm with `GET /api/farm`, checked 200. The attack tests compare its `text`
+ * before and after an attack: "nothing is written" means the farm reads byte-identical (#387).
+ */
+export async function loadFarm(player: Player): Promise<ApiResponse> {
+	const response = await callApi("/api/farm", { player });
+	expect(response.status).toBe(200);
+
+	return response;
 }
 
 /** A phase the game API times (ADR-0007 section 3, "Headers"); `total` is always sent. */
@@ -106,10 +125,11 @@ export function expectContractHeaders(response: ApiResponse, phases: readonly Ph
 	for (const [, duration] of metrics) expect(duration).toMatch(/^dur=\d+(\.\d+)?$/);
 }
 
-function encodeBody(body: unknown): string | null {
+function encodeBody(body: unknown): string | ReadableStream<Uint8Array> | null {
 	if (body === undefined) return null;
+	if (typeof body === "string" || body instanceof ReadableStream) return body;
 
-	return typeof body === "string" ? body : JSON.stringify(body);
+	return JSON.stringify(body);
 }
 
 function parseBody(text: string): unknown {
