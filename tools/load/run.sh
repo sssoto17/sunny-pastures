@@ -50,7 +50,10 @@ echo "== $label: next start on $base"
 	set -a
 	. ./.env
 	set +a
-	NEXT_TELEMETRY_DISABLED=1 exec pnpm --dir apps/web exec next start --port "$port" --hostname 127.0.0.1
+	# Keep-alive past the longest client wait (30 s), as the spike's server did (ADR-0001, "Method"):
+	# with Node's 5 s default the server closes a connection a waiting player then reuses.
+	NEXT_TELEMETRY_DISABLED=1 exec pnpm --dir apps/web exec next start --port "$port" \
+		--hostname 127.0.0.1 --keepAliveTimeout 65000
 ) >"$work/server.log" 2>&1 &
 server=$!
 trap 'pkill -P $server 2>/dev/null; kill $server 2>/dev/null; wait $server 2>/dev/null || true' EXIT
