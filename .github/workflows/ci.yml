@@ -266,8 +266,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # the path filter diffs against the base
-      # The app's code, its schema, the tests, the dependencies, and what runs this job. Every push
-      # to main runs the tests, so main always shows the suite on what landed.
+      # The app's code, its schema, the tests, the dependencies, the root build config, and what
+      # runs this job. Every push to main runs the tests, so main always shows the suite on what
+      # landed.
       - name: Choose whether to run
         id: paths
         run: |
@@ -277,14 +278,15 @@ jobs:
           else
             # A base git can't read fails the step: only an empty list means nothing was touched.
             changed=$(git diff --name-only "$SINCE...HEAD" -- apps packages supabase \
-              tests/acceptance package.json pnpm-lock.yaml .github/workflows/ci.yml \
+              tests/acceptance package.json pnpm-lock.yaml pnpm-workspace.yaml 'tsconfig*.json' \
+              .github/workflows/ci.yml \
               .github/actions/setup .github/actions/supabase-stack)
             if [[ -n $changed ]]; then
               run=true
               why="the change touches what the acceptance tests cover"
             else
               run=false
-              why="the change touches none of apps/, packages/, supabase/, tests/acceptance/, package.json, pnpm-lock.yaml, ci.yml or the setup and supabase-stack actions"
+              why="the change touches none of apps/, packages/, supabase/, tests/acceptance/, package.json, pnpm-lock.yaml, pnpm-workspace.yaml, the root tsconfig*.json, ci.yml or the setup and supabase-stack actions"
             fi
           fi
           if [[ $run == true ]]; then
