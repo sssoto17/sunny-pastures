@@ -54,6 +54,8 @@ json_str() {
   local s=$1
   s=${s//\\/\\\\}
   s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\t'/\\t}
   printf '"%s"' "$s"
 }
 
@@ -77,6 +79,8 @@ check() { # name expected-code shell-command [stderr-substring] [hook-command]
 }
 
 audited() { # name -> passes when the last run called `fallow audit` with the gate's flags
+  # The exact argument string on purpose: the flags are what #504 asked for, so a reinstall from
+  # a newer Fallow that changes them shows up here.
   if grep -q -- 'audit audit --format json --quiet --explain --gate-marker agent' "$log"; then
     pass=$((pass + 1))
   else
