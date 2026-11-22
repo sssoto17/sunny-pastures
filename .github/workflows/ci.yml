@@ -147,16 +147,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0 # fallow dupes reports clones in the files changed since the merge base
+          fetch-depth: 0 # fallow audit compares the change with a snapshot of its merge base
       - uses: ./.github/actions/setup
+      # CONSTRAINTS.md, the Duplication, Complexity and Dead code rows (#503): `fallow audit` over
+      # the whole repo against $SINCE, failing on what this change introduces (`new-only`). CRAP is
+      # Fallow's static estimate here, since coverage exists only in `ci / test`. The script renders
+      # the annotations and the job summary from the same run; neither needs a write permission.
+      # First in the job, so a lint or format failure doesn't hide them (no `if:`, which the floor
+      # guard reads as a skipped check).
+      - run: pnpm audit:changed --base "$SINCE"
       - run: pnpm lint
       # CONSTRAINTS.md, formatting row.
       - run: pnpm format:check
       # Markdown (#344; ADR-0005, section 6): Prettier's prose wrap, and every top-level table keeps
       # `<!-- prettier-ignore -->` on the line before it. Not in check:fast, for its 5 s budget.
       - run: pnpm format:md
-      # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
-      - run: pnpm dupes --changed-since "$SINCE"
       # CONSTRAINTS.md, migrations row (#372): no applied migration edited since the base, and
       # `drizzle-kit check` plus a generate that writes nothing. No database: the stack is
       # `ci / test`'s (#382), when a change can reach it.

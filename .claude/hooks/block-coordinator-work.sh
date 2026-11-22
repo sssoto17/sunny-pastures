@@ -2,8 +2,8 @@
 # shellcheck disable=SC2016 # backticks and `$HOME` in single quotes are message text and patterns
 # PreToolUse hook: keep the coordinating session at the coordination level (#75). When the
 # session's cwd is the main folder (not inside .claude/worktrees/<name>), it denies:
-# - Edit/Write/MultiEdit/NotebookEdit on repo paths outside .scratch/ and .remember/, including
-#   another session's worktree;
+# - Edit/Write/MultiEdit/NotebookEdit on repo paths outside .scratch/, .remember/ and the review
+#   copies (.claude/worktrees/review-*, REVIEW.md, #513), including another session's worktree;
 # - the common Bash writes to those paths: output redirects, `tee`, `sed -i`, `perl -i` (and
 #   either through xargs), `cp`, `mv`, `install`, `ln`, `rm`, `unlink`, `touch`, `truncate`,
 #   `git apply` and `patch`;
@@ -47,8 +47,11 @@ normalize_path / "$root"
 real_path "$REPLY"
 root=$REPLY
 
-# Is absolute path $1 a lane's file: in the repo, outside .scratch/ and .remember/? Sets REPLY to
-# its real path; with $2 set, only its parent's symlinks are resolved (the path names a link).
+# Is absolute path $1 a lane's file: in the repo, outside .scratch/, .remember/ and the review
+# copies? Sets REPLY to its real path; with $2 set, only its parent's symlinks are resolved (the
+# path names a link). A review copy (.claude/worktrees/review-<N>-<short sha>) is a reviewer's
+# throwaway: REVIEW.md has the reviewer link node_modules and plant mutants there, and
+# scripts/after-merge.sh removes it once its PR is closed (#513). Lanes are named <N>-<slug>.
 lane_path() {
   if [[ -n ${2:-} ]]; then
     local parent=${1%/*}
@@ -59,6 +62,7 @@ lane_path() {
   fi
   case $REPLY in
     "$root"/.scratch | "$root"/.scratch/* | "$root"/.remember | "$root"/.remember/*) return 1 ;;
+    "$root"/.claude/worktrees/review-*) return 1 ;;
     "$root" | "$root"/*) return 0 ;;
   esac
   return 1

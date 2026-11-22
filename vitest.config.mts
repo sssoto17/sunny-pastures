@@ -70,7 +70,9 @@ export default defineConfig({
 		],
 		coverage: {
 			provider: "v8",
-			reporter: ["lcov", "text-summary"],
+			// json writes coverage/coverage-final.json, which `fallow audit` reads for measured CRAP
+			// (#503); coverage-gate.mjs reads the lcov.
+			reporter: ["lcov", "json", "text-summary"],
 			reportsDirectory: "coverage",
 			include: ["{apps,packages}/*/src/**/*.{ts,tsx}"],
 			exclude: ["**/*.{test,spec}.{ts,tsx}", "**/tests/**", "**/*.d.ts", "**/generated/**"],
