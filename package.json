@@ -34,10 +34,12 @@
 		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm format:md && pnpm dupes --changed-since origin/main && pnpm guard:floor && pnpm boundaries && pnpm db:check && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm coverage:gate && pnpm bench && pnpm determinism"
 	},
 	"devDependencies": {
+		"@devcontainers/cli": "0.90.0",
 		"@eslint/js": "10.0.1",
 		"@ianvs/prettier-plugin-sort-imports": "4.7.1",
 		"@stryker-mutator/core": "10.1.1",
 		"@stryker-mutator/vitest-runner": "10.1.1",
+		"@typescript/typescript6": "6.0.2",
 		"@vitest/coverage-v8": "5.1.0",
 		"@vitest/eslint-plugin": "1.6.28",
 		"eslint": "10.15.0",
@@ -46,7 +48,8 @@
 		"micromark": "4.0.3",
 		"micromark-extension-gfm": "3.0.0",
 		"prettier": "3.10.1",
-		"typescript": "6.0.3",
+		"typescript": "npm:@typescript/typescript6@6.0.2",
+		"typescript-7": "npm:typescript@7.0.2",
 		"typescript-eslint": "8.72.2",
 		"vitest": "5.1.0"
 	}

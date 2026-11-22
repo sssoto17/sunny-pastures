@@ -4,9 +4,9 @@ import type { Answer, CommitResult, FarmRecord, GameStore, StoreDeps } from "../
 
 /**
  * What the in-memory store is built from: the rules' `newFarm` and `replay`, as B100 takes them,
- * and an optional script of injected conflicts.
+ * and an optional script of injected conflicts. It stores no rules version, so it isn't handed one.
  */
-export interface MemoryStoreDeps extends Omit<StoreDeps, "db"> {
+export interface MemoryStoreDeps extends Omit<StoreDeps, "db" | "rulesVersion"> {
 	/**
 	 * Entry i scripts the i-th commit that would write, counted across the store's farms: `true`
 	 * makes it a `conflict` that writes nothing, as if another commit had just taken the seq

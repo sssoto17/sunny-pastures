@@ -20,7 +20,8 @@ export interface GameStore {
 	/**
 	 * The farm after its last accepted action, not advanced past it: the newest snapshot, then a
 	 * replay of the actions after it. A farm with no action is `newFarm` at seq 0. Never writes
-	 * (MUST-11.5). Throws if `replay` throws (a refused or out-of-order row).
+	 * (MUST-11.5). Throws a store error if the first row after the snapshot isn't at the snapshot's
+	 * seq + 1 (seq 1 with no snapshot), and throws if `replay` throws (a refused or out-of-order row).
 	 */
 	readonly load: (playerId: string) => Promise<FarmRecord>;
 	/** The answer stored with `idempotencyKey` on this farm, or `null` if no commit used the key. */
@@ -74,10 +75,16 @@ export type CommitResult =
 
 /**
  * What the store is built from (ADR-0001; ADR-0007, section 2): the client, and the rules'
- * `newFarm` and `replay` as plain functions, so the store imports `db` and the sim as types only.
+ * `newFarm`, `replay` and `rulesVersion` as plain values, so the store imports `db` and the sim as
+ * types only.
  */
 export interface StoreDeps {
 	readonly db: Db;
+	/**
+	 * The rules version stamped on every row and snapshot this store writes: the rules' own
+	 * (`Rules.rulesVersion`), so a rules bump can't leave rows stamped with a stale one (#443).
+	 */
+	readonly rulesVersion: number;
 	/** A new farm for `farmId`: the farm before its first action. */
 	readonly newFarm: (farmId: string) => FarmState;
 	/**
@@ -95,20 +102,13 @@ export interface StoreDeps {
 const snapshotEvery = 100;
 
 /**
- * The rules version stamped on every row and snapshot. M3 has one (ADR-0006, section 2; ADR-0007,
- * section 5, Q5), and the store is built from `newFarm` and `replay` alone (#373), so it is a
- * constant here; M4's registry (#154) hands the store the current version instead.
- */
-const rulesVersion = 1;
-
-/**
  * Pinned, not left to the role's default: under repeatable read the loser of a race would throw a
  * serialization error instead of seeing the winner's row, so neither `conflict` nor `duplicate`
  * would hold (MUST-13.2, MUST-13.3).
  */
 const readCommitted = { isolationLevel: "read committed" } as const;
 
-export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
+export function createStore({ db, newFarm, replay, rulesVersion }: StoreDeps): GameStore {
 	return {
 		async load(playerId) {
 			const [snapshot] = await db
@@ -128,8 +128,17 @@ export function createStore({ db, newFarm, replay }: StoreDeps): GameStore {
 				.from(actions)
 				.where(and(eq(actions.farmId, playerId), gt(actions.seq, from.seq)))
 				.orderBy(asc(actions.seq));
+			const [first] = rows;
 			const last = rows.at(-1);
-			if (last === undefined) return from;
+			if (first === undefined || last === undefined) return from;
+
+			if (first.seq !== from.seq + 1) {
+				// `replay` checks the gaps between the rows, not this one: the farm doesn't carry its
+				// seq. A lost row here would replay the rest onto the wrong farm (#443).
+				throw new Error(
+					`Store error: the first log row after seq ${String(from.seq)} is seq ${String(first.seq)}, not seq ${String(from.seq + 1)}.`,
+				);
+			}
 
 			const logged = rows.map(({ seq, at, action }) => ({ seq, at, action: readAction(action) }));
 			// To the last row's time, so the farm isn't advanced past its last action (ADR-0001).
