@@ -5,8 +5,8 @@ own the gates (constraints, spec, plan, review, ship). Matt Pocock's skills own 
 the tracker loop (grilling, domain language, deep modules, tickets, implementation, retros). Each
 job has exactly one owning skill.
 
-Last changed: 2026-11-16 (the Wk 2 workflow audit's stale places, #273). Before that 2026-11-12
-(`REVIEW.md` as the one review standard, #225).
+Last changed: 2026-11-22 (the architecture review moves from Weekly into the milestone loop, #517).
+Before that 2026-11-16 (the Wk 2 workflow audit's stale places, #273).
 
 Every name below is a skill in `.claude/skills/`, except `remember:remember`, which comes from the
 `remember` plugin, and `/today`, which is the admin's user-scoped skill (`~/.claude/skills/today/`).
@@ -19,6 +19,7 @@ Every name below is a skill in `.claude/skills/`, except `remember:remember`, wh
 flowchart TB
   subgraph M["Milestone loop: every 1–2 weeks"]
     direction TB
+    ICA["improve-codebase-architecture<br/>fed by Fallow hotspots, duplication, cycles<br/>→ deepening candidates<br/>(its issue is filed when the milestone is created)"]
     G["grill-with-docs<br/>+ domain-modeling, codebase-design<br/>→ GLOSSARY.md, ADRs"]
     Q{"Settled in<br/>conversation?"}
     P["prototype<br/>branch prototype/‹name›"]
@@ -33,6 +34,7 @@ flowchart TB
     R -- "findings" --> G
     Q -- "yes" --> S --> PL --> T
     Q -. "spike or small chunk" .-> T
+    ICA -- "the candidate you pick" --> G
   end
 
   subgraph D["Daily loop"]
@@ -55,7 +57,6 @@ flowchart TB
 
   subgraph W["Weekly"]
     direction TB
-    ICA["improve-codebase-architecture<br/>→ deepening candidates"]
     RT["retro: cloud routine, Sunday 08:00<br/>reads the Retro inbox #55<br/>→ draft PR, docs/retros/YYYY-MM-DD.md"]
   end
 
@@ -68,9 +69,7 @@ flowchart TB
 
   T -- "tickets on the board" --> AM
   PM -- "next day" --> AM
-  PM -- "end of week" --> ICA
-  ICA -- "the candidate you pick" --> G
-  ICA --> RT
+  PM -- "end of week" --> RT
   RT -. "environment fixes" .-> D
   PM -- "milestone done" --> RV
   SH -- "go: playtest or hand-in" --> G
@@ -114,6 +113,7 @@ and "Relay").
 | Start of a milestone | `grill-with-docs` (+ `domain-modeling`, `codebase-design`) | `GLOSSARY.md`, ADRs (pattern + alternatives) | every design decision |
 | ↳ needs a runnable answer | `prototype` | `prototype/<name>` branch, never merged | what it taught |
 | ↳ needs facts | `research` (background) | cited `.md` | nothing: it feeds the grill |
+| | `improve-codebase-architecture`, fed by Fallow hotspots, duplication and cycles; its issue `Architecture review, <milestone>` is filed when the milestone is created (`.github/workflows/milestone-review.yml`, #517) | deepening candidates | which one to pick |
 | | Addy `spec-driven-development` | `docs/requirements/spec.md` (living, doubles as the requirements chapter) | edit and approve |
 | | Addy `planning-and-task-breakdown` | the milestone's plan as an ADR plus its tickets (M2: ADR-0003; M3 the same way, under #74); no `docs/plans/` file exists, and the week plan lives in the coordinator's `.scratch/` | approve the plan |
 | | `to-tickets` | GitHub issues with native blocking edges, on the Project | nothing: it publishes |
@@ -123,8 +123,7 @@ and "Relay").
 | ↳ module or API shape | Addy `api-and-interface-design` + `codebase-design` | interface sketch | the interface |
 | ↳ something broke | `diagnosing-bugs` | regression test + fix | |
 | ↳ only the admin can do it | `wizard` | setup script; issue gets `blocked:admin` until done | |
-| Weekly | `improve-codebase-architecture` | deepening candidates | which one to pick |
-| | `retro` (see **Weekly retro convention**), a cloud routine on Sundays at 08:00; it handles the comments in the Retro inbox #55 | a draft PR with `docs/retros/YYYY-MM-DD.md`, new checks and standards | which fixes to adopt |
+| Weekly | `retro` (see **Weekly retro convention**), a cloud routine on Sundays at 08:00; it handles the comments in the Retro inbox #55 | a draft PR with `docs/retros/YYYY-MM-DD.md`, new checks and standards | which fixes to adopt |
 | Milestone gate | Addy `code-review-and-quality` + `security-and-hardening`, `browser-testing-with-devtools`, `shipping-and-launch` | go/no-go with rollback plan | go or no-go |
 | After playtests | `triage` | feedback turned into ready issues | what's worth doing |
 | End of day | `remember:remember` (plugin) | handoff with the top 3 next | |
@@ -154,7 +153,7 @@ early as possible: the cheapest moment is the first repeat.
 <!-- prettier-ignore -->
 | Loop | Output of | Feeds |
 |---|---|---|
-| Complexity and coupling | Fallow hotspots, duplication, cycles | weekly `improve-codebase-architecture` candidates |
+| Complexity and coupling | Fallow hotspots, duplication, cycles | each milestone's `improve-codebase-architecture` candidates |
 | Property failures | fast-check's shrunk counterexample | a named regression test kept next to the property |
 | Repeated review findings | `code-review` flagging the same kind of issue twice | a check or a standard, via `retro` |
 | Playtests | tester feedback | `triage` → `ready` issues; the next grill may reopen a MoSCoW item |
