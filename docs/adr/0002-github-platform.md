@@ -1237,6 +1237,11 @@ dispatches (it would hold the Project token and `actions: write` together).
   and branches. `dispatch` alone has `actions: write`, and `GITHUB_TOKEN` dispatches `factory.yml`
   on `main`: a `workflow_dispatch` is one of the two events a `GITHUB_TOKEN` may start a run with
   ([triggering a workflow from a workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)).
+  That makes the factory run's actor `github-actions[bot]`, so `factory.yml`'s Claude step names
+  exactly `github-actions` in `allowed_bots` (#582: run 45075597193 failed at the action's actor
+  check without it). Dispatching with the factory App's token instead would need the App to get
+  Actions write, which it doesn't have ("The factory App's permissions", above); that is the admin's
+  call.
 - **The decision**, in order, the first that holds deciding: the kill switch (`FACTORY_ENABLED`,
   read before anything else, so nothing is read with it off); a factory run that is queued, waiting,
   pending, requested or in progress (strictly serial); the **open-PR cap**: open PRs by
@@ -1249,8 +1254,11 @@ dispatches (it would hold the Project token and `actions: write` together).
   no `<n>-` branch (the gate's rules, so the sweep doesn't dispatch what the gate would refuse).
 - **A run that opens no PR** doesn't raise the count, so the loop could re-dispatch one issue for
   ever. The sweep skips an issue whose newest factory run (by its `run-name`, `factory #<n>`)
-  finished after the issue's `updated_at`: updating the issue retries it (admin, 22 Nov 2026). It
-  compares with the run's finish, so an update while the run is going doesn't retry it, and a
+  finished after the issue's `updated_at`, and only if that run ran Claude: its `factory` job's
+  "Claude ran" step succeeded, which needs an execution file or the action's prompt file, written
+  once its checks pass. A run that failed before Claude ran (an actor check, a runner or install
+  failure) did no work and doesn't count (#582). Updating the issue retries it (admin, 22 Nov 2026).
+  It compares with the run's finish, so an update while the run is going doesn't retry it, and a
   comment by anyone but the owner or a collaborator doesn't count (the repo is public, and any
   comment moves `updated_at`), read from the comments updated since the oldest run it lists.
 - **Order:** Priority (P0 first, unset last), then board order, read as the order the REST items
@@ -1258,10 +1266,11 @@ dispatches (it would hold the Project token and `actions: write` together).
   and the admin steers by Priority and by what is Ready with `factory:ready`.
 - **The chaining limit:** `workflow_run` doesn't chain more than three levels of workflows. Whether
   a `workflow_dispatch` between the sweep and the factory resets that count is **unproven**: not
-  tested here, and the docs say nothing on it. So is whether a factory run that the sweep's
-  `GITHUB_TOKEN` dispatched fires `workflow_run` at all; the first night's runs will show it. The
-  hourly schedule restarts a chain that stops, so the queue still drains, at worst one issue an
-  hour.
+  tested here, and the docs say nothing on it. A factory run that the sweep's `GITHUB_TOKEN`
+  dispatched fired no `workflow_run` on the first night (run 45075597193 finished at 22:05 UTC, 22
+  Nov, and no sweep followed; #582), as GitHub's rule that events made with the `GITHUB_TOKEN` start
+  no new runs, `workflow_dispatch` and `repository_dispatch` excepted, reads. So the hourly schedule
+  is the loop, at worst one issue an hour, until a dispatch with another token.
 - **Logs:** one `SWEEP` line and a job summary per run: the switch, the open factory PRs against the
   cap, the eligible issues in order, the skipped ones and why, and the one dispatched or why none.
 

@@ -12,9 +12,15 @@ const GATHER = fileURLToPath(new URL("../factory-sweep-gather.sh", import.meta.u
 const REPO = "https://api.github.com/repos/sssoto17/sunny-pastures";
 const BOT = "sunny-factory[bot]";
 
-// A factory run as factory-sweep-gather.sh trims `GET …/actions/workflows/factory.yml/runs`.
-const run = (issue, started, { status = "completed", conclusion = "failure", id = 1 } = {}) => ({
+// A factory run as factory-sweep-gather.sh trims `GET …/actions/workflows/factory.yml/runs`, with
+// `claude_ran` from its jobs (#582).
+const run = (
+	issue,
+	started,
+	{ status = "completed", conclusion = "failure", id = 1, claudeRan = true } = {},
+) => ({
 	id,
+	claude_ran: claudeRan,
 	display_title: `factory #${issue}`,
 	status,
 	conclusion,
@@ -198,6 +204,20 @@ describe("decideSweep", () => {
 		expect(owner.dispatch).toBe(63);
 	});
 
+	// #582: run 45075597193 failed at claude-code-action's actor check, before Claude started.
+	it("doesn't skip an issue whose last run failed before Claude ran (no claude_ran)", () => {
+		const issues = [issue(64, { updated: "2026-11-22T08:00:00Z" })];
+		const last = (claudeRan) => [run(64, "2026-11-22T09:00:00Z", { id: 6, claudeRan })];
+		const unread = last(true);
+		delete unread[0].claude_ran;
+		for (const runs of [last(false), unread]) {
+			expect(decide({ items: [item(64)], issues, runs }).dispatch).toBe(64);
+		}
+		const ran = decide({ items: [item(64)], issues, runs: last(true) });
+		expect(ran.dispatch).toBeNull();
+		expect(ran.skipped[0].why).toMatch(/^last run failed: run 6/);
+	});
+
 	it("dispatches nothing when no issue is eligible", () => {
 		const d = decide({ items: [item(50, { status: "Backlog" })], issues: [issue(50)] });
 		expect(d).toMatchObject({ dispatch: null, eligible: [], reason: "no eligible issue" });
@@ -271,8 +291,9 @@ describe("factory-sweep-gather.sh", () => {
 	let dir;
 	afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
-	// A fake gh on PATH that logs each call's path and token: the fields give three ids, the runs [], and each
-	// paginated `--jq '.[] | …'` read prints nothing, as gh does for an empty page.
+	// A fake gh on PATH that logs each call's path and token: the fields give three ids, the runs
+	// FAKE_RUNS (default []), the factory:ready issues FAKE_ISSUES, a run's jobs read `true` for run 5
+	// alone, and each other paginated `--jq '.[] | …'` read prints nothing, as gh does for an empty page.
 	const gather = (env) => {
 		dir = mkdtempSync(join(tmpdir(), "factory-sweep-gather-"));
 		mkdirSync(join(dir, "bin"));
@@ -282,7 +303,13 @@ describe("factory-sweep-gather.sh", () => {
 			`#!/usr/bin/env bash
 for a; do case $a in repos/* | users/*) url=$a ;; esac; done
 echo "$url token=\${GH_TOKEN}" >>"${join(dir, "calls")}"
-case "$*" in *"/fields?"*) echo "1,2,3" ;; *"/runs?"*) echo "[]" ;; esac
+case "$*" in
+  *"/fields?"*) echo "1,2,3" ;;
+  *"/runs?"*) echo "\${FAKE_RUNS:-[]}" ;;
+  *"labels=factory:ready"*) echo "\${FAKE_ISSUES-}" ;;
+  *"/runs/5/jobs"*) echo true ;;
+  *"/jobs"*) echo false ;;
+esac
 `,
 		);
 		chmodSync(gh, 0o755);
@@ -326,5 +353,40 @@ case "$*" in *"/fields?"*) echo "1,2,3" ;; *"/runs?"*) echo "[]" ;; esac
 			expect(c).toMatch(c.includes("projectsV2") ? /token=board-token$/ : /token=repo-token$/);
 		}
 		expect(g.log).not.toMatch(/repo-token|board-token/);
+	});
+
+	// #582: the sweep counts a run against its issue only when the factory job's "Claude ran" step
+	// succeeded, so the gather reads the jobs of the open factory:ready issues' completed runs.
+	it("marks each completed run of an open factory:ready issue with claude_ran, from its jobs", () => {
+		const r = (id, title, status = "completed") => ({
+			id,
+			display_title: title,
+			status,
+			created_at: "2026-11-22T09:00:00Z",
+		});
+		const runs = [
+			r(5, "factory #70"),
+			r(6, "factory #70"),
+			r(7, "factory #71", "in_progress"),
+			r(8, "factory #99"),
+		];
+		const g = gather({
+			FACTORY_ENABLED: "true",
+			FAKE_RUNS: JSON.stringify(runs),
+			FAKE_ISSUES: JSON.stringify({ number: 70 }) + "\n" + JSON.stringify({ number: 71 }),
+		});
+		expect(g.code).toBe(0);
+		const jobs = g.calls.split("\n").filter((c) => c.includes("/jobs"));
+		expect(jobs).toEqual([
+			"repos/sssoto17/sunny-pastures/actions/runs/5/jobs?per_page=100 token=repo-token",
+			"repos/sssoto17/sunny-pastures/actions/runs/6/jobs?per_page=100 token=repo-token",
+		]);
+		const out = JSON.parse(readFileSync(join(dir, "sweep", "runs.json"), "utf8"));
+		expect(out.map((x) => [x.id, x.claude_ran])).toEqual([
+			[5, true],
+			[6, false],
+			[7, false],
+			[8, false],
+		]);
 	});
 });
