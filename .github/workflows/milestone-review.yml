@@ -1,0 +1,60 @@
+# A milestone's architecture review (#517): when a milestone is created, file "Architecture review,
+# <milestone>" into it with its type, area, Track, Mode, Priority, Size and Week, under #73. The
+# rules are in scripts/milestone-review.sh, which files through scripts/new-issue.sh; a milestone
+# that already has its review is left alone, so a re-run never files a second.
+# One job, in environment `board`, which lets only main read the secret BOARD_PROJECT_TOKEN (a
+# classic PAT with the `project` scope alone; ADR-0002, area 5, "Status automation"). The token
+# goes to the Project's calls only (PROJECT_GH_TOKEN, as in board.yml); GITHUB_TOKEN creates the
+# issue, its labels, milestone, type and parent link. board.yml splits its token into its own job
+# because its other job reads PR text; nothing here does: the event's one value is the milestone's
+# number, and only someone with write access creates a milestone.
+# A `milestone` event runs the default branch's copy of this file, so it first runs once merged
+# (live proof: #518). workflow_dispatch files a milestone's review by hand if the created run
+# failed; the `board` environment refuses a run from any branch but main. Event values reach the
+# shell only through `env:`, and the script checks the number before use. Actions are
+# GitHub-owned and pinned to a full SHA, the pin main already uses (ADR-0002, area 8).
+name: milestone-review
+
+on:
+  milestone:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      milestone:
+        description: The milestone's number (the last part of its URL)
+        required: true
+        type: string
+
+permissions: {}
+
+# One run per milestone at a time, so a dispatch next to the created run can't file twice: the
+# second sees the first's issue.
+concurrency:
+  group: milestone-review-${{ github.event.milestone.number || inputs.milestone }}
+  cancel-in-progress: false
+
+jobs:
+  file:
+    name: milestone / architecture review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: board
+    permissions:
+      contents: read # main's checkout of scripts/
+      issues: write # the issue, its labels, milestone, type and parent link
+    steps:
+      # No `ref`: both events run on main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: File the review (Project token on the Project's calls only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_GH_TOKEN: ${{ secrets.BOARD_PROJECT_TOKEN }}
+          MILESTONE: ${{ github.event.milestone.number || inputs.milestone }}
+        run: |
+          set -euo pipefail
+          [[ -n $PROJECT_GH_TOKEN ]] || { echo "::error::BOARD_PROJECT_TOKEN isn't set in environment board"; exit 1; }
+          bash scripts/milestone-review.sh "$MILESTONE"

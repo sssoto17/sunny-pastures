@@ -295,7 +295,9 @@ The bundle ratchet has no row in that table yet; it reports as `preview / bundle
 `guard / pr-title`, `guard / protected-paths` and `guard / no-prototype` are this ADR's own. The
 CI/CD step builds the checks (#40, #42). (Amended 19 Nov: `guard / protected-paths` is built as
 `guard / acceptance`, which fails a `[bot]`-authored PR that touches `tests/acceptance/**`;
-[ADR-0007](0007-apps-web-and-game-api.md), section 6.)
+[ADR-0007](0007-apps-web-and-game-api.md), section 6.) (Amended 22 Nov, #308: `guard / floor` reads
+this table's first column as the list of required checks, so every check in ruleset `main checks`
+has a row here, `guard / code-owned` and `guard / acceptance` included; ADR-0004 has the note.)
 
 <!-- prettier-ignore -->
 | Check | Covers |
@@ -313,6 +315,8 @@ CI/CD step builds the checks (#40, #42). (Amended 19 Nov: `guard / protected-pat
 | `ci / scripts` | the shell scripts' test suites, every `*.test.sh` under `scripts/` and `.claude/hooks/`, with their fake `gh`; the suites need no secret or network (#255) |
 | `guard / pr-body` | a body that says `Part of #N` and also links #N with a closing keyword (#270); required since 16 Nov (`main checks`, 10 checks) |
 | `guard / stack-base` | a PR whose base isn't `main` and isn't in a native stack: a hand-chained PR (#264); required once the admin adds it after #264 merges |
+| `guard / code-owned` | a PR that touches a code-owned path (`.github/CODEOWNERS`) needs the code owner's review on its head (#337, #379, #494); required in `main checks` |
+| `guard / acceptance` | `guard / protected-paths` as built: fails a `[bot]`-authored PR that touches `tests/acceptance/**` (MUST-15.2; #384, [ADR-0007](0007-apps-web-and-game-api.md), section 6); required in `main checks` |
 | `guard / secrets` | the gitleaks CLI over the PR's commits (area 8) |
 | `guard / code-scan` | Semgrep (area 8) |
 | `preview / lighthouse`, `preview / axe`, `preview / bundle`, `preview / latency` | page performance, BASE-03 (axe), the bundle ratchet and BASE-04 (latency smoke), measured on the Vercel preview (below; #43) |
@@ -864,12 +868,13 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the guard
   from the lower part's branch, so a part could swap the guard that judges the part above, and a
   lower part's unmerged Exceptions row would read as "merged" in the spent-row note (PR #301's
-  review). The cumulative diff costs this: an expected floor finding in a lower part turns every
-  part above it red, as on #259 and on this stack's own `ci.yml`. A stack merges whole, so one route
-  clears it: an Exceptions row in the part that needs it covers the parts above it, or the admin
-  lifts `main checks` once for the stack's merge. #264's own stack took the second (admin, 16 Nov
-  2026): its new `if:`s, the changed floor job, and the dupes and coverage steps now diffing from
-  `$SINCE` are 12 `check-removed` findings in `ci.yml`, by design.
+  review; the note claims no merge since #310). The cumulative diff costs this: an expected floor
+  finding in a lower part turns every part above it red, as on #259 and on this stack's own
+  `ci.yml`. A stack merges whole, so one route clears it: an Exceptions row in the part that needs
+  it covers the parts above it, or the admin lifts `main checks` once for the stack's merge. #264's
+  own stack took the second (admin, 16 Nov 2026): its new `if:`s, the changed floor job, and the
+  dupes and coverage steps now diffing from `$SINCE` are 12 `check-removed` findings in `ci.yml`, by
+  design.
 - **A partial merge can't hide a broken `main`.** A partial stack merge lands lower parts whose
   tests ran only as part of the top part's run. A merge queue (`merge_group`) would test exactly
   what lands, but it isn't available on this user-owned repo: a ruleset with a `merge_queue` rule
@@ -1081,7 +1086,7 @@ not the step, is the boundary.
 | `claude-seat` | `CLAUDE_CODE_OAUTH_TOKEN` | `factory.yml` `factory`, `review.yml` `review` | The jobs that run Claude: they need the seat token and nothing else. `main` only, so no branch's own workflow can read it |
 | `factory` | `FACTORY_APP_PRIVATE_KEY` (`FACTORY_APP_CLIENT_ID`) | `factory.yml` `publish`, `open-pr.yml`, `pr-draft.yml`, `check-68-factory-resolve.yml` | Plain steps that act as sunny-factory; none runs Claude. `main` only (#336) |
 | `review` | `REVIEWER_APP_PRIVATE_KEY` (`REVIEWER_APP_CLIENT_ID`) | `review.yml` `post` | The one job that posts as sunny-reviewer; it never runs Claude |
-| `board` | `BOARD_PROJECT_TOKEN` | `board.yml` `move` | The Project token (#417); no Claude, no App key |
+| `board` | `BOARD_PROJECT_TOKEN` | `board.yml` `move`, `milestone-review.yml` `file` | The Project token (#417); no Claude, no App key. Two workflows share it since #517 (area 5, "Status automation") |
 
 `scripts/setup/ci-claude.sh` writes the seat token to `claude-seat` only, and stops unless that
 environment admits `main` alone. Until the admin deletes it after #454's merge, `review` still holds
@@ -1642,6 +1647,28 @@ linked issue, Backlog included, and can't see checks or drafts.
   user's Project. The token goes to the Project's calls only (`PROJECT_GH_TOKEN`); the job's
   `GITHUB_TOKEN` reads the issue. The repo is public, so the item's issue isn't redacted for it; if
   the repo goes private again, the token needs `repo` too.
+- **A second user: the milestone's architecture review (#517; admin, 22 Nov 2026).**
+  `.github/workflows/milestone-review.yml` files "Architecture review, <milestone>" on
+  `milestone: created` (and on a dispatch from `main`) through `scripts/milestone-review.sh` and
+  `scripts/new-issue.sh`, and sets its Project fields with the same token, in the same environment,
+  passed the same way: `PROJECT_GH_TOKEN`, so `scripts/issue-fields.sh` hands it to the Project's
+  calls only (reading the Week iterations, adding the item, setting its fields); `GITHUB_TOKEN`
+  (`issues: write`) creates the issue, its labels, milestone, type and parent link. Sharing the PAT
+  is acceptable for two reasons. It only ever reaches the Project's calls, where its `project` scope
+  is all it can do anyway, so the second workflow adds no reach the first didn't have. And the
+  `board` environment admits `main` alone, so only a reviewed copy of either workflow can read it; a
+  `milestone` event runs from the default branch, and a dispatch from any other branch is refused at
+  the environment. It is one job, not board.yml's two, because nothing in it reads text a PR wrote:
+  the event's one value is the milestone's number, and only someone with write access creates a
+  milestone. Rotating or revoking the token now stops both workflows. Patterns: an event-driven
+  filer that is idempotent by a check-then-act guard (a milestone that already has an issue titled
+  "Architecture review, …", open or closed, gets no second; not atomic, so the workflow's
+  concurrency group keeps one run per milestone), reusing `new-issue.sh` for the filing rather than
+  a second copy of it. Alternatives considered: the coordinator filing the review by hand each week
+  or milestone (rejected: it was missed in Wk 1, 2 and 3, #290, #407); a schedule that files the
+  next milestone's review (rejected: a run whether or not a milestone was made, and lag); a
+  token-free job with Week left to triage every time (rejected: every review would land in Triage,
+  the manual step this removes).
 
 Patterns: a pipeline of a pure decision and a guarded command (the decide job computes, the move job
 applies), and the guarded transition itself (a check-then-set on Status: move only from the listed
