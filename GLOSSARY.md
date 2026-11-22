@@ -99,6 +99,13 @@ storage (for one store)
 replanting, carrying feed to troughs, collecting from pens, delivering orders. _Avoid_: worker,
 helper, NPC, bot
 
+**Lot**: A fixed place on the farm map where a plot, a pen or a facility stands, or can be bought
+while it shows a "For sale" sign. _Avoid_: tile, slot, cell, plot (for the place itself)
+
+**Attention cue**: A mark on the map that something waits for the player: a ripe crop, finished
+goods, products in a pen. It replaces any summary pop-up when the player returns. _Avoid_:
+notification, alert, badge (for the concept)
+
 ### Progress
 
 **Level**: The player's progress, raised by XP. It never goes down, and reaching one unlocks

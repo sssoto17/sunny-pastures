@@ -7,7 +7,21 @@ Source: a deep-research run on 2026-10-26 that covered several cosy-game themes.
 packs that fit Sunny Pastures' farm and bakery. Licences are as reported then and have not been
 rechecked; check each pack's page before using it.
 
-Last changed: 2026-11-05.
+Last changed: 2026-11-23.
+
+## Chosen for M4
+
+Decided 19 Nov 2026 (meeting with Dannie, #127) and 22 Nov (ADR-0010, section 7):
+
+- **Art:** LeviArt's Isometric Cartoon Farm and Cartoon Farm Items Pack (GameDevMarket). Missing
+  buildings are adapted by hand from their PSDs; a person draws every final pixel.
+- **Kept out of git:** the admin exports only the sprites the game uses and uploads them to a public
+  Supabase Storage bucket, whose base URL is `NEXT_PUBLIC_ART_BASE_URL`. The pack files and PSDs
+  stay on the admin's machine. The admin checks that the licence allows the game to serve the
+  exported sprites before uploading.
+- **Placeholders** in `apps/web/public/sprites/placeholder/` are hand-written SVGs, committed; the
+  game falls back to them when the variable is unset, as in CI.
+- The packs are credited in `CREDITS.md` when their sprites first ship.
 
 ## Candidates
 

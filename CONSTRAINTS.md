@@ -178,7 +178,7 @@ These have no tool that can decide them. The admin checks them at each milestone
 | Requirement | What is checked |
 |---|---|
 | BASE-01 | The UI is in English. |
-| BASE-03 | The WCAG 2.2 AA criteria axe can't see (it covers roughly a third): keyboard order, focus visible, meaningful labels, target size, motion. |
+| BASE-03 | The WCAG 2.2 AA criteria axe can't see (it covers roughly a third) on the interface: keyboard order, focus visible, meaningful labels, target size. On the map scene: ambient animation stills under `prefers-reduced-motion`, attention cues rest after a few pulses, pan and zoom work by keys and buttons (ADR-0010, section 2). |
 
 ## Stages
 
