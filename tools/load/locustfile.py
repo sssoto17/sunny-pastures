@@ -8,8 +8,9 @@ read from PLAYERS (players.json, whose tokens are never printed). Two kinds of p
   allows (plant, harvest, deliver), or a look if there is nothing to do yet.
 - ReturningPlayer (20%): each visit takes the next unused returning farm, whose last action was
   8 hours ago (seeded backdated: the API has no clock header), reads it (the offline return,
-  "GET /api/farm [return]"), makes 2-5 actions 2-8 s apart, then is away 10-30 s. Once the pool is
-  used up it revisits its last farm ("[revisit]", no longer an 8-hour return).
+  "GET /api/farm [return]"), makes 2-5 actions 2-8 s apart, then is away 10-30 s. Its first farm
+  is set aside for it; the rest come from a shared pool, and once that is used up it revisits its
+  last farm ("[revisit]", no longer an 8-hour return).
 
 The view is the farm the server last sent: a GET's farm is the state after the last action, not
 advanced (ADR-0007, section 3), so a growing plot past its readyAt counts as ripe, and a POST's
