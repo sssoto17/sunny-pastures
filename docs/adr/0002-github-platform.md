@@ -2725,6 +2725,12 @@ commit-message: { prefix: chore, include: scope } # chore(deps): / chore(deps-de
 inside the `all-dev` group (#262 bumped TypeScript 6 to 7 there) or alone; a major is upgraded by
 hand.
 
+**Changed 22 Nov, #268:** TypeScript 7 runs side by side with the TypeScript 6 API, so the ignore
+lists all three names: `typescript` (aliased to `@typescript/typescript6`, the API that
+typescript-eslint and Next import), `typescript-7` (aliased to `typescript`, the compiler behind
+`tsc`) and `@typescript/typescript6` (imported by name by the TS API tests and the determinism
+gate).
+
 ## A8. Rulesets (JSON for `gh api --input`)
 
 `ruleset-main.json`:
