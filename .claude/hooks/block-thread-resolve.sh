@@ -18,7 +18,8 @@
 # - a GraphQL call (`gh api graphql`, `gh api …/graphql`, `curl …graphql…`) whose query it can't
 #   read: one with an expansion ($…, backticks), a file or stdin (@file, --input, <), since the
 #   mutation could hide there.
-# The commands inside $( … ) and backticks are checked too. Unlike the other hooks, it also runs
+# The commands inside $( … ) and backticks are checked too. A command over 20 KB that runs gh or
+# curl with one of the words these forms need is refused, since reading it could outrun the timeout. Unlike the other hooks, it also runs
 # in remote sessions (cloud, routines, Actions): agent PRs and replies come from the admin's
 # account until #107, so nothing on GitHub can tell an agent's review from the admin's. This is a
 # standard plus a check, not a boundary: #107's App identity is. The `deny` rules in
@@ -43,9 +44,10 @@ EOF
   exit 2
 }
 
-# A PR review or review-comment endpoint: pulls/<n>/reviews… or pulls/<n>/comments… (a thread
-# reply is pulls/<n>/comments/<id>/replies). Matched lowercased.
-review_path='(^|/)pulls/[^/]+/(reviews|comments)([/?#]|$)'
+# A PR review or review-comment endpoint: pulls/<n>/reviews…, pulls/<n>/comments… (a thread reply
+# is pulls/<n>/comments/<id>/replies) or pulls/comments/<id> (edit or delete a review comment).
+# Matched lowercased.
+review_path='(^|/)pulls/([^/]+/)?(reviews|comments)([/?#]|$)'
 
 tool=$(json_field tool_name) || exit 0
 shopt -s nocasematch
@@ -56,7 +58,7 @@ if [[ $tool == mcp__* ]]; then
   # add_reply_to_pull_request_comment (github-mcp-server README); older releases had
   # create_and_submit_pull_request_review and the *_pending_pull_request_review tools.
   squashed=${tool//_/}
-  [[ $squashed =~ pullrequestreviewwrite|pending[a-z0-9]*review|replyto[a-z0-9]*comment|(add|create|submit|dismiss)[a-z0-9]*pullrequestreview ]] &&
+  [[ $squashed =~ pullrequestreviewwrite|commenttopendingreview|pendingpullrequestreview|replytopullrequestcomment|(add|create|submit|dismiss)[a-z0-9]*pullrequestreview ]] &&
     deny "the MCP tool $tool writes a PR review or a reply on a review thread"
   exit 0
 fi
@@ -69,7 +71,19 @@ flat=${flat,,}
 [[ $flat == *resolvereviewthread* ]] && deny "this command names resolveReviewThread"
 [[ $flat =~ (add|submit|dismiss|update|delete)pullrequestreview ]] &&
   deny "this command names ${BASH_REMATCH[0]}, a GraphQL mutation that writes a PR review or a thread reply"
-[[ $flat == *gh* || $flat == *curl* ]] || exit 0
+# Only a command that runs gh or curl goes on to the lexer (slow on a long command).
+calls_gh='(^|[^a-z0-9_.-])(gh|curl)([^a-z0-9_.-]|$)'
+[[ $flat =~ $calls_gh ]] || exit 0
+# Every form below needs one of these words: `pr review`, `api`, a pulls/ path or graphql.
+[[ $flat == *review* || $flat == *api* || $flat == *pulls* || $flat == *graphql* ]] || exit 0
+# The lexer is slow on a long command (about 1 s at 20 KB): past the 10 s timeout the hook would
+# let the call through, so refuse a long one instead.
+((${#command} <= 20000)) ||
+  deny "this command is over 20 KB and runs gh or curl, too long for the hook to read in time; put long text in a file (gh pr comment <N> --body-file <file>)"
+
+# The command without its single-quoted text, where a backtick is only data.
+unquoted=$command
+while [[ $unquoted =~ \'[^\']*\' ]]; do unquoted=${unquoted/"${BASH_REMATCH[0]}"/}; done
 
 deny_unreadable() {
   deny "this GraphQL call's query comes from a variable, a command, a file or stdin, so the hook can't read it"
@@ -124,8 +138,15 @@ check_gh_api() {
   [[ ${endpoint,,} =~ $review_path ]] &&
     deny "this gh api call writes to $endpoint, a PR review or review-comment endpoint"
   ((via_xargs)) && deny "this gh api call writes under xargs, which can add the endpoint, so the hook can't read it"
-  [[ $endpoint == '' || $endpoint == *'$'* || $command == *'`'* ]] &&
-    deny "this gh api call writes to an endpoint that comes from a variable or a command, so the hook can't read it"
+  [[ $unquoted == *'`'* ]] &&
+    deny "this gh api call writes and the command holds backticks, so the hook can't read its endpoint"
+  [[ $endpoint == '' ]] && deny "this gh api call writes to an endpoint the hook can't find"
+  # An expansion could hold a review path, unless a literal issues/ segment comes before it (and
+  # no `..` leads back out).
+  if [[ $endpoint == *'$'* ]]; then
+    [[ ${endpoint%%\$*} =~ (^|/)issues/ && $endpoint != *..* ]] ||
+      deny "this gh api call writes to an endpoint that comes from a variable or a command, so the hook can't read it"
+  fi
   return 0
 }
 
@@ -140,7 +161,16 @@ check_command() {
         [[ $1 == -R || $1 == --repo || $1 == --hostname ]] && shift
         shift
       done
-      [[ ${1:-} == pr && ${2:-} == review ]] && deny "gh pr review submits a PR review"
+      if [[ ${1:-} == pr ]]; then
+        shift
+        # and between `pr` and its subcommand: `gh pr -R o/r review`
+        while (($#)) && [[ $1 == -?* ]]; do
+          [[ $1 == -R || $1 == --repo ]] && shift
+          shift
+        done
+        [[ ${1:-} == review ]] && deny "gh pr review submits a PR review"
+        return 0
+      fi
       [[ ${1:-} == api ]] && check_gh_api "${@:2}"
       ;;
     curl)
@@ -156,30 +186,37 @@ check_command() {
 }
 
 # The lexer keeps $( … ) and backticks as data, so walk the commands inside them as well: each
-# $( … ) body up to its matching `)` (by counting parentheses), and each backtick body.
+# $( … ) body up to its matching `)` (counting parentheses outside quotes), and each backtick
+# body. A nested $( … ) is found again on its own.
+walk_body() {
+  local b=${1,,}
+  [[ ${b//[\'\"\\]/} =~ $calls_gh ]] || return 0
+  lex_command "$1"
+  walk_commands "${PWD:-/}"
+}
 walk_substitutions() {
-  local rest body k depth c
+  local rest k depth c sq dq
   rest=$command
   while [[ $rest == *'$('* ]]; do
     rest=${rest#*'$('}
-    depth=1
+    depth=1 sq=0 dq=0
     for ((k = 0; k < ${#rest} && depth > 0; k++)); do
       c=${rest:k:1}
-      [[ $c == '(' ]] && depth=$((depth + 1))
-      [[ $c == ')' ]] && depth=$((depth - 1))
+      case $c in
+        \\) ((sq)) || k=$((k + 1)) ;;
+        "'") ((dq)) || sq=$((!sq)) ;;
+        '"') ((sq)) || dq=$((!dq)) ;;
+        '(') ((sq || dq)) || depth=$((depth + 1)) ;;
+        ')') ((sq || dq)) || depth=$((depth - 1)) ;;
+      esac
     done
-    body=${rest:0:k-1}
-    [[ ${body,,} == *gh* || ${body,,} == *curl* ]] || continue
-    lex_command "$body"
-    walk_commands "${PWD:-/}"
+    walk_body "${rest:0:k-1}"
   done
   rest=$command
   while [[ $rest == *'`'*'`'* ]]; do
     rest=${rest#*'`'}
-    body=${rest%%'`'*}
+    walk_body "${rest%%'`'*}"
     rest=${rest#*'`'}
-    lex_command "$body"
-    walk_commands "${PWD:-/}"
   done
 }
 

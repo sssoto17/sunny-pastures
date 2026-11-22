@@ -125,6 +125,14 @@ deny 'env GH_REPO=o/r gh pr review 12 --approve'
 deny 'gh -R o/r pr review 12 --approve'
 deny 'gh --repo=o/r pr review 12 --approve'
 deny 'gh --repo o/r api -X POST repos/o/r/pulls/12/reviews -f event=APPROVE'
+# self-review of #497: options between `pr` and `review`, a `)` in quotes inside $( … ), editing a
+# review comment (pulls/comments/<id>, no PR number)
+deny 'gh pr -R o/r review 12 --approve'
+deny 'gh pr --repo=o/r review 12 --approve'
+deny 'x=$(echo ")"; gh pr review 12 --approve)'
+deny 'x=$(echo "$(gh pr review 12 --approve)")'
+deny 'gh api -X PATCH repos/o/r/pulls/comments/77 -f body=x'
+deny 'gh api -X DELETE repos/o/r/pulls/comments/77'
 # REST: a review (POST pulls/<n>/reviews), submitting a pending one (…/reviews/<id>/events),
 # dismissing one (…/dismissals), a review comment (POST pulls/<n>/comments) and a thread reply
 # (…/comments/<id>/replies), with an explicit method or with fields (gh then sends POST)
@@ -181,6 +189,21 @@ allow 'gh api -X GET repos/o/r/pulls/12/reviews -f per_page=100'
 allow 'gh api repos/o/r/pulls/12/comments --jq ".[].body"'
 allow 'gh api repos/o/r/pulls/12 -H "Accept: application/vnd.github.diff"'
 allow 'gh api -X PATCH repos/o/r/issues/12 -f title=x'
+# ordinary writes the first draft refused (self-review): an issue endpoint with a variable after
+# its literal issues/ segment, and a backtick that is only Markdown in single quotes
+allow 'gh api "repos/o/r/issues/$N/comments" -f body=x'
+allow 'gh api -X PATCH "repos/{owner}/{repo}/issues/$N" -f title=x'
+allow 'gh api repos/o/r/issues/12/comments -f body='\''see `foo` in a.ts'\'''
+allow 'gh api repos/o/r/pulls/comments/77 --jq .body'
+allow 'echo "length high" && git status'
+# a long command: fast when it can't hold a review call, refused when it might (the lexer would
+# outrun the 10 s timeout, and a timed-out hook lets the call through)
+long=$(printf 'see $(x) and `y` it%.0s' {1..3000})
+allow "gh pr comment 12 --body \"$long\""
+deny "gh pr comment 12 --body \"a review: $long\"" 'over 20 KB'
+deny 'gh api -X POST "repos/o/r/issues/$N/../../pulls/12/reviews" -f event=APPROVE'
+deny 'gh api -X POST "repos/o/r/$P" -f event=APPROVE' "can't read"
+deny 'gh api repos/o/r/issues/12/comments -f body=`cat b.md`'
 allow 'gh api graphql -f query='\''query { repository(owner: "o", name: "r") { pullRequest(number: 12) { reviewThreads(first: 50) { nodes { isResolved } } latestReviews(first: 5) { nodes { state } } } } }'\'''
 allow 'gh pr view 12 --json reviews'
 allow 'gh pr reviewers 12'
@@ -188,6 +211,9 @@ allow 'echo "$(gh pr view 12 --json headRefOid -q .headRefOid)"'
 check 0 mcp__github__pull_request_read ''
 check 0 mcp__github__add_issue_comment ''
 check 0 mcp__github__request_copilot_review ''
+# other servers' tools with similar words stay allowed
+check 0 mcp__linear__reply_to_comment ''
+check 0 mcp__figma__list_pending_reviews ''
 
 # --- unlike the other hooks, it runs in cloud sessions and Actions too ------------------------
 export CLAUDE_CODE_REMOTE=true
@@ -230,6 +256,8 @@ rule() { # expected (denied|allowed) tool command
 rule denied Bash 'gh pr review'
 rule denied Bash 'gh pr review 12 --approve'
 rule denied Bash 'gh -R o/r pr review 12 --approve'
+rule denied Bash 'gh pr -R o/r review 12 --approve'
+rule denied Bash 'gh api -X PATCH repos/o/r/pulls/comments/77 -f body=x'
 rule denied Bash 'gh api repos/o/r/pulls/12/reviews -f event=COMMENT -f body=x'
 rule denied Bash 'gh api -X POST repos/o/r/pulls/12/reviews -F event=APPROVE'
 rule denied Bash 'gh api repos/o/r/pulls/12/reviews --input review.json'
