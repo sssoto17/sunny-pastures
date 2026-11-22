@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// factory-sweep.mjs: the sweep's choice (#108; ADR-0002, area 2, "The factory sweep, built (#108)").
-// Which one issue, if any, the sweep dispatches to the factory. sweep.yml's `select` job runs it
-// after .github/scripts/factory-sweep-gather.sh has written what it reads; it never calls GitHub.
+// factory-sweep.mjs: the sweep's choice (#108; ADR-0002, area 2, "The factory sweep, built (#108)"
+// and "Fix rounds (#588)"). Which one factory run, if any, the sweep dispatches: a fix round on a
+// factory PR, or a new issue. sweep.yml's `select` job runs it after
+// .github/scripts/factory-sweep-gather.sh has written what it reads; it never calls GitHub.
 //
 // In order, the first that holds decides, and each says why in one `SWEEP` line:
 // 1. the kill switch (#106): FACTORY_ENABLED anything but `true` dispatches nothing, before a file
@@ -11,10 +12,20 @@
 // 3. strictly serial: a factory run that is queued, waiting, pending, requested or in progress
 //    dispatches nothing (factory.yml's concurrency group would make a new run wait, and a third
 //    would cancel the waiting one);
-// 4. backpressure on the review queue: as many open PRs (drafts included) opened by
-//    sunny-factory[bot] as the cap, or more, dispatches nothing. A PR that merges or closes lowers
-//    the count, and the next sweep goes on;
-// 5. the eligible issues: on the board in this repo, Status Ready, Mode Factory or not set, an
+// 4. a fix round (#588), before any new issue and whatever the cap, since it adds no PR: the open
+//    PR the factory made with the lowest number whose newest verdict from sunny-reviewer[bot]
+//    (factory-review.mjs: not dismissed, not an empty-bodied line-comment review) is on the PR's
+//    current head and is Request changes or starts "merge after fixes". The factory made a PR when
+//    sunny-factory[bot] opened it and every commit on it is that bot user's (`factory`, read by the
+//    gather): lanes open their PRs as sunny-factory[bot] too (#336) but commit as themselves, so a
+//    lane PR is never picked. The loop guard, stateless like the rest: the fix runs are the factory runs
+//    titled "factory fix #<pr> at <head SHA>" (factory.yml's run-name), so a PR with a run at its
+//    current head, or with 2 fix runs already (whatever they did, pushed nothing included), is
+//    skipped, and the SWEEP line says why. Only the newest 100 factory runs are read;
+// 5. backpressure on the review queue: as many open PRs (drafts included) opened by
+//    sunny-factory[bot] as the cap, or more, dispatches no new issue. A PR that merges or closes
+//    lowers the count, and the next sweep goes on;
+// 6. the eligible issues: on the board in this repo, Status Ready, Mode Factory or not set, an
 //    open issue (not a PR) carrying factory:ready and opened by the owner or a collaborator, with
 //    no open PR from a `<n>-` branch and no `<n>-` branch (the gate's rules), and no factory run
 //    for it ("factory #<n>") that ran Claude and ended without a PR since the issue was last
@@ -26,29 +37,43 @@
 //    REST items list returns them). The first is dispatched; the factory's gate checks it again.
 //
 // Env: FACTORY_ENABLED, FACTORY_MAX_OPEN_PRS (vars, through env:), SWEEP_DIR holding runs, items,
-// issues, pulls, refs and comments .json (each an array), GITHUB_OUTPUT (gets `issue=<n>`, empty for none),
-// GITHUB_STEP_SUMMARY (optional).
+// issues, pulls, refs, comments and reviews .json (each an array), GITHUB_OUTPUT (gets `issue=<n>`,
+// `pr=<n>` and `head=<sha>`, each empty unless it is the one dispatched), GITHUB_STEP_SUMMARY
+// (optional).
 // Exit codes: 0 decided (dispatch or not), 2 could not run (a file missing or not an array): the
-// step fails rather than guess, and `issue=` is never written.
+// step fails rather than guess, and nothing is written to GITHUB_OUTPUT.
 // Tests: .github/scripts/tests/factory-sweep.test.mjs
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { isMain } from "./diff.mjs";
+import { newestVerdict, wantsFixes } from "./factory-review.mjs";
 
 const DEFAULT_CAP = 4;
 const BOT = "sunny-factory[bot]";
 const REPO_URL = "https://api.github.com/repos/sssoto17/sunny-pastures";
 const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const PRIORITIES = ["P0", "P1", "P2", "P3"];
+const MAX_FIX_ROUNDS = 2;
+// The gathered files, SWEEP_DIR/<name>.json.
+const FILES = ["runs", "items", "issues", "pulls", "refs", "comments", "reviews"];
 
 /**
- * The sweep's decision: `{ dispatch, reason, open, cap, eligible, skipped }`. `dispatch` is an
- * issue number or null; `open` the factory's open PRs. `enabled` and `maxOpenPrs` are the raw
+ * The sweep's decision: `{ dispatch, fix, reason, open, cap, eligible, skipped, fixSkipped }`.
+ * `dispatch` is an issue number or null; `fix` a fix round `{ pr, head, round }` or null (at most
+ * one of the two is set); `open` the factory's open PRs. `enabled` and `maxOpenPrs` are the raw
  * variables; the arrays are the gathered files (only read once the switch is on).
  */
 export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
-	const none = { dispatch: null, open: null, cap: null, eligible: [], skipped: [] };
+	const none = {
+		dispatch: null,
+		fix: null,
+		open: null,
+		cap: null,
+		eligible: [],
+		skipped: [],
+		fixSkipped: [],
+	};
 	if (enabled !== "true") {
 		return { ...none, reason: `switch off: FACTORY_ENABLED is ${JSON.stringify(enabled ?? "")}` };
 	}
@@ -61,9 +86,20 @@ export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 		};
 	}
 	const open = data.pulls.filter((p) => p.user?.login === BOT).length;
-	const counted = { ...none, open, cap };
-	const blocked = blocker(data.runs, open, cap);
-	if (blocked) return { ...counted, reason: blocked };
+	const active = data.runs.find((r) => r.status !== "completed");
+	if (active) {
+		const reason = `factory run ${active.id} (${active.display_title}) is ${active.status}`;
+		return { ...none, open, cap, reason };
+	}
+	const { fix, fixSkipped } = selectFix(data);
+	const counted = { ...none, open, cap, fixSkipped };
+	if (fix) {
+		const reason = `fix round ${fix.round} of ${MAX_FIX_ROUNDS} on PR #${fix.pr} at ${short(fix.head)}`;
+		return { ...counted, fix, reason };
+	}
+	if (open >= cap) {
+		return { ...counted, reason: `open-PR cap reached: ${open} open PRs by ${BOT}, cap ${cap}` };
+	}
 	const { eligible, skipped } = selectIssues(data);
 	const first = eligible[0];
 	if (!first) return { ...counted, skipped, reason: "no eligible issue" };
@@ -71,12 +107,42 @@ export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 	return { ...counted, eligible, skipped, dispatch: first.number, reason };
 };
 
-// Why nothing may be dispatched now, or null: a factory run not yet finished, or the open-PR cap.
-function blocker(runs, open, cap) {
-	const active = runs.find((r) => r.status !== "completed");
-	if (active) return `factory run ${active.id} (${active.display_title}) is ${active.status}`;
-	if (open >= cap) return `open-PR cap reached: ${open} open PRs by ${BOT}, cap ${cap}`;
+// The first factory PR the reviewer sent back on its current head, with the PRs the loop guard
+// skipped on the way and why.
+function selectFix({ pulls, reviews, runs }) {
+	const fixSkipped = [];
+	// `factory`: every commit is the App's bot user's (the gather). Lanes open PRs as the App too.
+	const made = pulls.filter((p) => p.user?.login === BOT && p.factory === true);
+	for (const pr of made.sort((a, b) => a.number - b.number)) {
+		const head = pr.head?.sha;
+		const review = newestVerdict(reviews.filter((r) => r.pr === pr.number));
+		if (!head || review?.commit_id !== head || !wantsFixes(review)) continue;
+		const rounds = runs.filter((r) => r.display_title?.startsWith(`factory fix #${pr.number} at `));
+		const why = loopGuard(rounds, pr.number, head);
+		if (why) fixSkipped.push({ pr: pr.number, why });
+		else return { fix: { pr: pr.number, head, round: rounds.length + 1 }, fixSkipped };
+	}
+	return { fix: null, fixSkipped };
+}
+
+// Why a PR's fix rounds so far rule out another, or null: one already ran at this head, or the limit.
+function loopGuard(rounds, pr, head) {
+	if (rounds.some((r) => r.display_title === fixTitle(pr, head))) {
+		return `a fix round already ran at ${short(head)}`;
+	}
+	if (rounds.length >= MAX_FIX_ROUNDS) {
+		return `${rounds.length} fix rounds already, the limit is ${MAX_FIX_ROUNDS}`;
+	}
 	return null;
+}
+
+// factory.yml's run-name for a fix round: the sweep's whole record of the rounds it ran.
+function fixTitle(pr, head) {
+	return `factory fix #${pr} at ${head}`;
+}
+
+function short(sha) {
+	return sha.slice(0, 7);
 }
 
 // null when the value isn't a whole number; unset or empty is the default.
@@ -163,14 +229,29 @@ function summarise(d, enabled) {
 	);
 	if (d.skipped.length)
 		lines.push("", "Skipped:", "", ...d.skipped.map((s) => `- #${s.number}: ${s.why}`));
+	if (d.fixSkipped.length) {
+		lines.push(
+			"",
+			"Fix rounds skipped:",
+			"",
+			...d.fixSkipped.map((s) => `- PR #${s.pr}: ${s.why}`),
+		);
+	}
+	const chosen = d.fix ? `a ${d.reason}` : d.dispatch ? `#${d.dispatch}` : null;
 	lines.push(
 		"",
-		d.dispatch
-			? `Chosen: #${d.dispatch} (the dispatch job sends it)`
-			: `Dispatched: none (${d.reason})`,
+		chosen ? `Chosen: ${chosen} (the dispatch job sends it)` : `Dispatched: none (${d.reason})`,
 		"",
 	);
 	return lines.join("\n");
+}
+
+// The one log line: what was chosen or why nothing, the counts, and the fix rounds skipped.
+function sweepLine(d) {
+	const counts = d.cap === null ? "" : ` open=${d.open} cap=${d.cap}`;
+	const fixSkipped = d.fixSkipped.map((s) => `; skipped PR #${s.pr}: ${s.why}`).join("");
+	const chosen = d.dispatch || d.fix ? d.reason : `none: ${d.reason}`;
+	return `SWEEP ${chosen}${counts}${fixSkipped}`;
 }
 
 const main = () => {
@@ -178,21 +259,17 @@ const main = () => {
 	const enabled = env.FACTORY_ENABLED ?? "";
 	const dir = env.SWEEP_DIR ?? "";
 	const read = (name) => (enabled === "true" ? readArray(dir, name) : null);
-	const d = decideSweep({
-		enabled,
-		maxOpenPrs: env.FACTORY_MAX_OPEN_PRS,
-		runs: read("runs"),
-		items: read("items"),
-		issues: read("issues"),
-		pulls: read("pulls"),
-		refs: read("refs"),
-		comments: read("comments"),
-	});
-	const counts = d.cap === null ? "" : ` open=${d.open} cap=${d.cap}`;
-	console.log(`SWEEP ${d.dispatch ? d.reason : `none: ${d.reason}`}${counts}`);
+	const files = Object.fromEntries(FILES.map((name) => [name, read(name)]));
+	const d = decideSweep({ enabled, maxOpenPrs: env.FACTORY_MAX_OPEN_PRS, ...files });
+	console.log(sweepLine(d));
 	if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summarise(d, enabled));
-	appendFileSync(env.GITHUB_OUTPUT ?? "/dev/stdout", `issue=${d.dispatch ?? ""}\n`);
+	appendFileSync(env.GITHUB_OUTPUT ?? "/dev/stdout", outputs(d));
 };
+
+// What the dispatch job reads: at most one of the issue and the fix round is set.
+function outputs({ dispatch, fix }) {
+	return `issue=${dispatch ?? ""}\npr=${fix?.pr ?? ""}\nhead=${fix?.head ?? ""}\n`;
+}
 
 if (isMain(import.meta.url)) {
 	try {

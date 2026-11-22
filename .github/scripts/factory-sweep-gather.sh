@@ -5,8 +5,14 @@
 #   completed run of an open factory:ready issue whose `factory` job has a successful "Claude ran"
 #   step (factory.yml), read from that run's jobs; false for every other run (#582);
 # - issues.json: the open issues carrying factory:ready, with updated_at (issues: read);
-# - pulls.json and refs.json: the open PRs (head branch and author, drafts included) and every
+# - pulls.json and refs.json: the open PRs (head branch and SHA, author, drafts included) and every
 #   branch, for the open-PR cap and the gate's duplicate guard (pull-requests: read, contents: read);
+# - for the fix rounds (#588; pull-requests: read): each open PR by sunny-factory[bot] gets
+#   `factory`, true only when every one of its commits is authored and committed by the App's bot
+#   user, as factory-publish.sh makes the factory's own (lanes open their PRs as sunny-factory[bot]
+#   too, #336, but commit as themselves); and reviews.json holds sunny-reviewer[bot]'s reviews of
+#   those factory PRs, each with its PR's number. The rounds already run are factory runs in
+#   runs.json ("factory fix #<pr> at <sha>"), so nothing else is read for them;
 # - comments.json: the comments updated since the oldest of those runs, with their authors' standing
 #   (issues: read), so a stranger's comment doesn't retry an issue whose run opened no PR;
 # - items.json: the board's issue items with Status, Mode and Priority, in the order the REST
@@ -38,8 +44,26 @@ gh api "$r/actions/workflows/factory.yml/runs?per_page=100" --jq '[.workflow_run
   | {id, display_title, status, conclusion, run_started_at, created_at, updated_at}]' >"$dir/runs.json"
 gh api --paginate "$r/issues?state=open&labels=factory:ready&per_page=100" --jq '.[]
   | {number, author_association, updated_at, labels: [.labels[] | {name}], pull_request}' | jq -s . >"$dir/issues.json"
-gh api --paginate "$r/pulls?state=open&per_page=100" --jq '.[] | {number, head: {ref: .head.ref}, user: {login: .user.login}}' |
-  jq -s . >"$dir/pulls.json"
+gh api --paginate "$r/pulls?state=open&per_page=100" --jq '.[]
+  | {number, head: {ref: .head.ref, sha: .head.sha}, user: {login: .user.login}}' | jq -s . >"$dir/pulls.json"
+# Which of the App's open PRs the factory made (every commit its bot user's: factory.yml's
+# FACTORY_BOT_ID), and the reviewer's reviews of those, one read each.
+bot_email='355564973+sunny-factory[bot]@users.noreply.github.com'
+factory='[]'
+: >"$dir/reviews.ndjson"
+for n in $(jq -r '.[] | select(.user.login == "sunny-factory[bot]") | .number' "$dir/pulls.json"); do
+  [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "::error::unexpected PR number: $n"; exit 1; }
+  pages=$(gh api --paginate "$r/pulls/$n/commits?per_page=100" --jq "[.[] | .commit.author.email,
+    .commit.committer.email] | length > 0 and all(. == \"$bot_email\")")
+  if [[ -z $pages ]] || grep -qvx true <<<"$pages"; then continue; fi
+  factory=$(jq -c --argjson n "$n" '. + [$n]' <<<"$factory")
+  gh api --paginate "$r/pulls/$n/reviews?per_page=100" --jq ".[] | select(.user.login == \"sunny-reviewer[bot]\")
+    | {pr: $n, user: {login: .user.login}, state, commit_id, submitted_at, body}" >>"$dir/reviews.ndjson"
+done
+jq -s . "$dir/reviews.ndjson" >"$dir/reviews.json"
+rm "$dir/reviews.ndjson"
+jq --argjson f "$factory" 'map(.factory = (.number | IN($f[])))' "$dir/pulls.json" >"$dir/pulls.tmp"
+mv "$dir/pulls.tmp" "$dir/pulls.json"
 gh api --paginate "$r/git/matching-refs/heads/" --jq '.[] | {ref}' | jq -s . >"$dir/refs.json"
 # Did Claude run? Only the completed runs of the open factory:ready issues are read, one jobs call
 # each: a run that failed before Claude ran (#582) mustn't make the sweep skip its issue.
@@ -80,4 +104,5 @@ project_gh api --paginate "$PROJECT_API/items?per_page=100&fields=$ids" --jq "$P
 
 echo "SWEEP gather: runs=$(jq length "$dir/runs.json") issues=$(jq length "$dir/issues.json")" \
   "pulls=$(jq length "$dir/pulls.json") branches=$(jq length "$dir/refs.json")" \
-  "comments=$(jq length "$dir/comments.json") items=$(jq length "$dir/items.json")"
+  "comments=$(jq length "$dir/comments.json") reviews=$(jq length "$dir/reviews.json")" \
+  "items=$(jq length "$dir/items.json")"

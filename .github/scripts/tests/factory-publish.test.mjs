@@ -92,7 +92,7 @@ function handoff({
 	return { repo, base };
 }
 
-function run(repo, base) {
+function run(repo, base, env = {}) {
 	const work = join(dir, `work-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(work);
 	writeFileSync(join(dir, "out"), "");
@@ -110,6 +110,7 @@ function run(repo, base) {
 			BOT,
 			BOT_ID,
 			GITHUB_OUTPUT: join(dir, "out"),
+			...env,
 		},
 	});
 	return {
@@ -123,6 +124,45 @@ const publish = (opts) => {
 	const { repo, base } = handoff(opts);
 	return run(repo, base);
 };
+// Fix mode (#588): main, the PR's branch at its reviewed head (only as a remote ref, as on the
+// publish runner after its fetch), and a hand-off of `commits` new commits past that head, made on
+// the head or, with `diverged`, on main instead.
+function fixHandoff({
+	commits = 1,
+	diverged = false,
+	body = "",
+	labels = "review:admin\n",
+	comment = "",
+	entries = ["branch", "comment", "commits.bundle", "labels", "pr-body.md"],
+} = {}) {
+	dir = mkdtempSync(join(tmpdir(), "factory-publish-fix-"));
+	const repo = join(dir, "repo");
+	mkdirSync(repo);
+	const commit = (path) => {
+		write(repo, { [path]: `${path}\n` });
+		git(repo, ["add", "-A"]);
+		git(repo, ["commit", "-qm", path]);
+	};
+	git(repo, ["init", "-q", "-b", "main"]);
+	commit("README");
+	git(repo, ["switch", "-qc", "42-add-a-line"]);
+	commit("docs/note.md");
+	const head = git(repo, ["rev-parse", "HEAD"]);
+	git(repo, ["update-ref", "refs/remotes/origin/42-add-a-line", head]);
+	if (diverged) git(repo, ["reset", "-q", "--hard", "main"]);
+	for (let i = 0; i < commits; i++) commit(`docs/fix${i}.md`);
+	const h = join(dir, "h");
+	mkdirSync(h);
+	if (commits)
+		git(repo, ["bundle", "create", "-q", join(h, "commits.bundle"), `${head}..42-add-a-line`]);
+	else writeFileSync(join(h, "commits.bundle"), "");
+	git(repo, ["switch", "-q", "main"]);
+	git(repo, ["branch", "-qD", "42-add-a-line"]);
+	write(h, { branch: "42-add-a-line\n", "pr-body.md": body, labels, comment });
+	spawnSync("tar", ["-czf", join(dir, "handoff.tgz"), ...entries], { cwd: h });
+	return run(repo, head, { FIX_BRANCH: "42-add-a-line" });
+}
+
 // The log of a refusal (exit 1, no branch handed on), or a line that fails any toMatch.
 const refusal = (p) =>
 	p.code === 1 && !/^branch=/m.test(p.out) ? p.log : `NOT REFUSED (exit ${p.code}): ${p.log}`;
@@ -306,6 +346,61 @@ describe("factory-publish.sh", () => {
 			const { repo, base } = handoff();
 			writeFileSync(join(dir, "handoff.tgz"), "not a tar");
 			expect(refusal(run(repo, base))).toMatch(/isn't a readable tar\.gz/);
+		});
+	});
+
+	describe("fix mode (#588)", () => {
+		// GITHUB_OUTPUT's lines as an object.
+		const outputs = (p) =>
+			Object.fromEntries(
+				p.out
+					.trim()
+					.split("\n")
+					.map((l) => [l.split("=")[0], l.slice(l.indexOf("=") + 1)]),
+			);
+
+		it("passes new commits on the PR's head, with a label to add", () => {
+			const p = fixHandoff();
+			expect(p.log).toContain(
+				"PUBLISH ok: fix on 42-add-a-line, 1 commit(s), labels: review:admin",
+			);
+			expect([p.code, outputs(p)]).toEqual([
+				0,
+				{ branch: "42-add-a-line", labels: "review:admin", body: "", comment: "", commits: "1" },
+			]);
+		});
+
+		it("passes a label, body and comment fix with no commits", () => {
+			const p = fixHandoff({
+				commits: 0,
+				body: "## What and why\n\nCloses #42\n",
+				comment: "escalated: code-owned path (docs/adr)\n",
+			});
+			const { body, comment, commits } = outputs(p);
+			expect([p.code, commits, body.endsWith("/pr-body.md"), comment.endsWith("/comment")]).toEqual(
+				[0, "0", true, true],
+			);
+		});
+
+		it("refuses commits that don't descend from the PR's head: no force-push", () => {
+			expect(refusal(fixHandoff({ diverged: true }))).toMatch(/doesn't descend from the PR's head/);
+		});
+
+		it.each([
+			["a body that doesn't close the issue", { body: "Closes #43\n" }, /doesn't say Closes #42/],
+			[
+				"a comment that isn't an escalation",
+				{ comment: "lgtm\n" },
+				/doesn't start with 'escalated: '/,
+			],
+			["a comment of two lines", { comment: "escalated: a\nb\n" }, /isn't one line/],
+			[
+				"an issue run's hand-off",
+				{ entries: ["branch", "commits.bundle", "labels", "pr-body.md"] },
+				/the hand-off holds /,
+			],
+		])("refuses %s", (_n, opts, why) => {
+			expect(refusal(fixHandoff(opts))).toMatch(why);
 		});
 	});
 });

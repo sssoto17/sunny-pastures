@@ -1274,6 +1274,54 @@ dispatches (it would hold the Project token and `actions: write` together).
 - **Logs:** one `SWEEP` line and a job summary per run: the switch, the open factory PRs against the
   cap, the eligible issues in order, the skipped ones and why, and the one dispatched or why none.
 
+**Fix rounds (#588; admin, 22 Nov 2026).** Step 4 of the review flow ("the factory fixes them and
+pushes", above), built: when `sunny-reviewer[bot]` sends a factory PR back, the sweep dispatches the
+factory on that PR, which fixes only the Required findings on the same branch, so the factory can
+fix its own PRs overnight while the coordinator's laptop is off. Pattern: the same guard pipeline
+and model/writer split as an issue run, in a second mode of the same workflow (inputs `pr` and
+`head` instead of `issue`), and a stateless loop guard derived from the factory's own run titles.
+Alternatives considered: a separate `factory-fix.yml` (a second copy of the switch, environments,
+bubblewrap and caps, which would drift apart from the first); a label or a comment on the PR as the
+round counter (state anyone with write access can edit, and one more write per round); fixing in the
+reviewer's own job (it would run Claude next to the reviewer App's key, which "Which environment
+holds which secret" rules out).
+
+- **What the sweep picks:** after the kill switch, the cap's parse and the serial rule, and before
+  the open-PR cap and any new issue (a fix round adds no PR), the open PR with the lowest number
+  that the factory made: opened by `sunny-factory[bot]` with every commit authored and committed by
+  its bot user. Lanes open their PRs as `sunny-factory[bot]` too ("Lanes open PRs as sunny-factory",
+  below) but commit as themselves, so a lane PR is never picked. Its newest review from
+  `sunny-reviewer[bot]` that gives a verdict (not dismissed, not pending, not one of the
+  empty-bodied reviews that carry its line comments) must be on the PR's current head and be Request
+  changes or start "merge after fixes". `factory-review.mjs` holds those rules for the sweep and the
+  fix gate both.
+- **The loop guard:** at most **2** fix rounds per PR, and never two on one head. A fix run's
+  `run-name` is `factory fix #<pr> at <head SHA>`, so the sweep counts a PR's rounds from the
+  factory runs it already reads: every such run counts, whatever it did, a run that pushed nothing
+  or failed included. A PR over the limit, or with a run at its head, is skipped, and the `SWEEP`
+  line and the summary say why. The sweep reads the newest 100 factory runs, so a round older than
+  that falls out of the count. After 2 rounds the reviewer's own "Not converging" row (3 Request
+  changes) is one review away.
+- **Fix mode in `factory.yml`:** `gate` runs `factory-fix-gate.mjs` (through `factory-gather.sh`),
+  which refuses unless the PR is open, the factory made it (the rule above), its branch is
+  `<n>-<slug>` in this repo, its head is still `head`, and the newest verdict on that head asks for
+  fixes and lists at least one Required finding; the issue is the branch's number. `factory` makes
+  the PR's branch at `head` and hands Claude only the Required findings and the PR's body, with
+  `.github/factory-prompt.md`'s "Fix mode": fix those findings and nothing else, commit on top,
+  never rewrite history. Same environment, read-only `GITHUB_TOKEN`, tools, `--max-turns` and
+  timeouts as an issue run.
+- **Labels and the body are publish's:** a finding like "`review:admin` is missing" or a wrong
+  Review line isn't applied by Claude, which holds no write token. Claude writes the labels to add,
+  a whole new body and an `escalated:` comment into the hand-off; `factory-publish.sh` (with
+  `FIX_BRANCH`) checks them (labels only `review:admin` and `area:*`, added, never removed; the body
+  still says `Closes #<n>`; the comment one line starting `escalated: `) and checks the new commits
+  as for an issue run (identity, protected paths, at most 100), plus that they descend from the
+  reviewed head. `publish` then fetches the branch and refuses if it moved since the gate, mints the
+  App's token with `contents: write` and, in fix mode only, `pull-requests: write`, applies the
+  labels, body and comment, and pushes the commits last with a plain push, which GitHub refuses
+  unless it fast-forwards the branch: never a force-push. The push starts the next review ("An
+  approved head isn't reviewed", above).
+
 **Two environments, both `main` only (admin, 21 Nov 2026, in the coordinator session).** The Claude
 job runs in `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN` and is named for the seat, not
 the factory, so `review.yml` can share it (it does since #454). The App's key stays in `factory`,

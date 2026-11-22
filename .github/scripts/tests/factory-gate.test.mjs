@@ -403,7 +403,9 @@ describe("factory.yml", () => {
 	it("runs Claude on the setup-token, never on an API key, with /implement and no web tools", () => {
 		expect(factory).toContain("claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}");
 		expect(factory).toMatch(/ANTHROPIC_API_KEY: ''/);
-		expect(factory).toContain("/implement #${{ needs.gate.outputs.issue }}");
+		expect(factory).toContain("format('/implement #{0} Read");
+		// Fix mode (#588): the fix-mode section of the prompt, on the gate's checked PR and branch.
+		expect(factory).toContain(`its "Fix mode" section. You are fixing PR #{0} on the branch {1}`);
 		expect(factory).toMatch(/--disallowedTools "WebFetch,WebSearch/);
 	});
 
@@ -447,12 +449,17 @@ describe("factory.yml", () => {
 		for (const [, body] of yml.matchAll(/^ {8}run: \|\n((?: {10}.*\n|\n)+)/gm))
 			expect(body).not.toContain("${{");
 		const uses = [...yml.matchAll(/\$\{\{\s*inputs\.(\w+)\s*\}\}/g)].map((m) => m[0]);
+		// The gate's env alone; the run-name (display text) uses them inside format() (#588).
 		expect(uses.sort()).toEqual([
-			"${{ inputs.issue }}",
+			"${{ inputs.head }}",
 			"${{ inputs.issue }}",
 			"${{ inputs.max_turns }}",
+			"${{ inputs.pr }}",
 		]);
-		expect(yml).toMatch(/^run-name: 'factory #\$\{\{ inputs\.issue \}\}'$/m);
+		expect(yml).toMatch(
+			/^run-name: >-\n {2}\$\{\{ inputs\.pr != '' && format\('factory fix #\{0\} at \{1\}'/m,
+		);
+		expect(yml).toContain("|| format('factory #{0}', inputs.issue) }}");
 		expect(publish).toMatch(/^ {10}DATA: \$\{\{ needs\.factory\.outputs\.handoff \}\}$/m);
 	});
 
