@@ -29,10 +29,12 @@
 	// CLI asks for names a path on the host, so the path must be the same inside and out.
 	"workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
 	"workspaceFolder": "${localWorkspaceFolder}",
-	// The image's non-root user; the CLI maps its uid to the host's, so the checkout stays writable.
-	"remoteUser": "node",
+	// root, as the image's default user: the checkout belongs to whoever cloned it on the VM, root in
+	// a cloud session, and the CLI can't map the image's `node` user onto uid 0, so `node` couldn't
+	// write node_modules there. The container is a throwaway on a throwaway VM.
+	"remoteUser": "root",
 	"remoteEnv": {
-		"PATH": "/home/node/.local/bin:${containerEnv:PATH}",
+		"PATH": "/root/.local/bin:${containerEnv:PATH}",
 		"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0"
 	},
 	// Corepack, the frozen install, and the Supabase CLI and uv from their existing pins, each

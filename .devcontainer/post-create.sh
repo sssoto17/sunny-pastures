@@ -44,7 +44,9 @@ node=$(node --version)
 
 # pnpm at package.json's packageManager pin, through Corepack (as .github/actions/setup does).
 corepack enable --install-directory "$bin"
-COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile
+# The checkout may hold a node_modules the host installed from another store; with no TTY, pnpm
+# would abort rather than ask to replace it, so it replaces it without asking.
+COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile --config.confirmModulesPurge=false
 
 action=.github/actions/supabase-stack/action.yml
 supabase_version=$(pin SUPABASE_VERSION "$action")
@@ -58,7 +60,8 @@ echo "Supabase CLI $supabase_version installed."
 
 # uv's linux amd64 archive (uv-x86_64-unknown-linux-gnu.tar.gz) for each version the load project
 # may pin, from the release's own .sha256 file. Add a line when the pin moves, with the date the
-# version was checked against the 7-day rule. 0.13.6: on PyPI since 27 Oct 2026, checked 22 Nov.
+# version was checked against the 7-day rule. 0.13.6: the release's PyPI upload is dated 27 Oct 2026
+# (GitHub's release API isn't reachable from a cloud session); checked 22 Nov.
 declare -A uv_sha256=(
 	[0.13.6]=f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645
 )
