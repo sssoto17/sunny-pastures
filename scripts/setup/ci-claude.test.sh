@@ -86,14 +86,14 @@ expect_hidden() { # marker: in neither output nor any gh argument
 }
 
 # --- the pattern follows the workflows' pin (#486): a bump that leaves the wizard behind fails ---
-code=0 out=$pins err="" calls=$patterns
+code=0 out="" err="" calls="" # no run here: the messages carry the pin and the pattern
 assert "expected a claude-code-action pin in the workflows" test -n "$pins"
-assert "expected one pin, the same in every workflow" test "$(grep -c . <<<"$pins")" -eq 1
+assert "expected one pin, the same in every workflow, got: ${pins//$'\n'/; }" test "$(grep -c . <<<"$pins")" -eq 1
 assert "expected the pin to be a full commit SHA with its version (ADR-0002, area 8)" \
   grep -qxE 'anthropics/claude-code-action@[0-9a-f]{40} # v[0-9.]+' <<<"$pins"
 assert "expected exactly one claude-code-action pattern in the wizard" \
   test "$(grep -c 'anthropics/claude-code-action' <<<"$patterns")" -eq 1
-assert "expected the wizard's pattern to carry the workflows' SHA and version" \
+assert "expected the wizard's pattern to carry the workflows' SHA and version ($pins), got: ${patterns//$'\n'/ }" \
   grep -qxE "  ${pins//./\\.}(,.*)?" <<<"$patterns"
 
 # --- usage ------------------------------------------------------------------------------------
