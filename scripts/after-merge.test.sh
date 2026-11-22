@@ -791,6 +791,19 @@ expect_out "review copy: kept review-21-abc1234 (its git link doesn't point back
 assert "expected the copy to stay" test -d "$(copy_of 21)"
 rm -rf "$work/elsewhere"
 
+# A folder with a worktree's .git file that git worktree list doesn't show (a path spelled
+# another way, or a stale record): never deleted, since it isn't a plain archive copy.
+reset
+merge_pr
+pull 21 closed null
+mkdir "$(copy_of 21)"
+echo x >"$(copy_of 21)/kept.txt"
+printf 'gitdir: %s\n' "$main/.git/worktrees/review-21-abc1234" >"$(copy_of 21)/.git"
+case_ 9-lane
+expect_code 0
+expect_out "review copy: kept review-21-abc1234 (a worktree link that git worktree list doesn't show"
+assert "expected the linked folder to stay" test -f "$(copy_of 21)/kept.txt"
+
 # Sandbox mounts in a closed PR's copies: the lane is cleaned up, the copies stay, and the
 # commands to finish them are printed for outside the sandbox (exit 3).
 reset

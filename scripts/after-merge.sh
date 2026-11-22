@@ -160,7 +160,7 @@ resolve() { # dir [base] -> its physical path (relative to base), or nothing
   [[ $d == /* ]] || d=${2:-.}/$d
   (cd "$d" 2>/dev/null && pwd -P) || true
 }
-git_link() { # dir -> its admin folder in .git/worktrees/, when the links check out; else fails
+admin_of() { # dir -> its admin folder in .git/worktrees/, when the links check out; else fails
   local dir=$1 link="" adm="" back="" shared=""
   if [[ -f $dir/.git && ! -L $dir/.git ]]; then
     link=$(<"$dir/.git")
@@ -176,7 +176,7 @@ git_link() { # dir -> its admin folder in .git/worktrees/, when the links check 
   [[ -n $adm && $back == "$dir" && $shared == "$main_git" ]] || return 1
   printf '%s\n' "$adm"
 }
-admin=$(git_link "$path") ||
+admin=$(admin_of "$path") ||
   die 2 "$path's git link (its .git file, or gitdir and commondir in .git/worktrees/) doesn't point back at $main_git, so git there could read another repository's config; nothing changed. Check those files by hand."
 
 # git in a worktree goes through its checked admin folder, with fsmonitor off as a second guard.
@@ -444,7 +444,7 @@ for copy in "$main"/.claude/worktrees/review-*; do
       echo "review copy: kept $name (a locked worktree; git worktree unlock it first)"
       continue
     fi
-    if ! copy_admin=$(git_link "$copy"); then
+    if ! copy_admin=$(admin_of "$copy"); then
       echo "review copy: kept $name (its git link doesn't point back at $main_git; check it by hand)"
       continue
     fi
@@ -464,6 +464,11 @@ for copy in "$main"/.claude/worktrees/review-*; do
     fi
   else
     # An archive copy: a plain folder (with its own git init, at most), not linked to this repo.
+    # A .git file means a worktree that git worktree list spelled differently: never rm -rf it.
+    if [[ -f $copy/.git || -L $copy/.git ]]; then
+      echo "review copy: kept $name (a worktree link that git worktree list doesn't show; check it by hand)"
+      continue
+    fi
     if mounted_in "$copy"; then
       finish_outside+=("rm -rf $(printf %q "$copy")")
       continue

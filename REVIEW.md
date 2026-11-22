@@ -40,14 +40,14 @@ report. When a pointer here and the rule's home disagree, the home wins.
   path. That path is the same inside and outside the sandbox (`$TMPDIR` isn't), and
   `.claude/worktrees/` is gitignored. Make it with
   `git worktree add --detach <repo>/.claude/worktrees/review-<N>-<short sha> <sha>`, then
-  `pnpm install --frozen-lockfile` in it. Reach it only with a subshell, `( cd <path> && … )`, or
-  `git -C <path> …`, both of which the branch-switch hook allows; a top-level `cd` would leave your
-  later commands in the copy or, when it fails, in the main folder. Leave the copy when you're done:
-  `scripts/after-merge.sh` removes every review copy whose PR is closed, merged or not. Never
-  `rm -rf`, `git checkout --`, `git restore` or `git clean` a review copy; make a fresh one instead,
-  under a new `<short sha>` or suffix. The main folder stays on the branch it's on (`AGENTS.md`).
-  The CI reviewer App never runs PR code (ADR-0002, area 2), so it cites instead. In the local
-  sandbox (`docs/agents/sandbox.md`; seen in 30+ review runs on 21 Nov):
+  `( cd <path> && pnpm install --frozen-lockfile )`. Reach it only with a subshell,
+  `( cd <path> && … )`, or `git -C <path> …`, both of which the branch-switch hook allows; a
+  top-level `cd` would leave your later commands in the copy or, when it fails, in the main folder.
+  Leave the copy when you're done: `scripts/after-merge.sh` removes every review copy whose PR is
+  closed, merged or not. Never `rm -rf`, `git checkout --`, `git restore` or `git clean` a review
+  copy; make a fresh one instead, under a new `<short sha>` or suffix. The main folder stays on the
+  branch it's on (`AGENTS.md`). The CI reviewer App never runs PR code (ADR-0002, area 2), so it
+  cites instead. In the local sandbox (`docs/agents/sandbox.md`; seen in 30+ review runs on 21 Nov):
   - **Get the head without a checkout**: the branch-switch hook blocks one in the main folder. Fetch
     it into a ref, `git fetch origin +pull/<N>/head:refs/review/<N>`, check that
     `git rev-parse refs/review/<N>` prints the SHA you review, and copy from that ref.
@@ -63,8 +63,8 @@ report. When a pointer here and the rule's home disagree, the home wins.
     changes no dependency
     (`git diff --quiet <sha> -- pnpm-lock.yaml pnpm-workspace.yaml ':(glob)**/package.json'` in the
     main folder exits 0), you can instead symlink the main folder's `node_modules` into the copy:
-    the root's, `apps/web`'s and `packages/sim`'s, after any `git add -A`. A worktree with those
-    links refuses `git worktree remove`; leave it.
+    the root's, `apps/web`'s and `packages/sim`'s, after any `git add -A`. Link them into a plain
+    copy only: a worktree with those links refuses `git worktree remove`, so the sweep keeps it.
 - **On a test-heavy PR, plant a mutant**: break the code under test on purpose and confirm a test
   goes red. A test that stays green against its mutant is a Required finding.
 - **Measure timing claims** rather than estimate them.
