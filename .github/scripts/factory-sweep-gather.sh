@@ -5,6 +5,8 @@
 # - issues.json: the open issues carrying factory:ready, with updated_at (issues: read);
 # - pulls.json and refs.json: the open PRs (head branch and author, drafts included) and every
 #   branch, for the open-PR cap and the gate's duplicate guard (pull-requests: read, contents: read);
+# - comments.json: the comments updated since the oldest of those runs, with their authors' standing
+#   (issues: read), so a stranger's comment doesn't retry an issue whose run opened no PR;
 # - items.json: the board's issue items with Status, Mode and Priority, in the order the REST
 #   Projects API lists them, through scripts/lib/project-rest.sh with BOARD_PROJECT_TOKEN in
 #   PROJECT_GH_TOKEN, used on the Project's calls only.
@@ -31,12 +33,23 @@ mkdir -p "$dir"
 r="repos/${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set}"
 
 gh api "$r/actions/workflows/factory.yml/runs?per_page=100" --jq '[.workflow_runs[]
-  | {id, display_title, status, conclusion, run_started_at, created_at}]' >"$dir/runs.json"
+  | {id, display_title, status, conclusion, run_started_at, created_at, updated_at}]' >"$dir/runs.json"
 gh api --paginate "$r/issues?state=open&labels=factory:ready&per_page=100" --jq '.[]
   | {number, author_association, updated_at, labels: [.labels[] | {name}], pull_request}' | jq -s . >"$dir/issues.json"
 gh api --paginate "$r/pulls?state=open&per_page=100" --jq '.[] | {number, head: {ref: .head.ref}, user: {login: .user.login}}' |
   jq -s . >"$dir/pulls.json"
 gh api --paginate "$r/git/matching-refs/heads/" --jq '.[] | {ref}' | jq -s . >"$dir/refs.json"
+# The comments updated since the oldest of those runs, repo-wide in one read: whose comment last
+# moved an issue's updated_at.
+since=$(jq -r '[.[].created_at] | min // empty' "$dir/runs.json")
+if [[ -z $since ]]; then
+  echo '[]' >"$dir/comments.json"
+else
+  [[ $since =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || { echo "::error::unexpected run time: $since"; exit 1; }
+  gh api --paginate "$r/issues/comments?since=$since&per_page=100" --jq '.[]
+    | {issue: (.issue_url | sub(".*/"; "") | tonumber), author_association, updated_at}' |
+    jq -s . >"$dir/comments.json"
+fi
 
 ids=$(project_gh api "$PROJECT_API/fields?per_page=100" --jq '[.[]
   | select(.name == "Status" or .name == "Mode" or .name == "Priority") | .id | tostring] | join(",")')
@@ -51,4 +64,5 @@ project_gh api --paginate "$PROJECT_API/items?per_page=100&fields=$ids" --jq "$P
      status: fv("Status"), mode: fv("Mode"), priority: fv("Priority")}' | jq -s . >"$dir/items.json"
 
 echo "SWEEP gather: runs=$(jq length "$dir/runs.json") issues=$(jq length "$dir/issues.json")" \
-  "pulls=$(jq length "$dir/pulls.json") branches=$(jq length "$dir/refs.json") items=$(jq length "$dir/items.json")"
+  "pulls=$(jq length "$dir/pulls.json") branches=$(jq length "$dir/refs.json")" \
+  "comments=$(jq length "$dir/comments.json") items=$(jq length "$dir/items.json")"

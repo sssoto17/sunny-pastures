@@ -20,6 +20,7 @@ const run = (issue, started, { status = "completed", conclusion = "failure", id 
 	conclusion,
 	run_started_at: started,
 	created_at: started,
+	updated_at: started.replace(/T(\d\d)/, (_, h) => `T${String(Number(h) + 1).padStart(2, "0")}`),
 });
 // A board item as the gather step shapes it from the REST Projects API.
 const item = (
@@ -60,6 +61,7 @@ const decide = (over = {}) =>
 		issues: [issue(10), issue(11)],
 		pulls: [],
 		refs: [],
+		comments: [],
 		...over,
 	});
 
@@ -159,21 +161,41 @@ describe("decideSweep", () => {
 		expect(d.dispatch).toBe(47);
 	});
 
-	it("skips an issue whose last factory run opened no PR, until the issue is edited after it", () => {
+	// Each fixture run finishes an hour after it starts.
+	it("skips an issue whose last factory run opened no PR, until the issue is updated after it finished", () => {
 		const runs = [
-			run(60, "2026-11-22T09:00:00Z", { id: 1, conclusion: "success" }),
-			run(60, "2026-11-22T11:00:00Z", { id: 2 }),
+			run(60, "2026-11-22T06:00:00Z", { id: 1, conclusion: "success" }),
+			run(60, "2026-11-22T09:00:00Z", { id: 2 }),
 			run(61, "2026-11-22T09:00:00Z", { id: 3 }),
+			run(62, "2026-11-22T09:00:00Z", { id: 4, conclusion: "cancelled" }),
 		];
 		const issues = [
-			issue(60, { updated: "2026-11-22T10:00:00Z" }),
-			issue(61, { updated: "2026-11-22T10:00:00Z" }),
+			issue(60, { updated: "2026-11-22T08:00:00Z" }), // before its last run: skipped
+			issue(61, { updated: "2026-11-22T09:30:00Z" }), // during the run: skipped
+			issue(62, { updated: "2026-11-22T10:30:00Z" }), // after it finished: retried
 		];
-		const d = decide({ items: [item(60, { priority: "P0" }), item(61)], issues, runs });
+		const items = [item(60, { priority: "P0" }), item(61, { priority: "P0" }), item(62)];
+		const d = decide({ items, issues, runs });
 		expect(d.skipped).toEqual([
 			{ number: 60, why: "last run failed: run 2 (failure) opened no PR; edit the issue to retry" },
+			{ number: 61, why: "last run failed: run 3 (failure) opened no PR; edit the issue to retry" },
 		]);
-		expect(d.dispatch).toBe(61);
+		expect(d.dispatch).toBe(62);
+	});
+
+	it("doesn't retry an issue when the update after its run is a stranger's comment", () => {
+		const runs = [run(63, "2026-11-22T09:00:00Z", { id: 5 })];
+		const issues = [issue(63, { updated: "2026-11-22T11:00:00Z" })];
+		const comment = (author_association) => ({
+			issue: 63,
+			author_association,
+			updated_at: "2026-11-22T11:00:00Z",
+		});
+		const stranger = decide({ items: [item(63)], issues, runs, comments: [comment("NONE")] });
+		expect(stranger.dispatch).toBeNull();
+		expect(stranger.skipped[0].why).toMatch(/^last run failed: run 5/);
+		const owner = decide({ items: [item(63)], issues, runs, comments: [comment("OWNER")] });
+		expect(owner.dispatch).toBe(63);
 	});
 
 	it("dispatches nothing when no issue is eligible", () => {
@@ -194,6 +216,7 @@ describe("factory-sweep.mjs", () => {
 			issues: [issue(60)],
 			pulls: [],
 			refs: [],
+			comments: [],
 			...files,
 		};
 		for (const [k, v] of Object.entries(data))
@@ -226,7 +249,7 @@ describe("factory-sweep.mjs", () => {
 		expect(r.summary).toContain("- Switch: on");
 		expect(r.summary).toContain("- Open factory PRs: 1 of 4");
 		expect(r.summary).toContain("1. #60 (P2)");
-		expect(r.summary).toContain("Dispatched: #60");
+		expect(r.summary).toContain("Chosen: #60 (the dispatch job sends it)");
 	});
 
 	it("writes an empty issue and says why when the switch is off, without reading the files", () => {
@@ -248,7 +271,7 @@ describe("factory-sweep-gather.sh", () => {
 	let dir;
 	afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
-	// A fake gh on PATH that logs its calls: the fields give three ids, the runs [], and each
+	// A fake gh on PATH that logs each call's path and token: the fields give three ids, the runs [], and each
 	// paginated `--jq '.[] | …'` read prints nothing, as gh does for an empty page.
 	const gather = (env) => {
 		dir = mkdtempSync(join(tmpdir(), "factory-sweep-gather-"));
@@ -257,7 +280,8 @@ describe("factory-sweep-gather.sh", () => {
 		writeFileSync(
 			gh,
 			`#!/usr/bin/env bash
-echo "$* token=\${GH_TOKEN:+set}" >>"${join(dir, "calls")}"
+for a; do case $a in repos/* | users/*) url=$a ;; esac; done
+echo "$url token=\${GH_TOKEN}" >>"${join(dir, "calls")}"
 case "$*" in *"/fields?"*) echo "1,2,3" ;; *"/runs?"*) echo "[]" ;; esac
 `,
 		);
@@ -288,14 +312,19 @@ case "$*" in *"/fields?"*) echo "1,2,3" ;; *"/runs?"*) echo "[]" ;; esac
 		expect(g.log).toContain("SWEEP gather: switch off, nothing read");
 	});
 
-	it("reads the runs, issues, PRs, branches and board over REST, and never prints a token", () => {
+	it("reads over REST, with the board token on the Project's calls only, and never prints a token", () => {
 		const g = gather({ FACTORY_ENABLED: "true" });
 		expect(g.code).toBe(0);
 		expect(g.calls).toContain(
 			"repos/sssoto17/sunny-pastures/actions/workflows/factory.yml/runs?per_page=100",
 		);
 		expect(g.calls).toContain("users/sssoto17/projectsV2/3/items?per_page=100&fields=1,2,3");
-		expect(g.log).toMatch(/^SWEEP gather: runs=0 issues=0 pulls=0 branches=0 items=0$/m);
-		expect(g.log + g.calls).not.toMatch(/repo-token|board-token/);
+		expect(g.log).toMatch(/^SWEEP gather: runs=0 issues=0 pulls=0 branches=0 comments=0 items=0$/m);
+		const calls = g.calls.trim().split("\n");
+		expect(calls).toHaveLength(6);
+		for (const c of calls) {
+			expect(c).toMatch(c.includes("projectsV2") ? /token=board-token$/ : /token=repo-token$/);
+		}
+		expect(g.log).not.toMatch(/repo-token|board-token/);
 	});
 });

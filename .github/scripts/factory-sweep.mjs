@@ -19,12 +19,13 @@
 //    no open PR from a `<n>-` branch and no `<n>-` branch (the gate's rules), and no factory run
 //    for it ("factory #<n>") that ended without a PR since the issue was last updated: a run that
 //    opens no PR doesn't raise the count, so without this the loop could re-dispatch one issue
-//    for ever. Editing the issue (its updated_at) makes it eligible again. Ordered by Priority
+//    for ever. Updating the issue after that run finished makes it eligible again, unless the
+//    update is a comment by someone other than the owner or a collaborator. Ordered by Priority
 //    (P0 first, unset last), then board order (the order the REST items list returns them). The
 //    first is dispatched; the factory's gate checks it again.
 //
 // Env: FACTORY_ENABLED, FACTORY_MAX_OPEN_PRS (vars, through env:), SWEEP_DIR holding runs, items,
-// issues, pulls and refs .json (each an array), GITHUB_OUTPUT (gets `issue=<n>`, empty for none),
+// issues, pulls, refs and comments .json (each an array), GITHUB_OUTPUT (gets `issue=<n>`, empty for none),
 // GITHUB_STEP_SUMMARY (optional).
 // Exit codes: 0 decided (dispatch or not), 2 could not run (a file missing or not an array): the
 // step fails rather than guess, and `issue=` is never written.
@@ -45,7 +46,7 @@ const PRIORITIES = ["P0", "P1", "P2", "P3"];
  * issue number or null; `open` the factory's open PRs. `enabled` and `maxOpenPrs` are the raw
  * variables; the arrays are the gathered files (only read once the switch is on).
  */
-export const decideSweep = ({ enabled, maxOpenPrs, runs, items, issues, pulls, refs }) => {
+export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 	const none = { dispatch: null, open: null, cap: null, eligible: [], skipped: [] };
 	if (enabled !== "true") {
 		return { ...none, reason: `switch off: FACTORY_ENABLED is ${JSON.stringify(enabled ?? "")}` };
@@ -58,11 +59,11 @@ export const decideSweep = ({ enabled, maxOpenPrs, runs, items, issues, pulls, r
 			reason: `FACTORY_MAX_OPEN_PRS ${shown} isn't a whole number: nothing dispatched`,
 		};
 	}
-	const open = pulls.filter((p) => p.user?.login === BOT).length;
+	const open = data.pulls.filter((p) => p.user?.login === BOT).length;
 	const counted = { ...none, open, cap };
-	const blocked = blocker(runs, open, cap);
+	const blocked = blocker(data.runs, open, cap);
 	if (blocked) return { ...counted, reason: blocked };
-	const { eligible, skipped } = selectIssues({ items, issues, pulls, refs, runs });
+	const { eligible, skipped } = selectIssues(data);
 	const first = eligible[0];
 	if (!first) return { ...counted, skipped, reason: "no eligible issue" };
 	const reason = `dispatch #${first.number} (${first.priority ?? "no Priority"})`;
@@ -83,13 +84,13 @@ function readCap(value) {
 	return /^\d{1,4}$/.test(value) ? Number(value) : null;
 }
 
-function selectIssues({ items, issues, pulls, refs, runs }) {
-	const open = new Map(issues.map((i) => [i.number, i]));
-	const ready = items.filter((i) => i.repository_url === REPO_URL && i.status === "Ready");
+function selectIssues(data) {
+	const open = new Map(data.issues.map((i) => [i.number, i]));
+	const ready = data.items.filter((i) => i.repository_url === REPO_URL && i.status === "Ready");
 	const eligible = [];
 	const skipped = [];
 	for (const it of ready) {
-		const why = refusal(it, { open, pulls, refs, runs });
+		const why = refusal(it, open.get(it.number), data);
 		if (why) skipped.push({ number: it.number, why });
 		else eligible.push({ number: it.number, priority: it.priority ?? null });
 	}
@@ -100,10 +101,9 @@ function selectIssues({ items, issues, pulls, refs, runs }) {
 
 // Why the sweep skips a Ready item, or null when it is eligible: Mode, the gate's rules, then the
 // last run.
-function refusal(item, { open, pulls, refs, runs }) {
+function refusal(item, issue, { pulls, refs, runs, comments }) {
 	const n = item.number;
 	if (item.mode != null && item.mode !== "Factory") return `Mode is ${item.mode}`;
-	const issue = open.get(n);
 	if (!issue?.labels?.some((l) => l.name === "factory:ready"))
 		return "not an open issue carrying factory:ready";
 	if (issue.pull_request) return "a pull request";
@@ -114,16 +114,23 @@ function refusal(item, { open, pulls, refs, runs }) {
 	if (pr) return `has PR #${pr.number} from a ${n}- branch`;
 	const ref = refs.find((r) => r.ref?.startsWith(`refs/heads/${n}-`));
 	if (ref) return `has the branch ${ref.ref.slice("refs/heads/".length)}`;
-	return lastRunRefusal(n, issue, runs);
+	return lastRunRefusal(n, issue, runs, comments);
 }
 
-// The issue has no PR and no branch here, so its newest completed run opened none (or its PR
-// closed unmerged and the branch went). Skipped unless the issue changed after that run started.
-function lastRunRefusal(n, issue, runs) {
+// The issue has no PR and no branch here, so its newest run opened none (or its PR closed unmerged
+// and the branch went). Skipped unless the issue was updated after that run finished, and not by a
+// comment from outside the owner and collaborators: the repo is public, and anyone's comment moves
+// updated_at, which must not buy a factory run.
+function lastRunRefusal(n, issue, runs, comments) {
 	const mine = runs.filter((r) => r.display_title === `factory #${n}`);
 	if (mine.length === 0) return null;
 	const last = mine.reduce((a, b) => (started(b) > started(a) ? b : a));
-	if (started(last) < Date.parse(issue.updated_at)) return null;
+	const updated = Date.parse(issue.updated_at);
+	const byStranger = comments.some(
+		(c) =>
+			c.issue === n && !TRUSTED.has(c.author_association) && Date.parse(c.updated_at) >= updated,
+	);
+	if (Date.parse(last.updated_at ?? last.created_at) < updated && !byStranger) return null;
 	return `last run failed: run ${last.id} (${last.conclusion}) opened no PR; edit the issue to retry`;
 }
 
@@ -152,7 +159,13 @@ function summarise(d, enabled) {
 	);
 	if (d.skipped.length)
 		lines.push("", "Skipped:", "", ...d.skipped.map((s) => `- #${s.number}: ${s.why}`));
-	lines.push("", d.dispatch ? `Dispatched: #${d.dispatch}` : `Dispatched: none (${d.reason})`, "");
+	lines.push(
+		"",
+		d.dispatch
+			? `Chosen: #${d.dispatch} (the dispatch job sends it)`
+			: `Dispatched: none (${d.reason})`,
+		"",
+	);
 	return lines.join("\n");
 }
 
@@ -169,6 +182,7 @@ const main = () => {
 		issues: read("issues"),
 		pulls: read("pulls"),
 		refs: read("refs"),
+		comments: read("comments"),
 	});
 	const counts = d.cap === null ? "" : ` open=${d.open} cap=${d.cap}`;
 	console.log(`SWEEP ${d.dispatch ? d.reason : `none: ${d.reason}`}${counts}`);

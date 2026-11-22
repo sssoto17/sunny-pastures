@@ -25,7 +25,8 @@
 #   FACTORY_MAX_OPEN_PRS (default 4 when unset; admin, 22 Nov 2026), and skips an issue whose last
 #   factory run opened no PR until the issue is edited after that run.
 # - dispatch: `actions: write` on this job only, and nothing else: GITHUB_TOKEN dispatches
-#   factory.yml on main with the one issue. A workflow_dispatch is one of the two events a
+#   factory.yml on main with the one issue, then waits until the new run is listed, so a sweep
+#   queued behind this one sees it. A workflow_dispatch is one of the two events a
 #   GITHUB_TOKEN may start a run with ("Triggering a workflow from a workflow",
 #   https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
 #   The factory's own switch and gate check the issue again.
@@ -113,9 +114,9 @@ jobs:
     needs: select
     if: needs.select.outputs.issue != ''
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: 4
     permissions:
-      actions: write # workflow_dispatch of factory.yml, and nothing else
+      actions: write # workflow_dispatch of factory.yml (and reading its runs back), nothing else
     steps:
       - name: Dispatch the factory
         env:
@@ -128,3 +129,13 @@ jobs:
             -f ref=main -f "inputs[issue]=$ISSUE" --silent
           echo "SWEEP dispatched factory #$ISSUE"
           echo "Dispatched factory #$ISSUE on main." >>"$GITHUB_STEP_SUMMARY"
+          # The dispatch API answers before the run is listed. A sweep queued behind this one starts
+          # when it ends, so it waits (up to 2 minutes) until the run shows: the next sweep then sees
+          # it and stays strictly serial. A run that never shows is a warning, not a failure.
+          for _ in $(seq 24); do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/factory.yml/runs?per_page=10" \
+              --jq "[.workflow_runs[] | select(.display_title == \"factory #$ISSUE\" and .status != \"completed\")] | length")
+            if ((n > 0)); then echo "SWEEP factory #$ISSUE is listed"; exit 0; fi
+            sleep 5
+          done
+          echo "::warning title=sweep::factory #$ISSUE wasn't listed within 2 minutes; the next sweep may not see it"
