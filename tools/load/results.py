@@ -5,6 +5,8 @@
 
 `run` cuts a run's request log to its measured window (window.json) and writes the Server-Timing
 phases as histograms at 0.1 ms: one row per (request name, status, tail99, phase, ms) with a count.
+`offline_return.csv` holds the client time of each returning farm's first read, the offline
+return 8 hours after its last action (later reads by the same player are not returns).
 `tail99` marks requests whose farm had a 99-action replay tail: the seq the server loaded, mod 100
 (B100), is 99, rebuilt from the seeded seq plus the accepted actions as each response reports them.
 
@@ -48,10 +50,18 @@ def run(out: Path, requests_csv: Path) -> None:
     window = json.loads((out / "window.json").read_text())
     start, end = window["measuredFrom"], window["measuredTo"]
     counts: dict[tuple, int] = defaultdict(int)
+    offline: dict[float, int] = defaultdict(int)
+    returned: set[str] = set()
     with open(requests_csv, newline="") as f:
         for row in csv.DictReader(f):
+            # The offline return: a returning farm's first read, 8 hours after its last action.
+            first = row["name"] == "GET /api/farm [return]" and row["farm"] not in returned
+            if first:
+                returned.add(row["farm"])
             if not start <= int(row["t"]) <= end:
                 continue
+            if first and row["status"] == "200":
+                offline[round(float(row["clientMs"]))] += 1
             tail99 = int(row["seq"]) % 100 == 99
             for phase in PHASES:
                 if row[phase]:
@@ -61,6 +71,10 @@ def run(out: Path, requests_csv: Path) -> None:
         w.writerow(["name", "status", "tail99", "phase", "ms", "count"])
         for key in sorted(counts):
             w.writerow([*key, counts[key]])
+    with open(out / "offline_return.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["ms", "count"])
+        w.writerows(sorted(offline.items()))
 
 
 def locust_hist(run_dir: Path, method: str) -> tuple[Hist, int, int, float]:
@@ -106,9 +120,8 @@ def summarise(runs: list[Path]) -> dict:
         h, n, fails, s = locust_hist(r, "")
         merge(every, h)
         requests, failures, seconds = requests + n, failures + fails, seconds + s
-        for e in json.loads((r / "locust.json").read_text()):
-            if e["name"].endswith("[return]"):
-                merge(ret, {float(ms): c for ms, c in e["response_times"].items()})
+        with open(r / "offline_return.csv", newline="") as f:
+            merge(ret, {float(row["ms"]): int(row["count"]) for row in csv.DictReader(f)})
         for p in PHASES:
             merge(phases[p], server_hist(r, p, post_ok=True))
         merge(tail, server_hist(r, "load", tail99=True))
