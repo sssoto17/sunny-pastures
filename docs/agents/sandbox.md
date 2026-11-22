@@ -154,8 +154,10 @@ on (#434: `prettier --write` stopped the #382 lane for over an hour). A wildcard
 and `pnpm exec vitest run` call decided by the classifier, not the rule. Don't count on auto mode
 dropping it, though. The permission-modes page lists "package-manager run commands" among the broad
 allow rules auto mode drops, but Claude Code 2.1.330 drops only a bare prefix (`pnpm exec *`,
-`npx *`; read from its drop check, 22 Nov, #437). So `pnpm exec vitest run *` stays in effect and
-approves every flag no ask rule names; why the scan's calls still reached the classifier is open.
+`npx *`; read from its drop check, 22 Nov, #437). So a rule like `pnpm exec vitest run *` stays in
+effect and approves every flag no ask rule names; why the scan's calls still reached the classifier
+is open. That's why the vitest `run` and `bench` allows are gone (#560); the three snapshot ask
+rules stay.
 
 ### Flags a wildcard allow can't see
 
