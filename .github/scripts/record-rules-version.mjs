@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // record-rules-version.mjs: records a released rules version's logs for the rules-version check
-// (ADR-0006, section 10; #154). Run it once, when version N first reaches an environment whose farms
-// persist, after its `contentHash` is set in the registry (packages/sim/src/versions/index.ts):
+// (ADR-0006, section 10; #154). Run it once, when version N first reaches an environment whose
+// farms persist, after its `contentHash` is set in the registry (packages/sim/src/versions/index.ts):
 //
 //   node .github/scripts/record-rules-version.mjs <N>
 //
@@ -45,11 +45,11 @@ registerHooks({
 		}
 	},
 });
-const { registry } = await import(join(VERSIONS, "index.ts"));
+const { listVersions, registry } = await import(join(VERSIONS, "index.ts"));
 const { stateHash } = await import(join(ROOT, "packages/sim/src/index.ts"));
 const { recordLogs } = await import(join(TESTS, "record.ts"));
 
-const entry = version === 1 ? registry.first : registry.later[version - 2];
+const entry = listVersions(registry)[version - 1];
 if (entry === undefined) fail(1, `the registry has no rules version ${version}`);
 const hash = stateHash(entry.content);
 if (entry.contentHash !== hash) {
@@ -83,9 +83,9 @@ const recorded = readdirSync(TESTS)
 writeFormatted(
 	join(TESTS, "recordings.ts"),
 	[
-		"// The recorded logs of every released rules version (ADR-0006, section 10), one file per version",
-		"// beside this one. Written by `node .github/scripts/record-rules-version.mjs <version>` when the version is",
-		"// released, never edited by hand: the rules-version check replays each one on today's code.",
+		"// The recorded logs of every released rules version (ADR-0006, section 10), one file per",
+		"// version beside this one. Written by `node .github/scripts/record-rules-version.mjs <N>` when",
+		"// version N is released, never edited by hand: the rules-version check replays each one.",
 		'import type { Recording } from "./record.js";',
 		...recorded.map((n) => `import { rulesVersion${n} } from "./rulesVersion${n}.js";`),
 		"",

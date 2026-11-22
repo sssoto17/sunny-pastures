@@ -1,6 +1,7 @@
 // A registry with a version upgrade in it, so the rules-version check runs its assertions on a
 // boundary before the game has one (#154). Version 1 is the slice, released; version 2 is a tuning
-// that grows wheat 30 s longer and adds a third facility, so its `upgrade` fills the new entry.
+// that grows wheat 30 s longer and adds a second feed mill (a third facility), so its `upgrade`
+// fills the new entry.
 import { sliceContent, stateHash } from "../../index.js";
 import type { Content } from "../../index.js";
 import type { Registry } from "../index.js";

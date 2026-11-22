@@ -8,7 +8,7 @@ import { describe, expect, inject, it, vi } from "vitest";
 
 import { farmId, play, timedActions } from "../../state/tests/farms.js";
 import { requireProvided } from "../../state/tests/provided.js";
-import { createVersions, registry } from "../index.js";
+import { createVersions, listVersions, registry } from "../index.js";
 import type { Registry } from "../index.js";
 import {
 	listBoundaryFaults,
@@ -32,7 +32,7 @@ const registries: readonly (readonly [string, Registry, readonly Recording[]])[]
 
 describe.each(registries)("the rules-version check, over %s", (_name, checked, recorded) => {
 	const versions = createVersions(checked);
-	const all = [checked.first, ...checked.later];
+	const all = listVersions(checked);
 	const released = all.flatMap(({ contentHash }, i) => (contentHash === null ? [] : [i + 1]));
 	/** Every version but the current one has a version upgrade after it. */
 	const upgradable = all.slice(0, -1).map((_version, i) => i + 1);
@@ -53,12 +53,14 @@ describe.each(registries)("the rules-version check, over %s", (_name, checked, r
 	it.each(upgradable)(
 		"3: farms of version %i upgrade to the next and the current version without a throw, within MUST-14's bounds, as plain JSON, keeping shared facts",
 		(version) => {
-			const sim = versions.simOf(version);
+			const sim = versions.getSim(version);
 			fc.assert(
-				fc.property(farmId, timedActions, (id, played) => {
-					// Each run's last farm: comparing every farm of a run took over the property timeout.
-					const { final } = play(sim, id, played);
-					expect(listUpgradeFaults(checked, version, final)).toEqual([]);
+				fc.property(farmId, timedActions, fc.nat(), (id, played, pick) => {
+					// One farm of each run, often mid-run with work in flight: every farm of a run took
+					// over the property timeout at 1,000 runs.
+					const { farms } = play(sim, id, played);
+					const farm = farms[pick % farms.length] ?? sim.newFarm(id);
+					expect(listUpgradeFaults(checked, version, farm)).toEqual([]);
 				}),
 				params,
 			);

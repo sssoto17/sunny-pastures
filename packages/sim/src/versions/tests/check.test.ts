@@ -24,7 +24,7 @@ vi.setConfig({ testTimeout: inject("propertyTimeout") });
 const recording = recordLogs(twoVersions, 1, params);
 const [log] = recording.logs;
 const [tuned] = twoVersions.later;
-const newFarm = createVersions(twoVersions).simOf(1).newFarm("farm-1");
+const newFarm = createVersions(twoVersions).getSim(1).newFarm("farm-1");
 
 /** `twoVersions` with version 2's entry changed. */
 const withTuned = (change: Partial<LaterVersion>): Registry => ({

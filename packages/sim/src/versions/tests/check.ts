@@ -4,7 +4,7 @@ import { stateHash } from "../../index.js";
 import type { Content, FarmState } from "../../index.js";
 import { assertSafeIntegers } from "../../state/index.js";
 import type { TimedAction } from "../../state/tests/farms.js";
-import { createVersions } from "../index.js";
+import { createVersions, listVersions } from "../index.js";
 import type { LoggedRow, Registry, VersionedFarm } from "../index.js";
 import type { RecordedLog, Recording } from "./record.js";
 
@@ -12,8 +12,8 @@ import type { RecordedLog, Recording } from "./record.js";
  * Assertion 1, frozen content: every released version's content hashes to its recorded hash, and
  * only a prefix of the versions is released (content after an unreleased version can't be frozen).
  */
-export function listFrozenFaults({ first, later }: Registry): string[] {
-	const all = [first, ...later];
+export function listFrozenFaults(registry: Registry): string[] {
+	const all = listVersions(registry);
 	return all.flatMap(({ content, contentHash }, i) => {
 		const version = String(i + 1);
 		if (contentHash === null) return [];
@@ -39,7 +39,7 @@ export function listReplayFaults(registry: Registry, { rulesVersion, logs }: Rec
 		const faults: string[] = [];
 		try {
 			let farm: VersionedFarm = {
-				state: versions.simOf(rulesVersion).newFarm(log.farmId),
+				state: versions.getSim(rulesVersion).newFarm(log.farmId),
 				rulesVersion,
 			};
 			for (const row of log.rows) {
@@ -48,13 +48,13 @@ export function listReplayFaults(registry: Registry, { rulesVersion, logs }: Rec
 					faults.push(`${log.farmId}: seq ${String(row.seq)} replays to another farm`);
 				}
 			}
-			const replayed = versions.replay(log.farmId, [], toRows(log, rulesVersion));
-			const offline = versions.simOf(rulesVersion).advance(replayed.state, log.to);
+			const replayed = versions.replay(log.farmId, [], listRows(log, rulesVersion));
+			const offline = versions.getSim(rulesVersion).advance(replayed.state, log.to);
 			if (stateHash(offline) !== log.hash) {
 				faults.push(`${log.farmId}: the farm after its last row replays to another farm`);
 			}
 		} catch (error) {
-			faults.push(`${log.farmId}: ${describe(error)}`);
+			faults.push(`${log.farmId}: ${readMessage(error)}`);
 		}
 		return faults;
 	});
@@ -78,15 +78,17 @@ export function listUpgradeFaults(
 		try {
 			upgraded = versions.upgradeTo({ state: farm, rulesVersion }, to).state;
 		} catch (error) {
-			return [`${label} throws: ${describe(error)}`];
+			return [`${label} throws: ${readMessage(error)}`];
 		}
 
-		const target = to === 1 ? registry.first : registry.later[to - 2];
+		const target = listVersions(registry)[to - 1];
+		if (target === undefined) return [`${label}: the registry has no version ${String(to)}`];
+
 		const declared = new Set(
 			registry.later.slice(rulesVersion - 1, to - 1).flatMap(({ changes }) => changes),
 		);
 		return [
-			...listInvariantFaults(upgraded, target?.content ?? registry.first.content),
+			...listInvariantFaults(upgraded, target.content),
 			...(isPlainJson(upgraded) ? [] : ["it doesn't survive a JSON round trip"]),
 			...listChangedFacts(farm, upgraded, declared),
 		].map((fault) => `${label}: ${fault}`);
@@ -106,14 +108,14 @@ export function listBoundaryFaults(
 ): string[] {
 	const versions = createVersions(registry);
 	const { current } = versions;
-	const old = toRows(log, rulesVersion);
+	const old = listRows(log, rulesVersion);
 	const last = versions.replay(log.farmId, [], old);
 	const base = versions.upgradeTo(last, current);
 	const continued: LoggedRow[] = [];
 	let farm = base.state;
 	for (const { action, delay } of played) {
 		const at = farm.time + delay;
-		const result = versions.simOf(current).apply(farm, action, at);
+		const result = versions.getSim(current).apply(farm, action, at);
 		if (!result.ok) continue;
 
 		farm = result.state;
@@ -141,7 +143,7 @@ export function listInvariantFaults(farm: FarmState, content: Content): string[]
 	try {
 		assertSafeIntegers(farm);
 	} catch (error) {
-		faults.push(describe(error));
+		faults.push(readMessage(error));
 	}
 	const sum = (pick: (row: Content["levels"][number]) => number): number =>
 		content.levels.reduce((total, row) => total + pick(row), 0);
@@ -221,10 +223,10 @@ function isSame(a: unknown, b: unknown): boolean {
 	}
 }
 
-function toRows(log: RecordedLog, rulesVersion: number): LoggedRow[] {
+function listRows(log: RecordedLog, rulesVersion: number): LoggedRow[] {
 	return log.rows.map(({ seq, at, action }) => ({ seq, at, action, rulesVersion }));
 }
 
-function describe(error: unknown): string {
+function readMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }

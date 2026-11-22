@@ -1,7 +1,8 @@
 // Recording a released rules version's logs (ADR-0006, section 10, "Recorded logs"): the property
 // harness's generator, at a fixed seed, plays a set of farms under the version, and each log keeps
-// the state hash after every row and after an offline day. `.github/scripts/record-rules-version.mjs` runs
-// this when a version is released; the rules-version check replays the recording ever after.
+// the state hash after every row and after an offline day. The recording script
+// (`.github/scripts/record-rules-version.mjs`) runs this when a version is released; the
+// rules-version check replays the recording ever after.
 import fc from "fast-check";
 
 import { stateHash } from "../../index.js";
@@ -49,7 +50,7 @@ export function recordLogs(
 	rulesVersion: number,
 	settings: fc.Parameters<TimedAction[]>,
 ): Recording {
-	const sim = createVersions(registry).simOf(rulesVersion);
+	const sim = createVersions(registry).getSim(rulesVersion);
 	const sampled = fc.sample(timedActions, settings).slice(0, runs);
 	const logs = sampled.flatMap((played, i) => {
 		const farmId = `recorded-v${String(rulesVersion)}-${String(i + 1)}`;

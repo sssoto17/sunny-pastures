@@ -34,7 +34,7 @@ describe("createVersions", () => {
 	});
 
 	it("gives each version its own content's sim", () => {
-		const [v1, v2] = [1, 2].map((version) => versions.simOf(version).newFarm(farmId));
+		const [v1, v2] = [1, 2].map((version) => versions.getSim(version).newFarm(farmId));
 
 		expect(v1).toEqual(createSim(sliceContent).newFarm(farmId));
 		expect(v2).toEqual(createSim(tunedContent).newFarm(farmId));
@@ -44,14 +44,14 @@ describe("createVersions", () => {
 	it.each([0, 3, 1.5, Number.NaN])(
 		"throws for rules version %s, which it doesn't know",
 		(version) => {
-			expect(() => versions.simOf(version)).toThrow(`rules version ${String(version)} is unknown`);
+			expect(() => versions.getSim(version)).toThrow(`rules version ${String(version)} is unknown`);
 		},
 	);
 });
 
 describe("upgradeTo", () => {
 	const versions = createVersions(twoVersions);
-	const farm = { state: versions.simOf(1).newFarm(farmId), rulesVersion: 1 };
+	const farm = { state: versions.getSim(1).newFarm(farmId), rulesVersion: 1 };
 
 	it("runs each later version's upgrade on the way, unadvanced", () => {
 		const upgraded = versions.upgradeTo(farm, 2);

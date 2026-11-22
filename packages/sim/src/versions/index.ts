@@ -1,9 +1,10 @@
 // The rules versions (ADR-0006): a registry of each version's content and version upgrade, and the
 // replay that reads a log across versions. Server-only (ADR-0006, "The client"): the package entry
 // (src/index.ts) doesn't export this module, so the client gets only the current content.
-// Patterns: Registry (version → content and `upgrade`, section 2), Upcaster chained one version at
-// a time (section 6), Event Sourcing replay with a version step (section 5). Rejected: keeping old
-// sim builds side by side (section 8) and tolerant reading without a version upgrade (section 6).
+// Patterns: Registry (version → content and `upgrade`, section 2), Upcaster chained one version
+// at a time (section 6), Event Sourcing replay with a version step (section 5). Rejected: keeping
+// old sim builds side by side (section 8) and tolerant reading without a version upgrade (section
+// 6).
 import { sliceContent } from "../content/index.js";
 import type { Content } from "../content/index.js";
 import { createSim } from "../sim/index.js";
@@ -36,7 +37,7 @@ export interface LaterVersion extends RulesVersion {
 	readonly changes: readonly (keyof FarmState)[];
 }
 
-/** Every rules version, 1 first: `later[i]` is version i + 2, and the highest is the current one. */
+/** Every rules version, 1 first: `later[i]` is version i + 2; the highest is the current one. */
 export interface Registry {
 	readonly first: RulesVersion;
 	readonly later: readonly LaterVersion[];
@@ -66,7 +67,7 @@ export interface Versions {
 	/** The highest version: the one new actions are accepted and written under. */
 	readonly current: number;
 	/** The sim for `version`. Throws for a version the registry doesn't hold (section 8). */
-	simOf(version: number): Sim;
+	getSim(version: number): Sim;
 	/**
 	 * Gives `farm` a version upgrade to `to`, one version at a time (section 6), unadvanced. Returns
 	 * the same farm when it is already at `to`. Throws for an unknown version or a `to` below the
@@ -96,19 +97,20 @@ export interface Versions {
 /**
  * The game's registry. Version 1 is the slice content, unreleased until the first deploy whose
  * farms persist (M4's, ADR-0007 section 1): releasing it records its hash here, and the recording
- * script then records its logs (`.github/scripts/record-rules-version.mjs`). A tuning after that adds a
- * version; it never edits a released one.
+ * script then records its logs (`.github/scripts/record-rules-version.mjs`). A tuning after that
+ * adds a version; it never edits a released one.
  */
 export const registry: Registry = {
 	first: { content: sliceContent, contentHash: null },
 	later: [],
 };
 
-export function createVersions({ first, later }: Registry): Versions {
-	const sims = [first, ...later].map(({ content }) => createSim(content));
+export function createVersions(registry: Registry): Versions {
+	const { later } = registry;
+	const sims = listVersions(registry).map(({ content }) => createSim(content));
 	const current = sims.length;
 
-	function simOf(version: number): Sim {
+	function getSim(version: number): Sim {
 		const sim = Number.isSafeInteger(version) ? sims[version - 1] : undefined;
 		if (sim === undefined) {
 			// An instance older than the farm's version (a deploy's overlap) answers 503 (section 8).
@@ -120,9 +122,14 @@ export function createVersions({ first, later }: Registry): Versions {
 		return sim;
 	}
 
+	/** Throws the store error for a version this code doesn't know (section 8). */
+	function assertKnown(version: number): void {
+		getSim(version);
+	}
+
 	function upgradeTo(farm: VersionedFarm, to: number): VersionedFarm {
-		simOf(farm.rulesVersion);
-		simOf(to);
+		assertKnown(farm.rulesVersion);
+		assertKnown(to);
 		if (to < farm.rulesVersion) {
 			throw new Error(
 				`Replay error: a farm at rules version ${String(farm.rulesVersion)} can't go back to version ${String(to)}.`,
@@ -147,7 +154,7 @@ export function createVersions({ first, later }: Registry): Versions {
 		}
 
 		const { state } = upgradeTo(farm, rulesVersion);
-		const result = simOf(rulesVersion).apply(state, action, at);
+		const result = getSim(rulesVersion).apply(state, action, at);
 		if (!result.ok) {
 			throw new Error(
 				`Replay error: the rules refused the logged action at seq ${String(seq)}. ${result.reason}`,
@@ -159,7 +166,7 @@ export function createVersions({ first, later }: Registry): Versions {
 
 	return {
 		current,
-		simOf,
+		getSim,
 		upgradeTo,
 		applyRow,
 		replay(farmId, snapshots, rows) {
@@ -169,9 +176,9 @@ export function createVersions({ first, later }: Registry): Versions {
 			let farm: VersionedFarm;
 			if (snapshot === null) {
 				const rulesVersion = after[0]?.rulesVersion ?? current;
-				farm = { state: simOf(rulesVersion).newFarm(farmId), rulesVersion };
+				farm = { state: getSim(rulesVersion).newFarm(farmId), rulesVersion };
 			} else {
-				simOf(snapshot.rulesVersion);
+				assertKnown(snapshot.rulesVersion);
 				farm = { state: snapshot.state, rulesVersion: snapshot.rulesVersion };
 			}
 
@@ -189,6 +196,11 @@ export function createVersions({ first, later }: Registry): Versions {
 			return farm;
 		},
 	};
+}
+
+/** Every version's entry, version 1 first: entry i is version i + 1. */
+export function listVersions({ first, later }: Registry): readonly RulesVersion[] {
+	return [first, ...later];
 }
 
 /** The newest snapshot: the highest seq, and at one seq the higher version (section 5, step 1). */
