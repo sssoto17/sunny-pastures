@@ -21,7 +21,8 @@ fi
 OWNER=sssoto17
 REPO=sunny-pastures
 here="$(cd "$(dirname "$0")" && pwd)"
-# PROJECT_API, PROJECT_NUMBER, PROJECT_JQ_DEFS, PROJECT_SKIPPED, project_refused, project_rerun.
+# PROJECT_API, PROJECT_NUMBER, PROJECT_JQ_DEFS, PROJECT_SKIPPED, project_gh, project_refused,
+# project_rerun.
 # shellcheck source=scripts/lib/project-rest.sh
 . "$here/lib/project-rest.sh"
 
@@ -74,11 +75,6 @@ EOF
 die() { # code message
   printf 'issue-fields: %s\n' "$2" >&2
   exit "$1"
-}
-
-# The Project's calls: with PROJECT_GH_TOKEN set, gh uses it for them and nothing else (#417).
-project_gh() { # gh args...
-  if [[ -n ${PROJECT_GH_TOKEN-} ]]; then GH_TOKEN=$PROJECT_GH_TOKEN gh "$@"; else gh "$@"; fi
 }
 
 # Values only the admin sets (docs/agents/issue-tracker.md, Status rules; triage-labels.md,

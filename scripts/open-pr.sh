@@ -20,7 +20,10 @@ shopt -s inherit_errexit
 REPO=sssoto17/sunny-pastures
 P=repos/$REPO
 RUNS="$P/actions/workflows/open-pr.yml/runs?event=repository_dispatch&per_page=30"
-PR_DRAFT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pr-draft.sh
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PR_DRAFT=$here/pr-draft.sh
+# shellcheck source=scripts/lib/pr-title.sh
+. "$here/lib/pr-title.sh"
 TIMEOUT=${OPEN_PR_TIMEOUT:-300} POLL=${OPEN_PR_POLL:-5}
 
 usage() {
@@ -29,7 +32,10 @@ usage: scripts/open-pr.sh [--as-admin] [--base <branch>] [--label <name>]... [--
                           <branch> <body-file>
 
   Opens <branch>'s PR as sunny-factory[bot] and prints its number. Push the branch first. The
-  body file's first line is the PR's title; the rest is its body.
+  body file's first line is the PR's title; the rest is its body. The title starts with a
+  conventional type (feat, fix, chore, docs, test, ci, build, refactor, perf, style, revert or
+  spike), an optional (scope) and !, then ": " and a summary; a Closes #N or Part of #N line
+  goes below it, in the body (#471).
   --base     the branch the PR goes onto (default main); a stack part's base is the part
              below, and the workflow links it into that part's stack. Use scripts/stack.sh for
              stacks: it calls this for each part.
@@ -75,6 +81,8 @@ branch=$1 file=$2
 [[ -r $file ]] || die 2 "can't read the body file $file"
 title=$(head -n1 "$file")
 [[ -n ${title//[[:space:]]/} ]] || die 2 "the body file $file has no title on its first line"
+problem=$(pr_title_problem "$title")
+[[ -z $problem ]] || die 2 "$problem"
 body=$(tail -n +2 "$file" | sed '/./,$!d')
 
 if ((as_admin)); then # the gate: the admin's launch, not a brief, names the commissioned issue

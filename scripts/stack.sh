@@ -21,6 +21,8 @@ REPO=sssoto17/sunny-pastures
 P=repos/$REPO
 OPEN_PR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/open-pr.sh
 PR_DRAFT=${OPEN_PR%/*}/pr-draft.sh
+# shellcheck source=scripts/lib/pr-title.sh
+. "${OPEN_PR%/*}/lib/pr-title.sh"
 WAIT=${STACK_WAIT_TIMEOUT:-120} POLL=${STACK_WAIT_POLL:-3}
 
 usage() {
@@ -30,7 +32,8 @@ usage: scripts/stack.sh <command> ...
   open [--as-admin] [--base <branch>] [--label <name>]... <branch>=<body-file>...
       Push the parts, open each PR on the part below (part 1 on --base, default main), and link
       them as one native stack. Each part must be built on the one below and add commits of its
-      own. A body file's first line is the PR title; the rest is the body. Part 1 stays a draft
+      own. A body file's first line is the PR title, with a conventional type such as
+      `feat(ci): ` (scripts/open-pr.sh --help); the rest is the body. Part 1 stays a draft
       until the stack is linked, then every part is marked ready. Run it again after a failure:
       it reuses the PRs and the stack it finds.
   add <pr> [--as-admin] [--label <name>]... <branch>=<body-file>
@@ -62,13 +65,15 @@ die() { # code message
 # --- parts --------------------------------------------------------------------------------------
 branches=() bodies=() labels=() open_pr_flags=()
 parse_parts() { # <branch>=<body-file>... -> branches, bodies; checks each before anything runs
-  local arg b f
+  local arg b f problem
   for arg in "$@"; do
     [[ $arg == *=* ]] || die 2 "a part is <branch>=<body-file>, got: $arg"
     b=${arg%%=*} f=${arg#*=}
     git rev-parse -q --verify "refs/heads/$b" >/dev/null || die 2 "no local branch $b"
     [[ -r $f ]] || die 2 "can't read the body file $f for $b"
     [[ -n $(head -n1 "$f" | tr -d '[:space:]') ]] || die 2 "the body file $f has no title on its first line"
+    problem=$(pr_title_problem "$(head -n1 "$f")")
+    [[ -z $problem ]] || die 2 "$b: $problem"
     branches+=("$b") bodies+=("$f")
   done
 }
@@ -229,7 +234,10 @@ restack() { # stack-base onto upstream branch...
       # GitHub's restack, so rebuild the part as one commit with the same tree.
       [[ -n $(git rev-list --merges -n1 "$below_new..$b") ]] || continue
       local first
-      first=$(git rev-list --reverse --no-merges "$below_new..$b" | head -n1)
+      # No `| head -n1`: git writes a line at a time, so head can close the pipe before git is
+      # done, and under pipefail the SIGPIPE stops this script with exit 141 (#418).
+      first=$(git rev-list --reverse --no-merges "$below_new..$b")
+      first=${first%%$'\n'*}
       # Message: the first commit's subject and body, the other commits' subjects, its trailers last.
       local msg trailers
       msg=$(git log -1 --format=%B "$first")

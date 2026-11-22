@@ -2,6 +2,27 @@
 // that the floor guard reports.
 {
   "$schema": "./node_modules/fallow/schema.json",
+  // The changed-code gate (CONSTRAINTS.md, the Duplication, Complexity and Dead code rows; #503):
+  // `pnpm audit:changed` in `check:task`, `check:full` and `ci / lint` runs `fallow audit` over the
+  // whole repo against the merge base. `new-only` fails a PR only on what it introduces, so the
+  // inherited backlog (#503: 31 clone groups, 35 functions over the thresholds) passes. A function
+  // already over a threshold that grows gets Fallow's default `worsened` verdict: a warning.
+  "audit": { "gate": "new-only" },
+  // Fallow's own defaults, written out so the Complexity row's numbers live here. CRAP comes from
+  // coverage/coverage-final.json when a test run left one (Fallow reads it on its own; `check:full`
+  // names it), and from Fallow's static estimate of test reachability otherwise, as in `ci / lint`.
+  "health": { "maxCyclomatic": 20, "maxCognitive": 15, "maxCrap": 30 },
+  // Dead code (CONSTRAINTS.md, Dead code row). drizzle-kit reads every export of the store's
+  // schema (apps/web/drizzle.config.json; `game` makes it write `CREATE SCHEMA`), and Fallow's
+  // drizzle plugin doesn't read a drizzle.config.json, so the schema is an entry here.
+  "entry": ["apps/web/src/server/store/schema.ts"],
+  // The Supabase CLI is a system binary, pinned by `pnpm supabase:check`, not an npm package.
+  "ignoreBinaries": ["supabase"],
+  // ADR-0007, section 3 ("Errors"): the error body's types are exported for the M4 client, and
+  // where the client reads them from is still M4's decision (ADR-0007, "Open, for the admin").
+  "ignoreExports": [
+    { "file": "apps/web/src/server/http/index.ts", "exports": ["ErrorCode", "ErrorBody"] }
+  ],
   // Duplication (CONSTRAINTS.md, duplication row; ADR-0005, section 3): exact copies of 50 tokens
   // and 5 lines or more. `mild` matches token for token, so two loops of the same shape over
   // different data aren't clones ("the same rule, not the same shape"). Fallow's built-in
@@ -34,6 +55,11 @@
       { "name": "routeTests", "patterns": ["apps/web/src/app/api/**/tests/*.test.ts"] },
       { "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
       { "name": "pages", "patterns": ["apps/web/src/app/**"] },
+      // The composition root's tests (#470's criteria; ADR-0007 section 6), before `api`,
+      // so they take its `tests/*.test.ts` files only, never a helper beside them: they run the
+      // routes on the in-memory store (store/tests/memoryStore.ts), which the store contract holds
+      // to B100, instead of a fake store of their own.
+      { "name": "apiTests", "patterns": ["apps/web/src/server/api/tests/*.test.ts"] },
       { "name": "api", "patterns": ["apps/web/src/server/api/**"] },
       { "name": "config", "patterns": ["apps/web/src/server/config/**"] },
       // Test-file zones (#382; ADR-0007 section 6, an allowance for test files only): the db
@@ -58,7 +84,10 @@
       { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
       { "name": "http", "patterns": ["apps/web/src/server/http/**"] },
       { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
-      { "name": "sim", "patterns": ["packages/sim/src/**"] }
+      { "name": "sim", "patterns": ["packages/sim/src/**"] },
+      // The acceptance suite (#386; ADR-0007 section 6, "Acceptance tests"): black-box over HTTP,
+      // so it imports no zone, and a refactor of the app or the sim can't reshape what it expects.
+      { "name": "acceptance", "patterns": ["tests/acceptance/**"] }
     ],
     "rules": [
       { "from": "routes", "allow": ["api"] },
@@ -69,6 +98,24 @@
       {
         "from": "api",
         "allow": ["config", "db", "rules", "store", "auth", "timing", "http", "game", "sim"]
+      },
+      // A test-files-only allowance: `api`'s own rule, plus `api` itself and the store's test
+      // helpers. Production `api` still reaches only B100, through `store`.
+      {
+        "from": "apiTests",
+        "allow": [
+          "api",
+          "config",
+          "db",
+          "rules",
+          "store",
+          "auth",
+          "timing",
+          "http",
+          "game",
+          "sim",
+          "storeTests"
+        ]
       },
       {
         "from": "game",
@@ -85,6 +132,8 @@
       // headers. It sees the sim's types, never its code; the timing value is passed in.
       { "from": "http", "allow": [], "allowTypeOnly": ["sim"] },
       { "from": "sim", "allow": [] },
+      // No allowances, type-only included: the suite's expected values are written out literally.
+      { "from": "acceptance", "allow": [] },
       // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
       { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
       { "from": "storeTests", "allow": ["store", "dbTests"], "allowTypeOnly": ["db", "sim"] },

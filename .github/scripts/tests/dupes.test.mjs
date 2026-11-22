@@ -1,18 +1,10 @@
-// The duplication check (CONSTRAINTS.md, duplication row; ADR-0005, section 3): the real `dupes`
-// script and .fallowrc.jsonc, run against throwaway repos, fail a copied helper (#125).
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+// The duplication check (CONSTRAINTS.md, duplication row; ADR-0005, section 3): the real
+// `audit:changed` script and .fallowrc.jsonc, duplication only, run against throwaway repos, fail a
+// copied helper (#125; `fallow dupes` until #503).
 import { afterEach, describe, expect, it } from "vitest";
 
-import { root } from "./lint-snippet.mjs";
+import { CONFIG, runAudit, TOOL } from "./audit-script.mjs";
 import { makeRepo } from "./test-repo.mjs";
-
-const FALLOW = join(root, "node_modules/.bin/fallow");
-const CONFIG = readFileSync(join(root, ".fallowrc.jsonc"), "utf8");
-const [tool, ...SCRIPT_ARGS] = JSON.parse(
-	readFileSync(join(root, "package.json"), "utf8"),
-).scripts.dupes.split(" ");
 
 // A helper well over the minimum size: 8 lines, about 90 tokens.
 const helper = (name) => `export function ${name}(value: unknown, path: string): string[] {
@@ -26,17 +18,15 @@ const helper = (name) => `export function ${name}(value: unknown, path: string):
 }
 `;
 
-describe("fallow dupes", () => {
+describe("the duplication check", () => {
 	let repo;
 	afterEach(() => repo?.cleanup());
 
+	// Duplication only: these fixtures' modules have no entry point, so every export is unused.
 	const dupes = () => {
-		expect(tool).toBe("fallow");
-		const r = spawnSync(FALLOW, [...SCRIPT_ARGS, "--changed-since", "main"], {
-			cwd: repo.dir,
-			encoding: "utf8",
-		});
-		return { code: r.status, out: r.stdout + r.stderr };
+		expect(TOOL).toBe("node");
+		repo.commit();
+		return runAudit(repo.dir, ["--only", "dupes"]);
 	};
 	const base = (files = {}) =>
 		(repo = makeRepo({
@@ -76,6 +66,25 @@ describe("fallow dupes", () => {
 			.replaceAll("item", "child");
 		repo.write({ "packages/sim/src/plots/index.ts": renamed });
 		expect(dupes().code).toBe(0);
+	});
+
+	// #503: the audit's `new-only` gate passes an inherited clone outside the sim.
+	it("passes a clone the change inherits outside packages/sim, in a file it touches", () => {
+		base({
+			"apps/web/src/a/index.ts": helper("walk"),
+			"apps/web/src/b/index.ts": helper("walk"),
+		});
+		repo.write({ "apps/web/src/b/index.ts": `${helper("walk")}export const answer = 42;\n` });
+		expect(dupes().code).toBe(0);
+	});
+
+	// The sim keeps its bar from before #503: no clone at all in a file the change touches.
+	it("fails a clone the change inherits in a packages/sim file it touches", () => {
+		base({ "packages/sim/src/plots/index.ts": helper("unsafeNumbers") });
+		repo.write({
+			"packages/sim/src/plots/index.ts": `${helper("unsafeNumbers")}export const answer = 42;\n`,
+		});
+		expect(dupes().code).toBe(1);
 	});
 
 	it("reports only clones in changed files", () => {

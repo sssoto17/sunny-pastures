@@ -4,7 +4,8 @@
 // author, which the App's token sets, so an agent can't fake it (ADR-0007, section 6). A bot is a
 // `[bot]` login or GitHub's `Bot` user type. "Touches" is any file the PR lists there, added,
 // changed, deleted or renamed into or out of it; paths compare without case, as a case-blind
-// filesystem would merge them.
+// filesystem would merge them. Who pushed the commits isn't read: a bot's push to a PR the admin
+// opened passes, an accepted limit (ADR-0007, section 6; #425).
 //
 // Usage: node .github/scripts/acceptance-guard.mjs   ($GITHUB_EVENT_PATH; REST with $GITHUB_TOKEN)
 // Exit codes: 0 pass, 1 a bot PR touches tests/acceptance, 2 could not run (never reads as a pass).
@@ -37,6 +38,8 @@ export const checkAcceptance = async (event, { getPull, listFiles }) => {
 		throw new CannotRun(`GitHub listed ${files.length} of the PR's ${pull.changed_files} files`);
 
 	// A rename lists the old path as `previous_filename`, so a move out of the folder counts too.
+	// The Set is kept on purpose (#425): REST's file statuses include `copied`, whose
+	// `previous_filename` is a source that stays in the PR and can be listed again as its own entry.
 	const paths = files.flatMap((f) => [f.filename, f.previous_filename]);
 	const touched = [...new Set(paths.filter(inAcceptance))];
 	if (touched.length === 0)

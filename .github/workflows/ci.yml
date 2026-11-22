@@ -147,16 +147,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0 # fallow dupes reports clones in the files changed since the merge base
+          fetch-depth: 0 # fallow audit compares the change with a snapshot of its merge base
       - uses: ./.github/actions/setup
+      # CONSTRAINTS.md, the Duplication, Complexity and Dead code rows (#503): `fallow audit` over
+      # the whole repo against $SINCE, failing on what this change introduces (`new-only`). CRAP is
+      # Fallow's static estimate here, since coverage exists only in `ci / test`. The script renders
+      # the annotations and the job summary from the same run; neither needs a write permission.
+      # First in the job, so a lint or format failure doesn't hide them (no `if:`, which the floor
+      # guard reads as a skipped check).
+      - run: pnpm audit:changed --base "$SINCE"
       - run: pnpm lint
       # CONSTRAINTS.md, formatting row.
       - run: pnpm format:check
       # Markdown (#344; ADR-0005, section 6): Prettier's prose wrap, and every top-level table keeps
       # `<!-- prettier-ignore -->` on the line before it. Not in check:fast, for its 5 s budget.
       - run: pnpm format:md
-      # CONSTRAINTS.md, duplication row: 0 new clones in the changed packages/sim files.
-      - run: pnpm dupes --changed-since "$SINCE"
       # CONSTRAINTS.md, migrations row (#372): no applied migration edited since the base, and
       # `drizzle-kit check` plus a generate that writes nothing. No database: the stack is
       # `ci / test`'s (#382), when a change can reach it.
@@ -239,6 +244,71 @@ jobs:
           else
             node .github/scripts/coverage-gate.mjs --base "$SINCE" --skip-ratchet
           fi
+
+  # CONSTRAINTS.md, Acceptance row (MUST-15.3, #49): the admin-owned tests/acceptance/** over HTTP,
+  # as a black box, against a fresh local Supabase stack on this runner, started by the same
+  # composite action as `ci / test`'s db project (#39: no job `container:`, no Postgres `services:`).
+  # Its db:env writes ./.env, which `pnpm test:acceptance` (tests/acceptance/run.mjs) reads to build
+  # the app, start it, wait on /api/health, run the suite and stop it. No step prints a key, token or
+  # URL (docs/agents/sandbox.md, "Secrets in output"). It runs on every part of a stack.
+  # Path filter (admin, 22 Nov: don't run CI more than necessary): a step inside the job, not a
+  # workflow `paths:` trigger, so the check still reports, as a success, on a PR that touches
+  # nothing it covers; a required check that never reports reads "Expected" (ADR-0002, #312).
+  # Its measured runner time is in CONSTRAINTS.md, under the Ratchets table.
+  acceptance:
+    name: ci / acceptance
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Since the stack's base, as `ci / test` diffs, so a top part covers every part below it.
+      SINCE: >-
+        ${{ github.event_name == 'push' && github.event.before || format('origin/{0}',
+        github.event.pull_request.stack.base.ref || github.event.repository.default_branch) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the path filter diffs against the base
+      # The app's code, its schema, the tests, the dependencies, the root build config, and what
+      # runs this job. Every push to main runs the tests, so main always shows the suite on what
+      # landed.
+      - name: Choose whether to run
+        id: paths
+        run: |
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            run=true
+            why="a push to main always runs the acceptance tests"
+          else
+            # A base git can't read fails the step: only an empty list means nothing was touched.
+            changed=$(git diff --name-only "$SINCE...HEAD" -- apps packages supabase \
+              tests/acceptance package.json pnpm-lock.yaml pnpm-workspace.yaml 'tsconfig*.json' \
+              .github/workflows/ci.yml \
+              .github/actions/setup .github/actions/supabase-stack)
+            if [[ -n $changed ]]; then
+              run=true
+              why="the change touches what the acceptance tests cover"
+            else
+              run=false
+              why="the change touches none of apps/, packages/, supabase/, tests/acceptance/, package.json, pnpm-lock.yaml, pnpm-workspace.yaml, the root tsconfig*.json, ci.yml or the setup and supabase-stack actions"
+            fi
+          fi
+          if [[ $run == true ]]; then
+            summary="Acceptance tests run: $why."
+          else
+            summary="Acceptance tests skipped, and the check passes: $why."
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: ./.github/actions/setup
+        if: steps.paths.outputs.run == 'true'
+      - name: Start the Supabase stack
+        if: steps.paths.outputs.run == 'true'
+        uses: ./.github/actions/supabase-stack
+      - name: Run the acceptance tests over HTTP
+        if: steps.paths.outputs.run == 'true'
+        run: pnpm test:acceptance --reporter=verbose
 
   # CONSTRAINTS.md, Determinism row (#48): the recorded script through packages/sim in two
   # processes, against the recorded state hash. No path filter: the hash covers every rules change.

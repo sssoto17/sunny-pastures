@@ -48,6 +48,27 @@ reader. The admin's rule of 12 Nov (#214), for issue and PR bodies alike.
   `Admin review: yes (rows: Code-owned path)`, and `Code-owned paths: none` or
   `Code-owned paths: .github/… (admin asked in #N)`.
 
+## Closing issues
+
+A merge always closes its issue, and closes only that issue (admin, 22 Nov, #512). No issue stays
+open after the PR that completes it merges: a step only the admin can show after the merge lives in
+its own verify issue (**Status rules**, "Provable in the PR"). The one PR that merges without
+closing its issue is an earlier part of a split, whose work the closing part finishes.
+
+- **The link line:** the body's first line is `Closes #N`, the `<N>` of the branch `<N>-<slug>` (or
+  `Part of #N` on an earlier part of a split, `CONSTRAINTS.md`, "Split size").
+- **No other closing keyword:** GitHub links close, closes, closed, fix, fixes, fixed, resolve,
+  resolves and resolved before `#M` anywhere in the body (a code span, a quote, a table, prose about
+  another PR, bold) and closes #M on merge. Write about another issue without them: "the gap #M
+  found", "see #M". `guard / pr-body` fails a keyword that names any issue but the branch's `<N>`
+  (#512). On a branch that names no issue (`claude/<name>`), the issue on the body's first link line
+  counts as the PR's own.
+- **A PR that really completes a second issue** says so on a line of its own that starts
+  `Also closes #M`, one issue per line. Only that exact wording is accepted, and only at the start
+  of a line (a list marker or bold before it is fine): in a quote, a table, a code span or a fenced
+  block it fails like any other keyword, and so does `Also fixes #M`. Each issue it closes meets its
+  own acceptance criteria in this PR.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature
@@ -66,6 +87,8 @@ equivalents:
   `gh api --paginate 'repos/{owner}/{repo}/pulls?state=open' --jq '.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, title, author: .user.login, author_association, labels: [.labels[].name]}'`.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`,
   `gh pr close`.
+- **Answer a review finding** with `gh pr comment`, never a review (`gh pr review`) or a reply on
+  the review thread (REVIEW.md, Conduct; #497). The hook `block-thread-resolve.sh` refuses both.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with
 `gh api repos/sssoto17/sunny-pastures/issues/42 --jq 'has("pull_request")'`, which answers for both.
@@ -286,12 +309,25 @@ holds (the definition of ready):
    `docs/requirements/spec.md`) and linked. If working it needs a quick call by the admin,
    answerable in a comment, it gets `blocked:decision`. If it needs real design work, a `design`
    issue blocks it through a native dependency.
+6. **Provable in the PR**: every acceptance criterion can be shown inside the PR that closes it,
+   through tests, CI, the diff or a throwaway run, because the merge closes the issue (**Closing
+   issues**). A criterion that needs the admin after the merge (a live demo, a repo setting, making
+   a check required, a workflow that only runs from `main`) moves out into a **verify issue**.
+
+**Verify issues** (#512). Filed together with the build issue, titled "Verify …", natively blocked
+by the build issue (**Blocking** above), and labelled `blocked:admin` when the admin does it by hand
+or `blocked:decision` when it's a call. Its criteria are the moved ones, word for word. The Blocked
+view is then the admin's queue of manual work, and the build issue closes on its merge with nothing
+left. A lane that finds an unprovable criterion only during the build does the same: it files the
+verify issue (`triage` is fine when the cloud can't set the fields), leaves the criterion unticked
+in the PR, names the verify issue in the PR's Concerns, and still closes the build issue with
+`Closes #N`. It never keeps the issue open with `Part of #N` or a "(after merge)" note.
 
 An `idea` issue never moves to Ready: it's fleshed out by a blocking `design` issue, or retyped once
-its body meets rules 2–5.
+its body meets rules 2–6.
 
-An issue that meets all five but isn't chosen stays in Backlog. When its last blocker closes,
-nothing moves automatically: whether it becomes the focus is the admin's call.
+An issue that meets all six but isn't chosen stays in Backlog. When its last blocker closes, nothing
+moves automatically: whether it becomes the focus is the admin's call.
 
 **`factory:ready`** is also the admin's choice, to delegate rather than work it. The factory only
 picks up issues that are in Ready _and_ carry `factory:ready`, and the label additionally requires
@@ -319,7 +355,7 @@ green or red; the PR's own events (opened, ready, draft, closed) do the rest.
 | Move                     | When                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------- |
 | Ready → In progress      | _Automatic._ Work starts: a branch named `<N>-<slug>` is created, or a PR with `Closes #N` opens. The admin is assigned (manual), or the factory claims it (factory). |
-| In progress → In review  | _Automatic._ A PR with `Closes #N` is open, not a draft, and its checks are green. Green means every check passes apart from `guard / code-owned`, which stays red on a code-owned PR until the admin approves its head (admin, 21 Nov, on #417). A check still running, cancelled or stale isn't green yet: a re-run decides it. A draft stays In progress until it's marked ready. |
+| In progress → In review  | _Automatic._ A PR with `Closes #N` is open, not a draft, and its checks are green. Green means every check passes apart from `guard / code-owned`, which stays red on a code-owned PR until the admin approves its head, or reviews it on a PR the admin opened (admin, 21 Nov, on #417; #494). A check still running, cancelled or stale isn't green yet: a re-run decides it. A draft stays In progress until it's marked ready. |
 | In review → In progress  | _Automatic._ That PR's checks go red, it turns back into a draft, or it closes unmerged. |
 | In review → Done         | _Automatic._ The PR merged (the issue closes, and the Project's built-in workflow moves it). |
 | Any → Backlog            | It turns out not ready (add the `blocked:*` label that says why, or split it), or the admin drops it from the current focus. |

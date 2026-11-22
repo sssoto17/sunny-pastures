@@ -21,7 +21,8 @@ Write each Bash call so a rule in `.claude/settings.json` can match it, or it pr
 <!-- prettier-ignore -->
 | What | Symptom inside the sandbox | Why |
 |---|---|---|
-| Git commands that write `.git/config` or `.git/hooks`: `git push -u` / `--set-upstream`, `git worktree add` from a remote branch with tracking, `git remote set-url`, `gh pr checkout` | `could not lock config file` | The sandbox protects `.git/config` and `.git/hooks`, so a session can't plant a hook or a `core.fsmonitor` program. Avoid these commands rather than leaving the sandbox; see "Git inside the sandbox". |
+| Git commands that write `.git/config` or `.git/hooks`: `git push -u` / `--set-upstream`, `git remote set-url`, `gh pr checkout` | `could not lock config file` | The sandbox protects `.git/config` and `.git/hooks`, so a session can't plant a hook or a `core.fsmonitor` program. Avoid these commands rather than leaving the sandbox; see "Git inside the sandbox". |
+| `git worktree add`, `git worktree remove`, `git worktree move` | A failed write under `.git/worktrees` (a read-only mount), or `Device or resource busy` | `.git/worktrees` is writable only for the session's own worktree: the sandbox mounts the other admin folders read-only. Run these outside; a reviewer can use the `git archive` copy instead (see "Git inside the sandbox"). |
 | Every bare `supabase` command, even `supabase --version` | `EROFS: read-only file system` | The CLI writes telemetry to `~/.supabase`, and home is read-only. `HOME=$TMPDIR supabase …` also works. The `pnpm db:*` scripts and `pnpm supabase:check` run outside the sandbox on their own (`sandbox.excludedCommands` in `.claude/settings.json`). |
 | Anything that connects to a service on the host: local Postgres (55322), the Supabase API (55321), a spike server started in an earlier command | `Connection refused` | The sandbox has its own network namespace, so `127.0.0.1` inside it isn't the host's loopback. Checked on 6 Nov: port 55322 refused inside, open outside. |
 | `pnpm test`, `pnpm check:task` or `--project db` whenever a `db` test (`*.db.test.ts`) is queued (#382) | `EACCES` on `.env`, or "The db tests need the local Supabase stack" | The `db` project's global setup reads `.env` and connects to the host's Postgres, and both are blocked here. Run it outside. With no Docker at all, run `pnpm test --project unit` and leave the `db` tests to CI (`supabase/README.md`, "Without Docker"). |
@@ -33,15 +34,21 @@ commands, run both outside.
 
 ## Git inside the sandbox
 
-Sandboxed commands can write `.git`: objects, refs, the index and `.git/worktrees`, including a
-worktree's shared `.git`. Only `.git/config` and `.git/hooks` are protected (checked 7 Nov with
-`test -w`, and by `git worktree add` run inside the sandbox). So `git add`, `commit`, `fetch`,
-`switch`, `merge`, `worktree add` and `push` all run sandboxed. Don't add
-`dangerouslyDisableSandbox` to `git` or `gh`, except for the cases under "When git does need the
-host" below. These habits keep `.git/config` out of it:
+Sandboxed commands can write `.git`: objects, refs, the index, and the session's own worktree's
+admin folder under `.git/worktrees`. The rest of `.git/worktrees` is not writable: the sandbox
+mounts the other worktrees' admin folders read-only, and from a main-folder session all of them
+(seen 7 and 9 Nov, and in #466's review and 30+ review runs on 21 Nov). `.git/config` and
+`.git/hooks` are protected too. So `git add`, `commit`, `fetch`, `switch`, `merge` and `push` run
+sandboxed, but `git worktree add`, `git worktree remove` and `git worktree move` fail there: run
+them outside the sandbox. Don't add `dangerouslyDisableSandbox` to other `git` or `gh` commands,
+except for the cases under "When git does need the host" below. These habits keep `.git/config` out
+of it:
 
-- Create worktrees without tracking:
-  `git worktree add --no-track -b <branch> .claude/worktrees/<N>-<slug> origin/main`.
+- Create worktrees without tracking, outside the sandbox:
+  `git worktree add --no-track -b <branch> .claude/worktrees/<N>-<slug> origin/main`. A reviewer who
+  only needs a PR's files doesn't need a worktree: `REVIEW.md`, "Reproduce, then report", describes
+  the fallback, a plain copy made with
+  `git archive refs/review/<N> | tar -x -C <repo>/.claude/worktrees/review-<N>-<short sha>`.
 - Push with `git push origin <branch>`, never `-u`. Then open the PR with
   `scripts/open-pr.sh [--label <name>]... <branch> <body-file>` (a stack with `scripts/stack.sh`),
   never `gh pr create`: the `open-pr` workflow opens it as `sunny-factory[bot]`, and neither needs
@@ -83,8 +90,8 @@ be deleted.
   from outside the sandbox, where `git status` shows what's really there. `after-merge.sh` reads
   `/proc/self/mountinfo` first: with any mount in the worktree or its admin folder, or any
   placeholder, it stops before changing anything and prints one command to run outside. A reviewer's
-  throwaway copy under `$TMPDIR` is the exception: leave it when removal refuses (`REVIEW.md`,
-  "Reproduce, then report").
+  copy (`.claude/worktrees/review-<N>-<short sha>`) is the exception: the reviewer leaves it, and
+  `after-merge.sh` removes it once its PR is closed (`REVIEW.md`, "Reproduce, then report").
 - **`git branch -D`** always tries to drop the branch's `branch.<name>` section from `.git/config`,
   so inside the sandbox it warns "could not lock config file .git/config". The warning is harmless:
   the ref is deleted. A branch created with `--no-track` (above) has no such section, so nothing is
@@ -119,8 +126,9 @@ files, not devices. Like placeholders, they can't be deleted from inside the san
 - Writable: the current folder and `$TMPDIR`. Use `$TMPDIR` for scratch files, not `/tmp`.
 - In the main folder, `.claude/hooks/block-coordinator-work.sh` (#75) denies the coordinating
   session's file tools and common shell writes (redirects, `sed -i`, `cp`, `mv`, `rm` and the like)
-  on repo files outside `.scratch/` and `.remember/`. Paths outside the repo and removing a merged
-  worktree stay allowed. It and the branch guard skip remote sessions (`CLAUDE_CODE_REMOTE=true` or
+  on repo files outside `.scratch/`, `.remember/` and the review copies
+  (`.claude/worktrees/review-*`, #513). Paths outside the repo and removing a merged worktree stay
+  allowed. It and the branch guard skip remote sessions (`CLAUDE_CODE_REMOTE=true` or
   `GITHUB_ACTIONS=true`), which have no main folder.
 - Never writable from a session: the main folder's `.claude/settings.json`,
   `.claude/settings.local.json`, `.claude/hooks/` and `.claude/skills/`, and everything under
@@ -139,10 +147,32 @@ guidance, not a security boundary. The sandbox and the hooks are what enforce.
 An `ask` rule prompts in auto mode too, so each one can stop an unattended lane until the admin
 answers (<https://code.claude.com/docs/en/permission-modes.md>, "How the classifier evaluates
 actions"). Add one only for an action the admin must confirm. A wildcard allow paired with ask rules
-for its write flags prompts on every write: keep the pair only when the admin wants each write
-confirmed (vitest's snapshot flags, admin, 21 Nov). Otherwise drop both, so auto mode's classifier
-decides; Manual mode then prompts, or runs the command inside the sandbox when sandbox auto-allow is
-on (#434: `prettier --write` stopped the #382 lane for over an hour).
+for its write flags prompts on every write: keep the ask rules only when the admin wants each write
+confirmed (vitest's `--update`, `-u` and `--outputFile`, admin, 21 Nov; its allows went in #560,
+below). Otherwise drop both, so auto mode's classifier decides; Manual mode then prompts, or runs
+the command inside the sandbox when sandbox auto-allow is on (#434: `prettier --write` stopped the
+#382 lane for over an hour). A wildcard allow such as `pnpm exec vitest run *` buys little anyway:
+the #434 scan found every `pnpm exec prettier --check` and `pnpm exec vitest run` call decided by
+the classifier, not the rule. Don't count on auto mode dropping it, though. The permission-modes
+page lists "package-manager run commands" among the broad allow rules auto mode drops, but Claude
+Code 2.1.330 drops only a bare prefix (`pnpm exec *`, `npx *`; read from its drop check, 22 Nov,
+#437). So a rule like `pnpm exec vitest run *` stays in effect and approves every flag no ask rule
+names, which is why the vitest `run` and `bench` allows are gone (proposed in #540, admin, 22 Nov,
+#560). Why the scan's calls still reached the classifier is open.
+
+### Flags a wildcard allow can't see
+
+Before allowing a wildcard, check the tool's `--help` for flags that load code or write outside the
+repo: ask rules can't list them all, and each one would prompt in auto mode. vitest 5.1.0 `run` and
+`bench` take the same flags (checked 22 Nov, #437; `--outputJson` and `--compare` are gone, "Unknown
+option"):
+
+<!-- prettier-ignore -->
+| Effect | Flags |
+|---|---|
+| Load and run code from a path | `-c`/`--config`, `-r`/`--root`, `--dir`, `--reporter`, `--diff`, `--execArgv` (`--require=`), `--coverage.customProviderModule`, `--typecheck.checker`, `--experimental.vcsProvider` |
+| Write anywhere | `--outputFile` (has an ask rule), `--coverage.reportsDirectory`, `--coverage.htmlDir`, `--fsModuleCachePath`, `--attachmentsDir` |
+| Open a port | `--api` (`--api.allowExec` runs code, `--api.allowWrite` edits files), `--ui`, `--inspect`, `--inspectBrk` |
 
 ## Working directory
 

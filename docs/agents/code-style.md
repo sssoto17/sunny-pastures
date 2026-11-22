@@ -26,7 +26,8 @@ them.
   (`storage/`, for fits, put and take), or, if a module already owns the concept, add the helper to
   that module's `index.ts` interface.
 - "The same logic" means the same rule, not the same shape: two loops over different data stay two
-  loops. `fallow dupes` catches exact copies; the same rule written two ways is yours to spot.
+  loops. `pnpm audit:changed` (Fallow's changed-code audit, #503) catches exact copies; the same
+  rule written two ways is yours to spot.
 
 ## Tests
 

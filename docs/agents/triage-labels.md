@@ -48,7 +48,7 @@ in the PR title is the type (see **Pull requests**).
 | `idea` | Wanted but not shaped enough to build. Parked until picked up | Chore |
 
 **`idea`** never moves to Ready. To work it, either a `design` issue that blocks it fleshes it out,
-or it's retyped (`feature`, `chore`…) once its body meets definition-of-ready rules 2–5. `design` is
+or it's retyped (`feature`, `chore`…) once its body meets definition-of-ready rules 2–6. `design` is
 different: it's worked now and produces the decisions.
 
 ## Areas
@@ -148,6 +148,11 @@ A PR's type is its title's Conventional Commit prefix, which is also the squash-
 
 `idea` and `triage` issues don't get PRs.
 
+`scripts/open-pr.sh` and `scripts/stack.sh` refuse a title that doesn't start with one of these
+types or `test`, `ci`, `build`, `refactor`, `perf`, `style` or `revert`, with an optional `(scope)`
+and `!`, then `: ` and a summary (#471). The title is the body file's first line, so a body that
+starts with its `Closes #N` or `Part of #N` line is refused rather than opened with it as the title.
+
 ## Automation candidates
 
 Nothing here is automated yet. Per the 3-repetition rule (`docs/diagrams/workflow.md`), a step is
@@ -159,5 +164,5 @@ when one reaches 3.
 | Candidate | What it would do | By hand so far |
 |---|---|---|
 | Path labeler | A GitHub Action that sets a PR's `area:*` labels from the path table above | 1 |
-| PR-title check | A CI check that a PR title uses one of the prefixes above | 0 |
+| PR-title check | A CI check that a PR title uses one of the prefixes above; `scripts/open-pr.sh` and `scripts/stack.sh` check it as they open a PR (#471), so CI would catch only a title edited later | 0 |
 | Mode ↔ `factory:ready` sync | Keep the Project's Mode field and the `factory:ready` label in step | 0 |

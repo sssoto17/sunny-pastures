@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Setup wizard for #103: store a `claude setup-token` from the admin's employer Team or Enterprise
-# seat as CLAUDE_CODE_OAUTH_TOKEN in the `factory` and `review` environments, and allow the pinned
-# anthropics/claude-code-action in "Allowed actions" (ADR-0002, area 2 "How Claude is billed in CI"
-# and area 8). Only the admin can run it. The token is pasted at a hidden prompt and piped to
-# `gh secret set`; it is never echoed, never an argument and never written to a file.
+# seat as CLAUDE_CODE_OAUTH_TOKEN in the `claude-seat` environment, and allow the pinned
+# anthropics/claude-code-action in "Allowed actions" (ADR-0002, area 2 "How Claude is billed in CI",
+# "Which environment holds which secret" and area 8). Only the admin can run it. The token is
+# pasted at a hidden prompt and piped to `gh secret set`; it is never echoed, never an argument and
+# never written to a file. `claude-seat` is the only environment that holds it (#454): the jobs
+# that run Claude enter it, and it must admit `main` alone, or the wizard stops before asking for
+# the token. It never writes `factory` or `review`, which hold the Apps' keys; it lists their
+# secret names and warns while either still holds the seat token.
 # Tests: scripts/setup/ci-claude.test.sh. Run with --help for usage and exit codes.
 #
 # A wizard walks a human through a manual procedure, step by step.
@@ -210,11 +214,15 @@ if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); 
 fi
 
 REPO=sssoto17/sunny-pastures
+SEAT_ENV=claude-seat # the seat token's only environment (#454)
+KEY_ENVS=(factory review) # the Apps' keys: never the seat token
 # Pinned to a full commit SHA of a release at least 7 days old (ADR-0002, area 8). setup-bun is the
 # one action claude-code-action's own action.yml uses at that commit, so it needs a pattern too.
+# The claude-code-action line is the SHA and version comment the workflows pin, character for
+# character: ci-claude.test.sh fails when they disagree (#486), so a bump moves this line with them.
 ACTION_PATTERNS=(
-  anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268, 4 Nov 2026
-  oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0, inside v1.0.268
+  anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276, 13 Nov 2026
+  oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0, inside v1.0.276
 )
 
 usage() {
@@ -222,18 +230,21 @@ usage() {
 usage: scripts/setup/ci-claude.sh
 
 Walks you through #103's setup, one stage per screen:
-  1. checks gh is signed in and the environments `factory` and `review` exist (ci-apps.sh);
+  1. checks gh is signed in and the environment `claude-seat` exists and admits `main` alone
+     (Selected branches, one rule: main);
   2. you run `claude setup-token` in another terminal, signed in to your employer seat;
-  3. you paste the token at a hidden prompt; it is stored as CLAUDE_CODE_OAUTH_TOKEN in both
-     environments. An API key (sk-ant-api…) is refused; anything else not starting sk-ant-oat
-     is stored only if you answer y;
+  3. you paste the token at a hidden prompt; it is stored as CLAUDE_CODE_OAUTH_TOKEN in
+     `claude-seat` only (#454). An API key (sk-ant-api…) is refused; anything else not starting
+     sk-ant-oat is stored only if you answer y;
   4. adds the pinned claude-code-action (and the setup-bun it uses) to "Allowed actions",
      keeping every pattern already there;
-  5. lists what is set, by name only.
+  5. lists the secrets of `claude-seat`, `factory` and `review`, by name only, and warns while
+     `factory` or `review` still holds CLAUDE_CODE_OAUTH_TOKEN, with the command that deletes it.
 No script can prove which seat issued a token: that rests on stage 2.
 
-Exit codes: 0 done; 1 a gh command failed; 2 refused (gh missing or signed out, no environments,
-an API key pasted, input ended, allowed actions not "selected").
+Exit codes: 0 done; 1 a gh command failed; 2 refused (gh missing or signed out, no `claude-seat`
+or one that admits more than main, an API key pasted, input ended, allowed actions not
+"selected").
 USAGE
 }
 
@@ -264,14 +275,20 @@ TOTAL_STAGES=5
 
 intro "#103: Claude from the employer seat"
 
-stage "Check gh and the environments"
+stage "Check gh and the environment"
 command -v gh >/dev/null 2>&1 || die 2 "gh is not installed: https://cli.github.com"
 gh auth status >/dev/null 2>&1 || die 2 "gh is signed out: run gh auth login, then re-run this"
-for env in factory review; do
-  gh api "repos/$REPO/environments/$env" --silent >/dev/null 2>&1 ||
-    die 2 "no environment $env: run scripts/setup/ci-apps.sh first"
-done
-say "gh is signed in, and both environments exist."
+E=repos/$REPO/environments/$SEAT_ENV
+# On a 404, gh api prints the error body on stdout, so a failed call's output is dropped.
+policy=$(gh api "$E" --jq '.deployment_branch_policy // {} | "\(.protected_branches) \(.custom_branch_policies)"' 2>/dev/null) ||
+  die 2 "no environment $SEAT_ENV: create it in Settings → Environments, with Deployment branches and tags → Selected branches and tags, and main as its only rule, then re-run"
+[[ $policy == "false true" ]] ||
+  die 2 "$SEAT_ENV isn't limited to Selected branches (policy: $policy): set Deployment branches and tags → Selected branches and tags in its settings, with main as its only rule, then re-run"
+have=$(gh api "$E/deployment-branch-policies" --jq '.branch_policies[] | "\(.type // "branch") \(.name)"') ||
+  die 1 "reading the branch policies of $SEAT_ENV failed"
+[[ $have == "branch main" ]] ||
+  die 2 "$SEAT_ENV may be used by more than main: $(tr '\n' ' ' <<<"$have")— any of those branches' workflows could read the seat token. Remove every rule but main in Settings → Environments → $SEAT_ENV, then re-run"
+say "gh is signed in, and $SEAT_ENV exists and admits main alone."
 pause
 
 stage "Make the token on the employer seat"
@@ -296,13 +313,11 @@ case $_CI_CLAUDE_TOKEN in
     warn "it doesn't start like a setup-token (sk-ant-oat…)"
     confirm "Store it anyway?" || { _CI_CLAUDE_TOKEN=""; die 2 "nothing stored"; } ;;
 esac
-for env in factory review; do
-  printf '%s' "$_CI_CLAUDE_TOKEN" |
-    gh secret set CLAUDE_CODE_OAUTH_TOKEN --env "$env" --repo "$REPO" >/dev/null ||
-    { _CI_CLAUDE_TOKEN=""; die 1 "gh secret set CLAUDE_CODE_OAUTH_TOKEN --env $env failed"; }
-  WRITTEN_SECRET+=("CLAUDE_CODE_OAUTH_TOKEN ($env)")
-  printf '  %s✓ set%s secret CLAUDE_CODE_OAUTH_TOKEN in environment %s\n' "$GREEN" "$RESET" "$env"
-done
+printf '%s' "$_CI_CLAUDE_TOKEN" |
+  gh secret set CLAUDE_CODE_OAUTH_TOKEN --env "$SEAT_ENV" --repo "$REPO" >/dev/null ||
+  { _CI_CLAUDE_TOKEN=""; die 1 "gh secret set CLAUDE_CODE_OAUTH_TOKEN --env $SEAT_ENV failed"; }
+WRITTEN_SECRET+=("CLAUDE_CODE_OAUTH_TOKEN ($SEAT_ENV)")
+printf '  %s✓ set%s secret CLAUDE_CODE_OAUTH_TOKEN in environment %s\n' "$GREEN" "$RESET" "$SEAT_ENV"
 _CI_CLAUDE_TOKEN=""
 step "Now clear the other window (clear && printf '\\033[3J'), then close it."
 step "Clear your clipboard too (copy any harmless text)."
@@ -340,10 +355,16 @@ fi
 pause
 
 stage "Check what is set (names only)"
-for env in factory review; do
+for env in "$SEAT_ENV" "${KEY_ENVS[@]}"; do
   names=$(gh secret list --env "$env" --repo "$REPO" --json name --jq '.[].name') ||
     die 1 "gh secret list --env $env failed"
   say "Environment $env, secrets:"; note "  ${names//$'\n'/, }"
+  if [[ $env != "$SEAT_ENV" ]] && grep -qx CLAUDE_CODE_OAUTH_TOKEN <<<"$names"; then
+    warn "$env still holds CLAUDE_CODE_OAUTH_TOKEN; only $SEAT_ENV should (#454). Once the workflows"
+    warn "that read it there are gone from main, delete it (it prints nothing secret):"
+    note "  gh secret delete CLAUDE_CODE_OAUTH_TOKEN --env $env --repo $REPO"
+    SKIPPED+=("delete CLAUDE_CODE_OAUTH_TOKEN from $env")
+  fi
 done
 listed=$(gh api "$sel" --jq '.patterns_allowed // [] | .[]') || die 1 "reading the selected actions failed"
 say "Allowed action patterns:"; note "  ${listed//$'\n'/, }"

@@ -31,7 +31,7 @@ export interface Rules {
 	 * so a refusal means a corrupt log or other rules, and skipping it would replay into another farm
 	 * (ADR-0001; ADR-0006, section 5, step 3). Throws too if `actions` aren't in seq order with no
 	 * gaps; the first row isn't checked against the snapshot's seq, which `state` doesn't carry, so
-	 * the store hands in the rows after it. The store treats either throw as a store error.
+	 * the store checks that boundary itself (#443). The store treats either throw as a store error.
 	 */
 	readonly replay: (state: FarmState, actions: readonly LoggedAction[], to: number) => FarmState;
 }

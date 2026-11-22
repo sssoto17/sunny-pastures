@@ -3,8 +3,8 @@
 // root Vitest include already runs .github/scripts tests, and it can't sit inside packages/sim:
 // it imports eslint and node:*.
 import { join } from "node:path";
+import ts from "@typescript/typescript6";
 import { ESLint } from "eslint";
-import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import { lintSnippet, root } from "./lint-snippet.mjs";

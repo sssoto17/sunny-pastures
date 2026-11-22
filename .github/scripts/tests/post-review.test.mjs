@@ -24,7 +24,7 @@ const FAKE_GH = `#!/usr/bin/env bash
 d=$(dirname "$0")
 a="$*"; printf '%s\\n' "\${a//$'\\n'/\\\\n}" >>"$d/calls"
 case "$*" in
-  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-abc}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" "\${FAKE_AUTHOR_TYPE:-User}" "\${FAKE_BASE:-main}" ;;
+  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-$FAKE_HEAD_DEFAULT}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" "\${FAKE_AUTHOR_TYPE:-User}" "\${FAKE_BASE:-main}" ;;
   "api -X POST repos/o/r/issues/7/labels"*) [ -n "$FAKE_NO_LABEL" ] || echo true >"$d/labels" ;;
   *"enablePullRequestAutoMerge"*) [ -z "$FAIL_AUTO" ] ;;
   *"disablePullRequestAutoMerge"*) [ -z "$FAIL_DISABLE" ] ;;
@@ -36,15 +36,15 @@ case "$*" in
 esac
 `;
 
-// A fake git for post-review.sh's base check (#404): `rev-parse` answers FAKE_ORIGIN, the commit
-// origin/<base> points at after the action's fetch, or fails as for a ref it never fetched.
+// A fake git that only logs: since #454 the script runs on a runner that never ran the action, so
+// it must read the restored base from RESTORED, the hand-off, and never from git.
 const FAKE_GIT = `#!/usr/bin/env bash
 printf 'git %s\\n' "$*" >>"$(dirname "$0")/calls"
-[[ $1 == rev-parse && -n $FAKE_ORIGIN ]] && echo "$FAKE_ORIGIN"
 `;
 const SHA = "b".repeat(40);
+const HEAD = "a".repeat(40); // the reviewed head, as review.yml's hand-off carries it
 // A stacked part whose base the action restored at the commit the gate read.
-const STACKED = { FAKE_BASE: "lane-part1", BASE: "lane-part1", BASE_SHA: SHA, FAKE_ORIGIN: SHA };
+const STACKED = { FAKE_BASE: "lane-part1", BASE: "lane-part1", BASE_SHA: SHA, RESTORED: SHA };
 
 const thread = (id, body, { author = "sunny-reviewer", resolved = false, by = null } = {}) => ({
 	id,
@@ -90,7 +90,8 @@ function run(v, { threads = [], labels = ["false"], reviews = [], files = FILES,
 			PATH: `${join(dir, "bin")}:${process.env.PATH}`,
 			GITHUB_REPOSITORY: "o/r",
 			PR: "7",
-			HEAD: "abc",
+			HEAD,
+			FAKE_HEAD_DEFAULT: HEAD,
 			BOT: "sunny-reviewer",
 			ADMIN: "o",
 			FACTORY_APP: "sunny-factory",
@@ -360,14 +361,14 @@ describe("post-review.sh", () => {
 	it("on a head it approved, runs again only for review:admin, and then holds the approval", () => {
 		const approval = { id: 60, user: { login: "sunny-reviewer[bot]" }, state: "APPROVED" };
 		const asGathered = [
-			{ author: "sunny-reviewer[bot]", state: "APPROVED", body: "merge", commit_id: "abc" },
+			{ author: "sunny-reviewer[bot]", state: "APPROVED", body: "merge", commit_id: HEAD },
 		];
 		const gate = (action, labels = []) => {
 			const d = mkdtempSync(join(tmpdir(), "gate-"));
 			writeFileSync(join(d, "reviews.json"), JSON.stringify(asGathered));
 			writeFileSync(
 				join(d, "pr.json"),
-				JSON.stringify({ head_sha: "abc", base: "main", stack: null, labels }),
+				JSON.stringify({ head_sha: HEAD, base: "main", stack: null, labels }),
 			);
 			writeFileSync(join(d, "out"), "");
 			spawnSync("bash", [GATE], {
@@ -445,7 +446,7 @@ describe("post-review.sh", () => {
 		const r = run(verdict());
 		expect(r.code).toBe(0);
 		expect(r.calls).toMatch(/event=APPROVE[\s\S]*enablePullRequestAutoMerge/);
-		expect(r.calls).toContain("-f id=PR_node -f head=abc");
+		expect(r.calls).toContain(`-f id=PR_node -f head=${HEAD}`);
 		expect(r.calls).toContain("mergeMethod: SQUASH");
 		expect(r.calls).not.toContain("pr merge");
 		expect(r.out).toContain("auto_merge=on");
@@ -485,11 +486,16 @@ describe("post-review.sh", () => {
 
 	// #404 (admin, 21 Nov 2026): the gate read the base's files at BASE_SHA, and the action fetched
 	// origin/<base> 20-60 s later to restore config from it. A part below that moved in between
-	// means the review ran with config the gate never saw.
+	// means the review ran with config the gate never saw. Since #454 the model's job records that
+	// commit as RESTORED ("none" when the action fetched no base) and hands it to the post job.
 	it.each([
-		["the part below moved", { FAKE_ORIGIN: "c".repeat(40) }],
-		["the action fetched no base", { FAKE_ORIGIN: "" }],
+		["the part below moved", { RESTORED: "c".repeat(40) }],
+		["the action fetched no base", { RESTORED: "none" }],
+		["the hand-off carries no restored commit", { RESTORED: undefined }],
 		["gather recorded no base commit", { BASE_SHA: "" }],
+		["neither commit was recorded", { BASE_SHA: "", RESTORED: "" }],
+		["both are the same thing but no SHA", { BASE_SHA: "main", RESTORED: "main" }],
+		["the base isn't a plain branch name", { BASE: "lane part1", FAKE_BASE: "lane part1" }],
 	])("posts nothing on a stacked part when %s", (_name, env) => {
 		const r = run(verdict(), { env: { ...STACKED, ...env } });
 		expect(r.code).not.toBe(0);
@@ -497,13 +503,85 @@ describe("post-review.sh", () => {
 		expect(r.calls).not.toMatch(/^api /m);
 	});
 
-	it("reads origin/<base> by its full ref, and never on a PR on main", () => {
-		expect(run(verdict(), { env: STACKED }).calls).toContain(
-			`git rev-parse --verify --quiet refs/remotes/origin/lane-part1^{commit}`,
-		);
-		const onMain = run(verdict());
+	it("takes the restored base from the hand-off, never from git, and ignores it on main", () => {
+		const stacked = run(verdict(), { env: STACKED });
+		expect(stacked.code).toBe(0);
+		expect(stacked.calls).toContain("-f event=APPROVE");
+		expect(stacked.calls).not.toContain("git ");
+		const onMain = run(verdict(), { env: { RESTORED: "none" } });
 		expect(onMain.code).toBe(0);
 		expect(onMain.calls).not.toContain("git ");
+	});
+
+	// #454: HEAD comes from the model's job, so it must be a commit SHA before anything is read.
+	it.each([["abc"], [""], [`${"a".repeat(40)}\n`], ["A".repeat(40)]])(
+		"posts nothing when the hand-off's head is %j",
+		(head) => {
+			const r = run(verdict(), { env: { HEAD: head } });
+			expect(r.code).not.toBe(0);
+			expect(r.out).toContain("the reviewed head isn't a commit SHA: nothing posted");
+			expect(r.calls).toBe("");
+		},
+	);
+
+	// #454: the post job runs --check before it mints the App's token. It needs no token: it calls
+	// nothing, and stops after the hand-off's checks with what the full run would have refused.
+	describe("--check", () => {
+		const check = (v, env = {}) => {
+			dir = mkdtempSync(join(tmpdir(), "post-review-check-"));
+			mkdirSync(join(dir, "bin"));
+			writeFileSync(join(dir, "bin/gh"), FAKE_GH);
+			chmodSync(join(dir, "bin/gh"), 0o755);
+			writeFileSync(join(dir, "bin/git"), FAKE_GIT);
+			chmodSync(join(dir, "bin/git"), 0o755);
+			const res = spawnSync("bash", [SCRIPT, "--check"], {
+				cwd: dir,
+				encoding: "utf8",
+				env: {
+					PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+					RUNNER_TEMP: dir,
+					DEFAULT_BRANCH: "main",
+					BASE: "main",
+					HEAD,
+					VERDICT: v,
+					...env,
+				},
+			});
+			const log = join(dir, "bin/calls");
+			return {
+				code: res.status,
+				out: res.stdout + res.stderr,
+				calls: existsSync(log) ? readFileSync(log, "utf8") : "",
+			};
+		};
+
+		it("passes a well-formed hand-off without a token or a call", () => {
+			const r = check(verdict());
+			expect(r.code).toBe(0);
+			expect(r.out).toContain("CHECK ok");
+			expect(r.calls).toBe("");
+			const stacked = check(verdict(), { BASE: "lane-part1", BASE_SHA: SHA, RESTORED: SHA });
+			expect(stacked.code).toBe(0);
+			expect(stacked.calls).toBe("");
+		});
+
+		it.each([
+			["a verdict of the wrong shape", verdict({ findings: null }), {}],
+			["a verdict holding a credential", verdict({ summary: "sk-ant-oat01-xyz" }), {}],
+			["no verdict", "", {}],
+			["a head that isn't a SHA", verdict(), { HEAD: "abc" }],
+			[
+				"a stacked part whose base moved",
+				verdict(),
+				{ BASE: "p1", BASE_SHA: SHA, RESTORED: "none" },
+			],
+		])("refuses %s", (_name, v, env) => {
+			const r = check(v, env);
+			expect(r.code).not.toBe(0);
+			expect(r.out).toContain("nothing posted");
+			expect(r.out).not.toContain("CHECK ok");
+			expect(r.calls).toBe("");
+		});
 	});
 
 	// `set -u` alone would let an empty one through, and an empty DEFAULT_BRANCH reads every PR

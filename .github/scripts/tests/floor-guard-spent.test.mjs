@@ -89,8 +89,41 @@ describe("spent Exceptions rows (#271)", () => {
 		const r = guard();
 		expect(r.code).toBe(0);
 		expect(named(r.out)).toEqual(["E1"]);
-		expect(r.out).toContain("remove it in this PR");
+		expect(r.out).toContain("the next PR that edits `CONSTRAINTS.md` removes it");
 		expect(r.out).not.toContain("no file matches");
+	});
+
+	// #310: editing CONSTRAINTS.md makes a PR code-owned, so only a PR that already edits it is told
+	// to remove the row; any other gets the next-PR wording.
+	it("tells only a PR that already edits CONSTRAINTS.md to remove the row", () => {
+		setup([row("E1", "packages/sim/src/a.ts")], ["packages/sim/src/a.ts"]);
+		repo.write({
+			"CONSTRAINTS.md": constraints([row("E1", "packages/sim/src/a.ts")]).replace(
+				"- Secrets in source: blocked.",
+				"- Secrets in source: blocked, always.",
+			),
+		});
+		const r = guard();
+		expect(r.code).toBe(0);
+		expect(named(r.out)).toEqual(["E1"]);
+		expect(r.out).toMatch(/^ {2}E1 .*CONSTRAINTS\.md:\d+, remove it in this PR$/m);
+		expect(r.out).not.toContain("the next PR that edits");
+	});
+
+	// #310, finding 2 of its review: with per-part `--base` (#264), the base is an earlier part of the
+	// stack, whose rows haven't merged, so the warning claims no merge.
+	it("claims no merge when the base is an earlier, unmerged part of a stack", () => {
+		setup([], ["packages/sim/src/a.ts"]);
+		repo.git("switch", "-q", "-c", "part-1");
+		repo.write({ "CONSTRAINTS.md": constraints([row("E1", "packages/sim/src/a.ts")]) });
+		repo.commit();
+		repo.git("switch", "-q", "-c", "part-2");
+		repo.write({ "packages/sim/src/b.ts": "export const b = 2;\n" });
+		const r = repo.run(SCRIPT, ["--base", "part-1"], TODAY);
+		expect(r.code).toBe(0);
+		expect(named(r.out)).toEqual(["E1"]);
+		expect(r.out).toContain("so an earlier PR added it");
+		expect(r.out).not.toMatch(/merged/);
 	});
 
 	it("says when no file in the checkout matches a row's Path, file or folder", () => {

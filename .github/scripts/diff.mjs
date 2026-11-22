@@ -68,7 +68,7 @@ export const enterRepo = (base) => {
 // headers: `removed` lines carry their number in the old file, `added` lines in the new one.
 // `---` and `+++` are headers only between a file's `diff` line and its first `@@`; inside a hunk
 // an added `++i` (shown as `+++i`) is content.
-export const parseDiff = (text) => {
+const parseDiff = (text) => {
 	const files = [];
 	const pathOf = (s) => (s === "/dev/null" ? null : s.replace(/^[ab]\//, ""));
 	let cur = null;

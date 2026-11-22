@@ -1,0 +1,43 @@
+// The load VM's devcontainer (ADR-0009; #501). It is for the M3 load run (#388) on a cloud VM only:
+// `next start`, Locust and the Supabase stack, not development. Development use would move Claude
+// Code's sandbox, hooks and credentials into a container; that is parked as #502.
+// Start it from the repo root, after `pnpm install --frozen-lockfile` on the VM:
+//   pnpm exec devcontainer up --workspace-folder . --frozen-lockfile
+// `--frozen-lockfile` fails the start if the Feature no longer matches the digest in
+// devcontainer-lock.json. Then, inside it (`pnpm exec devcontainer exec --workspace-folder . bash`),
+// the stack starts with `pnpm db:start`, never a bare `supabase start` (docs/agents/sandbox.md).
+{
+	"name": "sunny-pastures load VM",
+	// Docker's official node:24-bookworm (Node 24.22.3), the multi-arch digest that tag pointed to,
+	// pushed 12 Nov 2026; checked against the 7-day rule on 22 Nov 2026 (CONSTRAINTS.md, "Tools are
+	// dependencies"). Node's major stays pinned in .nvmrc; post-create.sh checks the two agree.
+	"image": "node:24-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496",
+	// The one Feature (ADR-0009, section 3): the Docker CLI on the host's daemon, so the Supabase
+	// containers run beside this one, not inside it. v1.10.2 was published on ghcr.io about 10 Nov 2026
+	// (checked 22 Nov 2026); devcontainer-lock.json holds its manifest digest. Compose and Buildx are
+	// left out: the Supabase CLI talks to the daemon's API and needs neither.
+	"features": {
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1.10.2": {
+			"dockerDashComposeVersion": "none",
+			"installDockerBuildx": false
+		}
+	},
+	// The host's network, so the app and Locust reach the Supabase stack on localhost (ADR-0009,
+	// section 3).
+	"runArgs": ["--network=host"],
+	// The workspace at the host's own path: with docker-outside-of-docker, a bind mount the Supabase
+	// CLI asks for names a path on the host, so the path must be the same inside and out.
+	"workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+	"workspaceFolder": "${localWorkspaceFolder}",
+	// root, as the image's default user: the checkout belongs to whoever cloned it on the VM, root in
+	// a cloud session, and the CLI can't map the image's `node` user onto uid 0, so `node` couldn't
+	// write node_modules there. The container is a throwaway on a throwaway VM.
+	"remoteUser": "root",
+	"remoteEnv": {
+		"PATH": "/root/.local/bin:${containerEnv:PATH}",
+		"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0"
+	},
+	// Corepack, the frozen install, and the Supabase CLI and uv from their existing pins, each
+	// checked against a hash (ADR-0009, section 4).
+	"postCreateCommand": "bash .devcontainer/post-create.sh"
+}

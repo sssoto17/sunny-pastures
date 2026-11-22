@@ -192,6 +192,19 @@ printf '\n' >"$work/bodies/empty.md"
 case_ open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$work/bodies/empty.md"
 expect_code 2
 expect_err "no title"
+# #471: each part's title is a conventional one, checked before anything is pushed or opened
+case_ open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$(body 7-p2 'Part of #264.')"
+expect_code 2
+expect_err "7-p2: the title is the body file's first line, which here is the link \"Part of #264.\""
+expect_eq "nothing pushed" "$(remote_sha 7-p1)" none
+expect_eq "no PR" "$(cat "$work/gh/next")" 400
+case_ open 7-p1="$(body 7-p1 'Closes #264')" 7-p2="$(body 7-p2 'feat: two')"
+expect_code 2
+expect_err "7-p1: the title is the body file's first line, which here is the link"
+case_ open 7-p1="$(body 7-p1 'Add the stack')" 7-p2="$(body 7-p2 'feat: two')"
+expect_code 2
+expect_err "7-p1: the title \"Add the stack\" doesn't start with a conventional type"
+expect_eq "nothing pushed" "$(remote_sha 7-p1)" none
 case_ open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$work/bodies/missing.md"
 expect_code 2
 expect_err "can't read"
@@ -297,6 +310,10 @@ part 7-p4 7-p1 d.txt
 case_ add 400 7-p4="$(body 7-p4 'feat: four')"
 expect_code 2
 expect_err "7-p4 is not built on 7-p2"
+case_ add 401 7-p3="$(body 7-p3 'Closes #264')"
+expect_code 2
+expect_err "7-p3: the title is the body file's first line, which here is the link"
+expect_eq "no new part" "$(remote_sha 7-p3)" none
 case_ add 999 7-p3="$(body 7-p3 'feat: three')"
 expect_code 1
 expect_err "#999"
@@ -409,6 +426,30 @@ expect_eq "its trailers stay trailers" "$(git -C "$repo" log -1 --format='%(trai
   "Co-Authored-By: T <t@example.invalid>"
 assert "the other commits listed" bash -c "git -C '$repo' log -1 --format=%B 7-p2 | grep -q '^- 7-p2: b2.txt$'"
 expect_eq "7-p3 pushed" "$(remote_sha 7-p3)" "$(git -C "$repo" rev-parse 7-p3)"
+# the rebuild finds the part's first commit without a pipe that closes early: `rev-list | head -n1`
+# raced git's per-line writes, so pipefail stopped update with SIGPIPE (exit 141, no message) now
+# and then on the case above (#418). A part longer than a pipe's buffer (2000 commits, about 80 KB
+# of SHAs) makes that race certain.
+reset
+part 7-p1 main a.txt
+part 7-p2 7-p1 b.txt
+for i in $(seq 2000); do
+  ((i > 1)) || from="from refs/heads/7-p2^0"$'\n'
+  printf 'commit refs/heads/7-p2\ncommitter T <t@example.invalid> %s +0000\ndata <<E\n7-p2: step %s\nE\n%s\n' \
+    $((1700000000 + i)) "$i" "${from-}"
+  from=""
+done | git -C "$repo" fast-import --quiet
+git -C "$repo" reset -q --hard 7-p2
+git -C "$repo" switch -q 7-p1
+echo more >"$repo/a2.txt" && git -C "$repo" add a2.txt && git -C "$repo" commit -qm "7-p1: more"
+git -C "$repo" switch -q 7-p2 && git -C "$repo" merge -q --no-edit 7-p1
+run open 7-p1="$(body 7-p1 'feat: one')" 7-p2="$(body 7-p2 'feat: two')"
+case_ update 401
+expect_code 0
+expect_eq "a long part: now linear" "$(git -C "$repo" rev-list --merges main..7-p2 | wc -l)" 0
+expect_eq "a long part: one commit on 7-p1" "$(git -C "$repo" rev-list --count 7-p1..7-p2)" 1
+expect_eq "a long part: its first commit's subject kept" "$(git -C "$repo" log -1 --format=%s 7-p2)" "7-p2: b.txt"
+expect_eq "a long part: pushed linear" "$(git -C "$work/remote.git" rev-list --merges main..7-p2 | wc -l)" 0
 # a conflict changes nothing: no branch moves, nothing is pushed, no rebase is left open
 reset
 part 7-p1 main a.txt

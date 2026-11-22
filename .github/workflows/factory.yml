@@ -185,10 +185,14 @@ jobs:
       # hands it to git and its GitHub tools), and subprocesses get a scrubbed environment (the
       # setup-token stays out of Bash's env). Bash still has open network access. A
       # leading /name runs that skill; the rest of the line reaches it as its arguments. The
-      # project's settings load: an `ask` rule has no one to ask here, so it denies. No web tools.
+      # project's settings load: an `ask` rule has no one to ask here, so it denies. That holds in
+      # the default permission mode only: since v1.0.273 the action starts a run with a prompt in
+      # auto mode, where a safety review decides what no allow rule covers, so the mode is set
+      # below (#486; the release's upgrade notes). review.yml keeps the default through allowed_bots,
+      # which turns the auto-mode default off. No web tools.
       - id: claude
         timeout-minutes: 55
-        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
         with:
@@ -202,6 +206,7 @@ jobs:
             ${{ runner.temp }}/factory-context; write your hand-off files to ${{ env.OUT }}.
           claude_args: >-
             --max-turns ${{ needs.gate.outputs.turns }}
+            --permission-mode default
             --add-dir ${{ runner.temp }}/factory-context
             --add-dir ${{ env.OUT }}
             --allowedTools "Bash,Edit,Write,MultiEdit,Read,Glob,Grep,Skill,Task,TodoWrite"
@@ -273,7 +278,7 @@ jobs:
           printf '%s' "$DATA" | base64 -d >"$RUNNER_TEMP/handoff.tgz"
           mkdir -p "$RUNNER_TEMP/handoff"
           HANDOFF=$RUNNER_TEMP/handoff.tgz WORK=$RUNNER_TEMP/handoff BASE=$(git rev-parse HEAD) \
-            BOT="$FACTORY_APP[bot]" BOT_ID=$FACTORY_BOT_ID bash .github/scripts/factory-publish.sh
+            BOT="${FACTORY_APP}[bot]" BOT_ID=$FACTORY_BOT_ID bash .github/scripts/factory-publish.sh
 
       # Only what publishing needs: contents write pushes the branch and sends open-pr's
       # repository_dispatch; pull requests read for open-pr.sh's lookup. No workflows.

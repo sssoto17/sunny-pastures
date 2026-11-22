@@ -18,6 +18,11 @@ report. When a pointer here and the rule's home disagree, the home wins.
 
 - **Read-only.** No comments, pushes, approvals, labels or merges. The CI reviewer App is the one
   exception: its writes are set in ADR-0002, area 2.
+- **Findings are answered with a PR comment.** A lane answers a finding, from any reviewer, with a
+  plain PR comment (`gh pr comment <N> --body-file <file>`): what it fixed and in which commit, or
+  why not. Never a review (`gh pr review`, the reviews API) and never a reply on the review thread:
+  a session on the admin's account that does either signs the PR off as the admin (#494, #497;
+  `CONSTRAINTS.md`, "Admin review"). The hook `block-thread-resolve.sh` refuses both.
 - **The PR description is a set of claims.** Check each one against the diff, the checks and the
   issue before you rely on it.
 - **A decision the admin made outside the PR** (#264; seen on #281, where the bot asked for an
@@ -30,32 +35,36 @@ report. When a pointer here and the rule's home disagree, the home wins.
   escalate, one whose source says otherwise, or one that names no admin, date or place is a reason
   to escalate, never to drop a finding. It never drops an escalation row, `review:admin` or any
   other rule.
-- **Reproduce, then report.** Run the claim: tests in a temporary worktree under `$TMPDIR`
-  (`git worktree add "$TMPDIR/review-<N>" <sha>`, then `pnpm install --frozen-lockfile`), removed
-  with `git worktree remove` (no `--force`) when you're done. If it refuses, leave it: `$TMPDIR` is
-  cleared on reboot and `git worktree prune` drops the record. Never `rm -rf`, `git checkout --`,
-  `git restore` or `git clean` a review copy; make a fresh one instead, named
-  `$TMPDIR/review-<N>-<short sha>`. The main folder stays on the branch it's on (`AGENTS.md`). The
-  CI reviewer App never runs PR code (ADR-0002, area 2), so it cites instead. In the local sandbox
-  (`docs/agents/sandbox.md`; seen in 30+ review runs on 21 Nov):
+- **Reproduce, then report.** Run the claim: tests in a review copy at
+  `<repo>/.claude/worktrees/review-<N>-<short sha>`, where `<repo>` is the main folder's absolute
+  path. That path is the same inside and outside the sandbox (`$TMPDIR` isn't), and
+  `.claude/worktrees/` is gitignored. Make it with
+  `git worktree add --detach <repo>/.claude/worktrees/review-<N>-<short sha> <sha>`, then
+  `( cd <path> && pnpm install --frozen-lockfile )`. Reach it only with a subshell,
+  `( cd <path> && … )`, or `git -C <path> …`, both of which the branch-switch hook allows; a
+  top-level `cd` would leave your later commands in the copy or, when it fails, in the main folder.
+  Leave the copy when you're done: `scripts/after-merge.sh` removes every review copy whose PR is
+  closed, merged or not. Never `rm -rf`, `git checkout --`, `git restore` or `git clean` a review
+  copy; make a fresh one instead, under a new `<short sha>` or suffix. The main folder stays on the
+  branch it's on (`AGENTS.md`). The CI reviewer App never runs PR code (ADR-0002, area 2), so it
+  cites instead. In the local sandbox (`docs/agents/sandbox.md`; seen in 30+ review runs on 21 Nov):
   - **Get the head without a checkout**: the branch-switch hook blocks one in the main folder. Fetch
     it into a ref, `git fetch origin +pull/<N>/head:refs/review/<N>`, check that
     `git rev-parse refs/review/<N>` prints the SHA you review, and copy from that ref.
   - **When `git worktree add` fails** (it often does from a main-folder session, whose sandbox
-    mounts the worktree admin folders under `.git/worktrees` read-only), make a plain copy:
-    `mkdir "$TMPDIR/review-<N>-<short sha>"` (no `-p`: it fails on an existing copy, which you'd
-    otherwise unpack over; pick a new name), then
-    `git archive refs/review/<N> | tar -x -C "$TMPDIR/review-<N>-<short sha>"`. It has no `.git`, so
-    the `.github/scripts` tests that call `git ls-files` fail for reasons unrelated to the PR; run
-    `git init && git add -A` in the copy, with no commit, before you test (a copy under `$TMPDIR`
-    has none of the sandbox's placeholder files, so `-A` is safe there). Leave this copy in place
-    when you're done.
+    mounts the worktree admin folders under `.git/worktrees` read-only), make a plain copy at the
+    same path: `mkdir <path>` (no `-p`: it fails on an existing copy, which you'd otherwise unpack
+    over; pick a new name), then `git archive refs/review/<N> | tar -x -C <path>`. It has no `.git`,
+    so the `.github/scripts` tests that call `git ls-files` fail for reasons unrelated to the PR;
+    run `( cd <path> && git init -q && git add -A )`, with no commit, before you test. `-A` can't
+    pick up the sandbox's placeholder files: they are character devices, and `git add` only stages
+    regular files and symlinks (checked with a `/dev/null` device on git 2.43, #513).
   - **When `pnpm install` fails** on pnpm's store lock, run it outside the sandbox. If the PR
     changes no dependency
     (`git diff --quiet <sha> -- pnpm-lock.yaml pnpm-workspace.yaml ':(glob)**/package.json'` in the
     main folder exits 0), you can instead symlink the main folder's `node_modules` into the copy:
-    the root's, `apps/web`'s and `packages/sim`'s, after any `git add -A`. A worktree with those
-    links refuses `git worktree remove`; leave it.
+    the root's, `apps/web`'s and `packages/sim`'s, after any `git add -A`. Link them into a plain
+    copy only: a worktree with those links refuses `git worktree remove`, so the sweep keeps it.
 - **On a test-heavy PR, plant a mutant**: break the code under test on purpose and confirm a test
   goes red. A test that stays green against its mutant is a Required finding.
 - **Measure timing claims** rather than estimate them.
@@ -93,7 +102,7 @@ Every finding gets one severity and one status.
 
 - **Required**: the PR shouldn't merge until it's fixed. A criterion not met; a rule from Always
   check broken; a bug that changes behaviour; a test that wouldn't catch the bug it exists for; a
-  missing `review:admin`; a secret.
+  missing `review:admin`; a body that contradicts the diff; a secret.
 - **Optional**: worth doing, but the PR is correct without it. A clearer design, an edge case the
   criteria don't name, a follow-up issue.
 - **Nit**: wording, naming or layout no tool checks.
@@ -117,6 +126,22 @@ Report at most five Nits per review. Pick the ones a reader would trip on.
 - Lines outside the diff. If one matters, add it as a one-line follow-up under the findings.
 - `pnpm-lock.yaml`, files marked `linguist-generated`, and vendored skill content.
 - A choice an ADR already settled. Report the ADR, not the taste.
+
+## Dependabot PRs
+
+Dependabot's PRs get no bot review: `review.yml` skips `dependabot[bot]`. Runs that Dependabot
+triggers get no Actions or environment secrets, and copying `CLAUDE_CODE_OAUTH_TOKEN` into
+Dependabot secrets would put the token next to bumped actions nobody has reviewed yet. They are
+code-owned and carry `review:admin`, so the admin reviews them, by this checklist:
+
+- The release is past the 7-day cooldown (`cooldown` in `.github/dependabot.yml`).
+- The changelog has no breaking change for us.
+- CI is green on the head, including `ci / scripts`, which runs the action pin check
+  (`scripts/setup/ci-claude.test.sh`, #486).
+- A `claude-code-action` bump also adds its new SHA to the repo's allowed actions before merge. The
+  pin check stays red until `ACTION_PATTERNS` in `scripts/setup/ci-claude.sh` carries the new SHA
+  and version (and `setup-bun`'s, if the action moved it), so that edit goes onto Dependabot's
+  branch too.
 
 ## Review kinds
 
