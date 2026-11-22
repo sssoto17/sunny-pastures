@@ -295,7 +295,9 @@ The bundle ratchet has no row in that table yet; it reports as `preview / bundle
 `guard / pr-title`, `guard / protected-paths` and `guard / no-prototype` are this ADR's own. The
 CI/CD step builds the checks (#40, #42). (Amended 19 Nov: `guard / protected-paths` is built as
 `guard / acceptance`, which fails a `[bot]`-authored PR that touches `tests/acceptance/**`;
-[ADR-0007](0007-apps-web-and-game-api.md), section 6.)
+[ADR-0007](0007-apps-web-and-game-api.md), section 6.) (Amended 22 Nov, #308: `guard / floor` reads
+this table's first column as the list of required checks, so every check in ruleset `main checks`
+has a row here, `guard / code-owned` and `guard / acceptance` included; ADR-0004 has the note.)
 
 <!-- prettier-ignore -->
 | Check | Covers |
@@ -313,6 +315,8 @@ CI/CD step builds the checks (#40, #42). (Amended 19 Nov: `guard / protected-pat
 | `ci / scripts` | the shell scripts' test suites, every `*.test.sh` under `scripts/` and `.claude/hooks/`, with their fake `gh`; the suites need no secret or network (#255) |
 | `guard / pr-body` | a body that says `Part of #N` and also links #N with a closing keyword (#270); required since 16 Nov (`main checks`, 10 checks) |
 | `guard / stack-base` | a PR whose base isn't `main` and isn't in a native stack: a hand-chained PR (#264); required once the admin adds it after #264 merges |
+| `guard / code-owned` | a PR that touches a code-owned path (`.github/CODEOWNERS`) needs the code owner's review on its head (#337, #379, #494); required in `main checks` |
+| `guard / acceptance` | `guard / protected-paths` as built: fails a `[bot]`-authored PR that touches `tests/acceptance/**` (MUST-15.2; #384, [ADR-0007](0007-apps-web-and-game-api.md), section 6); required in `main checks` |
 | `guard / secrets` | the gitleaks CLI over the PR's commits (area 8) |
 | `guard / code-scan` | Semgrep (area 8) |
 | `preview / lighthouse`, `preview / axe`, `preview / bundle`, `preview / latency` | page performance, BASE-03 (axe), the bundle ratchet and BASE-04 (latency smoke), measured on the Vercel preview (below; #43) |
@@ -864,12 +868,13 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the guard
   from the lower part's branch, so a part could swap the guard that judges the part above, and a
   lower part's unmerged Exceptions row would read as "merged" in the spent-row note (PR #301's
-  review). The cumulative diff costs this: an expected floor finding in a lower part turns every
-  part above it red, as on #259 and on this stack's own `ci.yml`. A stack merges whole, so one route
-  clears it: an Exceptions row in the part that needs it covers the parts above it, or the admin
-  lifts `main checks` once for the stack's merge. #264's own stack took the second (admin, 16 Nov
-  2026): its new `if:`s, the changed floor job, and the dupes and coverage steps now diffing from
-  `$SINCE` are 12 `check-removed` findings in `ci.yml`, by design.
+  review; the note claims no merge since #310). The cumulative diff costs this: an expected floor
+  finding in a lower part turns every part above it red, as on #259 and on this stack's own
+  `ci.yml`. A stack merges whole, so one route clears it: an Exceptions row in the part that needs
+  it covers the parts above it, or the admin lifts `main checks` once for the stack's merge. #264's
+  own stack took the second (admin, 16 Nov 2026): its new `if:`s, the changed floor job, and the
+  dupes and coverage steps now diffing from `$SINCE` are 12 `check-removed` findings in `ci.yml`, by
+  design.
 - **A partial merge can't hide a broken `main`.** A partial stack merge lands lower parts whose
   tests ran only as part of the top part's run. A merge queue (`merge_group`) would test exactly
   what lands, but it isn't available on this user-owned repo: a ruleset with a `merge_queue` rule

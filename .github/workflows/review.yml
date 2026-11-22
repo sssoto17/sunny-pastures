@@ -162,8 +162,8 @@ jobs:
           echo "head=$(jq -r .head_sha "$CTX/pr.json")" >>"$GITHUB_OUTPUT"
 
       # The review skill (#68, admin 18 Nov 2026), from main's checkout, into the only skills folder
-      # `--setting-sources user` registers (header; ADR-0002, area 2). No `if:` on the gate
-      # (floor-guard reads a new `if:` as loosening); copying is free when Claude doesn't run.
+      # `--setting-sources user` registers (header; ADR-0002, area 2). No `if:` on the gate:
+      # copying is free when Claude doesn't run.
       - name: Install the review skill (main's copy)
         run: |
           set -euo pipefail

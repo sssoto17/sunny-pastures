@@ -258,7 +258,10 @@ can remove them instead.
 - _A warning, never a finding._ One block in the log, a section in the job summary and one
   `::warning` annotation on the first row the PR keeps; the change report gets the other 9 of
   GitHub's 10. `guard / floor` stays green. Each row says "remove it in this PR", or "this PR
-  removes it".
+  removes it". (Since #310, "remove it in this PR" only when the PR already edits `CONSTRAINTS.md`;
+  otherwise "the next PR that edits `CONSTRAINTS.md` removes it", as `CONSTRAINTS.md`, "Exceptions"
+  says. The intro claims only that an earlier PR added the row: with per-part `--base` (#264) the
+  base is an earlier part, which hasn't merged.)
 - _Pattern._ _Derived state_: the guard's own waiver rule decides what's spent, so the two can't
   disagree.
 - _Alternatives._ Reading the PR number from the Reason and asking GitHub whether it merged: the
@@ -267,6 +270,39 @@ can remove them instead.
   history, and any commit it finds in the base has merged anyway. A PR column in the table: it
   changes `CONSTRAINTS.md`'s row format and every reader of it, for an answer the base already
   gives. "Path gone" alone: it names none of the three cleanups' rows.
+
+**Note, 22 Nov 2026 (#308): the guard knows which checks are required.** A new `if:` anywhere in a
+workflow read as `check-removed`, so #295's `if:` on the `claude` step of `review.yml`, which backs
+no required check, needed the admin to lift `main checks`. And `CHECK_STEP` didn't match the
+required `ci / scripts` job's `bash .github/scripts/shell-suites.sh`, so removing that step passed.
+
+- _One source: ADR-0002 area 2's check-name table_ (admin, 22 Nov). The guard reads the check names
+  in its first column, at the merge base and in the PR, so a check the PR drops from the table still
+  counts. A ruleset matches a check by its job's `name:`, so a job whose `name:` is in the table, a
+  guarded job (`GUARDED_JOBS`), and every job one of those `needs:` (a skipped dependency skips the
+  required job, which then reports as passing) back a required check. ADR-0002's table gains
+  `guard / code-owned` and `guard / acceptance`, so it holds all 15 checks of `main checks` (a test
+  pins that list).
+- _What changes._ A new `if:` is `check-removed` only on a job or step that backs a required check.
+  In such a job, removing any `run:` line that isn't kept elsewhere is `check-removed` too, so a new
+  required job needs no new pattern; `CHECK_STEP` also learns `shell-suites.sh`.
+  `continue-on-error: true` and any change to a guarded job still count wherever they are.
+- _Errs towards required._ A composite action (`.github/actions/`, which any job may use), a line
+  outside any job, and every workflow when no table is found (with a note in the log) all count as
+  backing a required check, as before.
+- _Pattern._ _Single source of truth_: the guard reads the ADR's table rather than a list of its
+  own, so the two can't drift. Plus a small _dependency-graph walk_ over `needs:`.
+- _Alternatives._ The live ruleset through the API: the floor job has no token, and a fork's PR
+  couldn't read it. A list in `floor-guard.mjs` or `CONSTRAINTS.md`'s "Required check" column: a
+  second copy (the column lacks the guard checks), and the copy #299 already let drift. A YAML
+  parser: the floor job installs only the Markdown parser; the line reader matches how `jobOf`
+  already reads jobs.
+
+**Note, 22 Nov 2026 (#309): a ratchet's first value drops no negation.** The "CI runner time per PR"
+row's Direction gains "must not grow past that budget", so `compareRule` reads a higher value as
+`threshold-loosened`, as it does for "Reviewer cost per PR". And a "Today" cell going from "not yet"
+to its first value no longer warns `rule-narrowed: drops "not"` (#302's proposed issue 1): the old
+text is compared without that "not yet".
 
 ## The guard and the gate as a whole (#99, decided 9 Nov)
 
