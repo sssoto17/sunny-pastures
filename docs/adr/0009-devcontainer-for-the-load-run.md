@@ -4,10 +4,10 @@ status: accepted
 
 # A devcontainer for the load run
 
-Production is Vercel plus Supabase (MUST-17), and Vercel doesn't run our container. The question in
-#39 was whether the app should be containerised anyway, and for what: an image of the build that
-ships for the M3 load test, or Postgres as a CI service container. This ADR records the answer: no
-app container anywhere, and a **devcontainer for the load run only**.
+Production is Vercel plus Supabase (MUST-17), and Vercel doesn't run our container (#39's question).
+The question in #39 was whether the app should be containerised anyway, and for what: an image of
+the build that ships for the M3 load test, or Postgres as a CI service container. This ADR records
+the answer: no app container anywhere, and a **devcontainer for the load run only**.
 
 ## How this was decided
 
@@ -29,7 +29,7 @@ of #39 is moot: #33 is closed, and MUST-13.8 to 13.10 are unchanged by this.
 
 The M3 load run (#388) runs `next start`, Locust and the Supabase stack inside
 `.devcontainer/devcontainer.json` on the cloud VM, started with `pnpm exec devcontainer up`. Cloud
-sessions can run Docker; the spike's VM (ADR-0001, "Method") only skipped it to stay lean.
+sessions can run Docker; the spike's VM (ADR-0001, "Method") only skipped it to stay lean (#39).
 
 **Scope: the load VM only**, said in a header comment in `devcontainer.json`. Development use (WSL,
 Codespaces for readers) would move Claude Code's sandbox, hooks and credentials into a container. It
@@ -65,20 +65,20 @@ the admin. The version is to be settled in #501.
 
 ## 6. The CI check
 
-A job runs `devcontainer build` only on PRs that change `.devcontainer/**`. It is **not required**
-on `main`: a path-filtered required check would leave other PRs waiting. The job's name and the
+A job runs `devcontainer build` only when `.devcontainer/**` changes. It is **not required** on
+`main`: a path-filtered required check would leave other PRs waiting. The job's name and the
 workflow it lives in are to be settled in #501.
 
-## Not chosen
+## Alternatives considered
 
 <!-- prettier-ignore -->
 | Alternative | Why not |
 | --- | --- |
-| A production image | Vercel is the only deploy path (MUST-17) and doesn't run our container, so a production Dockerfile would be a second deploy path that nobody uses. |
-| A Next.js `standalone` image for the load test | It matches neither Vercel nor CI, so it isn't "the same build that ships" either. |
+| A production image | Vercel is the only deploy path (MUST-17). Vercel doesn't run our container, so a production Dockerfile would be a second deploy path that nobody uses (#39's question). |
+| A Next.js `standalone` image for the load test | It matches neither Vercel nor CI. |
 | A Postgres service container in CI | It would lack Auth, which anonymous sign-up needs, and it duplicates the `supabase-stack` action (#382), which already runs the whole stack in Docker on the runner. |
 | `docker-in-docker` | `--privileged`, nested overlay storage and a nested bridge would add I/O and latency to the `load` and `commit` phases that MUST-13.8 judges. |
-| A hand-written VM setup script | What the spike's VM did (ADR-0001, "Method"). It pins nothing a reader can rebuild: the devcontainer's base is pinned by digest, its tools come from their existing pins, and CI builds it whenever it changes (section 6). |
+| A hand-written VM setup script | Named in #500; #39's resolution gives it no reason of its own. It lacks what sections 4 and 6 give the devcontainer: a base pinned by digest and a CI build whenever it changes. |
 | Microsoft's `devcontainers/typescript-node` image | A bigger second publisher for extras the load run doesn't need. |
 | `pnpm dlx` for the CLI | No lockfile integrity, no 7-day rule. |
 | A devcontainer for development as well | It would move Claude Code's sandbox, hooks and credentials into a container. Parked as #502, behind ADR-0002's examiner trigger. |
@@ -88,9 +88,7 @@ workflow it lives in are to be settled in #501.
 <!-- prettier-ignore -->
 | Pattern | Where | Why |
 | --- | --- | --- |
-| A reproducible build environment per the [dev container spec](https://containers.dev/), used as a test harness, not a deployment unit | `.devcontainer/devcontainer.json` on the load VM | The load run gets a pinned, rebuildable toolchain, while production keeps one deploy path (Vercel). |
-| Sidecar containers on a shared host network | `docker-outside-of-docker` with `--network=host`; the Supabase containers beside the devcontainer | One Docker layer, as on the laptop and in CI, so the measured phases carry no nested I/O or network. |
-| Pin by content, not by name | the image by digest, the Feature and the CLI at exact versions, tools with hash checks | A rebuild gets the same bytes, and the 7-day rule applies to every piece. |
+| A reproducible build environment per the [dev container spec](https://containers.dev/), used as a test harness, not a deployment unit | `.devcontainer/devcontainer.json` on the load VM | The load run gets a reproducible toolchain; production stays Vercel-only (MUST-17), so there is no app container to deploy. |
 
 ## Consequences
 
@@ -98,7 +96,7 @@ workflow it lives in are to be settled in #501.
   `runArgs`, the `postCreateCommand`, `@devcontainers/cli` in the root `package.json`, and the
   path-filtered CI job. `package.json` and `.github/` are code-owned, so its PR carries
   `review:admin`.
-- **The M3 load run (#388) happens inside the devcontainer** (ADR-0007, "Load and concurrency"), and
-  its results record Postgres-in-a-container as a method difference from ADR-0001's spike.
+- **The M3 load run (#388) happens inside the devcontainer** (ADR-0007, "Load and concurrency"),
+  with section 3's method difference recorded in its results.
 - **ADR-0002** points its "A container for the load test and CI" and "Codespaces / dev container"
   rows here; the latter keeps its examiner trigger for development use (#502).
