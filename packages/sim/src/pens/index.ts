@@ -3,6 +3,7 @@
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { Content } from "../content/index.js";
+import { findOwned, findUnowned, replaceOwned } from "../owned/index.js";
 import { gainXp, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { refuse } from "../state/index.js";
@@ -77,9 +78,8 @@ export function newPens(rules: PenRules): readonly (OwnedPen | null)[] {
  * it, through the purchase rule (spec decision 1, MUST-05.6).
  */
 export function buyPen(farm: FarmState, index: number, rules: PenRules): ApplyResult {
-	const rule = findRule(index, rules);
-	if (rule === null) return refuse(describeNoPen(index));
-	if ((farm.pens[index] ?? null) !== null) return refuse(`The ${rule.id} is already bought.`);
+	const rule = findUnowned(farm.pens, rules.pens, index, describeNoPen);
+	if (typeof rule === "string") return refuse(rule);
 
 	const offer = { what: `The ${rule.id}`, level: rule.level, price: rule.price };
 	const bought = purchase(farm, offer, rules.progress);
@@ -94,7 +94,7 @@ export function buyPen(farm: FarmState, index: number, rules: PenRules): ApplyRe
  * once (MUST-02.2, 02.3). Refused if the trough is full or the barn holds none of its feed.
  */
 export function feed(farm: FarmState, index: number, rules: PenRules): ApplyResult {
-	const found = findOwned(farm, index, rules);
+	const found = findPen(farm, index, rules);
 	if (typeof found === "string") return refuse(found);
 
 	const { rule, pen } = found;
@@ -117,7 +117,7 @@ export function feed(farm: FarmState, index: number, rules: PenRules): ApplyResu
  * Level it reaches (MUST-02.4, 05.2, 05.4). Refused if there are none or the barn can't hold them.
  */
 export function collectProducts(farm: FarmState, index: number, rules: PenRules): ApplyResult {
-	const found = findOwned(farm, index, rules);
+	const found = findPen(farm, index, rules);
 	if (typeof found === "string") return refuse(found);
 
 	const { rule, pen } = found;
@@ -191,25 +191,6 @@ function eat(pen: OwnedPen, rule: PenRule, time: number): OwnedPen {
 	return { ...pen, trough, animals };
 }
 
-function findRule(index: number, rules: PenRules): PenRule | null {
-	return Number.isSafeInteger(index) && index >= 0 ? (rules.pens[index] ?? null) : null;
-}
-
-/** The pen at `index` and its rule, or why there is none, as a sentence (as facilities/ does). */
-function findOwned(
-	farm: FarmState,
-	index: number,
-	rules: PenRules,
-): { rule: PenRule; pen: OwnedPen } | string {
-	const rule = findRule(index, rules);
-	if (rule === null) return describeNoPen(index);
-
-	const pen = farm.pens[index] ?? null;
-	if (pen === null) return `The ${rule.id} isn't bought.`;
-
-	return { rule, pen };
-}
-
 /**
  * Why there is no pen at `index`. Players count pens from 1, so an index that can't name a pen
  * (negative or not an integer) gets no number.
@@ -220,10 +201,17 @@ function describeNoPen(index: number): string {
 		: "There is no such pen.";
 }
 
-/**
- * Sets the pen at `index`. The farm has one entry per content pen: a version that adds pens adds
- * their entries in its `upgrade` (ADR-0006, section 6).
- */
+/** The bought pen at `index` and its rule, or why there is none, as a sentence. */
+function findPen(
+	farm: FarmState,
+	index: number,
+	rules: PenRules,
+): { rule: PenRule; pen: OwnedPen } | string {
+	const found = findOwned(farm.pens, rules.pens, index, describeNoPen);
+	return typeof found === "string" ? found : { rule: found.rule, pen: found.owned };
+}
+
+/** Sets the pen at `index` (see `replaceOwned`). */
 function replacePen(farm: FarmState, index: number, pen: OwnedPen): FarmState {
-	return { ...farm, pens: farm.pens.map((current, i) => (i === index ? pen : current)) };
+	return { ...farm, pens: replaceOwned(farm.pens, index, pen) };
 }

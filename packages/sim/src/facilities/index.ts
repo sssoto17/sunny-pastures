@@ -3,6 +3,7 @@
 import { assertTime } from "../advance/index.js";
 import type { AutomatedStep, StepSource } from "../advance/index.js";
 import type { AddOn, Content, GoodCount } from "../content/index.js";
+import { findOwned, findUnowned, replaceOwned } from "../owned/index.js";
 import { findTierLevel, gainXp, purchase } from "../progress/index.js";
 import type { ProgressRules } from "../progress/index.js";
 import { refuse } from "../state/index.js";
@@ -113,12 +114,8 @@ export function newFacilities(rules: FacilityRules): readonly (OwnedFacility | n
  * sent twice buys it once.
  */
 export function buyFacility(farm: FarmState, index: number, rules: FacilityRules): ApplyResult {
-	const facility = findRule(index, rules);
-	if (facility === null) return refuse(`There is no facility ${formatFacilityNumber(index)}.`);
-
-	if (readEntry(farm, index, facility) !== null) {
-		return refuse(`The ${facility.id} is already bought.`);
-	}
+	const facility = findUnowned(farm.facilities, rules.facilities, index, describeNoFacility);
+	if (typeof facility === "string") return refuse(facility);
 
 	const offer = { what: `The ${facility.id}`, level: facility.level, price: facility.price };
 	const bought = purchase(farm, offer, rules.progress);
@@ -144,10 +141,10 @@ export function buyTier(
 	tier: number,
 	rules: FacilityRules,
 ): ApplyResult {
-	const found = findOwned(farm, index, rules);
+	const found = findOwned(farm.facilities, rules.facilities, index, describeNoFacility);
 	if (typeof found === "string") return refuse(found);
 
-	const { facility, owned } = found;
+	const { rule: facility, owned } = found;
 	if (!Number.isSafeInteger(tier)) return refuse("A tier is a whole number.");
 
 	if (tier <= owned.tier) {
@@ -191,10 +188,10 @@ export function startJob(
 	recipeId: string,
 	rules: FacilityRules,
 ): ApplyResult {
-	const found = findOwned(farm, index, rules);
+	const found = findOwned(farm.facilities, rules.facilities, index, describeNoFacility);
 	if (typeof found === "string") return refuse(found);
 
-	const { facility, owned } = found;
+	const { rule: facility, owned } = found;
 
 	const recipe = facility.recipes.get(recipeId);
 	if (recipe === undefined) return refuse(`The ${facility.id} has no recipe ${recipeId}.`);
@@ -230,10 +227,10 @@ export function startJob(
  * jobs behind it move up a slot.
  */
 export function collect(farm: FarmState, index: number, rules: FacilityRules): ApplyResult {
-	const found = findOwned(farm, index, rules);
+	const found = findOwned(farm.facilities, rules.facilities, index, describeNoFacility);
 	if (typeof found === "string") return refuse(found);
 
-	const { facility, owned } = found;
+	const { rule: facility, owned } = found;
 	if (owned.jobs[0]?.status !== "done") {
 		return refuse(`The ${facility.id} has no finished job to collect.`);
 	}
@@ -253,10 +250,10 @@ export function buyAddOn(
 	addOn: AddOn,
 	rules: FacilityRules,
 ): ApplyResult {
-	const found = findOwned(farm, index, rules);
+	const found = findOwned(farm.facilities, rules.facilities, index, describeNoFacility);
 	if (typeof found === "string") return refuse(found);
 
-	const { facility, owned } = found;
+	const { rule: facility, owned } = found;
 	const rule = rules.addOns.get(addOn);
 	if (rule === undefined) return refuse(`There is no add-on ${addOn}.`);
 	if (owned.addOns[addOn]) return refuse(`The ${facility.id} already has a ${rule.name}.`);
@@ -462,10 +459,6 @@ interface RecipeRule {
 	readonly xp: number;
 }
 
-function findRule(index: number, rules: FacilityRules): FacilityRule | null {
-	return Number.isSafeInteger(index) && index >= 0 ? (rules.facilities[index] ?? null) : null;
-}
-
 /**
  * Row `tier` of one of the facility's per-tier lists, tier 1 first: its tiers, or a recipe's job
  * times. A bought facility's tier is in content: a version that drops a tier settles its farms in
@@ -481,49 +474,12 @@ function findTier<Row>(facility: FacilityRule, rows: readonly Row[], tier: numbe
 	return row;
 }
 
-/** The facility at `index` and the farm's copy of it, or why there is none, as a sentence. */
-function findOwned(
-	farm: FarmState,
-	index: number,
-	rules: FacilityRules,
-): { facility: FacilityRule; owned: OwnedFacility } | string {
-	const facility = findRule(index, rules);
-	if (facility === null) return `There is no facility ${formatFacilityNumber(index)}.`;
-
-	const owned = readEntry(farm, index, facility);
-	if (owned === null) return `The ${facility.id} isn't bought.`;
-
-	return { facility, owned };
-}
-
-/**
- * The farm's entry for a content facility: null until bought. Every farm has one entry per content
- * facility (ADR-0003, section 12), so a missing entry is a broken farm, a programmer error, and
- * throws a RangeError rather than refuse (D15).
- */
-function readEntry(farm: FarmState, index: number, facility: FacilityRule): OwnedFacility | null {
-	const entry = farm.facilities[index];
-	if (entry === undefined) {
-		throw new RangeError(
-			`The farm has no entry for the ${facility.id}: its facilities don't match the content.`,
-		);
-	}
-
-	return entry;
-}
-
 /** Players count facilities from 1. */
-function formatFacilityNumber(index: number): string {
-	return String(index + 1);
+function describeNoFacility(index: number): string {
+	return `There is no facility ${String(index + 1)}.`;
 }
 
-/**
- * Sets the facility at `index`. The farm has one entry per content facility: a version that adds
- * facilities adds their entries in its `upgrade` (ADR-0006, section 6).
- */
+/** Sets the facility at `index` (see `replaceOwned`). */
 function replaceFacility(farm: FarmState, index: number, facility: OwnedFacility): FarmState {
-	return {
-		...farm,
-		facilities: farm.facilities.map((current, i) => (i === index ? facility : current)),
-	};
+	return { ...farm, facilities: replaceOwned(farm.facilities, index, facility) };
 }
