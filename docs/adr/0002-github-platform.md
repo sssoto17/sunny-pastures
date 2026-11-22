@@ -321,7 +321,10 @@ CI/CD step builds the checks (#40, #42). (Amended 19 Nov: `guard / protected-pat
 | `guard / no-prototype` | fails a PR into `main` whose head is `prototype/*` (rulesets can't block a head branch) |
 
 `ci / mutation` (Stryker) also runs and reports, but it is **not required**. Nor is `ci / stack`,
-which only tells typecheck, lint and test whether to run ("Stacks", below).
+which only tells typecheck, lint and test whether to run ("Stacks", below). Nor is `ci / workflows`
+(#442): actionlint, with shellcheck, over `.github/`, in `workflow-lint.yml`. Its event has
+`paths: ['.github/**']`, so a PR that touches nothing there shows no check rather than a skipped
+one; making it required means dropping that filter first.
 
 **Preview checks.** The `preview / …` checks measure the Vercel preview, so they start from Vercel's
 deployment events. A PR that Vercel doesn't build would then never report, and a required check that

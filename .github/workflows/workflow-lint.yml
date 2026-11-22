@@ -5,15 +5,17 @@
 # .github/ starts no run and shows no check, rather than a skipped job that reads as passing
 # (ADR-0002, #312). That is fine only while it isn't required: a required check that never reports
 # blocks the merge, so making it required means dropping `paths:` (ADR-0002, area 2).
-# No draft gate (#358): the job takes seconds and never skips, so a run on a draft and the run on
-# its ready mark both lint the same head and report the same result.
+# No draft gate (#358): the job takes seconds and has no `if:`, so it never skips and no stale run
+# can leave a skipped result. A draft's `opened` run lints the head the ready mark would, so
+# `ready_for_review` isn't an event here. No concurrency group, as in acceptance-guard.yml: two
+# runs on different heads each report for their own head.
 # Actions are GitHub-owned and pinned to a full commit SHA (ADR-0002, area 8). actionlint is a
 # pinned release download checked against a hash written here, as gitleaks in security.yml.
 name: workflow-lint
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened]
     paths:
       - '.github/**'
 
