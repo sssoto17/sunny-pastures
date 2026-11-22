@@ -242,11 +242,11 @@ worktrees, the handoff), which a cloud routine can't see.
    "Issue fields" and "Grouping").
 2. A light `retro` if you built something. Note any step you repeated by hand.
 3. Tidy up after the PRs that merged: check `git worktree list`, then from the main folder run
-   `scripts/after-merge.sh <name>` for each (it fast-forwards main, removes the worktree and deletes
-   the branch). If it exits 3, run the command it prints outside the sandbox; see
-   `docs/agents/sandbox.md`, "When git does need the host". A cloud lane's branch isn't a local
-   worktree, so the script doesn't reach it; GitHub deletes it at merge (the repo's "Automatically
-   delete head branches").
+   `scripts/after-merge.sh <name>` for each (it fast-forwards main, removes the worktree, deletes
+   the branch and removes the review copies of closed PRs). If it exits 3, run the command it prints
+   outside the sandbox; see `docs/agents/sandbox.md`, "When git does need the host". A cloud lane's
+   branch isn't a local worktree, so the script doesn't reach it; GitHub deletes it at merge (the
+   repo's "Automatically delete head branches").
 4. `remember:remember` handoff with the top 3 next.
 
 At merge, a required check that is red on a change you approved (for example `guard / floor` on an

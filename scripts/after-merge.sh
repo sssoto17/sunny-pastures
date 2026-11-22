@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # After the admin merges a lane's PR: fast-forward main in the main folder, remove the lane's
-# worktree, prune, and delete its branch (#77). Every check runs before the first change, so a
-# refusal changes nothing. Tests: scripts/after-merge.test.sh.
+# worktree, prune, and delete its branch (#77); then sweep the review copies of closed PRs (#513).
+# Every check runs before the first change, so a refusal changes nothing.
+# Tests: scripts/after-merge.test.sh.
 # Needs bash 4.4+ (wait $! on a process substitution), git 2.36+ (worktree list -z) and an
 # authenticated gh.
 set -euo pipefail
@@ -22,7 +23,10 @@ Run from the main folder, on main, after the worktree's PR has merged. <worktree
 
 It fast-forwards main to origin/main (never switches branch, never merges), removes the worktree
 with its build output (node_modules/, coverage/, .next/, dist/, .fallow/, *.tsbuildinfo), runs
-git worktree prune and deletes the worktree's branch, then prints what it did.
+git worktree prune and deletes the worktree's branch, then prints what it did. Then it sweeps
+the review copies (.claude/worktrees/review-<N>-*, REVIEW.md): each one whose PR #N is closed,
+merged or not, goes (git worktree remove, without --force, for a worktree; deleted for a plain
+copy), and each one it keeps is named with the reason. A copy for an open PR stays.
 
 It refuses, changing nothing, unless the branch's PR into main has merged with the branch's
 commits, the worktree has no uncommitted work and no other ignored files, and main can
@@ -156,36 +160,44 @@ resolve() { # dir [base] -> its physical path (relative to base), or nothing
   [[ $d == /* ]] || d=${2:-.}/$d
   (cd "$d" 2>/dev/null && pwd -P) || true
 }
-link="" admin="" back="" shared=""
-if [[ -f $path/.git && ! -L $path/.git ]]; then
-  link=$(<"$path/.git")
-fi
-if [[ $link == "gitdir: "* ]]; then
-  admin=$(resolve "${link#gitdir: }" "$path")
-fi
-if [[ -n $admin && $(dirname "$admin") == "$main_git/worktrees" &&
-  -f $admin/gitdir && -f $admin/commondir ]]; then
-  back=$(resolve "$(dirname "$(<"$admin/gitdir")")" "$admin")
-  shared=$(resolve "$(<"$admin/commondir")" "$admin")
-fi
-if [[ -z $admin || $back != "$path" || $shared != "$main_git" ]]; then
-  die 2 "$path's git link (its .git file, or gitdir and commondir in .git/worktrees/) doesn't point back at $main_git, so git there could read another repository's config; nothing changed. Check those files by hand."
-fi
-
-# git in the worktree goes through the checked admin folder, with fsmonitor off as a second guard.
-lane_git() { # git args...
-  (cd "$path" && git -c core.fsmonitor=false --git-dir="$admin" --work-tree="$path" "$@")
+git_link() { # dir -> its admin folder in .git/worktrees/, when the links check out; else fails
+  local dir=$1 link="" adm="" back="" shared=""
+  if [[ -f $dir/.git && ! -L $dir/.git ]]; then
+    link=$(<"$dir/.git")
+  fi
+  if [[ $link == "gitdir: "* ]]; then
+    adm=$(resolve "${link#gitdir: }" "$dir")
+  fi
+  if [[ -n $adm && $(dirname "$adm") == "$main_git/worktrees" &&
+    -f $adm/gitdir && -f $adm/commondir ]]; then
+    back=$(resolve "$(dirname "$(<"$adm/gitdir")")" "$adm")
+    shared=$(resolve "$(<"$adm/commondir")" "$adm")
+  fi
+  [[ -n $adm && $back == "$dir" && $shared == "$main_git" ]] || return 1
+  printf '%s\n' "$adm"
 }
+admin=$(git_link "$path") ||
+  die 2 "$path's git link (its .git file, or gitdir and commondir in .git/worktrees/) doesn't point back at $main_git, so git there could read another repository's config; nothing changed. Check those files by hand."
+
+# git in a worktree goes through its checked admin folder, with fsmonitor off as a second guard.
+wt_git() { # dir admin git args...
+  (cd "$1" && git -c core.fsmonitor=false --git-dir="$2" --work-tree="$1" "${@:3}")
+}
+lane_git() { wt_git "$path" "$admin" "$@"; }
 
 # git status and git worktree remove (which runs status with --ignore-submodules=none) recurse
 # into submodules, and a submodule's folder can link to any repository and its config, filter
 # drivers included. The lane controls its own index, so refuse any gitlink (mode 160000) in it
 # before running status there. This repo has no submodules.
-gitlinks=()
-while IFS= read -r -d '' entry; do
-  [[ $entry == 160000\ * ]] && gitlinks+=("${entry#*$'\t'}")
-done < <(lane_git ls-files --stage -z)
-wait $! || die 1 "git ls-files failed in $path; nothing changed"
+find_gitlinks() { # dir admin -> sets gitlinks
+  local entry
+  gitlinks=()
+  while IFS= read -r -d '' entry; do
+    [[ $entry == 160000\ * ]] && gitlinks+=("${entry#*$'\t'}")
+  done < <(wt_git "$1" "$2" ls-files --stage -z)
+  wait $!
+}
+find_gitlinks "$path" "$admin" || die 1 "git ls-files failed in $path; nothing changed"
 if ((${#gitlinks[@]})); then
   die 2 "$path has submodule entries in its index, and this repo has no submodules. Running git status there could run another repository's config, so nothing changed. Check them by hand:
 $(list "${gitlinks[@]}")"
@@ -290,20 +302,24 @@ fi
 # placeholders in the session's folder, and from a main-folder session the worktree's admin
 # folder read-only, with commondir and config.worktree bind-mounted in it (9 Nov). Any mount in the worktree or its admin folder would
 # leave the removal half-done, so stop before changing anything. Outside the sandbox there are
-# none. AFTER_MERGE_MOUNTINFO is for the tests only.
-mounts=()
+# none. The review-copy sweep at the end checks the same mounts. AFTER_MERGE_MOUNTINFO is for the
+# tests only.
+mount_points=()
 mountinfo=${AFTER_MERGE_MOUNTINFO:-/proc/self/mountinfo}
 if [[ -r $mountinfo ]]; then
   while read -r _ _ _ _ point _; do
     # mountinfo escapes space, tab, newline and \ as \nnn; %b decodes \0nnn in every shell.
-    point=$(printf '%b' "${point//\\/\\0}")
-    case $point in
-      "$path") mounts+=("the worktree folder itself") ;;
-      "$path"/*) mounts+=("${point#"$path"/}") ;;
-      "$admin" | "$admin"/*) mounts+=("${point#"$main"/}") ;;
-    esac
+    mount_points+=("$(printf '%b' "${point//\\/\\0}")")
   done <"$mountinfo"
 fi
+mounts=()
+for point in "${mount_points[@]}"; do
+  case $point in
+    "$path") mounts+=("the worktree folder itself") ;;
+    "$path"/*) mounts+=("${point#"$path"/}") ;;
+    "$admin" | "$admin"/*) mounts+=("${point#"$main"/}") ;;
+  esac
+done
 if ((${#mounts[@]})); then
   host_reasons+=("the sandbox has mounts in the worktree or its admin folder, which can't be deleted from inside it:
 $(list "${mounts[@]}")")
@@ -371,6 +387,95 @@ if git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
 else
   echo "branch: deleted $branch (was ${tip:0:7})"
 fi
+
+# --- review copies ------------------------------------------------------------------------------
+# Reviewers reproduce a PR in .claude/worktrees/review-<N>-<short sha> (REVIEW.md, "Reproduce,
+# then report"): a worktree, or a plain git archive copy. Sweep every copy whose PR is closed,
+# merged or not; a copy for an open PR, or whose PR can't be read, stays. Reviewers never delete
+# a copy themselves, so this is the only place one goes.
+# Registered worktrees (path -> 1, or locked) from git worktree list -z, as find_worktree reads it.
+declare -A worktrees=()
+cur=""
+while IFS= read -r -d '' field; do
+  case $field in
+    "worktree "*) cur=${field#worktree } && worktrees[$cur]=1 ;;
+    locked*) [[ -n $cur ]] && worktrees[$cur]=locked ;;
+  esac
+done < <(git -C "$main" worktree list --porcelain -z)
+wait $! || die 1 "git worktree list failed while sweeping review copies; main is updated"
+
+declare -A pr_states=()
+pr_state() { # N -> sets state: open, closed, or unknown when GitHub can't say. One call per PR.
+  if [[ -z ${pr_states[$1]+set} ]]; then
+    state=$(gh api "repos/$REPO/pulls/$1" --jq .state 2>/dev/null) || state=unknown
+    [[ $state == open || $state == closed ]] || state=unknown
+    pr_states[$1]=$state
+  fi
+  state=${pr_states[$1]}
+}
+mounted_in() { # dir... -> is any mount point in one of them?
+  local point dir
+  for point in "${mount_points[@]}"; do
+    for dir; do
+      [[ $point == "$dir" || $point == "$dir"/* ]] && return 0
+    done
+  done
+  return 1
+}
+
+shopt -s nullglob
+for copy in "$main"/.claude/worktrees/review-*; do
+  name=${copy##*/}
+  [[ -d $copy && ! -L $copy ]] || continue
+  if [[ ! $name =~ ^review-([0-9]+)(-.*)?$ ]]; then
+    echo "review copy: kept $name (no PR number in its name)"
+    continue
+  fi
+  n=${BASH_REMATCH[1]}
+  pr_state "$n"
+  case $state in
+    open) echo "review copy: kept $name (PR #$n is open)"; continue ;;
+    unknown) echo "review copy: kept $name (could not read PR #$n from GitHub)"; continue ;;
+  esac
+  if [[ -n ${worktrees[$copy]-} ]]; then
+    # A worktree: plain git worktree remove (no --force) refuses one with changes, such as the
+    # node_modules symlinks REVIEW.md allows; that copy stays for the admin to check.
+    if [[ ${worktrees[$copy]} == locked ]]; then
+      echo "review copy: kept $name (a locked worktree; git worktree unlock it first)"
+      continue
+    fi
+    if ! copy_admin=$(git_link "$copy"); then
+      echo "review copy: kept $name (its git link doesn't point back at $main_git; check it by hand)"
+      continue
+    fi
+    if ! find_gitlinks "$copy" "$copy_admin" || ((${#gitlinks[@]})); then
+      echo "review copy: kept $name (submodule entries in its index, or git ls-files failed; check it by hand)"
+      continue
+    fi
+    if mounted_in "$copy" "$copy_admin"; then
+      finish_outside+=("git -C $(printf %q "$main") worktree remove $(printf %q "$copy")")
+      continue
+    fi
+    if removed=$(git -c core.fsmonitor=false -C "$main" worktree remove "$copy" 2>&1); then
+      echo "review copy: removed worktree $name (PR #$n is closed)"
+    else
+      echo "review copy: kept $name (git worktree remove refused; check it by hand)"
+      printf '%s\n' "$removed" | sed 's/^/  git: /'
+    fi
+  else
+    # An archive copy: a plain folder (with its own git init, at most), not linked to this repo.
+    if mounted_in "$copy"; then
+      finish_outside+=("rm -rf $(printf %q "$copy")")
+      continue
+    fi
+    if rm -rf -- "$copy" 2>/dev/null; then
+      echo "review copy: removed $name (PR #$n is closed)"
+    else
+      finish_outside+=("rm -rf $(printf %q "$copy")")
+    fi
+  fi
+done
+shopt -u nullglob
 
 if ((${#finish_outside[@]})); then
   {

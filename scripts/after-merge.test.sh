@@ -3,7 +3,9 @@
 # a bare "origin", the main folder cloned from it, and a lane worktree under
 # .claude/worktrees/. A PR's squash merge is a commit pushed to origin from a third clone.
 # `gh` is a fake on PATH: it logs its calls and answers `gh api .../pulls?...` (REST, #346) from
-# $work/prs (the rows its --jq filter prints), or runs that filter over $work/prs.json.
+# $work/prs (the rows its --jq filter prints), or runs that filter over $work/prs.json. It
+# answers `gh api .../pulls/<N>` (REST "Get a pull request") by running the --jq filter over
+# $work/pulls/<N>.json, and fails like a 404 when there's no such file.
 # `stat` is a fake on PATH too: it reports the paths listed in $work/placeholders as the
 # sandbox's /dev/null placeholders (a character device, 1:3), which a test can't create without
 # root, and runs the real stat for everything else.
@@ -46,6 +48,13 @@ if [[ $1 == api && $2 == --paginate && $3 == repos/sssoto17/sunny-pastures/pulls
   cat "$dir/prs" 2>/dev/null
   exit 0
 fi
+if [[ $1 == api && $2 =~ ^repos/sssoto17/sunny-pastures/pulls/([0-9]+)$ ]]; then
+  [[ $3 == --jq ]] || { echo "fake: no --jq filter" >&2; exit 98; }
+  file=$dir/pulls/${BASH_REMATCH[1]}.json
+  [[ -f $file ]] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+  jq -r "$4" "$file"
+  exit
+fi
 echo "fake: unexpected gh call: $*" >&2
 exit 99
 FAKE
@@ -68,7 +77,7 @@ branch=chore/9-lane
 reset() {
   chmod -R u+w "$work" 2>/dev/null
   rm -rf "$work/origin.git" "$work/seed" "$work/main" "$work"/calls "$work"/prs \
-    "$work"/fail-gh "$work"/placeholders "$work"/err
+    "$work"/fail-gh "$work"/placeholders "$work"/err "$work"/pulls
   : >"$work/mountinfo"
   git init -q --bare "$work/origin.git"
   git clone -q "$work/origin.git" "$work/seed" 2>/dev/null
@@ -665,6 +674,155 @@ case_ 9-lane
 expect_code 2
 expect_not_run
 assert "expected main to stay at ${before:0:7}" test "$(main_at)" == "$before"
+
+# --- review copies --------------------------------------------------------------------------
+# Reviewers copy a PR to .claude/worktrees/review-<N>-<short sha> (REVIEW.md): a worktree or a
+# git archive copy. After the lane's own cleanup, each copy whose PR is closed (merged or not)
+# goes, and each copy for an open PR stays.
+pull() { # N state merged_at|null -> REST "Get a pull request" for #N, in its shape
+  mkdir -p "$work/pulls"
+  jq -n --argjson n "$1" --arg state "$2" --argjson merged "$3" \
+    '{number: $n, state: $state, merged: ($merged != null), merged_at: $merged}' \
+    >"$work/pulls/$1.json"
+}
+review_worktree() { # N -> a detached worktree at origin/main
+  git -C "$main" worktree add -q --detach "$main/.claude/worktrees/review-$1-abc1234" origin/main
+}
+review_archive() { # N -> a git archive copy, git init and git add -A in it, as REVIEW.md says
+  local copy=$main/.claude/worktrees/review-$1-abc1234
+  mkdir "$copy"
+  git -C "$main" archive origin/main | tar -x -C "$copy"
+  git -C "$copy" init -q && git -C "$copy" add -A
+}
+copy_of() { printf '%s\n' "$main/.claude/worktrees/review-$1-abc1234"; }
+is_registered() { git -C "$main" worktree list --porcelain | grep -qxF "worktree $1"; }
+
+reset
+merge_pr
+pull 20 open null
+pull 21 closed '"2026-11-22T10:00:00Z"'
+pull 22 closed null
+pull 23 open null
+pull 24 closed '"2026-11-22T10:00:00Z"'
+pull 25 closed null
+review_worktree 20 # open
+review_worktree 21 # merged
+review_worktree 22 # closed, never merged
+review_archive 23  # open
+review_archive 24  # merged
+review_archive 25  # closed, never merged
+review_archive 26  # GitHub can't find the PR
+mkdir "$main/.claude/worktrees/review-notes"
+case_ 9-lane
+expect_code 0
+expect_tidied
+expect_out "review copy: kept review-20-abc1234 (PR #20 is open)"
+expect_out "review copy: removed worktree review-21-abc1234 (PR #21 is closed)"
+expect_out "review copy: removed worktree review-22-abc1234 (PR #22 is closed)"
+expect_out "review copy: kept review-23-abc1234 (PR #23 is open)"
+expect_out "review copy: removed review-24-abc1234 (PR #24 is closed)"
+expect_out "review copy: removed review-25-abc1234 (PR #25 is closed)"
+expect_out "review copy: kept review-26-abc1234 (could not read PR #26 from GitHub)"
+expect_out "review copy: kept review-notes (no PR number in its name)"
+assert "expected the open PR's worktree to stay registered" is_registered "$(copy_of 20)"
+assert "expected the open PR's worktree folder to stay" test -f "$(copy_of 20)/README.md"
+assert "expected the open PR's archive copy to stay" test -f "$(copy_of 23)/README.md"
+assert "expected the unreadable PR's copy to stay" test -d "$(copy_of 26)"
+assert "expected review-notes to stay" test -d "$main/.claude/worktrees/review-notes"
+for n in 21 22; do
+  if is_registered "$(copy_of "$n")"; then bad "expected #$n's worktree deregistered"; else ok; fi
+done
+for n in 21 22 24 25; do
+  assert "expected #$n's copy to be gone" test ! -e "$(copy_of "$n")"
+done
+assert "expected gh to be asked for PR #21's state" \
+  contains "$calls" "api repos/sssoto17/sunny-pastures/pulls/21 --jq .state"
+assert "expected no warning on stderr" test -z "$err"
+
+# Two copies of one PR (two head SHAs): GitHub is asked once, and both go.
+reset
+merge_pr
+pull 21 closed null
+review_worktree 21
+mkdir "$main/.claude/worktrees/review-21-def5678"
+case_ 9-lane
+expect_code 0
+assert "expected both copies of #21 to be gone" \
+  test ! -e "$(copy_of 21)" -a ! -e "$main/.claude/worktrees/review-21-def5678"
+assert "expected one gh call for PR #21" \
+  test "$(grep -c 'pulls/21 ' <<<"$calls")" -eq 1
+
+# A closed PR's worktree with changes (the node_modules symlink REVIEW.md allows): plain
+# git worktree remove refuses, and the copy stays, named with git's reason. No --force.
+reset
+merge_pr
+pull 21 closed null
+review_worktree 21
+ln -s "$main/node_modules" "$(copy_of 21)/node_modules"
+case_ 9-lane
+expect_code 0
+expect_tidied
+expect_out "review copy: kept review-21-abc1234 (git worktree remove refused; check it by hand)"
+expect_out "git: "
+assert "expected the refused worktree to stay registered" is_registered "$(copy_of 21)"
+assert "expected the refused worktree's folder to stay" test -L "$(copy_of 21)/node_modules"
+
+# A locked review worktree stays.
+reset
+merge_pr
+pull 21 closed null
+review_worktree 21
+git -C "$main" worktree lock "$(copy_of 21)"
+case_ 9-lane
+expect_code 0
+expect_out "review copy: kept review-21-abc1234 (a locked worktree"
+assert "expected the locked worktree to stay" is_registered "$(copy_of 21)"
+
+# A review worktree whose .git link leads to another repository: git never runs there.
+reset
+merge_pr
+pull 21 closed null
+review_worktree 21
+git init -q "$work/elsewhere"
+printf 'gitdir: %s\n' "$work/elsewhere/.git" >"$(copy_of 21)/.git"
+case_ 9-lane
+expect_code 0
+expect_out "review copy: kept review-21-abc1234 (its git link doesn't point back"
+assert "expected the copy to stay" test -d "$(copy_of 21)"
+rm -rf "$work/elsewhere"
+
+# Sandbox mounts in a closed PR's copies: the lane is cleaned up, the copies stay, and the
+# commands to finish them are printed for outside the sandbox (exit 3).
+reset
+merge_pr
+pull 21 closed null
+pull 24 closed null
+review_worktree 21
+review_archive 24
+admin21=$(git -C "$(copy_of 21)" rev-parse --absolute-git-dir)
+{
+  printf '41 30 8:48 /null %s ro - tmpfs none ro\n' "$admin21"
+  printf '42 30 8:48 /null %s rw - tmpfs none rw\n' "$(copy_of 24)/.mcp.json"
+} >"$work/mountinfo"
+case_ 9-lane
+expect_code 3
+expect_tidied
+expect_err "Run these outside the sandbox"
+expect_err "git -C $main worktree remove $(copy_of 21)"
+expect_err "rm -rf $(copy_of 24)"
+assert "expected the mounted worktree to stay" is_registered "$(copy_of 21)"
+assert "expected the mounted archive copy to stay" test -d "$(copy_of 24)"
+
+# A refusal for the lane changes nothing, review copies included.
+reset
+merge_pr
+pull 21 closed null
+review_archive 21
+echo wip >"$lane/wip.txt"
+case_ 9-lane
+expect_code 2
+assert "expected the review copy to stay on a refusal" test -d "$(copy_of 21)"
+if contains "$calls" "pulls/21"; then bad "expected no PR lookup on a refusal"; else ok; fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 ((fail == 0))

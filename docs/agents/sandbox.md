@@ -48,7 +48,7 @@ of it:
   `git worktree add --no-track -b <branch> .claude/worktrees/<N>-<slug> origin/main`. A reviewer who
   only needs a PR's files doesn't need a worktree: `REVIEW.md`, "Reproduce, then report", describes
   the fallback, a plain copy made with
-  `git archive refs/review/<N> | tar -x -C "$TMPDIR/review-<N>-<short sha>"`.
+  `git archive refs/review/<N> | tar -x -C <repo>/.claude/worktrees/review-<N>-<short sha>`.
 - Push with `git push origin <branch>`, never `-u`. Then open the PR with
   `scripts/open-pr.sh [--label <name>]... <branch> <body-file>` (a stack with `scripts/stack.sh`),
   never `gh pr create`: the `open-pr` workflow opens it as `sunny-factory[bot]`, and neither needs
@@ -90,8 +90,8 @@ be deleted.
   from outside the sandbox, where `git status` shows what's really there. `after-merge.sh` reads
   `/proc/self/mountinfo` first: with any mount in the worktree or its admin folder, or any
   placeholder, it stops before changing anything and prints one command to run outside. A reviewer's
-  throwaway copy under `$TMPDIR` is the exception: leave it when removal refuses (`REVIEW.md`,
-  "Reproduce, then report").
+  copy (`.claude/worktrees/review-<N>-<short sha>`) is the exception: the reviewer leaves it, and
+  `after-merge.sh` removes it once its PR is closed (`REVIEW.md`, "Reproduce, then report").
 - **`git branch -D`** always tries to drop the branch's `branch.<name>` section from `.git/config`,
   so inside the sandbox it warns "could not lock config file .git/config". The warning is harmless:
   the ref is deleted. A branch created with `--no-track` (above) has no such section, so nothing is
