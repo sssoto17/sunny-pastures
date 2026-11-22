@@ -1,5 +1,14 @@
 #!/usr/bin/env node
-// pr-body-guard.mjs: `guard / pr-body` (#270). An earlier part of a split says `Part of #N` and
+// pr-body-guard.mjs: `guard / pr-body` (#270, #512). Two checks on the PR body's closing keywords.
+//
+// A merge closes its own issue and only that one (#512): five issues closed with work left in one
+// week (#386 through a code span in #426's body, #107, #358, #404, #417). So every closing keyword
+// must name the PR's own issue, the `<N>` of its branch (`<N>-<slug>`, optionally after one
+// `<prefix>/` and `issue-`, as scripts/board-status.sh reads it), or failing that the issue on the
+// body's first link line. The one way to close a second issue is a line of its own that starts
+// `Also closes #M` (docs/agents/issue-tracker.md, "Closing issues").
+//
+// An earlier part of a split says `Part of #N` and
 // must not link #N with a closing keyword, or #N closes when that part merges, before its work is
 // done: #131 closed #99 through a code span in a plan table, #245 closed #68 through "doesn't close
 // #68", and #279's first body linked #48 through prose about the next part (retro 2026-11-15).
@@ -12,7 +21,7 @@
 // miss closes an issue early.
 //
 // Usage: node .github/scripts/pr-body-guard.mjs   (reads the PR from $GITHUB_EVENT_PATH)
-// Exit codes: 0 pass, 1 an early closing link, 2 could not run (never reads as a pass).
+// Exit codes: 0 pass, 1 an early or a foreign closing link, 2 could not run (never reads as a pass).
 // It prints only what the patterns matched (a keyword and an issue reference), never a whole line
 // of the body, so no text the PR wrote can run as a workflow command.
 import { CannotRun, isMain, readEvent } from "./diff.mjs";
@@ -49,11 +58,56 @@ export const findEarlyClosings = (body, repo) => {
 		const issue = issueOf(m);
 		if (!parts.has(issue)) continue;
 
-		findings.push({
-			line: body.slice(0, m.index).split("\n").length,
-			issue,
-			text: m[0].replace(/\s+/g, " "),
-		});
+		findings.push({ line: lineOf(body, m.index), issue, text: m[0].replace(/\s+/g, " ") });
+	}
+	return findings;
+};
+
+// The branch grammar scripts/board-status.sh reads (`decide branch`): one optional `<prefix>/`, an
+// optional `issue-`, then `<N>-<slug>`.
+const BRANCH = /^(?:[A-Za-z0-9._-]+\/)?(?:issue-)?([1-9]\d{0,6})-[A-Za-z0-9._-]+$/;
+
+/**
+ * The issue this PR is for: the `<N>` its branch names, else the issue on the body's first link
+ * line (a line that starts with a closing keyword or `Part of`, as the PR template's first line
+ * does), else null.
+ * @param {string} branch the PR's head ref
+ * @param {string} body
+ * @param {string | null} repo
+ * @returns {number | null}
+ */
+export const ownIssue = (branch, body, repo) => {
+	const named = BRANCH.exec(branch ?? "");
+	if (named) return Number(named[1]);
+	const link = new RegExp(
+		String.raw`${LINK_LINE}(?:${KEYWORD}|part of)(?:\*\*|__)?[ \t]*:?[ \t]*${issueRef(repo)}(?!\d)`,
+		"im",
+	).exec(body);
+	return link ? issueOf(link) : null;
+};
+
+/**
+ * Every closing keyword in `body` that links an issue other than `own`, in order, apart from the
+ * `closes` that opens an `Also closes #M` line. That line starts with only indent, a list marker or
+ * bold before `Also`: one in a quote, a code span or a table is reported like any other keyword.
+ * With `own` null, every closing keyword is foreign.
+ * @param {string} body
+ * @param {string | null} repo
+ * @param {number | null} own
+ * @returns {{ line: number, issue: number, text: string }[]}
+ */
+export const findForeignClosings = (body, repo, own) => {
+	const ref = issueRef(repo);
+	const also = new Set(
+		[...body.matchAll(/^[ \t]*(?:[-*+][ \t]+)?(?:\*\*|__)?also[ \t]+(?=closes\b)/gim)].map(
+			(m) => m.index + m[0].length,
+		),
+	);
+	const findings = [];
+	for (const m of body.matchAll(new RegExp(String.raw`${KEYWORD}(?:\s*:)?\s*${ref}(?!\d)`, "gi"))) {
+		const issue = issueOf(m);
+		if (issue === own || also.has(m.index)) continue;
+		findings.push({ line: lineOf(body, m.index), issue, text: m[0].replace(/\s+/g, " ") });
 	}
 	return findings;
 };
@@ -71,27 +125,41 @@ function issueRef(repo) {
 	return `(?:${forms.join("|")})`;
 }
 
+function lineOf(body, index) {
+	return body.slice(0, index).split("\n").length;
+}
+
 function issueOf(match) {
 	return Number(match.slice(1).find((g) => g !== undefined));
 }
 
-const HINT = `An earlier part of a split says \`Part of #N\` and describes the later parts without a closing
+const EARLY_HINT = `An earlier part of a split says \`Part of #N\` and describes the later parts without a closing
 keyword. GitHub links a keyword followed by #N anywhere in the body (a code span, a table, a
 negated phrase, prose about another PR) and closes #N when this part merges. Reword the line,
 for example "the last part carries the link", or, if this PR completes the issue, replace
 \`Part of #N\` with the closing link (CONSTRAINTS.md, "Split size").`;
 
+const FOREIGN_HINT = `A merge closes its own issue and only that one (#512). GitHub links a keyword followed by #N
+anywhere in the body (a code span, a quote, a table, prose about another PR) and closes #N on
+merge. Reword the line without the keyword ("the gap #N found", "see #N"). If this PR really
+completes a second issue too, give it a line of its own: \`Also closes #M\`
+(docs/agents/issue-tracker.md, "Closing issues").`;
+
 const main = () => {
 	const event = readEvent();
 	const body = event?.pull_request?.body ?? "";
 	const repo = event?.repository?.full_name ?? process.env.GITHUB_REPOSITORY ?? null;
-	const findings = findEarlyClosings(body, repo);
-	if (findings.length === 0) {
-		console.log("pr-body: pass (no `Part of` issue is linked by a closing keyword)");
+	const own = ownIssue(event?.pull_request?.head?.ref ?? "", body, repo);
+	const early = findEarlyClosings(body, repo);
+	const foreign = findForeignClosings(body, repo, own);
+	if (early.length === 0 && foreign.length === 0) {
+		console.log(
+			`pr-body: pass (closing keywords name only ${own ? `#${own}` : "no issue"} or an Also closes line; no \`Part of\` issue is linked)`,
+		);
 		return 0;
 	}
 
-	for (const f of findings) {
+	for (const f of early) {
 		console.error(
 			`pr-body: line ${f.line}: \`${f.text}\` links #${f.issue}, which this body calls \`Part of #${f.issue}\``,
 		);
@@ -99,7 +167,15 @@ const main = () => {
 			`::error title=guard / pr-body::Line ${f.line} of the PR body links #${f.issue} with a closing keyword, but the body says Part of #${f.issue}`,
 		);
 	}
-	console.error(`\n${HINT}`);
+	const mine = own ? `this PR's issue is #${own}` : "this PR names no issue of its own";
+	for (const f of foreign) {
+		console.error(`pr-body: line ${f.line}: \`${f.text}\` links #${f.issue}, but ${mine}`);
+		console.log(
+			`::error title=guard / pr-body::Line ${f.line} of the PR body closes #${f.issue} on merge, but ${mine}`,
+		);
+	}
+	if (early.length) console.error(`\n${EARLY_HINT}`);
+	if (foreign.length) console.error(`\n${FOREIGN_HINT}`);
 	return 1;
 };
 

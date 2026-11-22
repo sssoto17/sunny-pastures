@@ -48,6 +48,26 @@ reader. The admin's rule of 12 Nov (#214), for issue and PR bodies alike.
   `Admin review: yes (rows: Code-owned path)`, and `Code-owned paths: none` or
   `Code-owned paths: .github/… (admin asked in #N)`.
 
+## Closing issues
+
+A merge always closes its issue, and closes only that issue (admin, 22 Nov, #512). No issue stays
+open after its PR merges: a step only the admin can show after the merge lives in its own verify
+issue (**Status rules**, "Provable in the PR").
+
+- **The link line:** the body's first line is `Closes #N`, the `<N>` of the branch `<N>-<slug>` (or
+  `Part of #N` on an earlier part of a split, `CONSTRAINTS.md`, "Split size").
+- **No other closing keyword:** GitHub links close, closes, closed, fix, fixes, fixed, resolve,
+  resolves and resolved before `#M` anywhere in the body (a code span, a quote, a table, prose about
+  another PR) and closes #M on merge. Write about another issue without them: "the gap #M found",
+  "see #M". `guard / pr-body` fails a keyword that names any issue but the branch's `<N>` (#512). On
+  a branch that names no issue (`claude/<name>`), the issue on the body's first link line counts as
+  the PR's own.
+- **A PR that really completes a second issue** says so on a line of its own that starts
+  `Also closes #M`, one issue per line, below the link line. Only that exact wording is accepted,
+  and only at the start of a line (a list marker or bold before it is fine): in a quote, a table or
+  a code span it fails like any other keyword. Each issue it closes meets its own acceptance
+  criteria in this PR.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature
@@ -288,12 +308,25 @@ holds (the definition of ready):
    `docs/requirements/spec.md`) and linked. If working it needs a quick call by the admin,
    answerable in a comment, it gets `blocked:decision`. If it needs real design work, a `design`
    issue blocks it through a native dependency.
+6. **Provable in the PR**: every acceptance criterion can be shown inside the PR that closes it,
+   through tests, CI, the diff or a throwaway run, because the merge closes the issue (**Closing
+   issues**). A criterion that needs the admin after the merge (a live demo, a repo setting, making
+   a check required, a workflow that only runs from `main`) moves out into a **verify issue**.
+
+**Verify issues** (#512). Filed together with the build issue, titled "Verify …", natively blocked
+by the build issue (**Blocking** above), and labelled `blocked:admin` when the admin does it by hand
+or `blocked:decision` when it's a call. Its criteria are the moved ones, word for word. The Blocked
+view is then the admin's queue of manual work, and the build issue closes on its merge with nothing
+left. A lane that finds an unprovable criterion only during the build does the same: it files the
+verify issue (`triage` is fine when the cloud can't set the fields), leaves the criterion unticked
+in the PR, names the verify issue in the PR's Concerns, and still closes the build issue with
+`Closes #N`. It never keeps the issue open with `Part of #N` or a "(after merge)" note.
 
 An `idea` issue never moves to Ready: it's fleshed out by a blocking `design` issue, or retyped once
-its body meets rules 2–5.
+its body meets rules 2–6.
 
-An issue that meets all five but isn't chosen stays in Backlog. When its last blocker closes,
-nothing moves automatically: whether it becomes the focus is the admin's call.
+An issue that meets all six but isn't chosen stays in Backlog. When its last blocker closes, nothing
+moves automatically: whether it becomes the focus is the admin's call.
 
 **`factory:ready`** is also the admin's choice, to delegate rather than work it. The factory only
 picks up issues that are in Ready _and_ carry `factory:ready`, and the label additionally requires

@@ -311,7 +311,7 @@ CI/CD step builds the checks (#40, #42). (Amended 19 Nov: `guard / protected-pat
 | `ci / acceptance` | acceptance tests on a throwaway stack (MUST-15.3, MUST-17.1) |
 | `ci / audit` | `pnpm audit --audit-level=high`, the required dependency check (area 8) |
 | `ci / scripts` | the shell scripts' test suites, every `*.test.sh` under `scripts/` and `.claude/hooks/`, with their fake `gh`; the suites need no secret or network (#255) |
-| `guard / pr-body` | a body that says `Part of #N` and also links #N with a closing keyword (#270); required since 16 Nov (`main checks`, 10 checks) |
+| `guard / pr-body` | a body that says `Part of #N` and also links #N with a closing keyword (#270), or a closing keyword that names an issue other than the PR's own `<N>` outside an `Also closes #M` line (#512); required since 16 Nov (`main checks`, 10 checks) |
 | `guard / stack-base` | a PR whose base isn't `main` and isn't in a native stack: a hand-chained PR (#264); required once the admin adds it after #264 merges |
 | `guard / secrets` | the gitleaks CLI over the PR's commits (area 8) |
 | `guard / code-scan` | Semgrep (area 8) |
