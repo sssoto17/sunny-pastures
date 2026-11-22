@@ -12,25 +12,42 @@
 # never leaves auto-merge on: that would merge the part into the part below, and a stack merges whole.
 # Tests: .github/scripts/tests/post-review.test.mjs.
 #
+# HEAD, BASE, BASE_SHA, RESTORED and VERDICT are review.yml's hand-off from the job that ran the
+# model (#454), so every one is checked before it is used. `--check` runs only those checks, which
+# need no token and no network, and stops: review.yml's post job runs it before it mints the App's
+# token, and the full run checks them again.
+#
 # Env: GH_TOKEN (the App's token), GITHUB_REPOSITORY, PR, HEAD (the reviewed head SHA), BOT (the
 # App's slug), ADMIN, FACTORY_APP (the factory App's slug), CTX (holds files.json), VERDICT,
-# THREADS_QUERY, RUNNER_TEMP, DEFAULT_BRANCH, BASE and BASE_SHA (the base gather judged); CODEOWNERS
+# THREADS_QUERY, RUNNER_TEMP, DEFAULT_BRANCH, BASE and BASE_SHA (the base gather judged), RESTORED
+# (the commit origin/<base> pointed at after claude-code-action's fetch, or "none"); CODEOWNERS
 # (default .github/CODEOWNERS, main's copy).
 # shellcheck disable=SC2016 # single-quoted jq programs, by design
 set -euo pipefail
 
 : "${DEFAULT_BRANCH:?}" "${BASE:?}" # a missing one must not read as "every PR is a stacked part"
+# A commit SHA, or nothing is posted. The live head is compared with it below as well.
+if [[ ! ${HEAD-} =~ ^[0-9a-f]{40}$ ]]; then
+  echo "::error::the reviewed head isn't a commit SHA: nothing posted"
+  exit 1
+fi
 # A stacked part (#404): claude-code-action fetched origin/<base> and restored config from it
-# after gather's gate read the base's files at BASE_SHA. If the part below moved in between, the
-# review ran with config the gate never saw: nothing is posted, and the run fails so it shows.
+# after gather's gate read the base's files at BASE_SHA; the model's job recorded that commit as
+# RESTORED. If the part below moved in between, the review ran with config the gate never saw:
+# nothing is posted, and the run fails so it shows. Both must be the same commit SHA, so two empty
+# values never pass, and the base a name of git's plainest characters, as the gate requires.
 if [[ $BASE != "$DEFAULT_BRANCH" ]]; then
-  restored=$(git rev-parse --verify --quiet "refs/remotes/origin/$BASE^{commit}") || restored=none
-  if [[ $restored != "${BASE_SHA-}" ]]; then
-    echo "::error::the action restored config from $BASE at $restored, not ${BASE_SHA:-unknown} as the gate read: nothing posted"
+  if [[ ! $BASE =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    echo "::error::the base isn't a plain branch name: nothing posted"
+    exit 1
+  fi
+  restored=${RESTORED:-none} gate_sha=${BASE_SHA:-unknown}
+  if [[ ! ${BASE_SHA-} =~ ^[0-9a-f]{40}$ || $restored != "$BASE_SHA" ]]; then
+    echo "::error::the action restored config from $BASE at ${restored//[^0-9a-z]/%}, not ${gate_sha//[^0-9a-z]/%} as the gate read: nothing posted"
     exit 1
   fi
 fi
-r="repos/$GITHUB_REPOSITORY" v="$RUNNER_TEMP/verdict.json" t="$RUNNER_TEMP/threads.json"
+v="$RUNNER_TEMP/verdict.json"
 printf '%s' "$VERDICT" >"$v"
 # The whole shape, or nothing is posted: a missing or null field must never read as "none".
 valid='def strings(nonempty): type == "array" and all(.[]; type == "string" and (if nonempty then test("\\S") else true end));
@@ -47,6 +64,11 @@ if grep -qE 'sk-ant-|gh[opsu]_[A-Za-z0-9]{20}|github_pat_|-----BEGIN' "$v"; then
   echo "::error::the verdict looks like it holds a credential: nothing posted"
   exit 1
 fi
+if [[ ${1-} == --check ]]; then
+  echo "CHECK ok: the hand-off is well formed"
+  exit 0
+fi
+r="repos/$GITHUB_REPOSITORY" t="$RUNNER_TEMP/threads.json"
 now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null), .user.type, .base.ref] | @tsv')
 IFS=$'\t' read -r head_now author node auto_on author_type base_ref <<<"$now"
 if [[ $head_now != "$HEAD" ]]; then

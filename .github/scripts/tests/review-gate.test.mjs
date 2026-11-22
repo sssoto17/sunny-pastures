@@ -312,10 +312,11 @@ describe("review.yml", () => {
 			expect(yml).not.toMatch(/^\s+(push|workflow_run|issue_comment):/m);
 		});
 
+		// One checkout a job (#454), each of main: no `ref`, no other repository.
 		it("never checks out anything but the default branch", () => {
 			const checkouts = yml.match(/uses: actions\/checkout@[^\n]*\n(\s+with:\n(\s{10}.*\n)*)?/g);
-			expect(checkouts).toHaveLength(1);
-			expect(checkouts[0]).not.toMatch(/\bref:|repository:/);
+			expect(checkouts).toHaveLength(2);
+			for (const c of checkouts) expect(c).not.toMatch(/\bref:|repository:/);
 			expect(yml).not.toMatch(/pull_request\.head\.(sha|ref)|refs\/pull\//);
 			expect(yml).not.toMatch(/gh pr checkout|git (fetch|checkout|switch)/);
 		});
@@ -344,10 +345,12 @@ describe("review.yml", () => {
 		});
 
 		it("tells post-review.sh the default branch and the base the gate read", () => {
-			const post = yml.slice(at("- name: Post the review as sunny-reviewer"), at("- name: Report"));
+			const post = yml.slice(at("\n  post:\n"));
 			expect(post).toContain("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}");
-			expect(post).toContain("BASE: ${{ steps.gather.outputs.base }}");
-			expect(post).toContain("BASE_SHA: ${{ steps.gather.outputs.base_sha }}");
+			expect(post).toContain("BASE: ${{ needs.review.outputs.base }}");
+			expect(post).toContain("BASE_SHA: ${{ needs.review.outputs.base_sha }}");
+			expect(yml).toContain("base: ${{ steps.gather.outputs.base }}");
+			expect(yml).toContain("base_sha: ${{ steps.gather.outputs.base_sha }}");
 			expect(gather).toContain('echo "base=$base" >>"$GITHUB_OUTPUT"');
 			expect(gather).toContain('echo "base_sha=$base_sha" >>"$GITHUB_OUTPUT"');
 		});
@@ -374,7 +377,7 @@ describe("review.yml", () => {
 	// so a step copies main's skill there before Claude runs. `project` stays out: it would load the
 	// repo's .mcp.json (the action sets enableAllProjectMcpServers), hooks and allow rules.
 	describe("the review skill", () => {
-		const claudeArgs = yml.slice(at("claude_args: >-"), at("# Minted after Claude has finished"));
+		const claudeArgs = yml.slice(at("claude_args: >-"), at("- id: handoff\n"));
 
 		it("copies main's skill into the user's skills before Claude runs", () => {
 			const step = at("- name: Install the review skill (main's copy)\n");
@@ -431,7 +434,11 @@ describe("review.yml", () => {
 		});
 
 		it("proves in the Report step that the skill's text reached the model (#381)", () => {
-			const report = yml.slice(at("- name: Report"));
+			// In Claude's job (#454): the transcript and the execution file are on its runner only.
+			const report = yml.slice(
+				at("- name: Report"),
+				at("\n  # Posts the verdict as sunny-reviewer"),
+			);
 			expect(report).toMatch(
 				/node \.github\/scripts\/skill-proof\.mjs "\$f" "\$HOME\/\.claude\/projects" \\\s+code-review-and-quality '# Code Review and Quality' \|\| proof=\$\?/,
 			);
@@ -444,6 +451,101 @@ describe("review.yml", () => {
 				"utf8",
 			);
 			expect(skill.split("\n")).toContain("# Code Review and Quality");
+		});
+	});
+
+	// #454 (admin, 21 Nov 2026): Claude runs in `claude-seat`, which holds only the seat token, with
+	// a read-only GITHUB_TOKEN, and never mints or holds the App's key. Only `post`, a fresh runner
+	// in `review`, mints the App's token, after it has checked the hand-off.
+	describe("two jobs, two environments (#454)", () => {
+		// Code only: the comments name the other job's secrets to say they aren't there.
+		const code = (text) =>
+			text
+				.split("\n")
+				.filter((l) => !l.trim().startsWith("#"))
+				.join("\n");
+		const model = code(yml.slice(at("\n  review:\n"), at("\n  post:\n")));
+		const post = code(yml.slice(at("\n  post:\n")));
+
+		it("runs Claude in claude-seat and posts from review, each job once", () => {
+			expect(yml.match(/^ {4}environment: .*$/gm)).toEqual([
+				"    environment: claude-seat",
+				"    environment: review",
+			]);
+			expect(model).toMatch(/^ {4}environment: claude-seat$/m);
+			expect(post).toMatch(/^ {4}environment: review$/m);
+			expect(model).toContain("uses: anthropics/claude-code-action@");
+			expect(post).not.toContain("claude-code-action");
+		});
+
+		it("keeps the App's key and token out of Claude's job, and the seat token out of post", () => {
+			expect(model).not.toMatch(
+				/create-github-app-token|REVIEWER_APP_PRIVATE_KEY|app-slug|steps\.app\./,
+			);
+			expect(model).toContain("claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}");
+			expect(post).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
+			expect(post.match(/secrets\.\w+/g)).toEqual(["secrets.REVIEWER_APP_PRIVATE_KEY"]);
+			expect(model.match(/secrets\.\w+/g)).toEqual(["secrets.CLAUDE_CODE_OAUTH_TOKEN"]);
+			expect(yml.slice(0, at("\njobs:\n"))).not.toContain("secrets.");
+		});
+
+		it("gives both jobs a read-only GITHUB_TOKEN", () => {
+			for (const job of [model, post]) {
+				const perms = job.match(/\n {4}permissions:\n((?: {6}.*\n)+)/)?.[1];
+				expect(perms).toBeDefined();
+				const scopes = perms.split("\n").filter((l) => l.trim());
+				expect(scopes.length).toBeGreaterThan(0);
+				for (const l of scopes) expect(l).toMatch(/^ {6}[a-z-]+: read\b/);
+			}
+			expect(yml).toMatch(/^permissions: \{\}$/m);
+		});
+
+		it("hands off through job outputs, and post reads only those", () => {
+			expect(model).toContain("verdict: ${{ steps.claude.outputs.structured_output }}");
+			expect(model).toContain("head: ${{ steps.gather.outputs.head }}");
+			expect(model).toContain("restored: ${{ steps.handoff.outputs.restored }}");
+			expect(post).toContain("needs: review\n");
+			expect(post).toContain("VERDICT: ${{ needs.review.outputs.verdict }}");
+			expect(post).toContain("HEAD: ${{ needs.review.outputs.head }}");
+			expect(post).toContain("RESTORED: ${{ needs.review.outputs.restored }}");
+			expect(post).not.toMatch(/steps\.(claude|gather|handoff)\./);
+		});
+
+		// The race check (#404) compares the base the gate read with the one the action restored,
+		// which only Claude's runner fetched: it is read there, by its full ref, after Claude.
+		it("records the restored base on Claude's runner, by its full ref, after Claude", () => {
+			const handoff = model.slice(model.indexOf("- id: handoff\n"));
+			expect(model.indexOf("- id: claude\n")).toBeLessThan(model.indexOf("- id: handoff\n"));
+			expect(handoff).toContain(
+				'restored=$(git rev-parse --verify --quiet "refs/remotes/origin/$BASE^{commit}") || restored=none',
+			);
+			expect(handoff).toContain("BASE: ${{ steps.gather.outputs.base }}");
+		});
+
+		it("checks the hand-off before it mints the App's token, and posts after", () => {
+			const check = post.indexOf("bash .github/scripts/post-review.sh --check");
+			const files = post.indexOf('gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files');
+			const mint = post.indexOf("uses: actions/create-github-app-token@");
+			const write = post.indexOf("run: bash .github/scripts/post-review.sh\n");
+			expect(post.indexOf("GH_TOKEN: ${{ github.token }}")).toBeGreaterThan(-1);
+			expect(check).toBeGreaterThan(
+				post.indexOf('if [[ $GITHUB_REF != "refs/heads/$DEFAULT_BRANCH" ]]'),
+			);
+			expect(files).toBeGreaterThan(check);
+			expect(mint).toBeGreaterThan(files);
+			expect(write).toBeGreaterThan(mint);
+			expect(post.slice(write - 200, write)).toContain("GH_TOKEN: ${{ steps.app.outputs.token }}");
+		});
+
+		// A failed skill proof fails Claude's job but still posts; a cancelled run never posts, and
+		// an older run's post never cancels a newer run's review.
+		it("posts after a failed proof, never after a cancel, in a group of its own", () => {
+			expect(post).toContain(
+				"if: ${{ !cancelled() && needs.review.result != 'cancelled' && needs.review.outputs.verdict != '' }}",
+			);
+			expect(post).toMatch(
+				/concurrency:\n\s+group: review-post-\$\{\{ github\.event\.pull_request\.number \}\}\n\s+cancel-in-progress: false/,
+			);
 		});
 	});
 });

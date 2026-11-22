@@ -524,9 +524,11 @@ seat (#37; "The factory's identity" below).
   catch-all `* @sssoto17`, which would have sent every PR to the admin.
 
 **The review workflow (#68 step 2, 12 Nov): `.github/workflows/review.yml`.** On
-`pull_request_target` from `main`, in the `review` environment, for non-draft PRs from this repo's
-branches, to `main` or in a native stack on any base (#404, "Stacks"). The pattern is _propose, then
-apply_: Claude proposes and plain code applies.
+`pull_request_target` from `main`, for non-draft PRs from this repo's branches, to `main` or in a
+native stack on any base (#404, "Stacks"). The pattern is _propose, then apply_: Claude proposes and
+plain code applies, in two jobs on two runners (#454): `review` runs Claude in the `claude-seat`
+environment, and `post` posts the verdict from the `review` environment ("Which environment holds
+which secret", below).
 
 - **Propose.** Claude reads the PR as files of data (diff, reviews, threads, linked issues) next to
   `main`'s checkout. It has Read, Grep and Glob only, and the read-only `GITHUB_TOKEN`. It follows
@@ -554,10 +556,23 @@ apply_: Claude proposes and plain code applies.
   skill's own folder (the model reading `SKILL.md` with Read doesn't count). It logs
   `RESULT skill=code-review-and-quality registered=<bool> loaded=<n> cli=<version> from=<dir>`, and
   with `loaded=0`, no transcript or no execution file, it fails the step with an `::error::`
-  annotation after the review is posted. Failing, not warning: a green job with a warning goes
-  unread, and `review` isn't a required check, so the red job blocks no merge.
-- **Apply.** Only after Claude has finished does the job mint the App's token, scoped to contents
-  and pull requests. `.github/scripts/post-review.sh` (tested by
+  annotation. Failing, not warning: a green job with a warning goes unread, and `review` isn't a
+  required check, so the red job blocks no merge. The transcript and the execution file exist only
+  on Claude's runner, so the Report step stays in the `review` job (#454); a failed proof fails that
+  job, and `post` still posts the verdict (its `if:` asks for a `review` job that wasn't cancelled
+  and a verdict). GitHub drops a job output that holds a secret's value, so a verdict quoting the
+  seat token never reaches `post`, and nothing is posted.
+- **Apply, in its own job (#454).** `post` runs on a fresh runner that never ran the model, and is
+  the only job that enters `review` and mints the App's token, scoped to contents and pull requests.
+  The hand-off is the `review` job's outputs: the verdict, the head, the base and its commit as the
+  gate read them, and the commit `origin/<base>` pointed at after the action's fetch (read with
+  plain git after Claude, on Claude's runner, the only one that fetched it). They are data from the
+  model's runner, so before the token exists `post` checks the run's ref and runs
+  `post-review.sh --check`: the verdict's whole shape and no credential in it, the head a commit
+  SHA, and on a stacked part a plain base name and the two base commits the same SHA (#404's race
+  check, which two empty values no longer pass). It reads the PR's file list again with the
+  read-only `GITHUB_TOKEN` rather than taking it from the hand-off, so the rows from paths never
+  rest on the model's runner. `.github/scripts/post-review.sh` (tested by
   `.github/scripts/tests/post-review.test.mjs`) then posts the review and applies the rules above in
   code. It approves only when none of these holds: a Required finding, `review:admin` (until #104),
   or an earlier finding of its own still open. **An escalation row or an escalation thread of its
@@ -578,7 +593,9 @@ apply_: Claude proposes and plain code applies.
   approval and posts a COMMENT (test (e)); a later COMMENT alone wouldn't replace an APPROVE. The
   job skips every other label, and the label the App adds itself (`sender` is
   `sunny-reviewer[bot]`), so it can't loop. Its concurrency group is on the job, so a skipped event
-  doesn't cancel a running review.
+  doesn't cancel a running review. `post` has a group of its own that never cancels (#454): an older
+  run's `post` can't cancel a newer run's review, and a `post` that started finishes its review;
+  `post-review.sh` posts nothing once the head has moved.
 - **Once per head (#274, 16 Nov; retro 2026-11-15, item F).** Before Claude runs, the `gather` step
   asks `.github/scripts/review-gate.sh`, and every later step waits on its answer. It skips a head
   the App has already reviewed: a review of its own on that commit with a non-empty body, which is
@@ -607,10 +624,22 @@ apply_: Claude proposes and plain code applies.
   PR based on anything but `main`, a stacked part, it never turns auto-merge on, and turns off one
   already on (#404): that would squash the part into the part below on its own, and a stack merges
   whole. The log reads `auto_merge=stacked`.
+- **No subprocess env scrub here (#454).** `factory.yml` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`,
+  which needs bubblewrap installed and smoke-tested first. The reviewer's Claude step doesn't: its
+  Claude has no Bash, no hooks (`--setting-sources user`), no MCP servers and `Read(//proc/**)`
+  denied, so no subprocess runs a command the model chose, and the scrub keeps the token only from
+  such subprocesses. Its runner holds the seat token and a read-only `GITHUB_TOKEN`, nothing that
+  writes. Adding the scrub would cost an `apt-get` and a new way for every review to fail for no
+  change in what the model can reach. Revisit it if the reviewer ever gets Bash.
 - **Alternatives considered.** Claude writing to GitHub itself with the App's token, through `gh` or
   the action's comment tools: rejected, because the model that reads the PR's text would then hold a
   token that can approve. A Bash allow-list (`gh pr view:*` and the like): rejected, because Bash
-  rules match command text (`docs/agents/sandbox.md`).
+  rules match command text (`docs/agents/sandbox.md`). One job with the App's token minted after
+  Claude (the layout until #454): rejected once the seat token got its own environment, because a
+  job that enters `review` gets both the seat token and the App's key, and the write step shares a
+  runner with whatever Claude's step left behind. The skill proof in `post`, from an uploaded
+  transcript: rejected, because `actions/upload-artifact` is a new action (as for the factory) and
+  the transcript holds the PR's text.
 
 ### Stacks: one approval pass, one test run, one merge (#264)
 
@@ -995,9 +1024,27 @@ and the job's 60 are the real bound on a run.
 
 **Two environments, both `main` only (admin, 21 Nov 2026, in the coordinator session).** The Claude
 job runs in `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN` and is named for the seat, not
-the factory, so `review.yml` can share it later. The App's key stays in `factory`, which only
-`publish` (and `open-pr.yml`) enters, so nothing on Claude's runner can reach the key, whatever
-GitHub hands a job.
+the factory, so `review.yml` can share it (it does since #454). The App's key stays in `factory`,
+which only `publish` (and `open-pr.yml`) enters, so nothing on Claude's runner can reach the key,
+whatever GitHub hands a job.
+
+**Which environment holds which secret (#454; admin, 21 Nov 2026).** One rule: no job that runs
+Claude enters an environment that holds an App's private key, and the seat token lives in one
+environment only. GitHub hands a job every secret of the environment it enters, so the environment,
+not the step, is the boundary.
+
+<!-- prettier-ignore -->
+| Environment | Secrets (variables) | Jobs that enter it | Why |
+|---|---|---|---|
+| `claude-seat` | `CLAUDE_CODE_OAUTH_TOKEN` | `factory.yml` `factory`, `review.yml` `review` | The jobs that run Claude: they need the seat token and nothing else. `main` only, so no branch's own workflow can read it |
+| `factory` | `FACTORY_APP_PRIVATE_KEY` (`FACTORY_APP_CLIENT_ID`) | `factory.yml` `publish`, `open-pr.yml`, `pr-draft.yml`, `check-68-factory-resolve.yml` | Plain steps that act as sunny-factory; none runs Claude. `main` only (#336) |
+| `review` | `REVIEWER_APP_PRIVATE_KEY` (`REVIEWER_APP_CLIENT_ID`) | `review.yml` `post` | The one job that posts as sunny-reviewer; it never runs Claude |
+| `board` | `BOARD_PROJECT_TOKEN` | `board.yml` `move` | The Project token (#417); no Claude, no App key |
+
+`scripts/setup/ci-claude.sh` writes the seat token to `claude-seat` only, and stops unless that
+environment admits `main` alone. Until the admin deletes it after #454's merge, `review` still holds
+the old copy of `CLAUDE_CODE_OAUTH_TOKEN`, which no job reads any more (the wizard warns while it is
+there).
 
 **Bubblewrap for the scrub (admin, 21 Nov 2026, option a).** The scrub runs Claude's subprocesses
 under bubblewrap, and Claude Code 2.1.319 refuses to start with the scrub on and no `bwrap`

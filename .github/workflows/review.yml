@@ -20,17 +20,23 @@
 #   ~/.claude/skills. `--setting-sources user` keeps the repo's .claude/settings.json (hooks, allow
 #   rules) and .mcp.json unloaded: the action sets enableAllProjectMcpServers, so the project
 #   source would start the repo's MCP servers;
-# - the App's token is minted only after Claude has finished, and only the last step, plain
-#   bash (.github/scripts/post-review.sh), writes to GitHub with it. That script, not the
+# - two jobs, two runners (#454): `review` runs Claude in the `claude-seat` environment, which
+#   holds only CLAUDE_CODE_OAUTH_TOKEN, with the read-only GITHUB_TOKEN; it never mints or holds
+#   the App's key. `post`, on a fresh runner that never ran the model, enters `review`, which holds
+#   only REVIEWER_APP_PRIVATE_KEY. The hand-off is `review`'s job outputs (the verdict, the head,
+#   the base the gate read and the base the action restored), which `post` checks before it mints
+#   the App's token (post-review.sh --check). Then only its last step, plain bash
+#   (.github/scripts/post-review.sh), writes to GitHub with that token. That script, not the
 #   model, decides the review's event.
-# Environment `review`, never `factory`: on this event the run's ref is main, so any job here
-# would get its environment's secrets on every PR (#227).
+# On this event the run's ref is main whatever the PR's base, so each job gets its environment's
+# secrets on every PR (#227); neither enters `factory`, which holds the factory's key.
 # Once per head (#274, #404): the gate in `gather` skips, before Claude runs, a head this App has
 # already reviewed or that the admin or this App approved, except review:admin on the PR while its
 # approval stands; and a PR on another base unless it's a native stack's part whose stack below
 # leaves the config the action restores from the base alone (.github/scripts/review-gate.sh).
-# Caps: 30 turns and 15 minutes. #103's runs took 26-34 s a job; a review reads about six rule
-# files plus one file per touched area. Actions pinned to full SHAs, each at least 7 days old.
+# Caps: 30 turns and 15 minutes on `review`, 5 minutes on `post`. #103's runs took 26-34 s a job;
+# a review reads about six rule files plus one file per touched area. Actions pinned to full SHAs,
+# each at least 7 days old.
 name: review
 
 on:
@@ -43,6 +49,15 @@ on:
     # part is reviewed, a hand-chained PR isn't.
 
 permissions: {}
+
+# Both jobs' (the event's fields only; no secret).
+env:
+  PR: ${{ github.event.pull_request.number }}
+  FACTORY_APP: sunny-factory # the factory App's slug (ADR-0002, "The factory's identity")
+  THREADS_QUERY: >-
+    query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name)
+    { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { id isResolved isOutdated
+    path line resolvedBy { login } comments(first: 20) { nodes { author { login } body } } } } } } }
 
 jobs:
   review:
@@ -62,19 +77,23 @@ jobs:
       cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: review
+    # Its own environment, holding CLAUDE_CODE_OAUTH_TOKEN only (#454; admin, 21 Nov 2026): the
+    # App's key lives in `review`, which only `post` enters, so nothing on Claude's runner can
+    # reach it. GITHUB_TOKEN is read-only.
+    environment: claude-seat
     permissions:
       contents: read # main's checkout, and the action's fetch of the PR's base
       pull-requests: read # the PR, its diff, reviews and threads
       issues: read # the issues the PR links
+    # The hand-off to `post`: data, checked there before the App's token exists.
+    outputs:
+      verdict: ${{ steps.claude.outputs.structured_output }}
+      head: ${{ steps.gather.outputs.head }}
+      base: ${{ steps.gather.outputs.base }}
+      base_sha: ${{ steps.gather.outputs.base_sha }}
+      restored: ${{ steps.handoff.outputs.restored }}
     env:
-      PR: ${{ github.event.pull_request.number }}
       ANTHROPIC_API_KEY: '' # never an API key: the setup-token is the only credential
-      FACTORY_APP: sunny-factory # the factory App's slug (ADR-0002, "The factory's identity")
-      THREADS_QUERY: >-
-        query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name)
-        { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { id isResolved isOutdated
-        path line resolvedBy { login } comments(first: 20) { nodes { author { login } body } } } } } } }
     steps:
       # No `ref`: on pull_request_target that is main, never the PR head.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,39 +192,25 @@ jobs:
             --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Skill,Read(//proc/**)"
             --json-schema '${{ steps.gather.outputs.schema }}'
 
-      # Minted after Claude has finished, so the model never shares a step with a write token.
-      - id: app
+      # The base the action restored config from (#404): claude-code-action fetched origin/<base>
+      # on this runner, so only this runner can read it, and `post`'s race check compares it with
+      # the commit the gate read. Plain git, after Claude: Claude has no Bash, so it can't move it.
+      - id: handoff
+        name: Record the base the action restored
         if: steps.claude.outputs.structured_output != ''
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ vars.REVIEWER_APP_CLIENT_ID }}
-          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
-          # Only what posting needs; contents: write because an App's approval may count only
-          # with it (ADR-0002, Q14). No issues, workflows or administration.
-          permission-contents: write
-          permission-pull-requests: write
-
-      # The only step that writes. The verdict is data: the script decides the event.
-      - name: Post the review as sunny-reviewer
-        if: steps.app.outputs.token != ''
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          VERDICT: ${{ steps.claude.outputs.structured_output }}
-          BOT: ${{ steps.app.outputs.app-slug }}
-          ADMIN: ${{ github.repository_owner }}
-          HEAD: ${{ steps.gather.outputs.head }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }} # no auto-merge off it (#404)
-          # The base gather judged: the action restores config from origin/<base>, so a stacked
-          # part's review posts only if that ref is still the commit the gate read (#404).
           BASE: ${{ steps.gather.outputs.base }}
-          BASE_SHA: ${{ steps.gather.outputs.base_sha }}
-        run: bash .github/scripts/post-review.sh
+        run: |
+          set -euo pipefail
+          restored=$(git rev-parse --verify --quiet "refs/remotes/origin/$BASE^{commit}") || restored=none
+          echo "restored=$restored" >>"$GITHUB_OUTPUT"
 
       # Report data (ADR-0002, "Caps"): cost, turns and the job's seconds. Non-secret fields only.
       # Then the proof that the skill's text reached the model (#381): registered=true only says
       # the CLI listed it. The expanded skill is in the session's transcript, not the execution
       # file, so the script reads ~/.claude/projects (header of .github/scripts/skill-proof.mjs).
-      # No proof fails this step with an ::error:: annotation, after the review is posted.
+      # Both are on this runner, so the proof runs here, in Claude's job. No proof fails this step
+      # with an ::error:: annotation; `post` still posts the verdict (its `if:` has !cancelled()).
       - name: Report
         if: always()
         env:
@@ -229,3 +234,82 @@ jobs:
           jq -r '.[] | select(.type == "result") | "RESULT subtype=\(.subtype) is_error=\(.is_error)"
             + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" || true
           exit "$proof"
+
+  # Posts the verdict as sunny-reviewer, on a fresh runner that never ran the model (#454). The only
+  # job that enters `review`, which holds REVIEWER_APP_PRIVATE_KEY only, and the only one that
+  # mints the App's token, after the hand-off has passed its check. !cancelled(): a failed skill
+  # proof in `review` still posts; a cancelled run (a newer one for the PR) never does.
+  post:
+    name: post
+    needs: review
+    # `review`'s own concurrency cancels that job, not the run, so its result is read as well: a
+    # verdict set before the cancel landed must not post.
+    if: ${{ !cancelled() && needs.review.result != 'cancelled' && needs.review.outputs.verdict != '' }}
+    # Its own group, never cancelled: an older run's post never cancels a newer run's review, and
+    # a post that started finishes its review. post-review.sh posts nothing once the head moved.
+    concurrency:
+      group: review-post-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: review
+    # GITHUB_TOKEN for the checkout and the PR's file list only; every write goes through the
+    # App's token.
+    permissions:
+      contents: read # main's checkout
+      pull-requests: read # the PR's files, for the rows from paths
+    env:
+      ADMIN: ${{ github.repository_owner }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }} # no auto-merge off it (#404)
+      # The hand-off, data from the runner that ran the model. post-review.sh checks every field:
+      # the verdict's whole shape and no credential in it, the head a commit SHA and still the
+      # PR's head, and for a stacked part the base's commit as the gate read it and as the action
+      # restored it, the same 40-hex SHA (#404).
+      VERDICT: ${{ needs.review.outputs.verdict }}
+      HEAD: ${{ needs.review.outputs.head }}
+      BASE: ${{ needs.review.outputs.base }}
+      BASE_SHA: ${{ needs.review.outputs.base_sha }}
+      RESTORED: ${{ needs.review.outputs.restored }}
+    steps:
+      # No `ref`: on pull_request_target that is main, never the PR head. Fresh: no model ran on
+      # this runner, so its scripts and CODEOWNERS are main's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+
+      # Before any token with a write exists. The file list is read again here with the read-only
+      # token, not handed off, so the rows from paths never rest on the model's runner.
+      - id: check
+        name: Check the hand-off (read-only token)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ $GITHUB_REF != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "::error::this run's ref is $GITHUB_REF, not $DEFAULT_BRANCH: nothing posted"
+            exit 1
+          fi
+          bash .github/scripts/post-review.sh --check
+          CTX=$RUNNER_TEMP/review-context
+          echo "CTX=$CTX" >>"$GITHUB_ENV"
+          mkdir -p "$CTX"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files?per_page=100" --jq '.[] |
+            {filename, status, additions, deletions, previous_filename}' | jq -s . >"$CTX/files.json"
+
+      # Only what posting needs; contents: write because an App's approval may count only with it
+      # (ADR-0002, Q14). No issues, workflows or administration.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.REVIEWER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # The only step that writes. The verdict is data: the script decides the event.
+      - name: Post the review as sunny-reviewer
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BOT: ${{ steps.app.outputs.app-slug }}
+        run: bash .github/scripts/post-review.sh
