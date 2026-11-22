@@ -1,0 +1,141 @@
+# The factory sweep and chain (#108; ADR-0002, area 2, "The factory sweep, built (#108)"): each run
+# dispatches at most ONE eligible issue to the factory (factory.yml), so a queue drains one factory
+# run at a time without the admin starting each one.
+#
+# Triggers: every hour (minute 23, UTC; the hour doesn't matter, so no DST to handle), the
+# factory's own runs finishing (`workflow_run`, the chain; a cancelled factory run is ignored), and
+# `workflow_dispatch` for the admin: `gh workflow run sweep.yml --repo sssoto17/sunny-pastures`.
+# The hourly run also restarts a chain that stops: `workflow_run` doesn't chain more than three
+# levels deep, and whether a `workflow_dispatch` in between resets that count is unproven.
+# Concurrency group `factory-sweep`: two sweeps never overlap; a newer pending sweep replaces an
+# older pending one (GitHub's rule), which loses nothing, since each reads the board afresh.
+#
+# Jobs, each skipped unless the one before says go:
+# - switch: the kill switch (#106), exactly as factory-switch.yml's header shows. Anything but
+#   FACTORY_ENABLED=true and nothing is read or dispatched.
+# - skipped: with the switch off, or after a cancelled factory run, writes the job summary that
+#   says so. No permissions.
+# - select: environment `board` (main only), for BOARD_PROJECT_TOKEN, which reads the Project
+#   (REST, on the Project's calls only, as board.yml's `move` does); the read-only GITHUB_TOKEN reads
+#   the factory's runs, the issues, PRs and branches. factory-sweep-gather.sh reads, then
+#   factory-sweep.mjs decides, logs one SWEEP line and writes the job summary: the switch, the open
+#   factory PRs against the cap, the eligible issues in order, the skipped ones and why, and the one
+#   dispatched or why none. It dispatches nothing while a factory run is queued, waiting or in
+#   progress, or while the open PRs by sunny-factory[bot] (drafts included) reach the repo variable
+#   FACTORY_MAX_OPEN_PRS (default 4 when unset; admin, 22 Nov 2026), and skips an issue whose last
+#   factory run opened no PR until the issue is edited after that run.
+# - dispatch: `actions: write` on this job only, and nothing else: GITHUB_TOKEN dispatches
+#   factory.yml on main with the one issue, then waits until the new run is listed, so a sweep
+#   queued behind this one sees it. A workflow_dispatch is one of the two events a
+#   GITHUB_TOKEN may start a run with ("Triggering a workflow from a workflow",
+#   https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+#   The factory's own switch and gate check the issue again.
+# Every event runs the default branch's copy of this file. Event values reach the shell only
+# through env:. Actions are GitHub-owned and pinned to a full SHA, main's pins (ADR-0002, area 8).
+name: sweep
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_run:
+    workflows: [factory]
+    types: [completed]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: factory-sweep
+  cancel-in-progress: false
+
+jobs:
+  switch:
+    uses: ./.github/workflows/factory-switch.yml
+    permissions:
+      contents: read
+
+  skipped:
+    needs: switch
+    if: >-
+      needs.switch.outputs.run != 'true' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'cancelled')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Say why nothing was read
+        env:
+          RUN: ${{ needs.switch.outputs.run }}
+        run: |
+          if [[ $RUN != true ]]; then why="switch off: FACTORY_ENABLED isn't true"; else why="the factory run was cancelled: the chain doesn't act on it"; fi
+          echo "SWEEP none: $why"
+          printf '### Factory sweep\n\n- Switch: %s\n\nDispatched: none (%s)\n' "$([[ $RUN == true ]] && echo on || echo off)" "$why" >>"$GITHUB_STEP_SUMMARY"
+
+  select:
+    needs: switch
+    if: >-
+      needs.switch.outputs.run == 'true' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: board
+    permissions:
+      actions: read # the factory workflow's runs
+      contents: read # main's checkout of the scripts, and the branches
+      issues: read # the open factory:ready issues
+      pull-requests: read # the open PRs
+    outputs:
+      issue: ${{ steps.decide.outputs.issue }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            scripts/lib
+
+      - name: Read the runs, issues, PRs, branches and board
+        env:
+          FACTORY_ENABLED: ${{ vars.FACTORY_ENABLED }}
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_GH_TOKEN: ${{ secrets.BOARD_PROJECT_TOKEN }}
+          SWEEP_DIR: ${{ runner.temp }}/sweep
+        run: bash .github/scripts/factory-sweep-gather.sh
+
+      - id: decide
+        name: Choose at most one issue
+        env:
+          FACTORY_ENABLED: ${{ vars.FACTORY_ENABLED }}
+          FACTORY_MAX_OPEN_PRS: ${{ vars.FACTORY_MAX_OPEN_PRS }}
+          SWEEP_DIR: ${{ runner.temp }}/sweep
+        run: node .github/scripts/factory-sweep.mjs
+
+  dispatch:
+    needs: select
+    if: needs.select.outputs.issue != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    permissions:
+      actions: write # workflow_dispatch of factory.yml (and reading its runs back), nothing else
+    steps:
+      - name: Dispatch the factory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.select.outputs.issue }}
+        run: |
+          set -euo pipefail
+          [[ $ISSUE =~ ^[1-9][0-9]{0,6}$ ]] || { echo "::error::not an issue number"; exit 1; }
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/factory.yml/dispatches" \
+            -f ref=main -f "inputs[issue]=$ISSUE" --silent
+          echo "SWEEP dispatched factory #$ISSUE"
+          echo "Dispatched factory #$ISSUE on main." >>"$GITHUB_STEP_SUMMARY"
+          # The dispatch API answers before the run is listed. A sweep queued behind this one starts
+          # when it ends, so it waits (up to 2 minutes) until the run shows: the next sweep then sees
+          # it and stays strictly serial. A run that never shows is a warning, not a failure.
+          for _ in $(seq 24); do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/factory.yml/runs?per_page=10" \
+              --jq "[.workflow_runs[] | select(.display_title == \"factory #$ISSUE\" and .status != \"completed\")] | length")
+            if ((n > 0)); then echo "SWEEP factory #$ISSUE is listed"; exit 0; fi
+            sleep 5
+          done
+          echo "::warning title=sweep::factory #$ISSUE wasn't listed within 2 minutes; the next sweep may not see it"
