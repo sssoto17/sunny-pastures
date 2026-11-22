@@ -88,7 +88,8 @@ them.
 - Every `git commit` and `git push` an agent runs goes through `.claude/hooks/fallow-gate.sh`
   (`fallow audit` on the changes since the merge base with `origin/main`): a new clone, unused
   export or function over the complexity limits blocks it, with the findings listed and the full
-  report in `.fallow/gate-report.json`. Fix the code; inherited findings don't block. When the audit
-  can't run, the gate lets the command through with a `fallow-gate: ... skipping` notice, so CI
-  stays the real gate. With the admin's user-scope Fallow plugin on, set `FALLOW_PLUGIN_GATE=off` so
-  the audit doesn't run twice.
+  report in `.fallow/gate-report.json`. Fix the code; inherited findings don't block, except a clone
+  in a changed `packages/sim` file, as in `pnpm audit:changed`. When the audit can't run, the gate
+  lets the command through with a `fallow-gate: ... skipping` notice, so CI stays the real gate.
+  With the admin's user-scope Fallow plugin on, set `FALLOW_PLUGIN_GATE=off` so the audit doesn't
+  run twice.

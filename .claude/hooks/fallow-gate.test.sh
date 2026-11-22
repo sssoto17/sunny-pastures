@@ -3,7 +3,10 @@
 # (allow) or 2 (block, findings on stderr). The script is Fallow's own (`fallow hooks install
 # --target agent`), so these tests pin what this repo relies on, not its internals: which commands
 # it audits, that a `fail` verdict blocks with the finding listed, that `pass`, `warn` and a broken
-# audit let the command through, and how .claude/settings.json registers it. A throwaway git repo
+# audit let the command through, and how .claude/settings.json registers it. One part is ours, not
+# Fallow's: the clone check between the gate's "sunny-pastures (#504)" markers, which blocks a clone
+# group the change introduces although Fallow 3.43.1's verdict is only `warn`; a reinstall drops it,
+# and the clone checks below fail then. A throwaway git repo
 # stands in for the work tree, with a copy of the gate in its .claude/hooks/; the `fallow` first on
 # PATH is a fake that logs its arguments and prints the report the test chose. The real audit is
 # shown in #504's PR. Run: bash .claude/hooks/fallow-gate.test.sh
@@ -44,8 +47,16 @@ report() { # status json
   printf '%s' "$1" >"$tmp/status"
   printf '%s' "$2" >"$tmp/report.json"
 }
-# A new clone group, as `fallow audit --format json` reports one (trimmed).
-clone='{"verdict":"fail","attribution":{"gate":"new-only"},"duplication":{"clone_groups":[{"instances":[{"file":"packages/sim/src/pens/index.ts","start_line":96},{"file":"packages/sim/src/pens/index.ts","start_line":231}],"actions":[{"type":"extract-shared"}],"introduced":true}]}}'
+# A new clone group, as `fallow audit --format json` (3.43.1) reports one (trimmed): verdict `warn`.
+group() { # file introduced
+  printf '{"instances":[{"file":"%s","start_line":96},{"file":"%s","start_line":231}],"actions":[{"type":"extract-shared"}],"introduced":%s}' "$1" "$1" "$2"
+}
+clones() { # gate group-json
+  printf '{"verdict":"warn","attribution":{"gate":"%s"},"duplication":{"clone_groups":[%s]}}' "$1" "$2"
+}
+clone=$(clones new-only "$(group packages/sim/src/pens/index.ts true)")
+# A finding Fallow itself fails on: a new unused export.
+unused='{"verdict":"fail","attribution":{"gate":"new-only"},"dead_code":{"unused_exports":[{"path":"apps/web/src/server/http/index.ts","line":12,"export_name":"spare","actions":[{"type":"remove-export"}],"introduced":true}]}}'
 clean='{"verdict":"pass","attribution":{"gate":"new-only"}}'
 warned='{"verdict":"warn","attribution":{"gate":"new-only"}}'
 broken='{"error":true,"message":"cannot resolve base ref"}'
@@ -99,14 +110,28 @@ not_audited() { # name
 }
 
 # --- a new finding blocks a commit or a push, and names the finding ---------------------------
-report 1 "$clone"
+report 0 "$clone"
 check 'commit with a new clone' 2 'git commit -m "feat(sim): feed again"' \
   'duplication packages/sim/src/pens/index.ts:96'
 audited 'commit with a new clone'
 check 'block names the verdict' 2 'git commit -am x' 'verdict fail, 1 finding(s) caused the block'
+check 'block says why a warn blocks' 2 'git commit -am x' \
+  "fallow's verdict is warn, but a clone group in this change fails CONSTRAINTS.md's Duplication row"
 check 'push with a new clone' 2 'git push -u origin claude/x'
 check 'commit after cd and &&' 2 "cd $repo && git add -A && git commit -m x"
 check 'commit with git options' 2 'git -c core.editor=true commit --amend --no-edit'
+
+report 1 "$unused"
+check 'commit with a new unused export' 2 'git commit -m x' \
+  'unused_exports apps/web/src/server/http/index.ts:12 spare'
+
+# --- which clone groups block: the Duplication row, as .github/scripts/audit-changed.mjs reads it
+report 0 "$(clones new-only "$(group apps/web/src/server/game/index.ts false)")"
+check 'inherited clone outside the sim' 0 'git commit -m x'
+report 0 "$(clones new-only "$(group packages/sim/src/pens/index.ts false)")"
+check 'inherited clone in a changed sim file' 2 'git commit -m x' 'Duplication row'
+report 0 "$(clones all "$(group apps/web/src/server/game/index.ts false)")"
+check 'any clone under gate all' 2 'git commit -m x' 'Duplication row'
 
 # --- other commands never run the audit --------------------------------------------------------
 check 'not git' 0 'ls -la'
@@ -151,7 +176,7 @@ done
 # own copy), so run it as written, from a folder inside the throwaway repo.
 registered=$(jq -r '.[0].command' <<<"$entry")
 mkdir -p "$repo/packages/sim"
-report 1 "$clone"
+report 0 "$clone"
 input=$(printf '{"session_id":"t","cwd":%s,"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' \
   "$(json_str "$repo/packages/sim")")
 : >"$log"

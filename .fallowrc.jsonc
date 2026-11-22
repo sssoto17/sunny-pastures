@@ -28,17 +28,11 @@
   // different data aren't clones ("the same rule, not the same shape"). Fallow's built-in
   // defaults leave out *.test.ts files, and the row covers the sim's tests too, so this config
   // doesn't use them.
-  // `threshold` makes `fallow audit` fail on a clone the change introduces: without it a new
-  // clone group is only a `warn` verdict, which neither the commit gate
-  // (.claude/hooks/fallow-gate.sh) nor CI blocks (#504). The audit fails when the change
-  // introduces a clone group and the repo's duplicated share is over the threshold, so a value
-  // this small means any new clone; inherited clones keep a `pass`. A tightening: 0 is no limit.
   "duplicates": {
     "mode": "mild",
     "minTokens": 50,
     "minLines": 5,
-    "ignoreDefaults": false,
-    "threshold": 0.000001
+    "ignoreDefaults": false
   },
   // apps/web's layers (CONSTRAINTS.md, "Boundaries: server-only"; #329 decision 3, #342). Only a
   // route imports api/, only api/ wires the server modules together, and client code (pages)
