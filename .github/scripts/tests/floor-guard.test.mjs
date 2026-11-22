@@ -212,6 +212,30 @@ describe("floor guard, end to end", () => {
 			});
 		});
 
+		// #503: the changed-code audit replaced `pnpm dupes` in the scripts.
+		describe("the changed-code audit", () => {
+			const AUDIT = (audit, task) =>
+				`{\n  "scripts": {\n    "audit:changed": "${audit}",\n    "check:task": "${task}"\n  }\n}\n`;
+			const TOOL = "RUST_LOG=error fallow audit --quiet";
+			const TASK = "pnpm check:fast && pnpm audit:changed --base origin/main";
+			const run = (content) => {
+				repo = makeRepo({ ...BASE, "package.json": AUDIT(TOOL, TASK) });
+				repo.write({ "package.json": content });
+				return guard();
+			};
+
+			it.each([
+				["audit:changed dropped from check:task", AUDIT(TOOL, "pnpm check:fast")],
+				["fallow audit dropped from audit:changed", AUDIT("true", TASK)],
+			])("blocks %s", (_, content) => {
+				expect(run(content).out).toContain("[check-removed] package.json");
+			});
+
+			it("accepts a flag added to the audit", () => {
+				expect(run(AUDIT(TOOL, `${TASK} --coverage coverage/coverage-final.json`)).code).toBe(0);
+			});
+		});
+
 		it("accepts an unrelated script edit", () => {
 			repo = makeRepo({ ...BASE, "package.json": OK });
 			repo.write({
@@ -312,15 +336,18 @@ describe("floor guard, end to end", () => {
 		});
 
 		// #125: the duplication and formatting checks run as steps of `ci / lint`.
-		it.each(['pnpm dupes --changed-since "origin/$BASE_REF"', "pnpm format:check"])(
-			"block a removed `%s` step",
-			(step) => {
-				const steps = `jobs:\n  lint:\n    steps:\n      - run: pnpm lint\n      - run: ${step}\n`;
-				repo = makeRepo({ ...BASE, [CI]: steps });
-				repo.write({ [CI]: steps.replace(`      - run: ${step}\n`, "") });
-				expect(guard().out).toContain(`[check-removed] ${CI}`);
-			},
-		);
+		it.each([
+			'pnpm dupes --changed-since "origin/$BASE_REF"',
+			"pnpm format:check",
+			// #503: the changed-code audit, run through its script or the tool.
+			'pnpm -s audit:changed --base "$SINCE" --format json >"$report" || status=$?',
+			'pnpm exec fallow audit --base "$SINCE"',
+		])("block a removed `%s` step", (step) => {
+			const steps = `jobs:\n  lint:\n    steps:\n      - run: pnpm lint\n      - run: ${step}\n`;
+			repo = makeRepo({ ...BASE, [CI]: steps });
+			repo.write({ [CI]: steps.replace(`      - run: ${step}\n`, "") });
+			expect(guard().out).toContain(`[check-removed] ${CI}`);
+		});
 
 		// #99: a local action (`uses: ./…`) is read from the PR's checkout, so a PR could change what the
 		// floor job runs before the base branch's guard starts. The floor job uses pinned actions only.
