@@ -155,6 +155,16 @@ in a PR of its own.
 | CI runner time per PR | 15.1 minutes per PR over the CI workflow's first week, 8 to 14 Nov 2026 (1,633 minutes for 108 PRs, across every workflow a PR starts; #98). With the 19 minutes of runs outside any PR, 1,652 that week: about 7,100 minutes a month at that pace, 2.4 times the 3,000 minutes that $18 buys at $0.006 a minute | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume; must not grow past that budget (#309) | n/a: a breach is reviewed, not blocked | #40 |
 | Reviewer cost per PR | $0.31 of Claude per reviewed PR, 12 Nov 2026 to the morning of 16 Nov ($6.55 over 44 reviews of 21 PRs, 7 of them cancelled before Claude ran; #98). Wk 2 total, 9 to 15 Nov 2026: about $14.25, from 1,749 runner minutes (about $10.49 at $0.006 a minute) and $3.76 of Claude | must not grow past the weekly budget set from this first data (ADR-0002, "Caps") | n/a: a breach is reviewed, not blocked | #98 |
 
+Note on the "CI runner time per PR" row above: the runner time of `ci / acceptance` (#49), recorded
+here as a note rather than in the row, because a new value in a ratchet row goes in a PR of its own:
+2 to 3 billed minutes a run, measured on PR #508's own runs on 22 Nov 2026 (runs 45043493394 and
+45043983689: 1 min 55 s and 2 min 17 s, of which 1 min 39 s and 1 min 53 s start the Supabase stack,
+and 8 s and 11 s build the app and run the 12 tests). It is path-filtered (admin, 22 Nov): of the
+107 commits that landed on `main` in the first week, 8 to 14 Nov, 47 touch what it covers. At that
+share, about 47 runs a week run the tests (about 95 to 140 minutes), and the other 60 bill about 1
+minute each for the filter alone: about 650 to 870 minutes a month at the first week's pace, against
+930 to 1,400 unfiltered.
+
 To keep CI cost down, the expensive checks run only when they're relevant. Stryker runs only when
 `packages/sim` changes. Lighthouse, axe and the latency smoke run only on preview deploys. Semgrep
 scans only from the merge base.
@@ -426,6 +436,7 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 | E17 | check-removed | package.json | The `dupes` script goes, and `check:task` and `check:full` run `pnpm audit:changed` in place of `pnpm dupes --changed-since origin/main`, after the tests so CRAP reads their coverage (#503). The duplication check widens from `packages/sim` to the repo. Remove this row once the PR has merged | Soto | 2026-12-06 |
 | E18 | config-loosened | .fallowrc.jsonc | Dead code starts at 0 (#503): `ignoreBinaries` names the Supabase CLI, a system binary that `pnpm supabase:check` pins, and `ignoreExports` keeps the error body's types that ADR-0007 section 3 exports for the M4 client. The same PR adds the store's schema as an `entry`, since drizzle-kit reads its exports. Remove this row once the PR has merged | Soto | 2026-12-06 |
 | E19 | rule-narrowed | CONSTRAINTS.md | The Duplication row's check changes from `fallow dupes --changed-since <merge base>` to `fallow audit` through `pnpm audit:changed` (#503), so that list item leaves its "Checked by" cell. The rule keeps `packages/sim`'s bar word for word (0 clones in its changed files) and adds every other folder, where only introduced clone groups fail. Remove this row once the PR has merged | Soto | 2026-12-06 |
+| E20 | check-removed | .github/workflows/ci.yml | ci / acceptance is a new job (#49), so no check is removed. Its job-level if: is the draft gate every per-part job has (#358), which skips only on a draft, and a draft can't merge. Its step-level if:s are the path filter the admin chose (22 Nov, PR #508): on a PR that touches none of apps/, packages/, supabase/, tests/acceptance/, package.json, pnpm-lock.yaml, pnpm-workspace.yaml, the root tsconfig*.json, ci.yml and the setup and supabase-stack actions, the tests don't run and the check passes; every push to main runs them. Remove this row once the PR has merged | Soto | 2026-12-06 |
 
 ## Interview record
 
