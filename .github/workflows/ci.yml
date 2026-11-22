@@ -240,6 +240,31 @@ jobs:
             node .github/scripts/coverage-gate.mjs --base "$SINCE" --skip-ratchet
           fi
 
+  # CONSTRAINTS.md, Acceptance row (MUST-15.3, #49): the admin-owned tests/acceptance/** over HTTP,
+  # as a black box, against a fresh local Supabase stack on this runner. The stack comes from the
+  # same composite action as `ci / test`'s db project (#39: no container, no Postgres service
+  # container); its db:env writes ./.env, which `pnpm test:acceptance` (tests/acceptance/run.mjs)
+  # reads to build the app, start it, wait on /api/health, run the suite and stop the app. No step
+  # prints a key, token or URL (docs/agents/sandbox.md, "Secrets in output"): the stack action hides
+  # them, and the runner passes .env to the app and the suite without echoing it.
+  # No path filter, and on every part of a stack: a required check must report on every PR, and any
+  # change can break the app over HTTP. Its runner time is in CONSTRAINTS.md, "CI runner time per PR".
+  acceptance:
+    name: ci / acceptance
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Start the Supabase stack
+        uses: ./.github/actions/supabase-stack
+      - name: Run the acceptance tests over HTTP
+        run: pnpm test:acceptance --reporter=verbose
+
   # CONSTRAINTS.md, Determinism row (#48): the recorded script through packages/sim in two
   # processes, against the recorded state hash. No path filter: the hash covers every rules change.
   determinism:
