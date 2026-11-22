@@ -24,8 +24,7 @@ report. When a pointer here and the rule's home disagree, the home wins.
   a session on the admin's account that does either signs the PR off as the admin (#494, #497;
   `CONSTRAINTS.md`, "Admin review"). The hook `block-thread-resolve.sh` refuses both.
 - **The PR description is a set of claims.** Check each one against the diff, the checks and the
-  issue before you rely on it. A body that contradicts the diff (What and why, Changes made, Not
-  touched or Concerns describing what the head no longer does) is a Required finding.
+  issue before you rely on it.
 - **A decision the admin made outside the PR** (#264; seen on #281, where the bot asked for an
   Exceptions row the admin had decided against) reaches the review as a line in the body's Concerns:
   `Decided (admin, <date>, <where>): <the decision>`, for example "Decided (admin, 16 Nov, #264
@@ -135,8 +134,10 @@ code-owned and carry `review:admin`, so the admin reviews them, by this checklis
 - The changelog has no breaking change for us.
 - CI is green on the head, including `ci / scripts`, which runs the action pin check
   (`scripts/setup/ci-claude.test.sh`, #486).
-- A `claude-code-action` bump also adds its new SHA to the repo's allowed actions before merge (the
-  patterns are `ACTION_PATTERNS` in `scripts/setup/ci-claude.sh`).
+- A `claude-code-action` bump also adds its new SHA to the repo's allowed actions before merge. The
+  pin check stays red until `ACTION_PATTERNS` in `scripts/setup/ci-claude.sh` carries the new SHA
+  and version (and `setup-bun`'s, if the action moved it), so that edit goes onto Dependabot's
+  branch too.
 
 ## Review kinds
 
