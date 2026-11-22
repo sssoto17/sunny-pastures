@@ -51,7 +51,8 @@ export function createApi(env: Env): Api {
 		const config = readConfig(env);
 		// postgres.js connects on the first query, so building the client touches no network (#372).
 		const db = createDb(config);
-		const store = createStore({ db, newFarm: rules.newFarm, replay: rules.replay });
+		const { newFarm, replay, rulesVersion } = rules;
+		const store = createStore({ db, newFarm, replay, rulesVersion });
 		// One Supabase client and one JWKS cache per process (#332 decision 4).
 		const { readPlayer } = createAuth(config);
 		return { readPlayer, store };

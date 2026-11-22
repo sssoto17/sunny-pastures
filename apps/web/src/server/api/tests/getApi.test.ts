@@ -7,9 +7,10 @@ import { makeEnv } from "../../config/tests/env";
 import type * as ApiModule from "../index";
 
 // What the mocked store and auth below share with the tests: an error for the store's `load` to
-// reject with when a test sets one.
+// reject with when a test sets one, and the rules versions getApi() handed `createStore`.
 const fakes = vi.hoisted(() => ({
 	storeError: null as Error | null,
+	storeRulesVersions: [] as number[],
 	playerId: "0b5d1e7a-3c4f-4a2b-9e8d-7f6a5b4c3d2e",
 }));
 
@@ -30,7 +31,12 @@ vi.mock("@/server/store", async (importOriginal) => {
 	const { createMemoryStore } = await import("../../store/tests/memoryStore");
 	return {
 		...(await importOriginal<typeof StoreModule>()),
-		createStore: ({ newFarm, replay }: StoreModule.StoreDeps): StoreModule.GameStore => {
+		createStore: ({
+			newFarm,
+			replay,
+			rulesVersion,
+		}: StoreModule.StoreDeps): StoreModule.GameStore => {
+			fakes.storeRulesVersions.push(rulesVersion);
 			const store = createMemoryStore({ newFarm, replay });
 			const { storeError } = fakes;
 			if (storeError !== null) vi.spyOn(store, "load").mockRejectedValue(storeError);
@@ -47,6 +53,7 @@ async function importApi(): Promise<typeof ApiModule> {
 
 beforeEach(() => {
 	fakes.storeError = null;
+	fakes.storeRulesVersions = [];
 	for (const [name, value] of Object.entries(makeEnv("postgresql://db.test/farm"))) {
 		vi.stubEnv(name, value);
 	}
@@ -100,6 +107,15 @@ describe("getApi", () => {
 		vi.stubEnv("DATABASE_URL", "postgresql://db.test/farm");
 		expect(getApi().health()).toEqual({ status: "ok" });
 		expect((await getApi().getFarm(new Request("http://app.test/api/farm"))).status).toBe(200);
+	});
+
+	it("builds the store with the rules' version, the one each response carries (#443)", async () => {
+		const { getApi } = await importApi();
+
+		const response = await getApi().getFarm(new Request("http://app.test/api/farm"));
+
+		expect(response.status).toBe(200);
+		expect(fakes.storeRulesVersions).toEqual([Number(response.headers.get("Rules-Version"))]);
 	});
 
 	it("stamps an action with the server's Date.now(), in ms (T1, MUST-11.1)", async () => {
