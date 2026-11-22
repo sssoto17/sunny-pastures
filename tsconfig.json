@@ -6,6 +6,7 @@
 		{ "path": "./packages/sim" },
 		{ "path": "./packages/sim/tsconfig.test.json" },
 		{ "path": "./apps/web" },
-		{ "path": "./apps/web/tsconfig.test.json" }
+		{ "path": "./apps/web/tsconfig.test.json" },
+		{ "path": "./tests/acceptance" }
 	]
 }

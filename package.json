@@ -18,6 +18,7 @@
 		"lint": "eslint .",
 		"lint:changed": "eslint --cache --cache-location node_modules/.cache/eslint/ .",
 		"test": "vitest run --coverage",
+		"test:acceptance": "node tests/acceptance/run.mjs",
 		"test:related": "vitest run --changed origin/main --coverage",
 		"guard:floor": "node .github/scripts/floor-guard.mjs",
 		"coverage:gate": "node .github/scripts/coverage-gate.mjs",

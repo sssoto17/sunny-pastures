@@ -63,7 +63,10 @@
       { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
       { "name": "http", "patterns": ["apps/web/src/server/http/**"] },
       { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
-      { "name": "sim", "patterns": ["packages/sim/src/**"] }
+      { "name": "sim", "patterns": ["packages/sim/src/**"] },
+      // The acceptance suite (#386; ADR-0007 section 6, "Acceptance tests"): black-box over HTTP,
+      // so it imports no zone, and a refactor of the app or the sim can't reshape what it expects.
+      { "name": "acceptance", "patterns": ["tests/acceptance/**"] }
     ],
     "rules": [
       { "from": "routes", "allow": ["api"] },
@@ -108,6 +111,8 @@
       // headers. It sees the sim's types, never its code; the timing value is passed in.
       { "from": "http", "allow": [], "allowTypeOnly": ["sim"] },
       { "from": "sim", "allow": [] },
+      // No allowances, type-only included: the suite's expected values are written out literally.
+      { "from": "acceptance", "allow": [] },
       // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
       { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
       { "from": "storeTests", "allow": ["store", "dbTests"], "allowTypeOnly": ["db", "sim"] },
