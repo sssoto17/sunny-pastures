@@ -15,7 +15,8 @@
   // Dead code (CONSTRAINTS.md, Dead code row). drizzle-kit reads every export of the store's
   // schema (apps/web/drizzle.config.json; `game` makes it write `CREATE SCHEMA`), and Fallow's
   // drizzle plugin doesn't read a drizzle.config.json, so the schema is an entry here.
-  "entry": ["apps/web/src/server/store/schema.ts"],
+  // The load run's seeder is a command run by tools/load/run.sh, not an import (#388).
+  "entry": ["apps/web/src/server/store/schema.ts", "tools/load/seed.mjs"],
   // The Supabase CLI is a system binary, pinned by `pnpm supabase:check`, not an npm package.
   "ignoreBinaries": ["supabase"],
   // ADR-0007, section 3 ("Errors"): the error body's types are exported for the M4 client, and
@@ -87,7 +88,10 @@
       { "name": "sim", "patterns": ["packages/sim/src/**"] },
       // The acceptance suite (#386; ADR-0007 section 6, "Acceptance tests"): black-box over HTTP,
       // so it imports no zone, and a refactor of the app or the sim can't reshape what it expects.
-      { "name": "acceptance", "patterns": ["tests/acceptance/**"] }
+      { "name": "acceptance", "patterns": ["tests/acceptance/**"] },
+      // The load run's seeder (#388; ADR-0007, "Load and concurrency"): it reaches the sim and
+      // postgres.js through apps/web's resolution at run time, never an import of a zone.
+      { "name": "load", "patterns": ["tools/load/**"] }
     ],
     "rules": [
       { "from": "routes", "allow": ["api"] },
@@ -134,6 +138,7 @@
       { "from": "sim", "allow": [] },
       // No allowances, type-only included: the suite's expected values are written out literally.
       { "from": "acceptance", "allow": [] },
+      { "from": "load", "allow": [] },
       // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
       { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
       { "from": "storeTests", "allow": ["store", "dbTests"], "allowTypeOnly": ["db", "sim"] },
