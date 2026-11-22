@@ -369,7 +369,7 @@ describe("review.yml", () => {
 	});
 
 	it("keeps the allowed claude-code-action pin (#290)", () => {
-		expect(yml).toContain("anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe");
+		expect(yml).toContain("anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc");
 	});
 
 	// #68 (admin, 18 Nov 2026): the review runs the code-review-and-quality skill. A typed /skill

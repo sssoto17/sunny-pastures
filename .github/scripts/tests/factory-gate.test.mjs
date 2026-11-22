@@ -407,6 +407,15 @@ describe("factory.yml", () => {
 		expect(factory).toMatch(/--disallowedTools "WebFetch,WebSearch/);
 	});
 
+	// claude-code-action v1.0.273 made auto mode the default for a run with a prompt and no
+	// allowed_bots: a safety review would decide what no allow rule covers, the project's `ask`
+	// rules included. The factory keeps the default mode, where those calls are denied (#486).
+	it("keeps the default permission mode, so an ask rule still denies", () => {
+		const args = factory.slice(factory.indexOf("claude_args: >-"));
+		expect(args).toMatch(/^ {12}--permission-mode default$/m);
+		expect(factory.match(/--permission-mode/g)).toHaveLength(1);
+	});
+
 	it("re-checks the gate before Claude reads the issue, and hands it only trusted comments", () => {
 		const ctx = factory.slice(factory.indexOf("id: context"), factory.indexOf("id: claude"));
 		expect(ctx).toContain("bash .github/scripts/factory-gather.sh");
@@ -429,7 +438,7 @@ describe("factory.yml", () => {
 			new Set([
 				"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
 				"actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
-				"anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe",
+				"anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc",
 			]),
 		);
 	});

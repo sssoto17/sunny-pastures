@@ -218,9 +218,11 @@ SEAT_ENV=claude-seat # the seat token's only environment (#454)
 KEY_ENVS=(factory review) # the Apps' keys: never the seat token
 # Pinned to a full commit SHA of a release at least 7 days old (ADR-0002, area 8). setup-bun is the
 # one action claude-code-action's own action.yml uses at that commit, so it needs a pattern too.
+# The claude-code-action line is the SHA and version comment the workflows pin, character for
+# character: ci-claude.test.sh fails when they disagree (#486), so a bump moves this line with them.
 ACTION_PATTERNS=(
-  anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268, 4 Nov 2026
-  oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0, inside v1.0.268
+  anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276, 13 Nov 2026
+  oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0, inside v1.0.276
 )
 
 usage() {
