@@ -15,8 +15,14 @@ fail=0
 work=$(mktemp -d "${TMPDIR:-/tmp}/ci-claude-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
-CLAUDE=anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c
 BUN=oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+repo=$(cd "$(dirname "$0")/../.." && pwd)
+# Every `uses:` of claude-code-action in the workflows, with its version comment, one per line.
+pins=$(cd "$repo" && grep -hoE 'uses: anthropics/claude-code-action@[^ ]+( # [^ ]+)?' \
+  .github/workflows/*.yml scripts/setup/workflows/*.yml | sed 's/^uses: //' | sort -u)
+# The wizard's ACTION_PATTERNS array, comments kept: the version sits in the comment.
+patterns=$(sed -n '/^ACTION_PATTERNS=(/,/^)/p' "$script")
+CLAUDE=${pins%% *}
 
 cat >"$work/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
@@ -78,6 +84,17 @@ expect_hidden() { # marker: in neither output nor any gh argument
   assert "token in stderr" lacks "$err" "$1"
   assert "token in a gh argument" lacks "$calls" "$1"
 }
+
+# --- the pattern follows the workflows' pin (#486): a bump that leaves the wizard behind fails ---
+code=0 out=$pins err="" calls=$patterns
+assert "expected a claude-code-action pin in the workflows" test -n "$pins"
+assert "expected one pin, the same in every workflow" test "$(grep -c . <<<"$pins")" -eq 1
+assert "expected the pin to be a full commit SHA with its version (ADR-0002, area 8)" \
+  grep -qxE 'anthropics/claude-code-action@[0-9a-f]{40} # v[0-9.]+' <<<"$pins"
+assert "expected exactly one claude-code-action pattern in the wizard" \
+  test "$(grep -c 'anthropics/claude-code-action' <<<"$patterns")" -eq 1
+assert "expected the wizard's pattern to carry the workflows' SHA and version" \
+  grep -qxE "  ${pins//./\\.}(,.*)?" <<<"$patterns"
 
 # --- usage ------------------------------------------------------------------------------------
 reset
