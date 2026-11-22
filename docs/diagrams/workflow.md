@@ -82,13 +82,13 @@ flowchart TB
 Gold diamonds are your decisions.
 
 **Reviews** (ADR-0002, area 2): PRs are reviewed the way people on GitHub review each other. A
-reviewer bot reviews every PR. It either approves, and the PR auto-merges once the required checks
-are green, or requests changes, and the author fixes them and pushes. You review and merge only
-admin-review PRs: those that touch a code-owned path, and those carrying `review:admin` under the
-escalation criteria in `CONSTRAINTS.md`, "Admin review". Production changes only when you push a
-`v*` tag (ADR-0002, area 4). What every reviewer checks, how it rates findings and how it reports is
-`REVIEW.md`, at the repo root, for the bot, the coordinator's reviewer and a lane's own review
-alike.
+reviewer bot reviews every PR but Dependabot's (`REVIEW.md`, "Dependabot PRs"). It either approves,
+and the PR auto-merges once the required checks are green, or requests changes, and the author fixes
+them and pushes. You review and merge only admin-review PRs: those that touch a code-owned path, and
+those carrying `review:admin` under the escalation criteria in `CONSTRAINTS.md`, "Admin review".
+Production changes only when you push a `v*` tag (ADR-0002, area 4). What every reviewer checks, how
+it rates findings and how it reports is `REVIEW.md`, at the repo root, for the bot, the
+coordinator's reviewer and a lane's own review alike.
 
 **Escalation comments.** Lanes no longer write a one-line escalation comment when they add
 `review:admin`; the reviewer bot's escalation is the record (retro 2026-11-15, Outcomes 5).

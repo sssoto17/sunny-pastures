@@ -1,0 +1,6 @@
+# Overrides for `uv pip compile` (see requirements.txt's header), which replace what a package
+# declares. Semgrep 1.184.0 declares `wcmatch~=8.3`, but wcmatch up to 11.1 has a ReDoS
+# (GHSA-53pm-wgxf-c6qf), fixed in 11.2 (#421). Without this line a regeneration quietly goes back
+# to the vulnerable 8.5.2. Semgrep's one `glob.globmatch` call was checked to behave the same under
+# 11.2 (#421's review, #455). Drop the line once a Semgrep release allows a fixed wcmatch.
+wcmatch==11.2
