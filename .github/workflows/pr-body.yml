@@ -2,7 +2,8 @@
 # that says `Part of #N` also links #N with a closing keyword, which closes #N when that earlier part
 # merges (retro 2026-11-15, issue B), and when a closing keyword names an issue other than the PR's
 # own (the branch's `<N>`) outside an `Also closes #M` line, which closes that issue too (#512).
-# It reads the head ref from the event as well as the body. The script and its grammar are in pr-body-guard.mjs.
+# It reads the head ref from the event as well as the body. The script and its grammar are in
+# pr-body-guard.mjs.
 # Its own workflow, not a job in ci.yml: a body or base edit (`edited`) re-runs these two checks
 # only, not all of ci. No path filter, so each reports on every PR and can be a required check
 # (ADR-0002, area 2). The body is untrusted text: the script reads it from $GITHUB_EVENT_PATH,

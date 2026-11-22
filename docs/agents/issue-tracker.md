@@ -51,22 +51,23 @@ reader. The admin's rule of 12 Nov (#214), for issue and PR bodies alike.
 ## Closing issues
 
 A merge always closes its issue, and closes only that issue (admin, 22 Nov, #512). No issue stays
-open after its PR merges: a step only the admin can show after the merge lives in its own verify
-issue (**Status rules**, "Provable in the PR").
+open after the PR that completes it merges: a step only the admin can show after the merge lives in
+its own verify issue (**Status rules**, "Provable in the PR"). The one PR that merges without
+closing its issue is an earlier part of a split, whose work the closing part finishes.
 
 - **The link line:** the body's first line is `Closes #N`, the `<N>` of the branch `<N>-<slug>` (or
   `Part of #N` on an earlier part of a split, `CONSTRAINTS.md`, "Split size").
 - **No other closing keyword:** GitHub links close, closes, closed, fix, fixes, fixed, resolve,
   resolves and resolved before `#M` anywhere in the body (a code span, a quote, a table, prose about
-  another PR) and closes #M on merge. Write about another issue without them: "the gap #M found",
-  "see #M". `guard / pr-body` fails a keyword that names any issue but the branch's `<N>` (#512). On
-  a branch that names no issue (`claude/<name>`), the issue on the body's first link line counts as
-  the PR's own.
+  another PR, bold) and closes #M on merge. Write about another issue without them: "the gap #M
+  found", "see #M". `guard / pr-body` fails a keyword that names any issue but the branch's `<N>`
+  (#512). On a branch that names no issue (`claude/<name>`), the issue on the body's first link line
+  counts as the PR's own.
 - **A PR that really completes a second issue** says so on a line of its own that starts
-  `Also closes #M`, one issue per line, below the link line. Only that exact wording is accepted,
-  and only at the start of a line (a list marker or bold before it is fine): in a quote, a table or
-  a code span it fails like any other keyword. Each issue it closes meets its own acceptance
-  criteria in this PR.
+  `Also closes #M`, one issue per line. Only that exact wording is accepted, and only at the start
+  of a line (a list marker or bold before it is fine): in a quote, a table, a code span or a fenced
+  block it fails like any other keyword, and so does `Also fixes #M`. Each issue it closes meets its
+  own acceptance criteria in this PR.
 
 ## Pull requests as a triage surface
 

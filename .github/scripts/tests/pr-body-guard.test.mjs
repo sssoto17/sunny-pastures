@@ -181,6 +181,8 @@ describe("ownIssue", () => {
 	it.each([
 		["a Closes line", "Closes #385\n\nText.", 385],
 		["a Part of line", "Part of #48\n\nText.", 48],
+		["a link line after a quoted one", "> Closes #44 was the old plan\n\nCloses #5", 5],
+		["a link line after a fenced one", "```\nCloses #44\n```\nCloses #5", 5],
 		["a link line in bold under a heading", "## Link\n\n**Closes** #7", 7],
 	])(
 		"falls back to the body's first link line when the branch names no issue: %s",
@@ -213,6 +215,10 @@ describe("findForeignClosings", () => {
 		["an Also line in a quote", "Closes #5\n> Also closes #6"],
 		["an Also line in a code span", "Closes #5\n`Also closes #6`"],
 		["an Also line with another keyword", "Closes #5\nAlso fixes #6"],
+		["an Also line in a fenced block", "Closes #5\n```\nAlso closes #6\n```"],
+		["an Also line in an unclosed fence", "Closes #5\n~~~md\n\nAlso closes #6"],
+		["a bold keyword", "Closes #5\n**Fixes** #6"],
+		["a bold keyword with its colon", "Closes #5\n__Resolves:__ #6"],
 	])("finds a keyword for another issue in %s", (_, body) => {
 		expect(findForeignClosings(body, REPO, 5).map((f) => f.issue)).toEqual([6]);
 	});
@@ -250,6 +256,7 @@ describe("findForeignClosings", () => {
 		it.each([
 			["the own issue, in any form", "Closes #5\n\nfixes sssoto17/sunny-pastures#5, `resolves #5`"],
 			["an Also closes line", "Closes #5\nAlso closes #6"],
+			["an Also closes line after a closed fence", "Closes #5\n```\nx\n```\nAlso closes #6"],
 			["an Also closes line with markdown", "Closes #5\n\n- **Also closes** #6\n  also closes: #7"],
 			["another repository's issue", "Closes #5\n\ncloses octo-org/octo-repo#6"],
 			["a longer number with a word between", "Closes #5\n\nIt closes the gap #6 found."],

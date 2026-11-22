@@ -8,17 +8,17 @@
 // body's first link line. The one way to close a second issue is a line of its own that starts
 // `Also closes #M` (docs/agents/issue-tracker.md, "Closing issues").
 //
-// An earlier part of a split says `Part of #N` and
-// must not link #N with a closing keyword, or #N closes when that part merges, before its work is
-// done: #131 closed #99 through a code span in a plan table, #245 closed #68 through "doesn't close
-// #68", and #279's first body linked #48 through prose about the next part (retro 2026-11-15).
+// An earlier part of a split says `Part of #N` and must not link #N with a closing keyword, or #N
+// closes when that part merges, before its work is done: #131 closed #99 through a code span in a
+// plan table, #245 closed #68 through "doesn't close #68", and #279's first body linked #48
+// through prose about the next part (retro 2026-11-15).
 //
 // GitHub's grammar ("Linking a pull request to an issue", docs.github.com, read through Context7
 // on 16 Nov 2026): the nine keywords close, closes, closed, fix, fixes, fixed, resolve, resolves,
 // resolved; in any case; optionally followed by a colon; then `#N` or `OWNER/REPO#N`. The docs say
-// nothing about code spans, HTML comments, fenced code or full issue URLs. #131 shows a code span
-// links, so this guard reads the raw body and counts all of them: a false alarm costs an edit, a
-// miss closes an issue early.
+// nothing about code spans, HTML comments, fenced code, emphasis or full issue URLs. #131 shows a
+// code span links, so this guard reads the raw body and counts all of them, bold keywords
+// (`**Fixes** #N`) included: a false alarm costs an edit, a miss closes an issue early.
 //
 // Usage: node .github/scripts/pr-body-guard.mjs   (reads the PR from $GITHUB_EVENT_PATH)
 // Exit codes: 0 pass, 1 an early or a foreign closing link, 2 could not run (never reads as a pass).
@@ -26,7 +26,10 @@
 // of the body, so no text the PR wrote can run as a workflow command.
 import { CannotRun, isMain, readEvent } from "./diff.mjs";
 
-const KEYWORD = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
+// No letter or digit before it; an underscore may be, for `__Fixes__`.
+const KEYWORD = String.raw`(?<![A-Za-z0-9])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
+// Between a keyword and its issue: bold around the keyword or its colon, a colon, spaces.
+const KEYWORD_GAP = String.raw`(?:\*\*|__)?(?:\s*:)?(?:\*\*|__)?\s*`;
 // What may come before `Part of` at the start of its line: indent, a quote, a list marker, a table
 // pipe, emphasis. Spaces and tabs only, never a newline: that keeps each line's scan linear on a
 // body of blank lines, and the optional colon is grouped with its spaces for the same reason.
@@ -53,24 +56,23 @@ export const findEarlyClosings = (body, repo) => {
 	);
 	if (parts.size === 0) return [];
 
-	const findings = [];
-	for (const m of body.matchAll(new RegExp(String.raw`${KEYWORD}(?:\s*:)?\s*${ref}(?!\d)`, "gi"))) {
-		const issue = issueOf(m);
-		if (!parts.has(issue)) continue;
-
-		findings.push({ line: lineOf(body, m.index), issue, text: m[0].replace(/\s+/g, " ") });
-	}
-	return findings;
+	return closings(body, ref)
+		.filter((f) => parts.has(f.issue))
+		.map(finding);
 };
 
 // The branch grammar scripts/board-status.sh reads (`decide branch`): one optional `<prefix>/`, an
 // optional `issue-`, then `<N>-<slug>`.
 const BRANCH = /^(?:[A-Za-z0-9._-]+\/)?(?:issue-)?([1-9]\d{0,6})-[A-Za-z0-9._-]+$/;
 
+// The start of a line that opens with a link or `Also closes`: indent, a list marker, bold. No
+// quote, table pipe or code span: a line there is about something else.
+const PLAIN_LINE = String.raw`^[ \t]*(?:[-*+][ \t]+)?(?:\*\*|__)?`;
+
 /**
  * The issue this PR is for: the `<N>` its branch names, else the issue on the body's first link
- * line (a line that starts with a closing keyword or `Part of`, as the PR template's first line
- * does), else null.
+ * line outside a fence (a plain line that starts with a closing keyword or `Part of`, as the PR
+ * template's first line does), else null.
  * @param {string} branch the PR's head ref
  * @param {string} body
  * @param {string | null} repo
@@ -79,38 +81,77 @@ const BRANCH = /^(?:[A-Za-z0-9._-]+\/)?(?:issue-)?([1-9]\d{0,6})-[A-Za-z0-9._-]+
 export const ownIssue = (branch, body, repo) => {
 	const named = BRANCH.exec(branch ?? "");
 	if (named) return Number(named[1]);
-	const link = new RegExp(
-		String.raw`${LINK_LINE}(?:${KEYWORD}|part of)(?:\*\*|__)?[ \t]*:?[ \t]*${issueRef(repo)}(?!\d)`,
-		"im",
-	).exec(body);
-	return link ? issueOf(link) : null;
+	const fenced = fencedLines(body);
+	const links = body.matchAll(
+		new RegExp(
+			String.raw`${PLAIN_LINE}(?:${KEYWORD}|part of)${KEYWORD_GAP}${issueRef(repo)}(?!\d)`,
+			"gim",
+		),
+	);
+	for (const m of links) if (!fenced.has(lineOf(body, m.index))) return issueOf(m);
+	return null;
 };
 
 /**
  * Every closing keyword in `body` that links an issue other than `own`, in order, apart from the
  * `closes` that opens an `Also closes #M` line. That line starts with only indent, a list marker or
- * bold before `Also`: one in a quote, a code span or a table is reported like any other keyword.
- * With `own` null, every closing keyword is foreign.
+ * bold before `Also`, outside a fence: one in a quote, a table, a code span or a fenced block is
+ * reported like any other keyword. With `own` null, every closing keyword is foreign.
  * @param {string} body
  * @param {string | null} repo
  * @param {number | null} own
  * @returns {{ line: number, issue: number, text: string }[]}
  */
 export const findForeignClosings = (body, repo, own) => {
-	const ref = issueRef(repo);
+	const fenced = fencedLines(body);
 	const also = new Set(
-		[...body.matchAll(/^[ \t]*(?:[-*+][ \t]+)?(?:\*\*|__)?also[ \t]+(?=closes\b)/gim)].map(
-			(m) => m.index + m[0].length,
-		),
+		[...body.matchAll(new RegExp(String.raw`${PLAIN_LINE}also[ \t]+(?=closes\b)`, "gim"))]
+			.filter((m) => !fenced.has(lineOf(body, m.index)))
+			.map((m) => m.index + m[0].length),
 	);
-	const findings = [];
-	for (const m of body.matchAll(new RegExp(String.raw`${KEYWORD}(?:\s*:)?\s*${ref}(?!\d)`, "gi"))) {
-		const issue = issueOf(m);
-		if (issue === own || also.has(m.index)) continue;
-		findings.push({ line: lineOf(body, m.index), issue, text: m[0].replace(/\s+/g, " ") });
-	}
-	return findings;
+	return closings(body, issueRef(repo))
+		.filter((f) => f.issue !== own && !also.has(f.index))
+		.map(finding);
 };
+
+// Every closing keyword followed by an issue `ref`, in order: its line, issue, offset and the
+// matched text with its whitespace collapsed (the only body text the guard ever prints).
+function closings(body, ref) {
+	return [...body.matchAll(new RegExp(String.raw`${KEYWORD}${KEYWORD_GAP}${ref}(?!\d)`, "gi"))].map(
+		(m) => ({
+			line: lineOf(body, m.index),
+			issue: issueOf(m),
+			index: m.index,
+			text: m[0].replace(/\s+/g, " "),
+		}),
+	);
+}
+
+// A closing as the guard reports it, without its offset.
+function finding({ line, issue, text }) {
+	return { line, issue, text };
+}
+
+// The 1-based numbers of the lines inside a ``` or ~~~ fence, the fence lines included. An
+// unclosed fence runs to the end of the body, as CommonMark reads it.
+function fencedLines(body) {
+	const fenced = new Set();
+	let fence = null;
+	body.split("\n").forEach((text, i) => {
+		const mark = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(text);
+		if (fence === null) {
+			if (!mark) return;
+			fence = mark[1];
+		} else if (mark && closesFence(fence, mark[1], mark[2])) fence = null;
+		fenced.add(i + 1);
+	});
+	return fenced;
+}
+
+// A closing fence: the opening's character, at least as long, nothing after it but spaces.
+function closesFence(open, mark, rest) {
+	return mark[0] === open[0] && mark.length >= open.length && !/\S/.test(rest);
+}
 
 // `#N`, and for this repository `owner/name#N` and its issue URL. Each form captures N.
 function issueRef(repo) {
