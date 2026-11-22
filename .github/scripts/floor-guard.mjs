@@ -41,7 +41,7 @@ const SELF = new Set([
 const WORKFLOW = /^\.github\/(workflows|actions)\/.+\.ya?ml$/;
 const GUARDED_JOBS = new Set(["floor", "stack", "stack-base", "code-owned", "acceptance-guard"]);
 const CHECK_STEP =
-	/floor-guard\.mjs|stack-base-guard\.mjs|code-owned-guard\.mjs|acceptance-guard\.mjs|coverage-gate\.mjs|shell-suites\.sh|pnpm (typecheck|lint|test|dupes|format:check)\b|SIM_PROPERTY_RUNS/;
+	/floor-guard\.mjs|stack-base-guard\.mjs|code-owned-guard\.mjs|acceptance-guard\.mjs|coverage-gate\.mjs|audit-changed\.mjs|shell-suites\.sh|pnpm (typecheck|lint|test|dupes|format:check)\b|\baudit:changed\b|\bfallow audit\b|SIM_PROPERTY_RUNS/;
 
 // The required checks (#308): the check names in the first column of ADR-0002 area 2's check-name
 // table, its one source (admin, 22 Nov). The table is a superset of ruleset `main checks`, so it
@@ -126,7 +126,7 @@ const backsRequired = (path, lines, required, baseLines = []) => {
 // script that loses one of these, or skips the ratchet outside `check:task`, is a removed check.
 const SCRIPT_LINE = /^\s*"([\w:.-]+)"\s*:\s*"(.*)",?\s*$/;
 const CHECK_CMD =
-	/node \S*(?:floor-guard|coverage-gate|typecheck-reach)\.mjs|\btsc -b\b|\beslint\b|\bvitest run\b|\bprettier --check\b|\bfallow dupes\b|pnpm (?:typecheck|lint|test|guard:floor|coverage:gate|check:fast|format:check|dupes)\b/g;
+	/node \S*(?:floor-guard|coverage-gate|typecheck-reach|audit-changed)\.mjs|\btsc -b\b|\beslint\b|\bvitest run\b|\bprettier --check\b|\bfallow (?:dupes|audit)\b|pnpm (?:typecheck|lint|test|guard:floor|coverage:gate|check:fast|format:check|dupes|audit:changed)\b/g;
 // The file types a `prettier --check "**/*.{a,b}"` glob covers (#125), so a script that drops one
 // narrows the formatting check.
 const prettierTypes = (value) =>
