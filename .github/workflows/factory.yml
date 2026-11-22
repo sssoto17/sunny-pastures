@@ -251,10 +251,11 @@ jobs:
           set -uo pipefail
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
           # Whether Claude ran (#582), for the "Claude ran" step below: an execution file, or the
-          # prompt file the action writes once its checks pass, just before it starts Claude
-          # (src/modes/agent/index.ts at the pinned SHA, after checkHumanActor). The prompt file
-          # covers a Claude step that timed out, which writes no execution file. Re-check this
-          # path when the pin moves.
+          # prompt file the action writes once its checks pass (src/modes/agent/index.ts at the
+          # pinned SHA, after checkHumanActor), before it installs the CLI and starts Claude. The
+          # prompt file covers a Claude step that timed out, which writes no execution file; it
+          # also counts a CLI install failure as a run, the safe side (the issue waits for an
+          # edit). Re-check this path when the pin moves.
           if [ -f "$f" ] || [ -f "$RUNNER_TEMP/claude-prompts/claude-prompt.txt" ]; then
             echo "ran=true" >>"$GITHUB_OUTPUT"
           fi
@@ -266,7 +267,8 @@ jobs:
 
       # The sweep's evidence (#582): sweep.yml skips an issue whose last run opened no PR only when
       # this step succeeded in it, read by name from the run's jobs (factory-sweep-gather.sh). A
-      # run that failed before Claude ran skips it, so the sweep tries the issue again.
+      # run that failed before Claude ran skips it, so the sweep tries the issue again. The step's
+      # name is that contract: renaming it means changing factory-sweep-gather.sh too.
       - name: Claude ran
         if: always() && steps.result.outputs.ran == 'true'
         run: echo "RESULT claude_ran=true"

@@ -43,10 +43,10 @@ gh api --paginate "$r/pulls?state=open&per_page=100" --jq '.[] | {number, head: 
 gh api --paginate "$r/git/matching-refs/heads/" --jq '.[] | {ref}' | jq -s . >"$dir/refs.json"
 # Did Claude run? Only the completed runs of the open factory:ready issues are read, one jobs call
 # each: a run that failed before Claude ran (#582) mustn't make the sweep skip its issue.
-ids=$(jq -r --slurpfile issues "$dir/issues.json" '[$issues[0][] | "factory #\(.number)"] as $t
+run_ids=$(jq -r --slurpfile issues "$dir/issues.json" '[$issues[0][] | "factory #\(.number)"] as $t
   | .[] | select(.status == "completed" and (.display_title | IN($t[]))) | .id' "$dir/runs.json")
 ran='[]'
-for id in $ids; do
+for id in $run_ids; do
   [[ $id =~ ^[1-9][0-9]*$ ]] || { echo "::error::unexpected run id: $id"; exit 1; }
   v=$(gh api "$r/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.name == "factory")
     | .steps[]? | select(.name == "Claude ran" and .conclusion == "success")] | length > 0')

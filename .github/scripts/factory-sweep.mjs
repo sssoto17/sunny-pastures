@@ -20,10 +20,10 @@
 //    for it ("factory #<n>") that ran Claude and ended without a PR since the issue was last
 //    updated (`claude_ran`, read by the gather; a run that failed before Claude ran doesn't count,
 //    #582): a run that opens no PR doesn't raise the count, so without this the loop could
-//    re-dispatch one issue for ever. Updating the issue after that run finished makes it eligible again, unless the
-//    update is a comment by someone other than the owner or a collaborator. Ordered by Priority
-//    (P0 first, unset last), then board order (the order the REST items list returns them). The
-//    first is dispatched; the factory's gate checks it again.
+//    re-dispatch one issue for ever. Updating the issue after that run finished makes it
+//    eligible again, unless the update is a comment by someone other than the owner or a
+//    collaborator. Ordered by Priority (P0 first, unset last), then board order (the order the
+//    REST items list returns them). The first is dispatched; the factory's gate checks it again.
 //
 // Env: FACTORY_ENABLED, FACTORY_MAX_OPEN_PRS (vars, through env:), SWEEP_DIR holding runs, items,
 // issues, pulls, refs and comments .json (each an array), GITHUB_OUTPUT (gets `issue=<n>`, empty for none),
