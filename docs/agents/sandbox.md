@@ -160,6 +160,22 @@ Code 2.1.330 drops only a bare prefix (`pnpm exec *`, `npx *`; read from its dro
 names, which is why the vitest `run` and `bench` allows are gone (proposed in #540, admin, 22 Nov,
 #560). Why the scan's calls still reached the classifier is open.
 
+### No prompts in unattended cloud sessions
+
+An unattended cloud session never shows a permission prompt (#574). Nobody watches it, so a prompt
+would stall the run until the admin opened the session. The `PermissionRequest` hook
+`.claude/hooks/deny-prompts-when-remote.mjs` answers every prompt with a deny when
+`CLAUDE_CODE_REMOTE=true` and `CLAUDE_ATTENDED` isn't `1` (<https://code.claude.com/docs/en/hooks>,
+"PermissionRequest decision control"). A denied step costs one retry: rerun it as simpler, separate
+commands (split chains and pipes; avoid heredocs, quoting or substitutions the permission check
+can't parse). If it still can't run, skip it and report it in the final message. The hook never
+grants anything, and deny rules still apply.
+
+A cloud environment someone works in by hand sets `CLAUDE_ATTENDED=1` in its environment variables
+and gets its prompts back. Without it the deny stays, so a forgotten variable can't stall a run.
+Local sessions get no output from the hook and prompt as before, so a local `--as-admin` lane keeps
+its deliberate `ask` rules.
+
 ### Flags a wildcard allow can't see
 
 Before allowing a wildcard, check the tool's `--help` for flags that load code or write outside the
