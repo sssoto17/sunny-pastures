@@ -398,7 +398,7 @@ These are Musts that apply to every requirement above (settled in #34). They kee
 | --- | --- | --- |
 | BASE-01 | The UI is in English. | `review` |
 | BASE-02 | It works in the latest two versions of Chrome, Firefox and Safari, at desktop and phone widths (≥ 360 px). | `ui` |
-| BASE-03 | The DOM UI meets WCAG 2.2 AA. | `ui`, `ci`, `review` |
+| BASE-03 | The interface (HUD, buttons, popovers, dialogs, the order board and all text) meets WCAG 2.2 AA. The map scene follows the genre: ambient animation runs by default and is stilled under `prefers-reduced-motion` (an exception to 2.2.2), with the Game Accessibility Guidelines' basic tier as its reference. No orientation lock. _Narrowed 22 Nov 2026 ([ADR-0010](../adr/0010-game-frontend.md), section 2; #409)._ | `ui`, `ci`, `review` |
 | BASE-04 | Action latency on the deployed stack has p95 < 300 ms. | `metric`, `ci` |
 | BASE-05 | A prediction shows within 100 ms of a tap (MUST-12.1). | `ui` |
 

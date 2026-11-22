@@ -116,7 +116,7 @@ Consciously out of scope for this project. Candidates for the report's Perspecti
 | ID      | Item                                                                                     |
 | ------- | ---------------------------------------------------------------------------------------- |
 | WONT-01 | A native mobile app (it could reuse `packages/sim` later)                                |
-| WONT-02 | A canvas or game-engine renderer: the UI is DOM-based React                               |
+| WONT-02 | A canvas or game-engine renderer in M4: the UI is DOM-based React (canvas is the planned upgrade once M4's goal is met; ADR-0010) |
 | WONT-03 | Custom artwork                                                                           |
 | WONT-04 | Company or client context: the project refers to the game only                           |
 | WONT-05 | Reusing Revenge of the Assassin (the 1st-semester JS browser game) beyond a brief mention |
@@ -137,7 +137,9 @@ Kept here so the report's technology chapter can cite the reasoning.
   and assets. This project's engine is the simulation (`packages/sim`), which Phaser doesn't
   provide, and an idle game needs no frame loop: state is a function of time. The UI is DOM-based
   (WONT-02). If a drawn farm map is ever wanted, PixiJS inside a React component is the lighter
-  option.
+  option. _22 Nov 2026 (#408, ADR-0010 section 1):_ the M4 map is DOM; after M4, canvas is
+  reconsidered when the map's sprite count needs it, and Dannie's suggestion (our own canvas
+  renderer, studied from Phaser's) is the first option then.
 - **Vercel Workflow SDK (not a game dependency; candidate for the software factory).** Durable
   functions: `"use workflow"` / `"use step"`, saved and retried steps, `sleep()` that costs nothing
   while waiting, and hooks that pause until something external resumes them. Internally each run is
