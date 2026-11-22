@@ -134,8 +134,14 @@ check_command() {
   local w
   case $name in
     gh)
-      [[ ${2:-} == pr && ${3:-} == review ]] && deny "gh pr review submits a PR review"
-      [[ ${2:-} == api ]] && check_gh_api "${@:3}"
+      shift
+      # Skip options before the subcommand, such as `gh -R o/r pr review`.
+      while (($#)) && [[ $1 == -?* ]]; do
+        [[ $1 == -R || $1 == --repo || $1 == --hostname ]] && shift
+        shift
+      done
+      [[ ${1:-} == pr && ${2:-} == review ]] && deny "gh pr review submits a PR review"
+      [[ ${1:-} == api ]] && check_gh_api "${@:2}"
       ;;
     curl)
       for w in "${@:2}"; do

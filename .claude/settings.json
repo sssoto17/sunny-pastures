@@ -153,6 +153,7 @@
 			"mcp__plugin_github_github__resolve_review_thread",
 			"Bash(gh pr review)",
 			"Bash(gh pr review *)",
+			"Bash(gh -* pr review*)",
 			"Bash(gh api *pulls/*/reviews* -f *)",
 			"Bash(gh api *pulls/*/reviews* -F *)",
 			"Bash(gh api *pulls/*/reviews*--field*)",

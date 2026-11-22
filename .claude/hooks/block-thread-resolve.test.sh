@@ -122,6 +122,9 @@ deny 'bash -c "gh pr review 12 --approve"'
 deny 'echo "$(gh pr review 12 --approve)"'
 deny 'echo `gh pr review 12 --approve`'
 deny 'env GH_REPO=o/r gh pr review 12 --approve'
+deny 'gh -R o/r pr review 12 --approve'
+deny 'gh --repo=o/r pr review 12 --approve'
+deny 'gh --repo o/r api -X POST repos/o/r/pulls/12/reviews -f event=APPROVE'
 # REST: a review (POST pulls/<n>/reviews), submitting a pending one (…/reviews/<id>/events),
 # dismissing one (…/dismissals), a review comment (POST pulls/<n>/comments) and a thread reply
 # (…/comments/<id>/replies), with an explicit method or with fields (gh then sends POST)
@@ -226,6 +229,7 @@ rule() { # expected (denied|allowed) tool command
 }
 rule denied Bash 'gh pr review'
 rule denied Bash 'gh pr review 12 --approve'
+rule denied Bash 'gh -R o/r pr review 12 --approve'
 rule denied Bash 'gh api repos/o/r/pulls/12/reviews -f event=COMMENT -f body=x'
 rule denied Bash 'gh api -X POST repos/o/r/pulls/12/reviews -F event=APPROVE'
 rule denied Bash 'gh api repos/o/r/pulls/12/reviews --input review.json'
