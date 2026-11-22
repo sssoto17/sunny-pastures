@@ -34,6 +34,11 @@
       { "name": "routeTests", "patterns": ["apps/web/src/app/api/**/tests/*.test.ts"] },
       { "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
       { "name": "pages", "patterns": ["apps/web/src/app/**"] },
+      // The composition root's tests (#470's criteria; ADR-0007 section 6), before `api`,
+      // so they take its `tests/*.test.ts` files only, never a helper beside them: they run the
+      // routes on the in-memory store (store/tests/memoryStore.ts), which the store contract holds
+      // to B100, instead of a fake store of their own.
+      { "name": "apiTests", "patterns": ["apps/web/src/server/api/tests/*.test.ts"] },
       { "name": "api", "patterns": ["apps/web/src/server/api/**"] },
       { "name": "config", "patterns": ["apps/web/src/server/config/**"] },
       // Test-file zones (#382; ADR-0007 section 6, an allowance for test files only): the db
@@ -69,6 +74,24 @@
       {
         "from": "api",
         "allow": ["config", "db", "rules", "store", "auth", "timing", "http", "game", "sim"]
+      },
+      // A test-files-only allowance: `api`'s own rule, plus `api` itself and the store's test
+      // helpers. Production `api` still reaches only B100, through `store`.
+      {
+        "from": "apiTests",
+        "allow": [
+          "api",
+          "config",
+          "db",
+          "rules",
+          "store",
+          "auth",
+          "timing",
+          "http",
+          "game",
+          "sim",
+          "storeTests"
+        ]
       },
       {
         "from": "game",

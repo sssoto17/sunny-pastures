@@ -6,10 +6,9 @@ import type * as StoreModule from "@/server/store";
 import { makeEnv } from "../../config/tests/env";
 import type * as ApiModule from "../index";
 
-// What the mocked store and auth below share with the tests: the commits the store saw, and an
-// error for every store call to reject with when a test sets one.
+// What the mocked store and auth below share with the tests: an error for the store's `load` to
+// reject with when a test sets one.
 const fakes = vi.hoisted(() => ({
-	commits: [] as StoreModule.CommitEntry[],
 	storeError: null as Error | null,
 	playerId: "0b5d1e7a-3c4f-4a2b-9e8d-7f6a5b4c3d2e",
 }));
@@ -24,30 +23,21 @@ vi.mock("@/server/auth", async (importOriginal) => ({
 	}),
 }));
 
-// A store with no database behind it, built from the `newFarm` getApi() hands B100, so these tests
-// see the wiring and not postgres.js. The store itself is tested against B100 in the db project.
-vi.mock("@/server/store", async (importOriginal) => ({
-	...(await importOriginal<typeof StoreModule>()),
-	createStore: ({ newFarm }: StoreModule.StoreDeps): StoreModule.GameStore => {
-		const reachStore = (): Promise<void> =>
-			fakes.storeError === null ? Promise.resolve() : Promise.reject(fakes.storeError);
-		return {
-			load: async (playerId) => {
-				await reachStore();
-				return { state: newFarm(playerId), seq: 0, at: 0 };
-			},
-			processed: async () => {
-				await reachStore();
-				return null;
-			},
-			commit: async (_playerId, entry) => {
-				await reachStore();
-				fakes.commits.push(entry);
-				return { kind: "committed", seq: entry.expectedSeq + 1 };
-			},
-		};
-	},
-}));
+// The in-memory store that the store contract holds to B100 (ADR-0007, section 6; #470), built
+// from the `newFarm` and `replay` getApi() hands B100, so these tests see the wiring and not
+// postgres.js. B100 itself is tested in the db project.
+vi.mock("@/server/store", async (importOriginal) => {
+	const { createMemoryStore } = await import("../../store/tests/memoryStore");
+	return {
+		...(await importOriginal<typeof StoreModule>()),
+		createStore: ({ newFarm, replay }: StoreModule.StoreDeps): StoreModule.GameStore => {
+			const store = createMemoryStore({ newFarm, replay });
+			const { storeError } = fakes;
+			if (storeError !== null) vi.spyOn(store, "load").mockRejectedValue(storeError);
+			return store;
+		},
+	};
+});
 
 // getApi() memoises per module, so each test imports a fresh copy (#329, decision 5).
 async function importApi(): Promise<typeof ApiModule> {
@@ -56,7 +46,6 @@ async function importApi(): Promise<typeof ApiModule> {
 }
 
 beforeEach(() => {
-	fakes.commits.length = 0;
 	fakes.storeError = null;
 	for (const [name, value] of Object.entries(makeEnv("postgresql://db.test/farm"))) {
 		vi.stubEnv(name, value);
@@ -79,14 +68,38 @@ describe("getApi", () => {
 		expect(api.health()).toEqual({ status: "ok" });
 	});
 
-	it("throws a config error while a variable is missing, and builds once it is set", async () => {
+	it("answers the contract's 500 while a variable is missing, and connects once it is set (#470)", async () => {
+		const logged: unknown[][] = [];
+		vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+			logged.push(args);
+		});
 		const { getApi } = await importApi();
 		vi.stubEnv("DATABASE_URL", "");
 
-		expect(() => getApi()).toThrow(/DATABASE_URL/);
+		const responses = await Promise.all([
+			getApi().getFarm(new Request("http://app.test/api/farm")),
+			getApi().postAction(buildPlantRequest()),
+		]);
+
+		for (const response of responses) {
+			expect(response.status).toBe(500);
+			const body = await response.text();
+			expect(JSON.parse(body)).toEqual({
+				error: "internal",
+				message: "Something went wrong on the server. Try again.",
+			});
+			expect(body).not.toContain("DATABASE_URL");
+			expect(response.headers.get("Rules-Version")).toBe("1");
+			expect(response.headers.get("Cache-Control")).toBe("no-store");
+			expect(response.headers.get("Server-Timing")).toMatch(/^total;dur=[\d.]+$/);
+		}
+		expect(logged.map(([label]) => label)).toEqual(["Game API error:", "Game API error:"]);
+		expect(String(logged[0]?.[1])).toMatch(/DATABASE_URL/);
+		expect(() => getApi().health()).toThrow(/DATABASE_URL/);
 
 		vi.stubEnv("DATABASE_URL", "postgresql://db.test/farm");
 		expect(getApi().health()).toEqual({ status: "ok" });
+		expect((await getApi().getFarm(new Request("http://app.test/api/farm"))).status).toBe(200);
 	});
 
 	it("stamps an action with the server's Date.now(), in ms (T1, MUST-11.1)", async () => {
@@ -97,8 +110,10 @@ describe("getApi", () => {
 		const response = await getApi().postAction(buildPlantRequest());
 
 		expect(response.status).toBe(200);
-		expect(fakes.commits.map((entry) => entry.at)).toEqual([now]);
 		expect(await response.json()).toMatchObject({ farm: { seq: 1, at: now } });
+		// The store logged the action at that time: a fresh load reads it back.
+		const loaded = await getApi().getFarm(new Request("http://app.test/api/farm"));
+		expect(await loaded.json()).toMatchObject({ farm: { seq: 1, at: now } });
 	});
 
 	it("sends a store error to the server's log and answers 503 busy (ADR-0006, section 8)", async () => {
