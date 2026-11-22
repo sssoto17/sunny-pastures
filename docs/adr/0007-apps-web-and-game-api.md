@@ -90,7 +90,7 @@ threat-model document (the spec's table already is one).
 | `config/` | `readConfig(env)`: typed config; a missing variable is a config error |
 | `db/` | `createDb(config)`: the Drizzle client over postgres.js (section 5) |
 | `rules/` | `createRules(content)` → `{ sim, newFarm, replay, rulesVersion }`. `replay` folds `apply` over the actions at their `at` (and throws on a refusal, ADR-0001), then `advance`s to `to`. M3 has one version (`rulesVersion = 1`); the M4 registry replaces the implementation behind the same interface |
-| `store/` | the `GameStore` type and `createStore({ db, newFarm, replay })`: B100. The layout grill wrote `sql`; section 5, Q9 hands the store the Drizzle client instead |
+| `store/` | the `GameStore` type and `createStore({ db, newFarm, replay, rulesVersion })`: B100. The layout grill wrote `sql`; section 5, Q9 hands the store the Drizzle client instead. `rulesVersion` is `Rules.rulesVersion`, wired in `api/`, so the version stamped on each row is the rules' own (#443) |
 | `auth/` | `createAuth(config)` → `{ readPlayer(request) }` (section 4) |
 | `timing/` | `createTiming(clock?)` → `{ withTiming(phase, fn), renderServerTiming() }`: one recorder per request; phases `load`, `sim`, `commit`, `total`, summed across retries; the header value, or `null` when no phase ran (#394) |
 | `http/` | the HTTP contract (section 3), added by #395: `readActionRequest` and `readFarmRequest` (the 415 → 413 → 400 checks and the action guards), `buildErrorResponse` and `buildJsonResponse` (the one error builder and the headers on every response). Builds `Response`s, so it isn't `game/` |
@@ -583,6 +583,17 @@ sim type-only (#383).
   `[bot]`-authored PR touches `tests/acceptance/**`. The App's token sets the author, so an agent
   can't fake it. The check runs the default branch's copy, as `guard / floor` does. The spec's
   MUST-15.2 is reworded from "an agent branch" to the PR's author.
+- **Accepted limit: commits pushed to a PR the admin authored** (admin, 22 Nov 2026, #425). The
+  guard reads who opened the PR, not who pushed to it, so a bot or a lane that pushes changes to
+  `tests/acceptance/**` onto an admin-authored PR passes `guard / acceptance`. This is accepted, not
+  checked. A check on the pushing identity can't tell a lane from the admin while lanes push as the
+  admin's account (ADR-0002, area 2; #107). It could tell an App's push today (the reviewer App
+  holds `contents: write`, ADR-0002, area 2), but on such a PR that push is covered another way: the
+  folder is code-owned, and `guard / code-owned` takes the admin's own review as the sign-off only
+  on the current head (#494), so any later push needs the admin to read the PR again before it can
+  merge. The guarantee above is unchanged: the factory can't _open_ a change to the acceptance
+  tests, and an admin-authored PR is the admin's act, every commit on it included. Revisit when
+  lanes push from an App (#107): the pushing identity then tells a bot from the admin.
 - **Harness:** its own `tests/acceptance/vitest.config.mts`, outside the root projects and with no
   coverage. The target comes from env (`ACCEPTANCE_BASE_URL`, the Supabase URL and publishable key),
   so the same suite can point at a Vercel preview in M4. The app runs as `next build && next start`,
@@ -738,7 +749,8 @@ Actions minutes are tight.
   [Vitest db project and a Supabase stack in ci / test](https://github.com/sssoto17/sunny-pastures/issues/382)
   builds both.
 - **Accepted trade-off: the acceptance tests' protection rests on identity.** A lane that pushes as
-  the admin is the admin's act; `guard / acceptance` can't tell what such a run wrote.
+  the admin is the admin's act; `guard / acceptance` can't tell what such a run wrote. The same
+  holds for commits a bot or a lane pushes to a PR the admin authored (section 6, #425).
 - **Accepted trade-off: some checks are confirmed only when built** (section 5): `supabase db reset`
   beside drizzle-kit's `meta/`, drizzle-kit without esbuild's `postinstall`, and Drizzle on
   postgres.js 4.x. Each is an acceptance check whose failure goes back to the admin.

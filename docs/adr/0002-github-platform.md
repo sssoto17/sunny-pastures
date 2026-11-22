@@ -2725,6 +2725,13 @@ commit-message: { prefix: chore, include: scope } # chore(deps): / chore(deps-de
 inside the `all-dev` group (#262 bumped TypeScript 6 to 7 there) or alone; a major is upgraded by
 hand.
 
+**Changed 22 Nov, #268:** TypeScript 7 runs side by side with the TypeScript 6 API, so the ignore
+lists all three names: `typescript` (an alias of `@typescript/typescript6`, the TS 6 API that
+typescript-eslint and Next import), `typescript-7` (an alias of the npm package `typescript@7.0.2`,
+the compiler behind `tsc`) and `@typescript/typescript6` (imported by name by the TS API tests and
+the determinism gate). Whether Dependabot matches an `npm:` alias by its key or by the real package
+name is unverified, so both names are listed.
+
 ## A8. Rulesets (JSON for `gh api --input`)
 
 `ruleset-main.json`:
