@@ -150,8 +150,17 @@ in a PR of its own.
 |---|---|---|---|---|
 | Project coverage | 99.8% | must not fall | 0.5 points | #40 |
 | First-load JS of the game route | not yet: recorded at the first preview deploy | must not grow | 5% per PR | #43 |
-| CI runner time per PR | 15.1 minutes per PR over the CI workflow's first week, 8 to 14 Nov 2026 (1,633 minutes for 108 PRs, across every workflow a PR starts; #98). With the 19 minutes of runs outside any PR, 1,652 that week: about 7,100 minutes a month at that pace, 2.4 times the 3,000 minutes that $18 buys at $0.006 a minute. `ci / acceptance` (#49) adds 2 to 3 billed minutes to each CI run, measured on PR #508's own runs on 22 Nov 2026 (runs 45043493394 and 45043983689: 1 min 55 s and 2 min 17 s, of which 1 min 39 s and 1 min 53 s start the Supabase stack, and 8 s and 11 s build the app and run the 12 tests); at the first week's 108 PRs and one run each, about 930 to 1,400 minutes a month more | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume | n/a: a breach is reviewed, not blocked | #40 |
+| CI runner time per PR | 15.1 minutes per PR over the CI workflow's first week, 8 to 14 Nov 2026 (1,633 minutes for 108 PRs, across every workflow a PR starts; #98). With the 19 minutes of runs outside any PR, 1,652 that week: about 7,100 minutes a month at that pace, 2.4 times the 3,000 minutes that $18 buys at $0.006 a minute | must fit the Pro plan's monthly included Actions compute (about $18, ADR-0002) at the expected PR volume | n/a: a breach is reviewed, not blocked | #40 |
 | Reviewer cost per PR | $0.31 of Claude per reviewed PR, 12 Nov 2026 to the morning of 16 Nov ($6.55 over 44 reviews of 21 PRs, 7 of them cancelled before Claude ran; #98). Wk 2 total, 9 to 15 Nov 2026: about $14.25, from 1,749 runner minutes (about $10.49 at $0.006 a minute) and $3.76 of Claude | must not grow past the weekly budget set from this first data (ADR-0002, "Caps") | n/a: a breach is reviewed, not blocked | #98 |
+
+The runner time of `ci / acceptance` (#49), recorded here next to the CI cost figure as a note
+rather than in the row, because a new value in a ratchet row goes in a PR of its own: 2 to 3 billed
+minutes a run, measured on PR #508's own runs on 22 Nov 2026 (runs 45043493394 and 45043983689: 1
+min 55 s and 2 min 17 s, of which 1 min 39 s and 1 min 53 s start the Supabase stack, and 8 s and 11
+s build the app and run the 12 tests). At the first week's 108 PRs and one run each, that is about
+930 to 1,400 minutes a month more, and more again because it also runs on drafts. It runs on every
+PR with no path filter, since the repository is public and its Actions minutes are free (admin, 22
+Nov).
 
 To keep CI cost down, the expensive checks run only when they're relevant. Stryker runs only when
 `packages/sim` changes. Lighthouse, axe and the latency smoke run only on preview deploys. Semgrep

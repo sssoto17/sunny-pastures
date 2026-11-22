@@ -12,7 +12,7 @@
 # stack while its parts are drafts, so every job skips while the PR is a draft (a draft can't
 # merge, so a skipped check there hides nothing) and the run comes from `ready_for_review`. The
 # `gate` job reads the PR's live draft state, never the payload's; on `push` to main it reads
-# nothing, and every job runs.
+# nothing, and every job runs. `ci / acceptance` is the one exception: it has no gate (#49).
 name: ci
 
 on:
@@ -245,13 +245,14 @@ jobs:
   # composite action as `ci / test`'s db project (#39: no job `container:`, no Postgres `services:`).
   # Its db:env writes ./.env, which `pnpm test:acceptance` (tests/acceptance/run.mjs) reads to build
   # the app, start it, wait on /api/health, run the suite and stop it. No step prints a key, token or
-  # URL (docs/agents/sandbox.md, "Secrets in output"). No path filter, and on every part of a stack:
-  # a required check must report on every PR, and any change can break the app over HTTP. Its
-  # measured runner time is in CONSTRAINTS.md, "CI runner time per PR".
+  # URL (docs/agents/sandbox.md, "Secrets in output").
+  # No path filter, no `needs:` and no `if:` (admin, 22 Nov: the repo is public, so its Actions
+  # minutes are free): it runs on every PR event, drafts included, and on every part of a stack.
+  # With no `if:` it has no way to be skipped, and a skipped required job reads as passing; the
+  # draft gate's `if:` would need an Exceptions row (floor guard, `check-removed`). Its measured
+  # runner time is in CONSTRAINTS.md, under the Ratchets table.
   acceptance:
     name: ci / acceptance
-    needs: gate
-    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
