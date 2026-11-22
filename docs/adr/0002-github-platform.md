@@ -319,7 +319,7 @@ has a row here, `guard / code-owned` and `guard / acceptance` included; ADR-0004
 | `ci / acceptance` | acceptance tests on a throwaway stack (MUST-15.3, MUST-17.1) |
 | `ci / audit` | `pnpm audit --audit-level=high`, the required dependency check (area 8) |
 | `ci / scripts` | the shell scripts' test suites, every `*.test.sh` under `scripts/` and `.claude/hooks/`, with their fake `gh`; the suites need no secret or network (#255) |
-| `guard / pr-body` | a body that says `Part of #N` and also links #N with a closing keyword (#270); required since 16 Nov (`main checks`, 10 checks) |
+| `guard / pr-body` | a body that says `Part of #N` and also links #N with a closing keyword (#270), or a closing keyword that names an issue other than the PR's own `<N>` outside an `Also closes #M` line (#512); required since 16 Nov (`main checks`, 10 checks) |
 | `guard / stack-base` | a PR whose base isn't `main` and isn't in a native stack: a hand-chained PR (#264); required once the admin adds it after #264 merges |
 | `guard / code-owned` | a PR that touches a code-owned path (`.github/CODEOWNERS`) needs the code owner's review on its head (#337, #379, #494); required in `main checks` |
 | `guard / acceptance` | `guard / protected-paths` as built: fails a `[bot]`-authored PR that touches `tests/acceptance/**` (MUST-15.2; #384, [ADR-0007](0007-apps-web-and-game-api.md), section 6); required in `main checks` |
