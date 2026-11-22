@@ -450,8 +450,10 @@ PR_ means either kind.
   - **The admin's go-ahead** is resolving the thread. The bot's approval already meets the count, so
     the PR, or the whole stack, then merges like any other. A code-owned PR still needs the code
     owner's approval: on a PR the admin's account opened, which the admin can't approve, the admin
-    bypass-merges it; a PR an App opened the admin approves (code-owner review stays on; "Stacks",
-    below). The resolved thread and the merge are the record of who decided.
+    leaves a Comment review on its head, which `guard / code-owned` counts as the code owner's
+    sign-off (#494; "Stacks", below), and bypass-merges it; a PR an App opened the admin approves
+    (code-owner review stays on; "Stacks", below). The resolved thread and the merge are the record
+    of who decided.
   - **The bot's earlier Request changes.** When its re-review finds those findings fixed, the bot's
     Approve replaces its Request changes, on an escalated PR too (#322). Where it withholds with
     every finding fixed (an escalated PR an App opened, or `review:admin` until #104), it dismisses
@@ -729,7 +731,9 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   the admin can't approve their own PRs, so it merges only by bypass, and a bypass can't merge a
   stack (above): a stack with a code-owned part merges part by part. Code-owner review stays on
   (Q15). This is input for #68, which turns code-owner review off only after the deterministic
-  `guard / code-owned` check (#337) is required (#68's criteria).
+  `guard / code-owned` check (#337) is required (#68's criteria). Since #494 the guard itself passes
+  such a part once the admin has left a review on its head (below); the bypass is still needed for
+  GitHub's own code-owner review.
 - **One test run per stack.** `ci / typecheck`, `ci / lint` and `ci / test` run on a stack's top
   part only, diffing from the stack's base, so one run covers every part. The other jobs, the floor
   guard among them, and the review run on each part. The `if:` in GitHub's
@@ -818,6 +822,38 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   PR's merge ref, as for `pull_request`; the script and CODEOWNERS still come from the default
   branch (#337). The label `review:admin` it adds now lands at the first review, not at open; the
   agent and the reviewer bot still add it earlier (CONSTRAINTS.md, "Escalation criteria").
+- **`guard / code-owned` on a PR a code owner opened** (#494; admin, 22 Nov 2026: option A). The
+  guard waited for a code owner to approve the head, GitHub never lets an author approve their own
+  PR, and `main checks` has no bypass (#110), so a code-owned PR the admin's account opened (an
+  `--as-admin` lane, #385; ADR-0007 section 6) could never pass it: #386's stack (#487, #488) was
+  the first. Now, when the PR's author is a code owner of every code-owned path the PR touches, the
+  guard counts the author's own latest review that isn't dismissed as the sign-off, if it is on the
+  current head (`commit_id`) and APPROVED or COMMENTED. The author is read from the REST PR the run
+  already fetches to pin the head (`user.login`, and `user.type` must be `User`), never the event,
+  as `post-review.sh` reads who opened a PR (#322). Every other case keeps the rule: on any other PR
+  only a code owner's APPROVED review on the head counts; the bot's reviews never count; a review of
+  an older head never counts. `code-owned.yml` already runs on `submitted` and `dismissed` reviews,
+  so the admin's Comment review runs the check; the script and CODEOWNERS still come from the
+  default branch. **The admin's steps** on such a PR, and on each part of such a stack in turn:
+  1. resolve the escalation thread;
+  2. leave a Comment review on the part's head, which runs `guard / code-owned` green;
+  3. bypass-merge the part ("Merge stack" offers no bypass, above); for a stack, run
+     `scripts/stack.sh refresh` after each merge, then repeat from step 1 on the next part (a
+     refresh pushes a new head, which needs a new review).
+
+  **The honest limit:** GitHub sees any session on the admin's account as the admin, so such a
+  session could leave that Comment review on its own PR, as it could resolve the thread. That adds
+  no merge path: code-owner review still holds the PR until the admin's bypass, which the same
+  session could already use. REVIEW.md keeps dispatched reviewers read-only, a standard rather than
+  a boundary, as for resolving threads (above); a PR the factory App opened (#107) keeps the old
+  rule.
+
+  _Alternatives:_ the bot approves every clean PR and code-owner review goes off, the broader
+  redesign, kept for #495; counting any review by the admin whoever opened the PR, which would let a
+  COMMENTED review stand in for an approval on App PRs the admin can approve; a label or a
+  `/approve` comment the admin posts, which a session on the admin's account could post too, as it
+  can a review, and which the guard would have to learn to read.
+
 - **The floor guard compares the whole stack below a part with the stack's base**, not each part
   with the part below (the admin left this to the lane, 16 Nov). Per-part diffs would read the guard
   from the lower part's branch, so a part could swap the guard that judges the part above, and a

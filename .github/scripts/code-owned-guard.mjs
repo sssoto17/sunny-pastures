@@ -16,6 +16,15 @@
 // the bot's approval or anyone else's never counts. The list is the default branch's CODEOWNERS
 // (the workflow copies it), so a PR can't drop a path from the list that judges it.
 //
+// A PR a code owner opened (#494; admin, 22 Nov: option A): GitHub refuses a self-approval, so a PR
+// the admin's account opened (an `--as-admin` lane, #385) could never pass. When the PR's author, as
+// the REST PR names it, is a User that CODEOWNERS lists as an owner of every code-owned path in the
+// diff, the author's own latest review that isn't dismissed counts as the sign-off if it is on the
+// head and APPROVED or COMMENTED. Any other PR keeps the rule above: on a PR the factory App opened,
+// the admin's COMMENTED review still fails it. The admin's steps on such a PR, or each part of such
+// a stack: resolve the escalation thread, leave a Comment review on the part's head (which runs this
+// check), then bypass-merge part by part (ADR-0002, area 2, "Stacks"). A push needs a new review.
+//
 // Usage: node .github/scripts/code-owned-guard.mjs [--codeowners <file>]
 //   (reads the PR from $GITHUB_EVENT_PATH; REST through $GITHUB_API_URL with $GITHUB_TOKEN)
 // Exit codes: 0 pass, 1 held for the admin, 2 could not run (never reads as a pass). It prints
@@ -27,8 +36,8 @@ import { CannotRun, isMain, readEvent } from "./diff.mjs";
 export const LABEL = "review:admin";
 const ESCALATED =
 	"escalated: Code-owned path\n\n`guard / code-owned` added `review:admin`: the diff touches a path " +
-	"in `main`'s .github/CODEOWNERS, so the check holds the PR until the admin approves its head " +
-	'(CONSTRAINTS.md, "Escalation criteria").';
+	"in `main`'s .github/CODEOWNERS, so the check holds the PR until the admin approves its head, or, " +
+	'on a PR the admin opened, reviews it (CONSTRAINTS.md, "Escalation criteria"; #494).';
 
 /**
  * CODEOWNERS as rules, in file order: `{ pattern, rx, owners }`. GitHub's syntax is gitignore's
@@ -90,17 +99,49 @@ export const checkCodeOwned = async (
 	if (owned.length === 0) return { ok: true, owned, message: "no code-owned path in the diff" };
 
 	if (!pull.labels.some((l) => l.name === LABEL)) await escalate();
-	const approvers = approversOf(await listReviews(), head);
-	const waiting = owned.filter((p) => !ownersOf(rules, p).some((o) => approvers.has(o)));
+	const reviews = await listReviews();
 	const short = head.slice(0, 7);
+	const author = ownerAuthorOf(pull, rules, owned);
+	if (author && authorReviewed(reviews, author, head))
+		return { ok: true, owned, message: `the author, a code owner, reviewed ${short}, the head` };
+
+	const approvers = approversOf(reviews, head);
+	const waiting = owned.filter((p) => !ownersOf(rules, p).some((o) => approvers.has(o)));
 	if (waiting.length === 0)
 		return { ok: true, owned, message: `a code owner approved ${short}, the head` };
+	const who = author ? "the author, a code owner, to review" : "a code owner to approve";
 	return {
 		ok: false,
 		owned,
-		message: `${waiting.length} code-owned path(s) wait for a code owner to approve ${short}, the head (CODEOWNERS)`,
+		message: `${waiting.length} code-owned path(s) wait for ${who} ${short}, the head (CODEOWNERS)`,
 	};
 };
+
+// The PR's author, lowercased, when it is a User account that CODEOWNERS lists as an owner of every
+// code-owned path in the diff (#494); otherwise null, and today's rule alone decides. Read from the
+// REST PR this run already fetched, the same read that pins the head, never from the event.
+function ownerAuthorOf(pull, rules, owned) {
+	const login = pull.user?.type === "User" ? pull.user.login?.toLowerCase() : undefined;
+	if (!login) return null;
+
+	return owned.every((p) => ownersOf(rules, p).includes(login)) ? login : null;
+}
+
+// Whether the author's latest review that isn't dismissed is APPROVED or COMMENTED, on `head`
+// (#494). GitHub refuses a self-approval, so a comment is the author's sign-off; a review of an
+// older head, or a later Request changes, never counts. A PENDING review isn't submitted, and REST
+// shows it only to its own author, so it is skipped as `approversOf` skips it.
+function authorReviewed(reviews, author, head) {
+	const latest = [...reviews]
+		.sort((a, b) => a.id - b.id)
+		.findLast(
+			(r) =>
+				r.user?.login?.toLowerCase() === author && r.state !== "DISMISSED" && r.state !== "PENDING",
+		);
+	return (
+		latest?.commit_id === head && (latest.state === "APPROVED" || latest.state === "COMMENTED")
+	);
+}
 
 // The users whose latest review that isn't a comment approves `head`. Reviews sorted by id, the
 // order GitHub made them in.

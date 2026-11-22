@@ -29,7 +29,17 @@ const review = (id, state, commit_id = HEAD, login = "sssoto17") => ({
 
 // Stands in for REST, so each case sets only the PR state it's about; `added` records each
 // escalation (the label and its comment). A file is a name, or an entry as REST lists it.
-const github = ({ files, reviews = [], labels = [], head = HEAD, changed = files.length }) => {
+// The PR's author defaults to the factory App (#336), the PR today's rule was written for.
+const APP = { login: "sunny-factory[bot]", type: "Bot" };
+const ADMIN = { login: "sssoto17", type: "User" };
+const github = ({
+	files,
+	reviews = [],
+	labels = [],
+	head = HEAD,
+	changed = files.length,
+	author = APP,
+}) => {
 	const added = [];
 	return {
 		added,
@@ -38,6 +48,7 @@ const github = ({ files, reviews = [], labels = [], head = HEAD, changed = files
 				head: { sha: head },
 				changed_files: changed,
 				labels: labels.map((name) => ({ name })),
+				user: author,
 			}),
 			listFiles: async () => files.map((f) => (typeof f === "string" ? { filename: f } : f)),
 			listReviews: async () => reviews,
@@ -204,6 +215,112 @@ describe("checkCodeOwned", () => {
 	});
 });
 
+// #494 (admin, 22 Nov: option A): GitHub refuses a self-approval, so on a PR whose author is a code
+// owner of every code-owned path in it, the author's own latest review on the head that isn't
+// dismissed, APPROVED or COMMENTED, is the code owner's sign-off. Every other PR keeps the rule above.
+describe("checkCodeOwned on a PR a code owner opened", () => {
+	const owned = (reviews, more = {}) =>
+		github({ files: ["CONSTRAINTS.md"], author: ADMIN, reviews, ...more });
+
+	it("holds it until the author has reviewed the head", async () => {
+		const gh = owned([]);
+		const r = await check(gh);
+		expect(r.ok).toBe(false);
+		expect(gh.added).toEqual(["review:admin"]);
+	});
+
+	it.each(["COMMENTED", "APPROVED"])(
+		"passes it once the author's %s review is on the head",
+		async (state) => {
+			const r = await check(owned([review(1, state)]));
+			expect(r.ok).toBe(true);
+			expect(r.message).toContain("the author");
+			expect(r.message).toContain(HEAD.slice(0, 7));
+		},
+	);
+
+	it("holds it again after a new push, until the author reviews the new head", async () => {
+		expect((await check(owned([review(1, "COMMENTED", OLD)]))).ok).toBe(false);
+		expect((await check(owned([review(1, "COMMENTED", OLD), review(2, "COMMENTED")]))).ok).toBe(
+			true,
+		);
+	});
+
+	it("matches the author to the code owner without regard to case", async () => {
+		const gh = owned([review(1, "COMMENTED", HEAD, "SSSoto17")], {
+			author: { login: "SSSoto17", type: "User" },
+		});
+		expect((await check(gh)).ok).toBe(true);
+	});
+
+	it.each([
+		// The author's latest review decides, so an older one on the head can't outlast a newer one.
+		[
+			"the author's latest review is of an older head",
+			[review(2, "COMMENTED", OLD), review(1, "COMMENTED")],
+		],
+		[
+			"the author's latest review requests changes",
+			[review(1, "COMMENTED"), review(2, "CHANGES_REQUESTED")],
+		],
+		[
+			"the author's only review of the head was dismissed",
+			[review(1, "COMMENTED", OLD), review(2, "DISMISSED")],
+		],
+		["only the bot commented", [review(1, "COMMENTED", HEAD, "sunny-reviewer[bot]")]],
+		["only someone who isn't a code owner commented", [review(1, "COMMENTED", HEAD, "someone")]],
+	])("holds it when %s", async (_, reviews) => {
+		expect((await check(owned(reviews))).ok).toBe(false);
+	});
+
+	// The author must own every code-owned path: a path someone else, or a team, owns needs them.
+	it.each([
+		["someone else", "/CONSTRAINTS.md  @sssoto17\n/x  @someone\n"],
+		["a team", "/CONSTRAINTS.md  @sssoto17\n/x  @org/team\n"],
+	])("holds it when another code-owned path belongs to %s", async (_, text) => {
+		const gh = github({
+			files: ["CONSTRAINTS.md", "x"],
+			author: ADMIN,
+			reviews: [review(1, "COMMENTED")],
+		});
+		expect((await checkCodeOwned(event(), { rules: parseCodeOwners(text), ...gh.deps })).ok).toBe(
+			false,
+		);
+	});
+
+	// The author is read from the PR as REST returns it, and only a User account can be an author
+	// whose own review counts (CODEOWNERS header: never a bot or an App).
+	it.each([
+		["the PR has no author", null],
+		["the author is a bot with the owner's login", { login: "sssoto17", type: "Bot" }],
+	])("holds it when %s", async (_, author) => {
+		expect((await check(owned([review(1, "COMMENTED")], { author }))).ok).toBe(false);
+	});
+});
+
+// #494, unchanged: on a PR the factory App opened, only a code owner's APPROVED review counts.
+describe("checkCodeOwned on a PR an App opened", () => {
+	it.each([
+		["the admin only commented on the head", [review(1, "COMMENTED")]],
+		[
+			"the bot approved and commented",
+			[
+				review(1, "APPROVED", HEAD, "sunny-factory[bot]"),
+				review(2, "COMMENTED", HEAD, "sunny-factory[bot]"),
+			],
+		],
+		["someone who isn't a code owner commented", [review(1, "COMMENTED", HEAD, "someone")]],
+	])("holds it when %s", async (_, reviews) => {
+		expect((await check(github({ files: ["CONSTRAINTS.md"], reviews }))).ok).toBe(false);
+	});
+
+	it("passes it on the admin's APPROVED review of the head", async () => {
+		expect(
+			(await check(github({ files: ["CONSTRAINTS.md"], reviews: [review(1, "APPROVED")] }))).ok,
+		).toBe(true);
+	});
+});
+
 // #379: the check runs on `pull_request_review` only. The review that fired the run is not the
 // verdict: the PR's reviews as REST lists them are, so every review ends in a pass or a fail.
 describe("checkCodeOwned on a review event", () => {
@@ -253,8 +370,8 @@ describe("code-owned-guard.mjs", () => {
 		return { seen, url: `http://127.0.0.1:${server.address().port}` };
 	};
 	const P = "/repos/sssoto17/sunny-pastures";
-	const routes = (files, reviews) => ({
-		[`GET ${P}/pulls/337`]: { head: { sha: HEAD }, changed_files: files.length, labels: [] },
+	const routes = (files, reviews, user = APP) => ({
+		[`GET ${P}/pulls/337`]: { head: { sha: HEAD }, changed_files: files.length, labels: [], user },
 		[`GET ${P}/pulls/337/files`]: files.map((filename) => ({ filename })),
 		[`GET ${P}/pulls/337/reviews`]: reviews,
 		[`POST ${P}/issues/337/labels`]: [],
@@ -304,6 +421,16 @@ describe("code-owned-guard.mjs", () => {
 	it("exits 0 once the admin approves the head", async () => {
 		const api = await serve(routes(["CONSTRAINTS.md"], [review(1, "APPROVED")]));
 		expect((await run(event(), api.url)).status).toBe(0);
+	});
+
+	it("exits 0 once the admin, as the PR's author, comments on the head (#494)", async () => {
+		const api = await serve(routes(["CONSTRAINTS.md"], [review(1, "COMMENTED")], ADMIN));
+		expect((await run(event(), api.url)).status).toBe(0);
+	});
+
+	it("exits 1 on the admin's comment when the factory App opened the PR", async () => {
+		const api = await serve(routes(["CONSTRAINTS.md"], [review(1, "COMMENTED")]));
+		expect((await run(event(), api.url)).status).toBe(1);
 	});
 
 	it("exits 2, never a pass, when GitHub can't be read", async () => {
