@@ -1,0 +1,12 @@
+{
+	"//": "The acceptance suite (#386): the shared options, and the default libs' fetch and Response, which it reaches the app with. It imports nothing from apps/ or packages/ (ADR-0007 section 6; Fallow's `acceptance` zone). Vitest bundles these files with Vite, as Next does apps/web's, so they resolve as a bundler does.",
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"module": "Preserve",
+		"moduleResolution": "Bundler",
+		"emitDeclarationOnly": true,
+		"sourceMap": false,
+		"outDir": "../../node_modules/.cache/tsc/acceptance"
+	},
+	"include": ["**/*.ts", "vitest.config.mts"]
+}
