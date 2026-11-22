@@ -239,6 +239,15 @@ the `deny` rule on the GitHub MCP resolve-thread tool and the hook
 Neither is the boundary: until agent PRs come from the factory App (#107), GitHub sees the admin's
 account either way.
 
+**Agents never submit a PR review or reply on a review thread** (admin, 22 Nov 2026, #497). They
+answer a finding with a plain PR comment (`gh pr comment`), which creates no review. A review from a
+session on the admin's account, and a thread reply is one, would count as the admin's sign-off under
+`guard / code-owned` on a PR the admin opened (#494). The rule holds for every session: lanes, the
+coordinator and the reviewers it dispatches (the CI reviewer App posts from Actions). A standard
+plus a check: `deny` rules in `.claude/settings.json` on `gh pr review`, the review and reply API
+paths and GitHub's MCP review tools, and the hook `.claude/hooks/block-thread-resolve.sh`, which
+also refuses the `gh api` and GraphQL forms a rule can't match and a GraphQL query it can't read.
+
 ### Split size
 
 The bot reviews a PR of at most **400 changed lines**. Above that, it submits Request changes that

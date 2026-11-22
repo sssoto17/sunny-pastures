@@ -62,9 +62,9 @@ move    one move: scripts/issue-fields.sh <issue> --status <Status> --from <list
 
 Checks are green when every check run on the head (the latest of each name) passed, skipped or
 was neutral and every commit status passed, leaving out `guard / code-owned` (red until the
-admin approves a code-owned head) and this workflow's own `board / ...` jobs. Any failure,
-time-out or start-up failure is red; anything still running, cancelled or stale, or no check at
-all, is pending.
+admin approves a code-owned head, or reviews it on a PR the admin opened) and this workflow's
+own `board / ...` jobs. Any failure, time-out or start-up failure is red; anything still
+running, cancelled or stale, or no check at all, is pending.
 
 Exit codes: 0 done (nothing to move is done too), 1 a gh call or a move failed, 2 bad arguments.
 EOF

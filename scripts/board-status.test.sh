@@ -135,7 +135,8 @@ case_ decide pr 12
 expect_code 0
 expect_out "moves=417:review"
 
-# Green apart from `guard / code-owned`, red until the admin approves (admin, 21 Nov): In review.
+# Green apart from `guard / code-owned`, red until the admin approves, or reviews it on a PR the
+# admin opened (admin, 21 Nov; #494): In review.
 reset
 pr 12 open false false
 closes 12 417:OPEN

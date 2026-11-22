@@ -30,10 +30,10 @@ runner checks it and, only if it passes, pushes the branch and opens the PR as `
 - **One branch: `<N>-<slug>`**, created from `main` with `git switch -c <N>-<slug>` (the slug is two
   to five words of the issue's title in kebab case, lowercase letters, digits and hyphens only).
   Never commit to `main`.
-- **Never** merge a PR, turn on auto-merge, resolve a review thread, close or edit an issue, change
-  a label or a Project field, push a tag, force-push, or edit `tests/acceptance/**` or
-  `.github/workflows/**`. The publish job refuses a hand-off whose diff touches either. If the issue
-  needs one of these, stop (below).
+- **Never** merge a PR, turn on auto-merge, submit a PR review, reply on or resolve a review thread,
+  close or edit an issue, change a label or a Project field, push a tag, force-push, or edit
+  `tests/acceptance/**` or `.github/workflows/**`. The publish job refuses a hand-off whose diff
+  touches either. If the issue needs one of these, stop (below).
 - **Never print a secret.** Don't run `env` or `printenv`, read `/proc/*/environ`, or anything else
   that would echo a token.
 - **No dependencies.** Adding one needs the admin (`AGENTS.md`): if the work needs one, stop.

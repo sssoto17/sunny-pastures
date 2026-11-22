@@ -66,6 +66,8 @@ equivalents:
   `gh api --paginate 'repos/{owner}/{repo}/pulls?state=open' --jq '.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, title, author: .user.login, author_association, labels: [.labels[].name]}'`.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`,
   `gh pr close`.
+- **Answer a review finding** with `gh pr comment`, never a review (`gh pr review`) or a reply on
+  the review thread (REVIEW.md, Conduct; #497). The hook `block-thread-resolve.sh` refuses both.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with
 `gh api repos/sssoto17/sunny-pastures/issues/42 --jq 'has("pull_request")'`, which answers for both.
