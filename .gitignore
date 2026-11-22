@@ -31,6 +31,9 @@ supabase/.temp/
 .claude/worktrees/
 .claude/.cc-writes
 .scratch/
+# Fallow's cache and the commit gate's report (.claude/hooks/fallow-gate.sh, #504). Fallow ignores the
+# folder with a nested .gitignore, which Prettier doesn't read.
+.fallow/
 .DS_Store
 .vscode/
 *.log

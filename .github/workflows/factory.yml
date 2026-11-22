@@ -1,7 +1,8 @@
 # The factory (#107; ADR-0002, area 2, "The factory workflow, built"): one workflow_dispatch run
 # takes one issue to an open PR as the App sunny-factory, within a fixed turn and time cap. The
-# admin dispatches it (workflow_dispatch needs actions: write, which a lane's token lacks); the
-# dispatch is the Ready signal (admin, 21 Nov 2026). It always runs main's copy: the `factory` and
+# admin dispatches it, or the sweep does (sweep.yml, #108: one eligible issue at a time);
+# workflow_dispatch needs actions: write, which a lane's token lacks. The dispatch is the Ready
+# signal (admin, 21 Nov 2026). It always runs main's copy: the `factory` and
 # `claude-seat` environments admit only main, so a dispatch on another branch reaches neither.
 #
 # Each job is skipped unless the one before says go, so a refusal never mints a token or calls
