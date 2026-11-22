@@ -1,0 +1,58 @@
+# `ci / workflows` (#442): actionlint over the workflow files, so an invalid workflow fails its PR
+# instead of failing silently once merged (check-106-factory-switch.yml, #413 to #440). It also
+# runs shellcheck on every `run:` script. Its ignores are in .github/actionlint.yaml.
+# Its own workflow, so the path filter can sit on the event: a PR that touches nothing under
+# .github/ starts no run and shows no check, rather than a skipped job that reads as passing
+# (ADR-0002, #312). That is fine only while it isn't required: a required check that never reports
+# blocks the merge, so making it required means dropping `paths:` (ADR-0002, area 2).
+# No draft gate (#358): the job takes seconds and has no `if:`, so it never skips and no stale run
+# can leave a skipped result. A draft's `opened` run lints the head the ready mark would, so
+# `ready_for_review` isn't an event here. No concurrency group, as in acceptance-guard.yml: two
+# runs on different heads each report for their own head.
+# Actions are GitHub-owned and pinned to a full commit SHA (ADR-0002, area 8). actionlint is a
+# pinned release download checked against a hash written here, as gitleaks in security.yml.
+name: workflow-lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/**'
+
+permissions:
+  contents: read
+
+jobs:
+  workflows:
+    name: ci / workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      # actionlint v1.7.12 (published 30 Mar 2026), linux amd64. The hash is the release's own
+      # actionlint_1.7.12_checksums.txt line, copied here so a replaced release asset fails the check.
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      # actionlint reads only .github/: the workflows, the local actions they use and its config.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - name: Install actionlint
+        run: |
+          dir="$RUNNER_TEMP/actionlint"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "$ACTIONLINT_SHA256  $dir/$archive" | sha256sum --check --strict
+          tar -xzf "$dir/$archive" -C "$dir" actionlint
+          "$dir/actionlint" -version
+          echo "$dir" >> "$GITHUB_PATH"
+      # shellcheck is the runner image's own (ubuntu-24.04); its version is printed so a finding
+      # that appears with a new image can be traced to it. No `run:` step uses Python, so pyflakes
+      # is off. Exit 1 means findings, each printed with its file, line and rule.
+      - name: Lint the workflows
+        run: |
+          shellcheck --version
+          actionlint -color -shellcheck="$(command -v shellcheck)" -pyflakes=

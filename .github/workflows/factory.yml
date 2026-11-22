@@ -273,7 +273,7 @@ jobs:
           printf '%s' "$DATA" | base64 -d >"$RUNNER_TEMP/handoff.tgz"
           mkdir -p "$RUNNER_TEMP/handoff"
           HANDOFF=$RUNNER_TEMP/handoff.tgz WORK=$RUNNER_TEMP/handoff BASE=$(git rev-parse HEAD) \
-            BOT="$FACTORY_APP[bot]" BOT_ID=$FACTORY_BOT_ID bash .github/scripts/factory-publish.sh
+            BOT="${FACTORY_APP}[bot]" BOT_ID=$FACTORY_BOT_ID bash .github/scripts/factory-publish.sh
 
       # Only what publishing needs: contents write pushes the branch and sends open-pr's
       # repository_dispatch; pull requests read for open-pr.sh's lookup. No workflows.

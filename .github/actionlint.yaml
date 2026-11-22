@@ -1,0 +1,8 @@
+# actionlint's config (#442), read by `ci / workflows` in .github/workflows/workflow-lint.yml and
+# by a local `actionlint` run from the repo root. Each ignore names one rule in one file, with why.
+paths:
+  .github/workflows/check-68-factory-resolve.yml:
+    ignore:
+      # The single-quoted strings are GraphQL documents whose $o, $n, $p and $t are GraphQL
+      # variables, passed with `gh api graphql -f`; the shell must not expand them.
+      - 'SC2016:'
