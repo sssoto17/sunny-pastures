@@ -41,7 +41,87 @@ const SELF = new Set([
 const WORKFLOW = /^\.github\/(workflows|actions)\/.+\.ya?ml$/;
 const GUARDED_JOBS = new Set(["floor", "stack", "stack-base", "code-owned", "acceptance-guard"]);
 const CHECK_STEP =
-	/floor-guard\.mjs|stack-base-guard\.mjs|code-owned-guard\.mjs|acceptance-guard\.mjs|coverage-gate\.mjs|pnpm (typecheck|lint|test|dupes|format:check)\b|SIM_PROPERTY_RUNS/;
+	/floor-guard\.mjs|stack-base-guard\.mjs|code-owned-guard\.mjs|acceptance-guard\.mjs|coverage-gate\.mjs|shell-suites\.sh|pnpm (typecheck|lint|test|dupes|format:check)\b|SIM_PROPERTY_RUNS/;
+
+// The required checks (#308): the check names in the first column of ADR-0002 area 2's check-name
+// table, its one source (admin, 22 Nov). The table is a superset of ruleset `main checks`, so it
+// errs towards required. Empty when the file has no such table.
+const CHECK_TABLE = "docs/adr/0002-github-platform.md";
+export const requiredChecks = (lines) => {
+	const start = lines.findIndex((l) => /^\|\s*Check\s*\|\s*Covers\s*\|\s*$/.test(l));
+	if (start === -1) return [];
+	const out = [];
+	for (const l of lines.slice(start + 2)) {
+		if (!l.startsWith("|")) break;
+		for (const m of (l.split("|")[1] ?? "").matchAll(/`([\w-]+ \/ [\w-]+)`/g)) out.push(m[1]);
+	}
+	return out;
+};
+// A workflow's jobs under `jobs:`: each one's `name:`, the check name a ruleset matches (ADR-0002,
+// area 2), and the jobs it `needs:`, inline, as a flow list or as a block list.
+const unquote = (s) => s.trim().replace(/^(["'])(.*)\1$/, "$2");
+const workflowJobs = (lines) => {
+	const jobs = new Map();
+	let inJobs = false;
+	let job = null;
+	let needsBlock = false;
+	for (const raw of lines) {
+		const l = raw.replace(/\s+#.*$/, "");
+		if (/^\S/.test(l)) {
+			inJobs = /^jobs:\s*$/.test(l);
+			job = null;
+			continue;
+		}
+		if (!inJobs) continue;
+		const id = /^ {2}([\w-]+):\s*$/.exec(l);
+		if (id) {
+			job = { name: null, needs: [] };
+			jobs.set(id[1], job);
+			needsBlock = false;
+			continue;
+		}
+		if (!job) continue;
+		const item = needsBlock && /^ {4,}-\s*(\S+)\s*$/.exec(l);
+		if (item) {
+			job.needs.push(unquote(item[1]));
+			continue;
+		}
+		needsBlock = false;
+		const name = /^ {4}name:\s*(.+)$/.exec(l);
+		if (name) job.name = unquote(name[1]);
+		const needs = /^ {4}needs:\s*(.*)$/.exec(l);
+		if (needs) {
+			const list = needs[1].trim().replace(/^\[|\]$/g, "");
+			job.needs.push(...list.split(",").map(unquote).filter(Boolean));
+			needsBlock = !list;
+		}
+	}
+	return jobs;
+};
+// Whether line `n` (1-based) of a workflow backs a required check: it sits in a job named as one,
+// in a guarded job, or in a job one of those `needs:` (a skipped dependency skips the required job,
+// and a skipped required job reports as passing). Errs towards yes: with no table (`required` is
+// null), in a composite action (any job may use it) and outside any job. A job's `name:` at the
+// merge base counts too (`baseLines`), so renaming a required job doesn't free it (review of #538).
+const backsRequired = (path, lines, required, baseLines = []) => {
+	if (!required || !path.startsWith(".github/workflows/")) return () => true;
+	const jobs = workflowJobs(lines);
+	const wasRequired = new Set(
+		[...workflowJobs(baseLines)].filter(([, j]) => required.has(j.name)).map(([id]) => id),
+	);
+	const backing = new Set();
+	const visit = (id) => {
+		if (backing.has(id) || !jobs.has(id)) return;
+		backing.add(id);
+		for (const n of jobs.get(id).needs) visit(n);
+	};
+	for (const [id, j] of jobs)
+		if (GUARDED_JOBS.has(id) || required.has(j.name) || wasRequired.has(id)) visit(id);
+	return (n) => {
+		const id = jobOf(lines, n);
+		return id === null || !jobs.has(id) || backing.has(id);
+	};
+};
 // The checks a package.json script runs (#99, review of #134). CI runs the PR's own scripts, so a
 // script that loses one of these, or skips the ratchet outside `check:task`, is a removed check.
 const SCRIPT_LINE = /^\s*"([\w:.-]+)"\s*:\s*"(.*)",?\s*$/;
@@ -974,6 +1054,15 @@ const compareRule = (old, now) => {
 	return null;
 };
 
+// A ratchet's first value (#302's proposed issue 1, #309): its "Today" cell going from "not yet" to
+// a number drops no negation from the rule, so the old text is compared without that "not yet".
+const firstValue = (old, now) => {
+	const today = cellOf(old, "today");
+	if (today === null || !/^\W*not yet\b/i.test(today) || !numbersOf(cellOf(now, "today") ?? "")[0])
+		return old.text;
+	return old.text.replace(today, today.replace(/\bnot yet\b/i, ""));
+};
+
 const keyOf = (r) =>
 	r.key ??
 	`${r.kind === "item" ? "list item" : r.kind === "row" ? "row" : "paragraph"} in "${r.section}"`;
@@ -1036,7 +1125,7 @@ const constraintsFindings = (f, mergeBase) => {
 			old,
 			now,
 			key,
-			narrows: [...narrowingLabels(old.text, now.text), ...(clauses ? [clauses] : [])],
+			narrows: [...narrowingLabels(firstValue(old, now), now.text), ...(clauses ? [clauses] : [])],
 		});
 		const verdict = compareRule(old, now);
 		if (verdict) out.push({ rule: verdict, line: now.line, key });
@@ -1402,8 +1491,8 @@ export const globToRegExp = (glob) =>
 	);
 
 // Spent Exceptions rows (#271; ADR-0004, "Exceptions rows"). Only a row the PR adds waives anything
-// (`addedRows` in `guard`), so every row in the merge base's table was added by a PR that has merged
-// and can no longer waive anything; only its expiry and validity are still checked. Each one is a
+// (`addedRows` in `guard`), so every row in the base's table was added by an earlier PR (merged, or
+// with `--base` on a stack part an earlier part, #310) and can no longer waive anything; only its expiry and validity are still checked. Each one is a
 // warning, never a finding, so the next PR can remove it without a cleanup PR of its own. A row
 // this PR rewrites under the same ID is a new row, which waives, so it isn't named. A Path that no
 // file in the checkout matches is named too, as a second reason.
@@ -1429,14 +1518,20 @@ const spentRows = (baseRows, allNow, addedRows) => {
 		});
 };
 // The spent rows for the log, the job summary and one warning annotation, on the first row this PR
-// keeps. Base rows are main's merged text, and a Path is one line, so it is quoted as it is:
+// keeps. Base rows are the base's committed text, and a Path is one line, so it is quoted as it is:
 // `redact` would hide a path like `.github/workflows/check-103-claude.yml`. The annotation escapes it.
-const spentReport = (spent) => {
+// Only a PR that already edits CONSTRAINTS.md is told to remove a row: editing it makes any PR
+// code-owned (#310). With `--base` on a stack part the base is an earlier part, whose rows haven't
+// merged yet, so the intro claims only that an earlier PR added the row (#310).
+const spentReport = (spent, editsConstraints) => {
 	if (!spent.length) return null;
-	const intro = `${spent.length} spent Exceptions row(s): each is in the merge base's table, so the PR that added it has merged, and only rows a PR adds waive anything (CONSTRAINTS.md, "Exceptions"). A warning, not a finding.`;
+	const intro = `${spent.length} spent Exceptions row(s): each is in the base's table, so an earlier PR added it, and only rows a PR adds waive anything (CONSTRAINTS.md, "Exceptions"). A warning, not a finding.`;
+	const todo = editsConstraints
+		? "remove it in this PR"
+		: "the next PR that edits `CONSTRAINTS.md` removes it";
 	const lines = spent.map(
 		(s) =>
-			`${s.id} \`${s.path}\`: ${s.line ? `CONSTRAINTS.md:${s.line}, remove it in this PR` : "this PR removes it"}${s.gone ? "; no file matches its Path" : ""}`,
+			`${s.id} \`${s.path}\`: ${s.line ? `CONSTRAINTS.md:${s.line}, ${todo}` : "this PR removes it"}${s.gone ? "; no file matches its Path" : ""}`,
 	);
 	const at = spent.find((s) => s.line)?.line;
 	return {
@@ -1456,6 +1551,17 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 		findings.push({ rule, file, line, key, waivable });
 	const weak = push(true);
 	const always = push(false);
+	// The required checks at the merge base and in this PR, so a check dropped from the table in the
+	// same PR still counts. None found: every job counts as backing one, as before #308.
+	const checks = [
+		...requiredChecks(oldContent(mergeBase, CHECK_TABLE) ?? []),
+		...(existsSync(CHECK_TABLE)
+			? requiredChecks(readFileSync(CHECK_TABLE, "utf8").split("\n"))
+			: []),
+	];
+	const required = checks.length ? new Set(checks) : null;
+	if (!required && changes.some((f) => WORKFLOW.test(f.path)))
+		notices.push(`no check-name table in ${CHECK_TABLE}, so every workflow job counts as required`);
 
 	for (const f of changes) {
 		if (f.status === "deleted") {
@@ -1565,6 +1671,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 			);
 			const kept = new Set(f.added.map((a) => a.text.trim()));
 			const gone = new Set(f.removed.map((r) => r.text.trim()));
+			const backedNow = backsRequired(f.path, now, required, before);
 			for (const r of f.removed) {
 				// The `stack` job decides whether typecheck, lint and test run (#264): guarded like `floor`.
 				const guarded = CHECK_STEP.test(r.text) || GUARDED_JOBS.has(jobOf(before, r.line));
@@ -1578,9 +1685,12 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 			);
 			for (const a of f.added) {
 				if (f.status === "added") break;
-				// A skipped required job reports as passing, so a new `if:` counts too.
+				// A skipped required job reports as passing, so a new `if:` counts too, on a job or step
+				// that backs a required check (#308).
 				const loosens =
-					/continue-on-error:\s*true|^\s*-?\s*if:/.test(a.text) || had.has(jobOf(now, a.line));
+					/continue-on-error:\s*true/.test(a.text) ||
+					(/^\s*-?\s*if:/.test(a.text) && backedNow(a.line)) ||
+					had.has(jobOf(now, a.line));
 				if (loosens && !gone.has(a.text.trim()) && !bumped.has(bumpKey(now, a)))
 					weak("check-removed", f.path, a.line);
 			}
@@ -1725,6 +1835,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 			allNow,
 			addedRows,
 		),
+		Boolean(constraints),
 	);
 	// The spent rows take one of GitHub's 10 annotations, so the change report keeps the rest.
 	const report = changeReport(ruleChanges, spent ? MAX_ANNOTATIONS - 1 : MAX_ANNOTATIONS);
