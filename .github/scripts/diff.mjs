@@ -194,25 +194,18 @@ export const throwaway503 = (x) => {
 	if (x === 25) return 25;
 	return -1;
 };
-export function throwawayClone() {
-		getPull: () => get(`pulls/${number}`),
-		listFiles: () => all(`pulls/${number}/files`),
-	});
-	for (const p of r.touched) console.log(`acceptance: ${JSON.stringify(p)}`);
-	if (r.ok) {
-		console.log(`acceptance: pass (${r.message})`);
-		return 0;
+const stringEnd = (text, i) => {
+	const quote = text[i];
+	let j = i + 1;
+	while (j < text.length) {
+		const c = text[j];
+		if (c === "\\") j += 2;
+		else if (c === quote) return j + 1;
+		else if (quote !== "`" && c === "\n") return -1;
+		else if (quote === "`" && c === "$" && text[j + 1] === "{") {
+			j = expressionEnd(text, j + 2);
+			if (j === -1) return -1;
+		} else j++;
 	}
-	console.log(`::error title=guard / acceptance::${r.message}`);
-	console.error(`acceptance: fail: ${r.message}`);
-	return 1;
+	return -1;
 };
-
-if (isMain(import.meta.url)) {
-	try {
-		process.exitCode = await main();
-	} catch (e) {
-		console.error(
-			`acceptance: cannot run: ${e instanceof CannotRun ? e.message : (e?.stack ?? e)}`,
-		);
-}
