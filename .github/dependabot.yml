@@ -14,7 +14,7 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: typescript-7 # the compiler (tsc), aliased to typescript 7
         update-types: ["version-update:semver-major"]
-      - dependency-name: "@typescript/typescript6"
+      - dependency-name: "@typescript/typescript6" # the TS 6 API by its own name (tests, determinism gate)
         update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 3
     labels: ["area:ci-cd", "review:admin"]          # code-owned paths (triage-labels.md)
