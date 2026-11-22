@@ -37,8 +37,9 @@ from dataclasses import dataclass
 import gevent
 from locust import HttpUser, between, constant, events, task
 
-#: M3's content written out (sliceContent): wheat costs 2 coins, a harvest yields at most 3, the
-#: silo holds 50.
+#: M3's content written out, as the acceptance tests write it (sliceContent in packages/sim): wheat
+#: costs 2 coins, a harvest yields at most 3, the silo holds 50. A content change must update these;
+#: a stale one shows as 422s in the run's failures.
 SEED_PRICE = 2
 MAX_YIELD = 3
 SILO_CAPACITY = 50

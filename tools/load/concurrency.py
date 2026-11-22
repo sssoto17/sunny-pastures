@@ -4,7 +4,7 @@ gift-and-harvest script. The gift version is MUST-13.5 itself, in M6.
 
     uv run --locked python concurrency.py <work dir> <base url> <out dir>
 
-Each pair farm has wheat ripe on plots 1 and 2 (prepare.py --pairs, seed.mjs). Two kept-alive
+Each pair farm has wheat ripe on plots 0 and 1 (the player's plots 1 and 2) (prepare.py --pairs, seed.mjs). Two kept-alive
 connections each send one harvest with `expectedSeq: 2`, released by one event, so they reach the
 server together; the loser of the race conflicts and must commit on its retry (MUST-13.3). The
 requests go to <work dir>/requests.csv in the Locust log's columns, for seed.mjs's lost-update
@@ -29,7 +29,7 @@ import gevent
 import requests
 from gevent.event import Event
 
-from locustfile import LOG_COLUMNS, read_timing
+from locustfile import LOG_COLUMNS, PHASES, read_timing
 
 
 def harvest(session: requests.Session, base: str, player: dict, plot: int, go: Event) -> list:
@@ -44,7 +44,7 @@ def harvest(session: requests.Session, base: str, player: dict, plot: int, go: E
     timing = read_timing(res.headers.get("Server-Timing"))
     return [
         int(time.time() * 1000), "POST /api/farm/actions [pair]", "POST", res.status_code, client_ms,
-        *(timing.get(p, "") for p in ("load", "sim", "commit", "total")), 2, player["farmId"], key,
+        *(timing.get(p, "") for p in PHASES), 2, player["farmId"], key,
         answer["seq"] if answer else "", answer["retries"] if answer else "",
     ], answer
 

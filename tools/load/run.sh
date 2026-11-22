@@ -11,6 +11,7 @@
 #   locust.json        Locust's final stats with histograms, measured window only
 #   window.json        the measured window, epoch ms
 #   server_timing.csv  the Server-Timing histograms, measured window only (results.py)
+#   offline_return.csv the offline returns' client times, measured window only (results.py)
 #   verify.json        seed.mjs verify: lost updates, gaps, unanswered commits (whole run)
 #   errors.json        the server log's UNSAFE_TRANSACTION errors and error lines (whole run)
 #   concurrency.json   the pairs' statuses and collisions (concurrency mode, instead of the first 3)
@@ -18,7 +19,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-label=${1:?usage: run.sh <label> <users> <run time> [stress]}
+label=${1:?usage: run.sh <label> <users> <run time> [stress] | concurrency <pairs> -- concurrency}
 users=${2:?users}
 run_time=${3:?run time}
 mode=${4:-}

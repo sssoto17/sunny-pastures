@@ -35,7 +35,8 @@ JSON
 	pnpm --silent exec prettier --write --log-level warn "$out/machine.json"
 fi
 
-done_run() { [[ -f $out/$1/errors.json ]]; }
+# A run is done once its last output is written: the histograms, or the concurrency counts.
+done_run() { [[ -f $out/$1/errors.json && ( -f $out/$1/offline_return.csv || -f $out/$1/concurrency.json ) ]]; }
 for round in 1 2 3; do
 	for users in 50 200; do
 		done_run "r$round-u$users" || tools/load/run.sh "r$round-u$users" "$users" 6m

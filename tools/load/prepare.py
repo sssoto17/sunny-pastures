@@ -47,9 +47,9 @@ def read_env(name: str) -> str:
     return value
 
 
-def sign_up(session: requests.Session, url: str, key: str) -> tuple[str, str]:
+def sign_up(url: str, key: str) -> tuple[str, str]:
     """One anonymous player: (user id, access token). An error names the status only."""
-    res = session.post(f"{url}/auth/v1/signup", json={}, headers={"apikey": key}, timeout=30)
+    res = requests.post(f"{url}/auth/v1/signup", json={}, headers={"apikey": key}, timeout=30)
     if res.status_code != 200:
         raise SystemExit(f"anonymous sign-up failed with status {res.status_code}")
     body = res.json()
@@ -68,7 +68,7 @@ def build(kinds: list[str], now_ms: int) -> list[dict]:
             farms.append({"kind": "pair", "actions": 2, "endAt": now_ms - 10 * 60_000})
         else:
             back = RETURN_AFTER_MS if kind == "returning" else 60_000
-            farms.append({"kind": "history", "role": kind, "actions": seeded_actions(i), "endAt": now_ms - back})
+            farms.append({"kind": "history", "actions": seeded_actions(i), "endAt": now_ms - back})
     return farms
 
 
@@ -87,9 +87,8 @@ def main() -> None:
     url, key = read_env("SUPABASE_URL"), read_env("SUPABASE_PUBLISHABLE_KEY")
     kinds = ["active"] * args.active + ["returning"] * args.returning + ["pair"] * args.pairs
     started = time.time()
-    session = requests.Session()
     with ThreadPoolExecutor(max_workers=16) as pool:
-        players = list(pool.map(lambda _: sign_up(session, url, key), kinds))
+        players = list(pool.map(lambda _: sign_up(url, key), kinds))
     farms = build(kinds, int(time.time() * 1000))
     for farm, (user_id, _token) in zip(farms, players):
         farm["farmId"] = user_id

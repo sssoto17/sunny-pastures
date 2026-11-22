@@ -8,7 +8,9 @@ phases as histograms at 0.1 ms: one row per (request name, status, tail99, phase
 `offline_return.csv` holds the client time of each returning farm's first read, the offline
 return 8 hours after its last action (later reads by the same player are not returns).
 `tail99` marks requests whose farm had a 99-action replay tail: the seq the server loaded, mod 100
-(B100), is 99, rebuilt from the seeded seq plus the accepted actions as each response reports them.
+(B100), is 99. The seq is the one each response reports (a GET's farm seq; an accepted action's
+answered seq less 1), which is the seeded seq plus the accepted actions: seed.mjs verify checks that
+the log agrees.
 
 `report` pools runs as MUST-13.10 says: Locust's histograms of the three normal runs per player
 count (client time, which decides MUST-13.8), the server's phases over the same runs, and the
