@@ -96,7 +96,7 @@ export interface Versions {
 /**
  * The game's registry. Version 1 is the slice content, unreleased until the first deploy whose
  * farms persist (M4's, ADR-0007 section 1): releasing it records its hash here, and the recording
- * script then records its logs (`scripts/record-rules-version.mjs`). A tuning after that adds a
+ * script then records its logs (`.github/scripts/record-rules-version.mjs`). A tuning after that adds a
  * version; it never edits a released one.
  */
 export const registry: Registry = {

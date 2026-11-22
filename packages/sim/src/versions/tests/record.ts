@@ -1,6 +1,6 @@
 // Recording a released rules version's logs (ADR-0006, section 10, "Recorded logs"): the property
 // harness's generator, at a fixed seed, plays a set of farms under the version, and each log keeps
-// the state hash after every row and after an offline day. `scripts/record-rules-version.mjs` runs
+// the state hash after every row and after an offline day. `.github/scripts/record-rules-version.mjs` runs
 // this when a version is released; the rules-version check replays the recording ever after.
 import fc from "fast-check";
 

@@ -3,7 +3,7 @@
 // (ADR-0006, section 10; #154). Run it once, when version N first reaches an environment whose farms
 // persist, after its `contentHash` is set in the registry (packages/sim/src/versions/index.ts):
 //
-//   node scripts/record-rules-version.mjs <N>
+//   node .github/scripts/record-rules-version.mjs <N>
 //
 // It plays the property harness's generator at the root config's fixed seed under version N
 // (versions/tests/record.ts), writes versions/tests/rulesVersion<N>.ts and lists it in
@@ -18,7 +18,7 @@ import { registerHooks } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const VERSIONS = join(ROOT, "packages/sim/src/versions");
 const TESTS = join(VERSIONS, "tests");
 // The root vitest.config.mts's fast-check seed (D10), so a recording is the harness's own sample.
@@ -31,7 +31,7 @@ const fail = (code, message) => {
 
 const version = Number(process.argv[2]);
 if (process.argv.length !== 3 || !Number.isSafeInteger(version) || version < 1) {
-	fail(2, "usage: node scripts/record-rules-version.mjs <rules version>");
+	fail(2, "usage: node .github/scripts/record-rules-version.mjs <rules version>");
 }
 
 registerHooks({
@@ -68,7 +68,7 @@ if (existsSync(file))
 const recording = recordLogs(registry, version, SETTINGS);
 const source = [
 	`// Rules version ${version}'s recorded logs (ADR-0006, section 10), written by`,
-	"// scripts/record-rules-version.mjs when it was released. Never edit by hand.",
+	"// .github/scripts/record-rules-version.mjs when it was released. Never edit by hand.",
 	'import type { Recording } from "./record.js";',
 	"",
 	`export const rulesVersion${version}: Recording = ${JSON.stringify(recording)};`,
@@ -84,7 +84,7 @@ writeFormatted(
 	join(TESTS, "recordings.ts"),
 	[
 		"// The recorded logs of every released rules version (ADR-0006, section 10), one file per version",
-		"// beside this one. Written by `node scripts/record-rules-version.mjs <version>` when the version is",
+		"// beside this one. Written by `node .github/scripts/record-rules-version.mjs <version>` when the version is",
 		"// released, never edited by hand: the rules-version check replays each one on today's code.",
 		'import type { Recording } from "./record.js";',
 		...recorded.map((n) => `import { rulesVersion${n} } from "./rulesVersion${n}.js";`),
