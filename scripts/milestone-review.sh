@@ -22,7 +22,7 @@ REPO=sunny-pastures
 PARENT=73
 PREFIX="Architecture review"
 here="$(cd "$(dirname "$0")" && pwd)"
-# PROJECT_API, PROJECT_JQ_DEFS, project_refused.
+# PROJECT_API, PROJECT_JQ_DEFS, project_gh, project_refused.
 # shellcheck source=scripts/lib/project-rest.sh
 . "$here/lib/project-rest.sh"
 
@@ -61,17 +61,18 @@ warn() { # message
   fi
 }
 
-project_gh() { # gh args... (the Project's calls only get PROJECT_GH_TOKEN)
-  if [[ -n ${PROJECT_GH_TOKEN-} ]]; then GH_TOKEN=$PROJECT_GH_TOKEN gh "$@"; else gh "$@"; fi
-}
-
 case ${1-} in
   "") usage; exit 2 ;;
   -h | --help) usage; exit 0 ;;
 esac
 (($# == 1)) || die 2 "takes one milestone number, got $# arguments"
-number=${1#\#}
+# Digits only, no "#4": the workflow's concurrency group keys on the value as given.
+number=$1
 [[ $number =~ ^[1-9][0-9]*$ ]] || die 2 "not a milestone number: \"$1\""
+
+err=$(mktemp "${TMPDIR:-/tmp}/milestone-review.XXXXXX")
+body=$(mktemp "${TMPDIR:-/tmp}/milestone-review-body.XXXXXX")
+trap 'rm -f "$err" "$body"' EXIT
 
 # --- reads --------------------------------------------------------------------------------------
 row=$(gh api "repos/$OWNER/$REPO/milestones/$number" --jq '[.state, (.due_on // "-"), .title] | @tsv') ||
@@ -103,11 +104,9 @@ else
   WEEK_FILTER="$PROJECT_JQ_DEFS"'
 ("DUE" + "T00:00:00Z" | fromdateiso8601) as $d
 | .[] | select(.name == "Week" and .data_type == "iteration")
-| ((.configuration.iterations // []) + (.configuration.completed_iterations // []))[]
+| iterations
 | select((.start_date + "T00:00:00Z" | fromdateiso8601) as $s | $s <= $d and $d < $s + .duration * 86400)
 | .title | txt'
-  err=$(mktemp "${TMPDIR:-/tmp}/milestone-review.XXXXXX")
-  trap 'rm -f "$err"' EXIT
   if weeks=$(project_gh api "$PROJECT_API/fields?per_page=100" --jq "${WEEK_FILTER//DUE/$due}" 2>"$err"); then
     week=$(head -n1 <<<"$weeks")
     [[ -n $week ]] ||
@@ -122,12 +121,10 @@ else
 fi
 
 # --- file it ------------------------------------------------------------------------------------
-body=$(mktemp "${TMPDIR:-/tmp}/milestone-review-body.XXXXXX")
-trap 'rm -f "$body" "${err-}"' EXIT
 cat >"$body" <<EOF
 ## Parent
 
-[Agent workflow](https://github.com/$OWNER/$REPO/issues/$PARENT). Filed by \`.github/workflows/milestone-review.yml\` when the milestone was created (#517): the architecture review runs once per milestone (\`docs/diagrams/workflow.md\`, the milestone loop).
+[Agent workflow](https://github.com/$OWNER/$REPO/issues/$PARENT). Filed by \`scripts/milestone-review.sh\` (#517), which \`.github/workflows/milestone-review.yml\` runs when a milestone is created: the architecture review runs once per milestone (\`docs/diagrams/workflow.md\`, the milestone loop).
 
 ## What to build
 
@@ -143,6 +140,4 @@ EOF
 args=(--title "$PREFIX, $title" --type chore --area tools --milestone "$title" --body-file "$body"
   --parent "$PARENT" --track Infra --mode Manual --priority P2 --size M)
 [[ -n $week ]] && args+=(--week "$week")
-code=0
-"$here/new-issue.sh" "${args[@]}" || code=$?
-exit "$code"
+"$here/new-issue.sh" "${args[@]}"

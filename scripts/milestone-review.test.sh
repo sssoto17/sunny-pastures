@@ -112,7 +112,7 @@ case_ --help
 expect_code 0
 expect_no_gh
 
-for a in abc 0 -4 "4 5" "M4"; do
+for a in abc 0 -4 "4 5" "M4" "#4"; do
   reset
   read -ra words <<<"$a"
   case_ "${words[@]}"
