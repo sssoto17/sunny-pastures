@@ -61,7 +61,7 @@ and the checks that enforce them are in [`CONSTRAINTS.md`](../../CONSTRAINTS.md)
 | ------- | -------------------------------------------------------------------------------------- |
 | BASE-01 | The UI is in English                                                                   |
 | BASE-02 | Works in the latest two Chrome, Firefox and Safari, at desktop and phone widths (≥ 360 px) |
-| BASE-03 | The DOM UI meets WCAG 2.2 AA                                                           |
+| BASE-03 | The interface meets WCAG 2.2 AA; the map scene follows the genre (ADR-0010)            |
 | BASE-04 | Action latency on the deployed stack has p95 < 300 ms                                  |
 | BASE-05 | A prediction shows within 100 ms of a tap                                              |
 
