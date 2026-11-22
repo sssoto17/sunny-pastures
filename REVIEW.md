@@ -18,6 +18,11 @@ report. When a pointer here and the rule's home disagree, the home wins.
 
 - **Read-only.** No comments, pushes, approvals, labels or merges. The CI reviewer App is the one
   exception: its writes are set in ADR-0002, area 2.
+- **Findings are answered with a PR comment.** A lane answers a finding, from any reviewer, with a
+  plain PR comment (`gh pr comment <N> --body-file <file>`): what it fixed and in which commit, or
+  why not. Never a review (`gh pr review`, the reviews API) and never a reply on the review thread:
+  a session on the admin's account that does either signs the PR off as the admin (#494, #497;
+  `CONSTRAINTS.md`, "Admin review"). The hook `block-thread-resolve.sh` refuses both.
 - **The PR description is a set of claims.** Check each one against the diff, the checks and the
   issue before you rely on it.
 - **A decision the admin made outside the PR** (#264; seen on #281, where the bot asked for an

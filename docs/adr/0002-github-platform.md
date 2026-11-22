@@ -515,8 +515,8 @@ seat (#37; "The factory's identity" below).
 - **Who resolves the threads.** Conversation resolution would stall auto-merge on the bot's old line
   comments. So when the bot re-reviews and finds a finding fixed, it resolves that thread itself
   (`resolveReviewThread`, from Actions, where GraphQL is open). A thread it still considers open
-  stays open, and the PR doesn't merge. Agents may reply on a thread but never resolve one (the hook
-  above, #264).
+  stays open, and the PR doesn't merge. Agents answer a thread's finding with a PR comment, never a
+  reply on the thread or a review, and never resolve a thread (the hook above, #264, #497).
 - **Each run costs.** The bot runs on every push, every `labeled` event (until #104) and every
   "Update branch", since each of those dismisses the approval. One `concurrency` group per PR with
   `cancel-in-progress` keeps only the newest run (Consequences).
