@@ -10,6 +10,9 @@ import { expect, inject } from "vitest";
  */
 export const plantWheat = { action: { type: "plant", plot: 0, crop: "wheat" }, expectedSeq: 0 };
 
+/** The farm's second action after `plantWheat`: wheat on the second plot, leaving 46 coins. */
+export const plantPlot1 = { action: { type: "plant", plot: 1, crop: "wheat" }, expectedSeq: 1 };
+
 /** A fresh anonymous player. The token is a secret: never print or log it. */
 export interface Player {
 	readonly accessToken: string;

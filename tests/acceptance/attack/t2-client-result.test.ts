@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { callApi, loadFarm, plantWheat, signUpPlayer } from "../harness";
+import { callApi, loadFarm, plantPlot1, plantWheat, signUpPlayer } from "../harness";
 
 // T2, a client that sends a result or a quantity (spec MUST-16; ADR-0007 section 6, "Attack
 // tests"): the request may carry neither, so it's refused with 400 and the server computes every
 // outcome. Each body below is an action the farm would accept but for the extra field, so a server
-// that dropped the field instead of refusing it would answer 200 and write.
-
-// A farm one action in (wheat on plot 0, 48 coins), so the "unchanged" check has a state to keep.
-const plantPlot1 = { action: { type: "plant", plot: 1, crop: "wheat" }, expectedSeq: 1 };
+// that dropped the field instead of refusing it would answer 200 and write. The farm is one action
+// in (wheat on plot 0, 48 coins), so the "unchanged" check has a state to keep.
 
 describe("T2: a result or a quantity from the client", () => {
 	it.each([

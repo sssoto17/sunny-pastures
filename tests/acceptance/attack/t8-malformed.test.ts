@@ -97,12 +97,25 @@ const cases: Case[] = [
 			body: JSON.stringify(plantWheat),
 		}),
 	],
+	// Two faults at once: the checks' order (ADR-0007 section 3) says which one answers.
+	[
+		"a 5 KiB text/plain body, type before size",
+		415,
+		"unsupported_media_type",
+		() => ({ headers: { "Content-Type": "text/plain" }, body: plantPadded }),
+	],
+	[
+		"5 KiB of bad JSON, size before JSON",
+		413,
+		"too_large",
+		() => ({ body: `{${" ".repeat(5 * 1024)}` }),
+	],
 ];
 
 describe("T8: malformed or oversized input", () => {
 	it.each(cases)(
 		"answers %s with %i, never 500, and writes nothing",
-		async (_a, status, error, build) => {
+		async (_attack, status, error, build) => {
 			const player = await signUpPlayer();
 			const before = await loadFarm(player);
 

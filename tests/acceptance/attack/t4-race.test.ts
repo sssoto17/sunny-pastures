@@ -10,6 +10,8 @@ import { callApi, loadFarm, plantWheat, signUpPlayer } from "../harness";
 // plot ripens in real time: wheat grows for 120 s (M3's content). The wait is read from the plant's
 // own answer (`readyAt - at`, both server times), so a skew between this clock and the server's
 // doesn't matter, plus a margin for the commit's own latency.
+// Wheat's grow time in M3's content, written out; readGrowMs checks the plant agrees.
+const wheatGrowMs = 120_000;
 const ripeningMarginMs = 3_000;
 const racers = 20;
 
@@ -48,7 +50,7 @@ describe("T4: concurrent harvests of one ripe plot", () => {
 			expect([2, 3]).toContain(wheat);
 		},
 		// The grow time, the margin, and a few round trips for sign-up, plant and the race.
-		120_000 + ripeningMarginMs + 30_000,
+		wheatGrowMs + ripeningMarginMs + 30_000,
 	);
 });
 
@@ -61,6 +63,6 @@ function readGrowMs(body: unknown): number {
 
 	const growMs = farm.state.plots[0].readyAt - farm.at;
 	// M3's wheat grows for 120 s; a different number means the content moved, not the attack.
-	expect(growMs).toBe(120_000);
+	expect(growMs).toBe(wheatGrowMs);
 	return growMs;
 }

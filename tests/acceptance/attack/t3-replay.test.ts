@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { callApi, loadFarm, plantWheat, signUpPlayer, type Player } from "../harness";
+import { callApi, loadFarm, plantPlot1, plantWheat, signUpPlayer, type Player } from "../harness";
 
 // T3, a replayed or duplicated request (spec MUST-16; ADR-0007 section 6, "Attack tests"): a
 // resent `Idempotency-Key` gets the first answer unchanged and nothing applies twice (MUST-13.2,
 // ADR-0001). The body isn't compared (ADR-0007 section 3, "Request"), so a key can't carry a
-// second action either. Every resend below would be refused (422) if the server ran it: plot 0
-// is already growing after the first plant.
-
-const plantPlot1 = { action: { type: "plant", plot: 1, crop: "wheat" }, expectedSeq: 1 };
+// second action either. Each resent plant below would be refused (422) if the server ran it:
+// plot 0 is already growing after the first plant.
 
 describe("T3: a replayed Idempotency-Key", () => {
 	it("returns the identical first answer to a resend, and seq advanced once", async () => {
