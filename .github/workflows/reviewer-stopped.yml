@@ -1,0 +1,58 @@
+# The reviewer-stopped alert (#514): when review.yml, the CI reviewer, ends in startup_failure, one
+# "Reviewer stopped" issue labelled blocked:admin links the failed runs, and later failures comment
+# on it while it stays open. The rules are in .github/scripts/reviewer-stopped.sh.
+#
+# Why a schedule and not workflow_run: no source #514's lane could read confirms that workflow_run
+# fires for a run that fails at startup (the PR records what was checked), and no run here can show
+# it before merge: both events run from the default branch only ("Events that trigger workflows",
+# https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows,
+# "schedule" and "workflow_run"). The
+# REST list of runs does show those runs (`status=startup_failure` lists the 29 of 15-16 Nov), so
+# an hourly poll catches them either way. Each poll reads the last 24 hours and skips a run an
+# issue already links, so a delayed or dropped scheduled run loses nothing. #515 checks it live.
+#
+# It uses only actions/checkout, GitHub-owned, so an allowed-actions miss for a third-party action
+# (the cause on 15 Nov) can't stop the alert too. Pinned to a full SHA (ADR-0002, area 8). The
+# dispatch input reaches the shell only through `env:`.
+name: reviewer-stopped
+
+on:
+  schedule:
+    - cron: '17 * * * *' # hourly, off the top of the hour
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Read and log the outcome, write nothing
+        type: boolean
+        default: true
+
+permissions: {}
+
+# Two polls at once could both find no open issue and each open one.
+concurrency:
+  group: reviewer-stopped
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    name: alert / reviewer stopped
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # the checkout of the script
+      actions: read # review.yml's runs
+      issues: write # the issue or the comment
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Report review.yml's startup failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A schedule has no inputs, so it always writes.
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: |
+          SINCE=$(date -u -d '24 hours ago' +%FT%TZ)
+          export SINCE
+          bash .github/scripts/reviewer-stopped.sh

@@ -150,7 +150,27 @@ actions"). Add one only for an action the admin must confirm. A wildcard allow p
 for its write flags prompts on every write: keep the pair only when the admin wants each write
 confirmed (vitest's snapshot flags, admin, 21 Nov). Otherwise drop both, so auto mode's classifier
 decides; Manual mode then prompts, or runs the command inside the sandbox when sandbox auto-allow is
-on (#434: `prettier --write` stopped the #382 lane for over an hour).
+on (#434: `prettier --write` stopped the #382 lane for over an hour). A wildcard allow such as
+`pnpm exec vitest run *` buys little anyway: the #434 scan found every `pnpm exec prettier --check`
+and `pnpm exec vitest run` call decided by the classifier, not the rule. Don't count on auto mode
+dropping it, though. The permission-modes page lists "package-manager run commands" among the broad
+allow rules auto mode drops, but Claude Code 2.1.330 drops only a bare prefix (`pnpm exec *`,
+`npx *`; read from its drop check, 22 Nov, #437). So `pnpm exec vitest run *` stays in effect and
+approves every flag no ask rule names; why the scan's calls still reached the classifier is open.
+
+### Flags a wildcard allow can't see
+
+Before allowing a wildcard, check the tool's `--help` for flags that load code or write outside the
+repo: ask rules can't list them all, and each one would prompt in auto mode. vitest 5.1.0 `run` and
+`bench` take the same flags (checked 22 Nov, #437; `--outputJson` and `--compare` are gone, "Unknown
+option"):
+
+<!-- prettier-ignore -->
+| Effect | Flags |
+|---|---|
+| Load and run code from a path | `-c`/`--config`, `-r`/`--root`, `--dir`, `--reporter`, `--diff`, `--execArgv` (`--require=`), `--coverage.customProviderModule`, `--typecheck.checker`, `--experimental.vcsProvider` |
+| Write anywhere | `--outputFile` (has an ask rule), `--coverage.reportsDirectory`, `--coverage.htmlDir`, `--fsModuleCachePath`, `--attachmentsDir` |
+| Open a port | `--api` (`--api.allowExec` runs code, `--api.allowWrite` edits files), `--ui`, `--inspect`, `--inspectBrk` |
 
 ## Working directory
 
