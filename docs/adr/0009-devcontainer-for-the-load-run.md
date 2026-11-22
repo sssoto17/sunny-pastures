@@ -100,3 +100,26 @@ workflow it lives in are to be settled in #501.
   with section 3's method difference recorded in its results.
 - **ADR-0002** points its "A container for the load test and CI" and "Codespaces / dev container"
   rows here; the latter keeps its examiner trigger for development use (#502).
+
+## Amendment: the cloud config (22 Nov 2026, #388)
+
+The committed config doesn't come up in a Claude cloud session: the `docker-outside-of-docker`
+Feature runs `apt-get` while the image builds, and that build has neither the session's proxy nor
+its CA, while the network policy refuses every Debian mirror
+([#388, "Cloud Docker probe"](https://github.com/sssoto17/sunny-pastures/issues/388)). The admin
+chose a cloud-only config over teaching the Feature build the proxy (option a, 22 Nov).
+
+- **`.devcontainer/cloud/devcontainer.json`** is `devcontainer.json` minus the Feature: the same
+  image digest, `runArgs` and `post-create.sh`, with the host's Docker CLI and socket bind-mounted
+  in its place, so section 3 still holds (the Supabase containers run beside it, on the host's
+  network). The session's proxy and CA bundle are passed in from the host's `HTTPS_PROXY` and
+  `SSL_CERT_FILE` with `${localEnv:…}`, which the dev container spec substitutes in any property
+  ([reference](https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson)),
+  so no port is hard-coded.
+- **Which one when:** a Claude cloud session uses the cloud config
+  (`pnpm exec devcontainer up --workspace-folder . --config .devcontainer/cloud/devcontainer.json`,
+  after starting `dockerd`); every other VM, and the CI build check (section 6), uses
+  `devcontainer.json`. The CI job builds the main config only.
+- **Docker Hub's rate limit:** a cloud session's pulls can get 429 from Docker Hub. The M3 run set
+  `mirror.gcr.io` as the daemon's registry mirror (`/etc/docker/daemon.json` on the session host),
+  which serves the same digest; that is host setup, not part of either config.

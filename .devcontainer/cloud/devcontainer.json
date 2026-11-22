@@ -1,0 +1,47 @@
+// The load VM's devcontainer for a Claude cloud session (ADR-0009, "Amendment: the cloud config";
+// #388). The committed ../devcontainer.json can't come up there: its docker-outside-of-docker
+// Feature runs apt-get during the image build, and the build has neither the session's proxy nor
+// its CA, while the network policy refuses every Debian mirror (#388, "Cloud Docker probe"). This
+// config is that one minus the Feature: the same image and post-create.sh, with the host's Docker
+// CLI and socket bind-mounted instead, and the session's proxy and CA passed in. Everywhere else,
+// use ../devcontainer.json. Start it from the repo root, after `pnpm install --frozen-lockfile`
+// and with dockerd running on the host:
+//   pnpm exec devcontainer up --workspace-folder . --config .devcontainer/cloud/devcontainer.json
+// then run commands in it with `pnpm exec devcontainer exec --workspace-folder .
+// --config .devcontainer/cloud/devcontainer.json <command>`.
+{
+	"name": "sunny-pastures load VM (cloud session)",
+	// The same digest as ../devcontainer.json, whose comment holds the tag and the 7-day check.
+	"image": "node:24-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496",
+	"runArgs": ["--network=host"],
+	"workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+	"workspaceFolder": "${localWorkspaceFolder}",
+	// No Feature: the host's Docker CLI and socket stand in for docker-outside-of-docker, so the
+	// Supabase containers still run beside this one (ADR-0009, section 3). The CA bundle's path is
+	// the session's own SSL_CERT_FILE.
+	"mounts": [
+		"source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+		"source=/usr/bin/docker,target=/usr/local/bin/docker,type=bind,readonly",
+		"source=${localEnv:SSL_CERT_FILE},target=/etc/ccr-ca-bundle.crt,type=bind,readonly"
+	],
+	// The proxy's port differs per session, so it is read from the host's HTTPS_PROXY when the
+	// container is created: the dev container spec substitutes ${localEnv:NAME} in any property
+	// (https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson).
+	// localhost stays off the proxy, so the app, Locust and the stack talk directly.
+	"containerEnv": {
+		"HTTPS_PROXY": "${localEnv:HTTPS_PROXY}",
+		"https_proxy": "${localEnv:HTTPS_PROXY}",
+		"NO_PROXY": "localhost,127.0.0.1,::1",
+		"no_proxy": "localhost,127.0.0.1,::1",
+		"SSL_CERT_FILE": "/etc/ccr-ca-bundle.crt",
+		"CURL_CA_BUNDLE": "/etc/ccr-ca-bundle.crt",
+		"NODE_EXTRA_CA_CERTS": "/etc/ccr-ca-bundle.crt",
+		"NODE_USE_ENV_PROXY": "1"
+	},
+	"remoteUser": "root",
+	"remoteEnv": {
+		"PATH": "/root/.local/bin:${containerEnv:PATH}",
+		"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0"
+	},
+	"postCreateCommand": "bash .devcontainer/post-create.sh"
+}
