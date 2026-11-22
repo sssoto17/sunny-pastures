@@ -319,7 +319,7 @@ green or red; the PR's own events (opened, ready, draft, closed) do the rest.
 | Move                     | When                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------- |
 | Ready → In progress      | _Automatic._ Work starts: a branch named `<N>-<slug>` is created, or a PR with `Closes #N` opens. The admin is assigned (manual), or the factory claims it (factory). |
-| In progress → In review  | _Automatic._ A PR with `Closes #N` is open, not a draft, and its checks are green. Green means every check passes apart from `guard / code-owned`, which stays red on a code-owned PR until the admin approves its head (admin, 21 Nov, on #417). A check still running, cancelled or stale isn't green yet: a re-run decides it. A draft stays In progress until it's marked ready. |
+| In progress → In review  | _Automatic._ A PR with `Closes #N` is open, not a draft, and its checks are green. Green means every check passes apart from `guard / code-owned`, which stays red on a code-owned PR until the admin approves its head, or reviews it on a PR the admin opened (admin, 21 Nov, on #417; #494). A check still running, cancelled or stale isn't green yet: a re-run decides it. A draft stays In progress until it's marked ready. |
 | In review → In progress  | _Automatic._ That PR's checks go red, it turns back into a draft, or it closes unmerged. |
 | In review → Done         | _Automatic._ The PR merged (the issue closes, and the Project's built-in workflow moves it). |
 | Any → Backlog            | It turns out not ready (add the `blocked:*` label that says why, or split it), or the admin drops it from the current focus. |

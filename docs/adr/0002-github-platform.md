@@ -732,7 +732,8 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   stack (above): a stack with a code-owned part merges part by part. Code-owner review stays on
   (Q15). This is input for #68, which turns code-owner review off only after the deterministic
   `guard / code-owned` check (#337) is required (#68's criteria). Since #494 the guard itself passes
-  such a part once the admin has left a review on its head (below); the bypass is still needed for
+  such a part once the admin, as its author and a code owner of each of its code-owned paths, has
+  left a Comment review as their last review on its head (below); the bypass is still needed for
   GitHub's own code-owner review.
 - **One test run per stack.** `ci / typecheck`, `ci / lint` and `ci / test` run on a stack's top
   part only, diffing from the stack's base, so one run covers every part. The other jobs, the floor
@@ -828,13 +829,15 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   `--as-admin` lane, #385; ADR-0007 section 6) could never pass it: #386's stack (#487, #488) was
   the first. Now, when the PR's author is a code owner of every code-owned path the PR touches, the
   guard counts the author's own latest review that isn't dismissed as the sign-off, if it is on the
-  current head (`commit_id`) and APPROVED or COMMENTED. The author is read from the REST PR the run
-  already fetches to pin the head (`user.login`, and `user.type` must be `User`), never the event,
-  as `post-review.sh` reads who opened a PR (#322). Every other case keeps the rule: on any other PR
-  only a code owner's APPROVED review on the head counts; the bot's reviews never count; a review of
-  an older head never counts. `code-owned.yml` already runs on `submitted` and `dismissed` reviews,
-  so the admin's Comment review runs the check; the script and CODEOWNERS still come from the
-  default branch. **The admin's steps** on such a PR, and on each part of such a stack in turn:
+  current head (`commit_id`) and APPROVED or COMMENTED. Latest means last submitted (`submitted_at`,
+  then `id`), since a review's id likely dates from when its draft started (inferred from REST, not
+  checked here). The author is read from the REST PR the run already fetches to pin the head
+  (`user.login`, and `user.type` must be `User`), never the event, as `post-review.sh` reads who
+  opened a PR (#322). Every other case keeps the rule: on any other PR only a code owner's APPROVED
+  review on the head counts; the bot's reviews never count; a review of an older head never counts.
+  `code-owned.yml` already runs on `submitted` and `dismissed` reviews, so the admin's Comment
+  review runs the check; the script and CODEOWNERS still come from the default branch. **The admin's
+  steps** on such a PR, and on each part of such a stack in turn:
   1. resolve the escalation thread;
   2. leave a Comment review on the part's head, which runs `guard / code-owned` green;
   3. bypass-merge the part ("Merge stack" offers no bypass, above); for a stack, run

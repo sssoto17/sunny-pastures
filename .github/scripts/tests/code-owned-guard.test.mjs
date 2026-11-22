@@ -29,7 +29,7 @@ const review = (id, state, commit_id = HEAD, login = "sssoto17") => ({
 
 // Stands in for REST, so each case sets only the PR state it's about; `added` records each
 // escalation (the label and its comment). A file is a name, or an entry as REST lists it.
-// The PR's author defaults to the factory App (#336), the PR today's rule was written for.
+// The PR's author defaults to the factory App (#336), the PR the rule before #494 was written for.
 const APP = { login: "sunny-factory[bot]", type: "Bot" };
 const ADMIN = { login: "sssoto17", type: "User" };
 const github = ({
@@ -219,11 +219,11 @@ describe("checkCodeOwned", () => {
 // owner of every code-owned path in it, the author's own latest review on the head that isn't
 // dismissed, APPROVED or COMMENTED, is the code owner's sign-off. Every other PR keeps the rule above.
 describe("checkCodeOwned on a PR a code owner opened", () => {
-	const owned = (reviews, more = {}) =>
+	const adminPr = (reviews, more = {}) =>
 		github({ files: ["CONSTRAINTS.md"], author: ADMIN, reviews, ...more });
 
 	it("holds it until the author has reviewed the head", async () => {
-		const gh = owned([]);
+		const gh = adminPr([]);
 		const r = await check(gh);
 		expect(r.ok).toBe(false);
 		expect(gh.added).toEqual(["review:admin"]);
@@ -232,7 +232,7 @@ describe("checkCodeOwned on a PR a code owner opened", () => {
 	it.each(["COMMENTED", "APPROVED"])(
 		"passes it once the author's %s review is on the head",
 		async (state) => {
-			const r = await check(owned([review(1, state)]));
+			const r = await check(adminPr([review(1, state)]));
 			expect(r.ok).toBe(true);
 			expect(r.message).toContain("the author");
 			expect(r.message).toContain(HEAD.slice(0, 7));
@@ -240,14 +240,24 @@ describe("checkCodeOwned on a PR a code owner opened", () => {
 	);
 
 	it("holds it again after a new push, until the author reviews the new head", async () => {
-		expect((await check(owned([review(1, "COMMENTED", OLD)]))).ok).toBe(false);
-		expect((await check(owned([review(1, "COMMENTED", OLD), review(2, "COMMENTED")]))).ok).toBe(
+		expect((await check(adminPr([review(1, "COMMENTED", OLD)]))).ok).toBe(false);
+		expect((await check(adminPr([review(1, "COMMENTED", OLD), review(2, "COMMENTED")]))).ok).toBe(
 			true,
 		);
 	});
 
+	// A review's id likely dates from its draft, so ids can disagree with the order of submission.
+	it("takes the author's last submitted review, whatever its id", async () => {
+		const at = (r, submitted_at) => ({ ...r, submitted_at });
+		const reviews = [
+			at(review(1, "COMMENTED", OLD), "2026-11-22T10:05:00Z"),
+			at(review(2, "COMMENTED"), "2026-11-22T10:00:00Z"),
+		];
+		expect((await check(adminPr(reviews))).ok).toBe(false);
+	});
+
 	it("matches the author to the code owner without regard to case", async () => {
-		const gh = owned([review(1, "COMMENTED", HEAD, "SSSoto17")], {
+		const gh = adminPr([review(1, "COMMENTED", HEAD, "SSSoto17")], {
 			author: { login: "SSSoto17", type: "User" },
 		});
 		expect((await check(gh)).ok).toBe(true);
@@ -270,7 +280,7 @@ describe("checkCodeOwned on a PR a code owner opened", () => {
 		["only the bot commented", [review(1, "COMMENTED", HEAD, "sunny-reviewer[bot]")]],
 		["only someone who isn't a code owner commented", [review(1, "COMMENTED", HEAD, "someone")]],
 	])("holds it when %s", async (_, reviews) => {
-		expect((await check(owned(reviews))).ok).toBe(false);
+		expect((await check(adminPr(reviews))).ok).toBe(false);
 	});
 
 	// The author must own every code-owned path: a path someone else, or a team, owns needs them.
@@ -294,7 +304,7 @@ describe("checkCodeOwned on a PR a code owner opened", () => {
 		["the PR has no author", null],
 		["the author is a bot with the owner's login", { login: "sssoto17", type: "Bot" }],
 	])("holds it when %s", async (_, author) => {
-		expect((await check(owned([review(1, "COMMENTED")], { author }))).ok).toBe(false);
+		expect((await check(adminPr([review(1, "COMMENTED")], { author }))).ok).toBe(false);
 	});
 });
 

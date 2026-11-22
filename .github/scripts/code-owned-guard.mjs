@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // code-owned-guard.mjs: `guard / code-owned` (#337). A PR whose diff touches a path in
-// .github/CODEOWNERS fails until a code owner, the admin, approves its current head; a PR that
+// .github/CODEOWNERS fails until a code owner, the admin, approves its current head (on a PR the
+// admin opened, reviews it: below); a PR that
 // touches none passes. On a code-owned PR it adds `review:admin`, so the label comes from the diff,
 // not from the reviewer bot's judgement (CONSTRAINTS.md, "Escalation criteria", Code-owned path).
 // ADR-0002 (area 2, "Code-owner review on stacks") hands #68 turning GitHub's code-owner review off
@@ -109,6 +110,7 @@ export const checkCodeOwned = async (
 	const waiting = owned.filter((p) => !ownersOf(rules, p).some((o) => approvers.has(o)));
 	if (waiting.length === 0)
 		return { ok: true, owned, message: `a code owner approved ${short}, the head` };
+
 	const who = author ? "the author, a code owner, to review" : "a code owner to approve";
 	return {
 		ok: false,
@@ -118,10 +120,10 @@ export const checkCodeOwned = async (
 };
 
 // The PR's author, lowercased, when it is a User account that CODEOWNERS lists as an owner of every
-// code-owned path in the diff (#494); otherwise null, and today's rule alone decides. Read from the
+// code-owned path in the diff (#494); otherwise null, and the rule in the header alone decides. Read from the
 // REST PR this run already fetched, the same read that pins the head, never from the event.
 function ownerAuthorOf(pull, rules, owned) {
-	const login = pull.user?.type === "User" ? pull.user.login?.toLowerCase() : undefined;
+	const login = pull.user?.type === "User" ? (pull.user.login?.toLowerCase() ?? null) : null;
 	if (!login) return null;
 
 	return owned.every((p) => ownersOf(rules, p).includes(login)) ? login : null;
@@ -130,10 +132,12 @@ function ownerAuthorOf(pull, rules, owned) {
 // Whether the author's latest review that isn't dismissed is APPROVED or COMMENTED, on `head`
 // (#494). GitHub refuses a self-approval, so a comment is the author's sign-off; a review of an
 // older head, or a later Request changes, never counts. A PENDING review isn't submitted, and REST
-// shows it only to its own author, so it is skipped as `approversOf` skips it.
+// shows it only to its own author, so it is skipped as `approversOf` skips it. Latest means last
+// submitted: a review's id likely dates from when its draft started (inferred, not checked), so a
+// draft begun on an older head and submitted after a comment on the head could have the lower id.
 function authorReviewed(reviews, author, head) {
 	const latest = [...reviews]
-		.sort((a, b) => a.id - b.id)
+		.sort((a, b) => bySubmitted(a, b) || a.id - b.id)
 		.findLast(
 			(r) =>
 				r.user?.login?.toLowerCase() === author && r.state !== "DISMISSED" && r.state !== "PENDING",
@@ -155,6 +159,11 @@ function approversOf(reviews, head) {
 	return new Set(
 		[...latest].filter(([, r]) => r.state === "APPROVED" && r.commit_id === head).map(([u]) => u),
 	);
+}
+
+// ISO 8601 timestamps in UTC, as REST gives them, sort as strings.
+function bySubmitted(a, b) {
+	return (a.submitted_at ?? "").localeCompare(b.submitted_at ?? "");
 }
 
 function lastMatch(rules, path) {
