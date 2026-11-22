@@ -323,6 +323,24 @@ describe("decideSweep", () => {
 	});
 });
 
+// The loop guard reads factory.yml's run-name, and the gather pins the bot user's commit email:
+// both must match the workflow, or fix rounds silently stop counting (or stop being found).
+describe("the contract with factory.yml (#588)", () => {
+	const yml = readFileSync(new URL("../../workflows/factory.yml", import.meta.url), "utf8");
+	const gatherSrc = readFileSync(GATHER, "utf8");
+	const sweepYml = readFileSync(new URL("../../workflows/sweep.yml", import.meta.url), "utf8");
+
+	it("names fix runs 'factory fix #<pr> at <head>' in the run-name and the dispatch's wait", () => {
+		expect(yml).toContain("format('factory fix #{0} at {1}', inputs.pr, inputs.head)");
+		expect(sweepYml).toContain('title="factory fix #$PR at $HEAD"');
+	});
+
+	it("pins the same bot user id as factory.yml", () => {
+		const id = yml.match(/FACTORY_BOT_ID: '(\d+)'/)[1];
+		expect(gatherSrc).toContain(`bot_email='${id}+sunny-factory[bot]@users.noreply.github.com'`);
+	});
+});
+
 describe("factory-sweep.mjs", () => {
 	let dir;
 	afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));

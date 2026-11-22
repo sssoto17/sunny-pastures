@@ -118,7 +118,7 @@ function selectFix({ pulls, reviews, runs }) {
 		const review = newestVerdict(reviews.filter((r) => r.pr === pr.number));
 		if (!head || review?.commit_id !== head || !wantsFixes(review)) continue;
 		const rounds = runs.filter((r) => r.display_title?.startsWith(`factory fix #${pr.number} at `));
-		const why = loopGuard(rounds, fixTitle(pr.number, head));
+		const why = loopGuard(rounds, pr.number, head);
 		if (why) fixSkipped.push({ pr: pr.number, why });
 		else return { fix: { pr: pr.number, head, round: rounds.length + 1 }, fixSkipped };
 	}
@@ -126,9 +126,9 @@ function selectFix({ pulls, reviews, runs }) {
 }
 
 // Why a PR's fix rounds so far rule out another, or null: one already ran at this head, or the limit.
-function loopGuard(rounds, title) {
-	if (rounds.some((r) => r.display_title === title)) {
-		return `a fix round already ran at ${short(title.slice(-40))}`;
+function loopGuard(rounds, pr, head) {
+	if (rounds.some((r) => r.display_title === fixTitle(pr, head))) {
+		return `a fix round already ran at ${short(head)}`;
 	}
 	if (rounds.length >= MAX_FIX_ROUNDS) {
 		return `${rounds.length} fix rounds already, the limit is ${MAX_FIX_ROUNDS}`;
