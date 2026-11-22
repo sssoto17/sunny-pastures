@@ -63,15 +63,7 @@ describe("createStore (B100) over the game schema", () => {
 		const farmId = await createPlayer();
 		const last = Number.MAX_SAFE_INTEGER;
 		// A log already at the largest seq the column holds, written straight into the table.
-		await db.insert(actions).values({
-			farmId,
-			seq: last,
-			at: 0,
-			action: makeEntry(newFarm(), 0, 0).action,
-			idempotencyKey: crypto.randomUUID(),
-			answer: {},
-			rulesVersion: 1,
-		});
+		await insertRow(farmId, last, 0);
 
 		await expect(
 			makeB100().commit(farmId, makeEntry(newFarm(), last, 1_000)),
@@ -105,7 +97,7 @@ describe("createStore (B100) over the game schema", () => {
 		const farmId = await createPlayer();
 		await playActions(makeB100(), farmId, 100);
 		// The row for seq 101 is lost: seq 102 is written straight into the table.
-		await insertRow(farmId, 102);
+		await insertRow(farmId, 102, 102_000);
 		const recorded = recordReplay();
 
 		await expect(makeB100({ replay: recorded.replay }).load(farmId)).rejects.toThrow(
@@ -116,7 +108,7 @@ describe("createStore (B100) over the game schema", () => {
 
 	it("throws a store error when a farm with no snapshot has no row at seq 1", async () => {
 		const farmId = await createPlayer();
-		await insertRow(farmId, 2);
+		await insertRow(farmId, 2, 2_000);
 
 		await expect(makeB100().load(farmId)).rejects.toThrow(
 			"Store error: the first log row after seq 0 is seq 2, not seq 1.",
@@ -125,12 +117,12 @@ describe("createStore (B100) over the game schema", () => {
 });
 
 /** A log row written straight into the table, past the store's gap-free append (ADR-0007 Q6). */
-async function insertRow(farmId: string, seq: number): Promise<void> {
+async function insertRow(farmId: string, seq: number, at: number): Promise<void> {
 	await db.insert(actions).values({
 		farmId,
 		seq,
-		at: seq * 1_000,
-		action: makeEntry(newFarm(), seq - 1, seq * 1_000).action,
+		at,
+		action: makeEntry(newFarm(), 0, at).action,
 		idempotencyKey: crypto.randomUUID(),
 		answer: {},
 		rulesVersion: 1,
