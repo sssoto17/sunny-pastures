@@ -175,6 +175,13 @@ describe("a new `if:` in a workflow (#308)", () => {
 		expect(guard().out).toContain(`[check-removed] ${CI}`);
 	});
 
+	// Review of #538: renaming a required job's `name:` in the same PR doesn't free it.
+	it("still counts a required job the same PR renames", () => {
+		setup();
+		edit("    name: ci / test\n", "    name: ci / tests\n    if: false\n");
+		expect(guard().out).toContain(`[check-removed] ${CI}`);
+	});
+
 	it("counts every job as required, and says so, when the base has no table", () => {
 		repo = makeRepo({ "CONSTRAINTS.md": CONSTRAINTS, [CI]: WORKFLOW });
 		edit("    name: review\n", "    name: review\n    if: false\n");

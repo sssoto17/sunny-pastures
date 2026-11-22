@@ -101,17 +101,22 @@ const workflowJobs = (lines) => {
 // Whether line `n` (1-based) of a workflow backs a required check: it sits in a job named as one,
 // in a guarded job, or in a job one of those `needs:` (a skipped dependency skips the required job,
 // and a skipped required job reports as passing). Errs towards yes: with no table (`required` is
-// null), in a composite action (any job may use it) and outside any job.
-const backsRequired = (path, lines, required) => {
+// null), in a composite action (any job may use it) and outside any job. A job's `name:` at the
+// merge base counts too (`baseLines`), so renaming a required job doesn't free it (review of #538).
+const backsRequired = (path, lines, required, baseLines = []) => {
 	if (!required || !path.startsWith(".github/workflows/")) return () => true;
 	const jobs = workflowJobs(lines);
+	const wasRequired = new Set(
+		[...workflowJobs(baseLines)].filter(([, j]) => required.has(j.name)).map(([id]) => id),
+	);
 	const backing = new Set();
 	const visit = (id) => {
 		if (backing.has(id) || !jobs.has(id)) return;
 		backing.add(id);
 		for (const n of jobs.get(id).needs) visit(n);
 	};
-	for (const [id, j] of jobs) if (GUARDED_JOBS.has(id) || required.has(j.name)) visit(id);
+	for (const [id, j] of jobs)
+		if (GUARDED_JOBS.has(id) || required.has(j.name) || wasRequired.has(id)) visit(id);
 	return (n) => {
 		const id = jobOf(lines, n);
 		return id === null || !jobs.has(id) || backing.has(id);
@@ -1486,8 +1491,8 @@ export const globToRegExp = (glob) =>
 	);
 
 // Spent Exceptions rows (#271; ADR-0004, "Exceptions rows"). Only a row the PR adds waives anything
-// (`addedRows` in `guard`), so every row in the merge base's table was added by a PR that has merged
-// and can no longer waive anything; only its expiry and validity are still checked. Each one is a
+// (`addedRows` in `guard`), so every row in the base's table was added by an earlier PR (merged, or
+// with `--base` on a stack part an earlier part, #310) and can no longer waive anything; only its expiry and validity are still checked. Each one is a
 // warning, never a finding, so the next PR can remove it without a cleanup PR of its own. A row
 // this PR rewrites under the same ID is a new row, which waives, so it isn't named. A Path that no
 // file in the checkout matches is named too, as a second reason.
@@ -1666,7 +1671,7 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 			);
 			const kept = new Set(f.added.map((a) => a.text.trim()));
 			const gone = new Set(f.removed.map((r) => r.text.trim()));
-			const backedNow = backsRequired(f.path, now, required);
+			const backedNow = backsRequired(f.path, now, required, before);
 			for (const r of f.removed) {
 				// The `stack` job decides whether typecheck, lint and test run (#264): guarded like `floor`.
 				const guarded = CHECK_STEP.test(r.text) || GUARDED_JOBS.has(jobOf(before, r.line));
