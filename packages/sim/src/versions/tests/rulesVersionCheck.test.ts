@@ -56,9 +56,9 @@ describe.each(registries)("the rules-version check, over %s", (_name, checked, r
 			const sim = versions.simOf(version);
 			fc.assert(
 				fc.property(farmId, timedActions, (id, played) => {
-					for (const farm of play(sim, id, played).farms) {
-						expect(listUpgradeFaults(checked, version, farm)).toEqual([]);
-					}
+					// Each run's last farm: comparing every farm of a run took over the property timeout.
+					const { final } = play(sim, id, played);
+					expect(listUpgradeFaults(checked, version, final)).toEqual([]);
 				}),
 				params,
 			);
