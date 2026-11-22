@@ -65,6 +65,7 @@ describe("the store gate (B100 with the slice's rules)", () => {
 				db,
 				newFarm: () => rules.newFarm(script.farmId),
 				replay: rules.replay,
+				rulesVersion: rules.rulesVersion,
 			});
 			const afterGap = findGap(script.steps);
 			expect(afterGap, "the step after the 8-hour gap").toBeGreaterThan(0);

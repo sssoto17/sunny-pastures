@@ -120,13 +120,14 @@ const compile = (dir) => {
 	const out = join(dir, "out");
 	const tsc = spawnSync(
 		process.execPath,
-		[join(ROOT, "node_modules/typescript/bin/tsc"), "-p", join(ROOT, SIM_BUILD), "--outDir", out],
+		[join(ROOT, "node_modules/typescript-7/bin/tsc"), "-p", join(ROOT, SIM_BUILD), "--outDir", out],
 		{ encoding: "utf8" },
 	);
 	if (tsc.status !== 0) throw new CannotRun(`the sim's build failed:\n${tsc.stdout}${tsc.stderr}`);
 
 	writeFileSync(join(out, "package.json"), '{ "type": "module" }\n');
-	const ts = createRequire(import.meta.url)(join(ROOT, "node_modules/typescript"));
+	// TypeScript 7 has no compiler API until 7.1, so the conversion uses the TS 6 API package (#268).
+	const ts = createRequire(import.meta.url)("@typescript/typescript6");
 	const simConfig = join(ROOT, "packages/sim/tsconfig.json");
 	const { options } = ts.parseJsonConfigFileContent(
 		ts.readConfigFile(simConfig, ts.sys.readFile).config,

@@ -20,6 +20,8 @@ runs:
     # pins. v2.122.0 was published on 23 Oct 2026, past the 7-day rule for binaries
     # (CONSTRAINTS.md, "Tools are dependencies"). The hash is the release's own checksums.txt line,
     # copied here so a replaced release asset fails the step (as security.yml does for gitleaks).
+    # .devcontainer/post-create.sh reads SUPABASE_VERSION and SUPABASE_SHA256 from this file, one
+    # `KEY: value` line each, so keep them in that shape (#501).
     - name: Install the Supabase CLI
       shell: bash
       env:
