@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { findEarlyClosings } from "../pr-body-guard.mjs";
+import { findEarlyClosings, findForeignClosings, ownIssue } from "../pr-body-guard.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../pr-body-guard.mjs", import.meta.url));
 const REPO = "sssoto17/sunny-pastures";
@@ -47,6 +47,13 @@ Part 1 of 2. Part 2 (based on this branch) adds the two-process gate and \`ci / 
 `;
 
 const lines = (findings) => findings.map((f) => f.line);
+
+// #426 (merged 21 Nov from claude/lanes-push-admin-2pna8j), lines 1 and 60 of its body: it closed
+// #385, as meant, and #386 too, through a code span in a bullet about a refused variable. #386 had
+// work left and was reopened (#512).
+const PR_426 = `Closes #385
+${"\n".repeat(58)}  - A variable naming an issue the body doesn't link (\`38\` against \`Closes #386\`): refused.
+`;
 
 describe("findEarlyClosings", () => {
 	it("finds #131's code-span keyword in a table cell, on line 16", () => {
@@ -161,6 +168,109 @@ describe("findEarlyClosings", () => {
 	});
 });
 
+describe("ownIssue", () => {
+	it.each([
+		["512-merge-closes", 512],
+		["claude/issue-512-merge-closes-195im7", 512],
+		["claude/512-merge-closes", 512],
+		["68-tests-a-f-2", 68],
+	])("reads the issue from the branch %s", (branch, issue) => {
+		expect(ownIssue(branch, "Closes #9", REPO)).toBe(issue);
+	});
+
+	it.each([
+		["a Closes line", "Closes #385\n\nText.", 385],
+		["a Part of line", "Part of #48\n\nText.", 48],
+		["a link line after a quoted one", "> Closes #44 was the old plan\n\nCloses #5", 5],
+		["a link line after a fenced one", "```\nCloses #44\n```\nCloses #5", 5],
+		["a link line in bold under a heading", "## Link\n\n**Closes** #7", 7],
+	])(
+		"falls back to the body's first link line when the branch names no issue: %s",
+		(_, body, issue) => {
+			expect(ownIssue("claude/lanes-push-admin-2pna8j", body, REPO)).toBe(issue);
+		},
+	);
+
+	it.each(["claude/lanes-push-admin", "dependabot/npm_and_yarn/vitest-4.1.0", "main"])(
+		"is null when neither the branch %s nor the body names one",
+		(branch) => {
+			expect(ownIssue(branch, "Bumps vitest.\n\nIt closes #7 mid-line.", REPO)).toBeNull();
+		},
+	);
+});
+
+describe("findForeignClosings", () => {
+	it("finds #426's code-span keyword for #386 on line 60", () => {
+		expect(findForeignClosings(PR_426, REPO, 385)).toEqual([
+			{ line: 60, issue: 386, text: "Closes #386" },
+		]);
+	});
+
+	it.each([
+		["a code span", "Closes #5\n\nSee `fixes #6`."],
+		["a quote", "Closes #5\n\n> resolves #6"],
+		["prose", "Closes #5\n\nThis also closed #6 on the way."],
+		["a table cell", "Closes #5\n\n| a | fixes #6 |"],
+		["an issue URL", "Closes #5\n\nfixes https://github.com/sssoto17/sunny-pastures/issues/6"],
+		["an Also line in a quote", "Closes #5\n> Also closes #6"],
+		["an Also line in a code span", "Closes #5\n`Also closes #6`"],
+		["an Also line with another keyword", "Closes #5\nAlso fixes #6"],
+		["an Also line in a fenced block", "Closes #5\n```\nAlso closes #6\n```"],
+		["an Also line in an unclosed fence", "Closes #5\n~~~md\n\nAlso closes #6"],
+		["a bold keyword", "Closes #5\n**Fixes** #6"],
+		["a bold keyword with its colon", "Closes #5\n__Resolves:__ #6"],
+	])("finds a keyword for another issue in %s", (_, body) => {
+		expect(findForeignClosings(body, REPO, 5).map((f) => f.issue)).toEqual([6]);
+	});
+
+	it("stays fast on a body built to make the patterns backtrack", () => {
+		const body = `${" \n".repeat(30_000)}${"also ".repeat(20_000)}close${" ".repeat(60_000)}x`;
+		const start = performance.now();
+		findForeignClosings(body, REPO, 5);
+		ownIssue("claude/x", body, REPO);
+		expect(performance.now() - start).toBeLessThan(1000);
+	});
+
+	it("finds every keyword for an issue when the PR has none of its own", () => {
+		expect(lines(findForeignClosings("Bumps x.\n\nfixes #6\ncloses #7", REPO, null))).toEqual([
+			3, 4,
+		]);
+	});
+
+	it("passes the PR template as it stands", () => {
+		const template = readFileSync(
+			fileURLToPath(new URL("../../pull_request_template.md", import.meta.url)),
+			"utf8",
+		);
+		expect(findForeignClosings(template, REPO, null)).toEqual([]);
+		expect(findEarlyClosings(template, REPO)).toEqual([]);
+	});
+
+	it("checks the rest of an Also closes line", () => {
+		expect(findForeignClosings("Closes #5\nAlso closes #6, fixes #7", REPO, 5)).toEqual([
+			{ line: 2, issue: 7, text: "fixes #7" },
+		]);
+	});
+
+	describe("passes", () => {
+		it.each([
+			["the own issue, in any form", "Closes #5\n\nfixes sssoto17/sunny-pastures#5, `resolves #5`"],
+			["an Also closes line", "Closes #5\nAlso closes #6"],
+			["an Also closes line after a closed fence", "Closes #5\n```\nx\n```\nAlso closes #6"],
+			["an Also closes line with markdown", "Closes #5\n\n- **Also closes** #6\n  also closes: #7"],
+			["another repository's issue", "Closes #5\n\ncloses octo-org/octo-repo#6"],
+			["a longer number with a word between", "Closes #5\n\nIt closes the gap #6 found."],
+			[
+				"the PR template's own comment",
+				'Closes # <!-- or "Part of #N" for an earlier part of a split; the last part says Closes -->',
+			],
+			["an empty body", ""],
+		])("%s", (_, body) => {
+			expect(findForeignClosings(body, REPO, 5)).toEqual([]);
+		});
+	});
+});
+
 describe("pr-body-guard.mjs", () => {
 	let dir;
 	afterEach(() => {
@@ -177,7 +287,28 @@ describe("pr-body-guard.mjs", () => {
 		});
 		return { code: r.status, out: r.stdout + r.stderr };
 	};
-	const event = (body) => ({ pull_request: { body }, repository: { full_name: REPO } });
+	const event = (body, ref = "48-gate") => ({
+		pull_request: { body, head: { ref } },
+		repository: { full_name: REPO },
+	});
+
+	it("fails #426's body on #386 and names the line", () => {
+		const r = run(event(PR_426, "claude/lanes-push-admin-2pna8j"));
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("line 60: `Closes #386` links #386, but this PR's issue is #385");
+		expect(r.out).toContain("::error title=guard / pr-body::");
+	});
+
+	it("passes a body with an Also closes line", () => {
+		const r = run(event("Closes #385\nAlso closes #386\n\nBoth done.", "385-lanes"));
+		expect(r).toEqual({ code: 0, out: expect.stringContaining("pr-body: pass") });
+	});
+
+	it("fails a body that closes another issue than the branch's", () => {
+		const r = run(event("Closes #513", "512-merge-closes"));
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("line 1: `Closes #513` links #513, but this PR's issue is #512");
+	});
 
 	it("fails #279's first body and names the line and the issue", () => {
 		const r = run(event(PR_279));

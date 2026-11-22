@@ -48,7 +48,7 @@ in the PR title is the type (see **Pull requests**).
 | `idea` | Wanted but not shaped enough to build. Parked until picked up | Chore |
 
 **`idea`** never moves to Ready. To work it, either a `design` issue that blocks it fleshes it out,
-or it's retyped (`feature`, `chore`…) once its body meets definition-of-ready rules 2–5. `design` is
+or it's retyped (`feature`, `chore`…) once its body meets definition-of-ready rules 2–6. `design` is
 different: it's worked now and produces the decisions.
 
 ## Areas
