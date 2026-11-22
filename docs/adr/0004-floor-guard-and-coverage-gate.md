@@ -258,7 +258,10 @@ can remove them instead.
 - _A warning, never a finding._ One block in the log, a section in the job summary and one
   `::warning` annotation on the first row the PR keeps; the change report gets the other 9 of
   GitHub's 10. `guard / floor` stays green. Each row says "remove it in this PR", or "this PR
-  removes it".
+  removes it". (Since #310, "remove it in this PR" only when the PR already edits `CONSTRAINTS.md`;
+  otherwise "the next PR that edits `CONSTRAINTS.md` removes it", as `CONSTRAINTS.md`, "Exceptions"
+  says. The intro claims only that an earlier PR added the row: with per-part `--base` (#264) the
+  base is an earlier part, which hasn't merged.)
 - _Pattern._ _Derived state_: the guard's own waiver rule decides what's spent, so the two can't
   disagree.
 - _Alternatives._ Reading the PR number from the Reason and asking GitHub whether it merged: the
@@ -267,6 +270,42 @@ can remove them instead.
   history, and any commit it finds in the base has merged anyway. A PR column in the table: it
   changes `CONSTRAINTS.md`'s row format and every reader of it, for an answer the base already
   gives. "Path gone" alone: it names none of the three cleanups' rows.
+
+**Note, 22 Nov 2026 (#308): the guard knows which checks are required.** A new `if:` anywhere in a
+workflow read as `check-removed`, so #295's `if:` on the `claude` step of `review.yml`, which backs
+no required check, needed the admin to lift `main checks`. And `CHECK_STEP` didn't match the
+required `ci / scripts` job's `bash .github/scripts/shell-suites.sh`, so removing that step passed.
+
+- _One source: ADR-0002 area 2's check-name table_ (admin, 22 Nov). The guard reads the check names
+  in its first column, at the merge base and in the PR, so a check the PR drops from the table still
+  counts. A ruleset matches a check by its job's `name:`, so a job whose `name:` is in the table, a
+  guarded job (`GUARDED_JOBS`), and every job one of those `needs:` (a skipped dependency skips the
+  required job, which then reports as passing) back a required check. ADR-0002's table gains
+  `guard / code-owned` and `guard / acceptance`, so it holds all 15 checks of `main checks` (a test
+  pins that list).
+- _What changes._ A new `if:` is `check-removed` only on a job or step that backs a required check.
+  `CHECK_STEP` learns `shell-suites.sh`, so removing `ci / scripts`' step is `check-removed`.
+  `continue-on-error: true` and any change to a guarded job still count wherever they are. A removed
+  `run:` line counts only when `CHECK_STEP` matches it, as before: counting every removed `run:`
+  line in a required job was tried in review and dropped, since it fails honest edits of a one-line
+  `run:`, misses commands inside a `run: |` block, and a `run: |` added elsewhere hides a removed
+  one.
+- _Errs towards required._ A composite action (`.github/actions/`, which any job may use), a line
+  outside any job, and every workflow when no table is found (with a note in the log) all count as
+  backing a required check, as before.
+- _Pattern._ _Single source of truth_: the guard reads the ADR's table rather than a list of its
+  own, so the two can't drift. Plus a small _dependency-graph walk_ over `needs:`.
+- _Alternatives._ The live ruleset through the API: the floor job has no token, and a fork's PR
+  couldn't read it. A list in `floor-guard.mjs` or `CONSTRAINTS.md`'s "Required check" column: a
+  second copy (the column lacks the guard checks), and the copy #299 already let drift. A YAML
+  parser: the floor job installs only the Markdown parser; the line reader matches how `jobOf`
+  already reads jobs.
+
+**Note, 22 Nov 2026 (#309): a ratchet's first value drops no negation.** The "CI runner time per PR"
+row's Direction gains "must not grow past that budget", so `compareRule` reads a higher value as
+`threshold-loosened`, as it does for "Reviewer cost per PR". And a "Today" cell going from "not yet"
+to its first value no longer warns `rule-narrowed: drops "not"` (#302's proposed issue 1): the old
+text is compared without that "not yet".
 
 ## The guard and the gate as a whole (#99, decided 9 Nov)
 
@@ -285,7 +324,7 @@ run; a 2 never reads as clean.
 | Denylist of weakening forms | Suppressions, skips, stubs, loosened configs, removed workflow steps | Each is a known shape of a lowered bar. #99 part 2 (#133) adds the forms the #40 review found passing: an empty `.catch`, a comment-only `catch`, "not yet implemented", every `fallow-ignore-*`, a deleted run count, a new tsconfig with neither `extends` nor `strict`. |
 | Structural diff of `CONSTRAINTS.md` | Rules pair by section and key, then by similarity; numbers carry a direction and a unit | It compares what a rule says, not its line. With #99 part 2 (#133), numbers pair by unit before position, so a new cap added in front can't take an old one's place, and a cap in a new unit counts as a loosening. |
 | Formatting is not content: whole-file normalized comparison (#138) | A guarded JS, TS or JSON config (by extension; YAML and extensionless files are left out, since indentation can be meaning) changed only formatting when its whole old text and its whole new text are equal once normalized: whitespace outside strings goes (one space stays between two words), a quoted string reads as its value (its escapes decoded, so its quotes and escapes don't matter), and trailing commas before a closing bracket go. Strings are scanned with their escapes and a template's `${…}`; template text and comments stay exact, and the code inside `${…}` is normalized too. A regex literal, an unclosed string, or a line break after `return`, `throw`, `break`, `continue` or `yield` makes the file unjudgeable. Then, and whenever anything else in the file changed, every finding in it stays. **So a reformat must be its own PR**: mixed with a content change in the same config, it keeps every finding | A formatter (Prettier, #125) needs no Exceptions rows. Reading the whole file from its first character is the only reading that knows whether a line sits in code, a string, a template or a comment. The first builds judged lines, then hunks. Their reviews showed a formatter changes boundary lines too (a scope swap and a reordered later-wins override slipped through), a hunk can start inside a comment or template opened above it, and a dropped trailing comma joins the next line onto an item. Alternatives: Exceptions rows per formatted file (rejected by the admin, 9 Nov), or parsing each config (no parser without an install in the floor job, #132) |
-| Prettier's config is a guarded config (#125) | An added non-comment line in `.prettierignore` is `config-loosened`, as in `.gitleaksignore` and `.semgrepignore`; a `!` line re-includes a path, which widens the check, so it passes. In `.prettierrc`, an added line naming `overrides`, an ignore-like key or `requirePragma` is `config-loosened`, and so is a removed `prettier-plugin` that isn't added back. Prettier reads its settings from other files too, so any new Prettier config file (`.prettierrc.*`, `prettier.config.*`, nested or at the root), a deleted one, one moved anywhere (renamed, into another folder, or to a name the guard skips, checked before prose files are), a new or changed top-level `prettier` key in any `package.json`, a `prettier` key in a `package.yaml`, and a new or changed `.editorconfig` are `config-loosened` as well (security reviews of #147). `.prettierrc` has no extension and may be YAML, so the #138 comparison doesn't apply to it; instead a change reads as formatting only when both versions parse as JSON to the same value. In `package.json` scripts, `prettier --check`, `fallow dupes`, `pnpm format:check` and `pnpm dupes` count as checks, and a `prettier --check` glob that loses a file type is `check-removed`. Both files are code-owned | The ignore list and the settings decide what the formatting check covers (admin, 9 Nov), so widening the list is the same moved threshold as a coverage exclusion. Alternatives: code-owned only (the admin's review would be the only check, with nothing in the guard's report), or renaming to `.prettierrc.json` so #138's comparison covers it (a rename for the guard's sake) |
+| Prettier's config is a guarded config (#125) | An added non-comment line in `.prettierignore` is `config-loosened`, as in `.gitleaksignore` and `.semgrepignore`; a `!` line re-includes a path, which widens the check, so it passes. In `.prettierrc`, an added line naming `overrides`, an ignore-like key or `requirePragma` is `config-loosened`, and so is a removed `prettier-plugin` that isn't added back. Prettier reads its settings from other files too, so any new Prettier config file (`.prettierrc.*`, `prettier.config.*`, nested or at the root), a deleted one, one moved anywhere (renamed, into another folder, or to a name the guard skips, checked before prose files are), a new or changed top-level `prettier` key in any `package.json`, a `prettier` key in a `package.yaml`, and a new or changed `.editorconfig` are `config-loosened` as well (security reviews of #147). `.prettierrc` has no extension and may be YAML, so the #138 comparison doesn't apply to it; instead a change reads as formatting only when both versions parse as JSON to the same value. In `package.json` scripts, `prettier --check`, `fallow dupes`, `pnpm format:check` and `pnpm dupes` count as checks (and since #503 `fallow audit`, `pnpm audit:changed` and `node .github/scripts/audit-changed.mjs`, which also count as a `ci.yml` step), and a `prettier --check` glob that loses a file type is `check-removed`. Both files are code-owned | The ignore list and the settings decide what the formatting check covers (admin, 9 Nov), so widening the list is the same moved threshold as a coverage exclusion. Alternatives: code-owned only (the admin's review would be the only check, with nothing in the guard's report), or renaming to `.prettierrc.json` so #138's comparison covers it (a rename for the guard's sake) |
 | Time-boxed, scoped waiver | Exceptions rows | A weakened bar passes only on a named path, for named findings, until a date, with the admin's approval (code-owned). |
 | Allowlist for one known change (#133) | A SHA-only `uses:` bump in the floor job, from Dependabot only | Dependabot's weekly bump would otherwise need the admin every week. The actor check stops an imposter commit from riding along. |
 

@@ -48,7 +48,7 @@ of it:
   `git worktree add --no-track -b <branch> .claude/worktrees/<N>-<slug> origin/main`. A reviewer who
   only needs a PR's files doesn't need a worktree: `REVIEW.md`, "Reproduce, then report", describes
   the fallback, a plain copy made with
-  `git archive refs/review/<N> | tar -x -C "$TMPDIR/review-<N>-<short sha>"`.
+  `git archive refs/review/<N> | tar -x -C <repo>/.claude/worktrees/review-<N>-<short sha>`.
 - Push with `git push origin <branch>`, never `-u`. Then open the PR with
   `scripts/open-pr.sh [--label <name>]... <branch> <body-file>` (a stack with `scripts/stack.sh`),
   never `gh pr create`: the `open-pr` workflow opens it as `sunny-factory[bot]`, and neither needs
@@ -90,8 +90,8 @@ be deleted.
   from outside the sandbox, where `git status` shows what's really there. `after-merge.sh` reads
   `/proc/self/mountinfo` first: with any mount in the worktree or its admin folder, or any
   placeholder, it stops before changing anything and prints one command to run outside. A reviewer's
-  throwaway copy under `$TMPDIR` is the exception: leave it when removal refuses (`REVIEW.md`,
-  "Reproduce, then report").
+  copy (`.claude/worktrees/review-<N>-<short sha>`) is the exception: the reviewer leaves it, and
+  `after-merge.sh` removes it once its PR is closed (`REVIEW.md`, "Reproduce, then report").
 - **`git branch -D`** always tries to drop the branch's `branch.<name>` section from `.git/config`,
   so inside the sandbox it warns "could not lock config file .git/config". The warning is harmless:
   the ref is deleted. A branch created with `--no-track` (above) has no such section, so nothing is
@@ -126,8 +126,9 @@ files, not devices. Like placeholders, they can't be deleted from inside the san
 - Writable: the current folder and `$TMPDIR`. Use `$TMPDIR` for scratch files, not `/tmp`.
 - In the main folder, `.claude/hooks/block-coordinator-work.sh` (#75) denies the coordinating
   session's file tools and common shell writes (redirects, `sed -i`, `cp`, `mv`, `rm` and the like)
-  on repo files outside `.scratch/` and `.remember/`. Paths outside the repo and removing a merged
-  worktree stay allowed. It and the branch guard skip remote sessions (`CLAUDE_CODE_REMOTE=true` or
+  on repo files outside `.scratch/`, `.remember/` and the review copies
+  (`.claude/worktrees/review-*`, #513). Paths outside the repo and removing a merged worktree stay
+  allowed. It and the branch guard skip remote sessions (`CLAUDE_CODE_REMOTE=true` or
   `GITHUB_ACTIONS=true`), which have no main folder.
 - Never writable from a session: the main folder's `.claude/settings.json`,
   `.claude/settings.local.json`, `.claude/hooks/` and `.claude/skills/`, and everything under
@@ -146,16 +147,18 @@ guidance, not a security boundary. The sandbox and the hooks are what enforce.
 An `ask` rule prompts in auto mode too, so each one can stop an unattended lane until the admin
 answers (<https://code.claude.com/docs/en/permission-modes.md>, "How the classifier evaluates
 actions"). Add one only for an action the admin must confirm. A wildcard allow paired with ask rules
-for its write flags prompts on every write: keep the pair only when the admin wants each write
-confirmed (vitest's snapshot flags, admin, 21 Nov). Otherwise drop both, so auto mode's classifier
-decides; Manual mode then prompts, or runs the command inside the sandbox when sandbox auto-allow is
-on (#434: `prettier --write` stopped the #382 lane for over an hour). A wildcard allow such as
-`pnpm exec vitest run *` buys little anyway: the #434 scan found every `pnpm exec prettier --check`
-and `pnpm exec vitest run` call decided by the classifier, not the rule. Don't count on auto mode
-dropping it, though. The permission-modes page lists "package-manager run commands" among the broad
-allow rules auto mode drops, but Claude Code 2.1.330 drops only a bare prefix (`pnpm exec *`,
-`npx *`; read from its drop check, 22 Nov, #437). So `pnpm exec vitest run *` stays in effect and
-approves every flag no ask rule names; why the scan's calls still reached the classifier is open.
+for its write flags prompts on every write: keep the ask rules only when the admin wants each write
+confirmed (vitest's `--update`, `-u` and `--outputFile`, admin, 21 Nov; its allows went in #560,
+below). Otherwise drop both, so auto mode's classifier decides; Manual mode then prompts, or runs
+the command inside the sandbox when sandbox auto-allow is on (#434: `prettier --write` stopped the
+#382 lane for over an hour). A wildcard allow such as `pnpm exec vitest run *` buys little anyway:
+the #434 scan found every `pnpm exec prettier --check` and `pnpm exec vitest run` call decided by
+the classifier, not the rule. Don't count on auto mode dropping it, though. The permission-modes
+page lists "package-manager run commands" among the broad allow rules auto mode drops, but Claude
+Code 2.1.330 drops only a bare prefix (`pnpm exec *`, `npx *`; read from its drop check, 22 Nov,
+#437). So a rule like `pnpm exec vitest run *` stays in effect and approves every flag no ask rule
+names, which is why the vitest `run` and `bench` allows are gone (proposed in #540, admin, 22 Nov,
+#560). Why the scan's calls still reached the classifier is open.
 
 ### Flags a wildcard allow can't see
 

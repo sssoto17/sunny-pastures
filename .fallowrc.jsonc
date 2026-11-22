@@ -2,6 +2,27 @@
 // that the floor guard reports.
 {
   "$schema": "./node_modules/fallow/schema.json",
+  // The changed-code gate (CONSTRAINTS.md, the Duplication, Complexity and Dead code rows; #503):
+  // `pnpm audit:changed` in `check:task`, `check:full` and `ci / lint` runs `fallow audit` over the
+  // whole repo against the merge base. `new-only` fails a PR only on what it introduces, so the
+  // inherited backlog (#503: 31 clone groups, 35 functions over the thresholds) passes. A function
+  // already over a threshold that grows gets Fallow's default `worsened` verdict: a warning.
+  "audit": { "gate": "new-only" },
+  // Fallow's own defaults, written out so the Complexity row's numbers live here. CRAP comes from
+  // coverage/coverage-final.json when a test run left one (Fallow reads it on its own; `check:full`
+  // names it), and from Fallow's static estimate of test reachability otherwise, as in `ci / lint`.
+  "health": { "maxCyclomatic": 20, "maxCognitive": 15, "maxCrap": 30 },
+  // Dead code (CONSTRAINTS.md, Dead code row). drizzle-kit reads every export of the store's
+  // schema (apps/web/drizzle.config.json; `game` makes it write `CREATE SCHEMA`), and Fallow's
+  // drizzle plugin doesn't read a drizzle.config.json, so the schema is an entry here.
+  "entry": ["apps/web/src/server/store/schema.ts"],
+  // The Supabase CLI is a system binary, pinned by `pnpm supabase:check`, not an npm package.
+  "ignoreBinaries": ["supabase"],
+  // ADR-0007, section 3 ("Errors"): the error body's types are exported for the M4 client, and
+  // where the client reads them from is still M4's decision (ADR-0007, "Open, for the admin").
+  "ignoreExports": [
+    { "file": "apps/web/src/server/http/index.ts", "exports": ["ErrorCode", "ErrorBody"] }
+  ],
   // Duplication (CONSTRAINTS.md, duplication row; ADR-0005, section 3): exact copies of 50 tokens
   // and 5 lines or more. `mild` matches token for token, so two loops of the same shape over
   // different data aren't clones ("the same rule, not the same shape"). Fallow's built-in

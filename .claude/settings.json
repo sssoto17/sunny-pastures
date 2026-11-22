@@ -51,8 +51,6 @@
 			"Bash(pnpm typecheck)",
 			"Bash(pnpm check:fast)",
 			"Bash(pnpm check:task)",
-			"Bash(pnpm exec vitest run *)",
-			"Bash(pnpm exec vitest bench *)",
 			"Bash(scripts/today-gather.sh)",
 			"Bash(scripts/today-gather.sh *)",
 			"Bash(bash .claude/hooks/after-edit.test.sh)",

@@ -1,7 +1,9 @@
 <!-- Title: <type>(<scope>): <summary>, e.g. feat(sim): ripen crops by elapsed time.
      The title and this body become the commit on main. -->
 
-Closes # <!-- or "Part of #N" for an earlier part of a split; the last part says Closes -->
+Closes # <!-- the branch's <N>, or "Part of #N" for an earlier part of a split; the last part says
+     Closes. No other closing keyword anywhere below; a PR that also completes #M adds a line
+     "Also closes #M" (docs/agents/issue-tracker.md, "Closing issues"; guard / pr-body) -->
 
 ## What and why
 

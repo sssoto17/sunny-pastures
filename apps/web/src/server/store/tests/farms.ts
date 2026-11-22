@@ -24,7 +24,7 @@ export function newFarm(): FarmState {
 }
 
 /** The stand-in's `apply`: each action adds 1 xp and moves the farm to its time. Never refuses. */
-export function applyAction(farm: FarmState, at: number): FarmState {
+function applyAction(farm: FarmState, at: number): FarmState {
 	return { ...farm, time: at, xp: farm.xp + 1 };
 }
 

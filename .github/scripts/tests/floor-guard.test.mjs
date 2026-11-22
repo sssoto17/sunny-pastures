@@ -212,6 +212,30 @@ describe("floor guard, end to end", () => {
 			});
 		});
 
+		// #503: the changed-code audit replaced `pnpm dupes` in the scripts.
+		describe("the changed-code audit", () => {
+			const AUDIT = (audit, task) =>
+				`{\n  "scripts": {\n    "audit:changed": "${audit}",\n    "check:task": "${task}"\n  }\n}\n`;
+			const TOOL = "RUST_LOG=error fallow audit --quiet";
+			const TASK = "pnpm check:fast && pnpm audit:changed --base origin/main";
+			const run = (content) => {
+				repo = makeRepo({ ...BASE, "package.json": AUDIT(TOOL, TASK) });
+				repo.write({ "package.json": content });
+				return guard();
+			};
+
+			it.each([
+				["audit:changed dropped from check:task", AUDIT(TOOL, "pnpm check:fast")],
+				["fallow audit dropped from audit:changed", AUDIT("true", TASK)],
+			])("blocks %s", (_, content) => {
+				expect(run(content).out).toContain("[check-removed] package.json");
+			});
+
+			it("accepts a flag added to the audit", () => {
+				expect(run(AUDIT(TOOL, `${TASK} --coverage coverage/coverage-final.json`)).code).toBe(0);
+			});
+		});
+
 		it("accepts an unrelated script edit", () => {
 			repo = makeRepo({ ...BASE, "package.json": OK });
 			repo.write({
@@ -312,15 +336,18 @@ describe("floor guard, end to end", () => {
 		});
 
 		// #125: the duplication and formatting checks run as steps of `ci / lint`.
-		it.each(['pnpm dupes --changed-since "origin/$BASE_REF"', "pnpm format:check"])(
-			"block a removed `%s` step",
-			(step) => {
-				const steps = `jobs:\n  lint:\n    steps:\n      - run: pnpm lint\n      - run: ${step}\n`;
-				repo = makeRepo({ ...BASE, [CI]: steps });
-				repo.write({ [CI]: steps.replace(`      - run: ${step}\n`, "") });
-				expect(guard().out).toContain(`[check-removed] ${CI}`);
-			},
-		);
+		it.each([
+			'pnpm dupes --changed-since "origin/$BASE_REF"',
+			"pnpm format:check",
+			// #503: the changed-code audit, run through its script or the tool.
+			'pnpm audit:changed --base "$SINCE"',
+			'pnpm exec fallow audit --base "$SINCE"',
+		])("block a removed `%s` step", (step) => {
+			const steps = `jobs:\n  lint:\n    steps:\n      - run: pnpm lint\n      - run: ${step}\n`;
+			repo = makeRepo({ ...BASE, [CI]: steps });
+			repo.write({ [CI]: steps.replace(`      - run: ${step}\n`, "") });
+			expect(guard().out).toContain(`[check-removed] ${CI}`);
+		});
 
 		// #99: a local action (`uses: ./…`) is read from the PR's checkout, so a PR could change what the
 		// floor job runs before the base branch's guard starts. The floor job uses pinned actions only.
@@ -1480,11 +1507,34 @@ describe("floor guard, end to end", () => {
 		it("lets the coverage ratchet get its first value, then holds it", () => {
 			realRepo(coverageToday(NOT_YET));
 			repo.write({ "CONSTRAINTS.md": coverageToday("92.5%") });
-			expect(guard().code).toBe(0);
+			const first = guard();
+			expect(first.code).toBe(0);
+			// #302's proposed issue 1 (#309): "not yet" giving way to a number drops no negation.
+			expect(first.out).not.toContain('drops "not"');
 			realRepo(coverageToday("92.5%"));
 			repo.write({ "CONSTRAINTS.md": coverageToday("90%") });
 			expect(guard().out).toContain("[threshold-loosened] CONSTRAINTS.md");
 			repo.write({ "CONSTRAINTS.md": coverageToday("93%") });
+			expect(guard().code).toBe(0);
+		});
+
+		// #309: the cost rows' Directions say they must not grow, so a higher recorded value is the
+		// loosening and a lower one passes, on the real rows.
+		it.each([
+			[
+				"CI runner time per PR",
+				"15.1 minutes per PR",
+				"16.4 minutes per PR",
+				"12.3 minutes per PR",
+			],
+			["Reviewer cost per PR", "$0.31 of Claude", "$0.45 of Claude", "$0.20 of Claude"],
+		])("holds the %s ratchet down: higher fails, lower passes", (_, today, higher, lower) => {
+			realRepo();
+			repo.write({ "CONSTRAINTS.md": edit(REAL, today, higher) });
+			const worse = guard();
+			expect(worse.code).toBe(1);
+			expect(worse.out).toContain("[threshold-loosened] CONSTRAINTS.md");
+			repo.write({ "CONSTRAINTS.md": edit(REAL, today, lower) });
 			expect(guard().code).toBe(0);
 		});
 	});
