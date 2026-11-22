@@ -98,7 +98,7 @@ Every finding gets one severity and one status.
 
 - **Required**: the PR shouldn't merge until it's fixed. A criterion not met; a rule from Always
   check broken; a bug that changes behaviour; a test that wouldn't catch the bug it exists for; a
-  missing `review:admin`; a secret.
+  missing `review:admin`; a body that contradicts the diff; a secret.
 - **Optional**: worth doing, but the PR is correct without it. A clearer design, an edge case the
   criteria don't name, a follow-up issue.
 - **Nit**: wording, naming or layout no tool checks.
@@ -122,6 +122,22 @@ Report at most five Nits per review. Pick the ones a reader would trip on.
 - Lines outside the diff. If one matters, add it as a one-line follow-up under the findings.
 - `pnpm-lock.yaml`, files marked `linguist-generated`, and vendored skill content.
 - A choice an ADR already settled. Report the ADR, not the taste.
+
+## Dependabot PRs
+
+Dependabot's PRs get no bot review: `review.yml` skips `dependabot[bot]`. Runs that Dependabot
+triggers get no Actions or environment secrets, and copying `CLAUDE_CODE_OAUTH_TOKEN` into
+Dependabot secrets would put the token next to bumped actions nobody has reviewed yet. They are
+code-owned and carry `review:admin`, so the admin reviews them, by this checklist:
+
+- The release is past the 7-day cooldown (`cooldown` in `.github/dependabot.yml`).
+- The changelog has no breaking change for us.
+- CI is green on the head, including `ci / scripts`, which runs the action pin check
+  (`scripts/setup/ci-claude.test.sh`, #486).
+- A `claude-code-action` bump also adds its new SHA to the repo's allowed actions before merge. The
+  pin check stays red until `ACTION_PATTERNS` in `scripts/setup/ci-claude.sh` carries the new SHA
+  and version (and `setup-bun`'s, if the action moved it), so that edit goes onto Dependabot's
+  branch too.
 
 ## Review kinds
 
