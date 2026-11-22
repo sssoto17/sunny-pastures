@@ -1,0 +1,4 @@
+# The M3 load run's result data, written by tools/load/ (#388), not by hand, so not counted toward
+# the split size (CONSTRAINTS.md, "Split size"). README.md, the results page, counts.
+*.csv linguist-generated=true
+*.json linguist-generated=true
