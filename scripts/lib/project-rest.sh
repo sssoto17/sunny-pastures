@@ -30,7 +30,14 @@ PROJECT_JQ_DEFS='def txt: if type == "object" then (.raw // .html) else . end;
 def val: if .value == null then null
   elif (.value | type) == "object" then ((.value.name // .value.title) | txt)
   else .value end;
-def fv($n): ([.fields[]? | select(.name == $n) | val] | first);'
+def fv($n): ([.fields[]? | select(.name == $n) | val] | first);
+def iterations: (.configuration.iterations // []) + (.configuration.completed_iterations // []) | .[];'
+
+# The Project's calls: with PROJECT_GH_TOKEN set, gh uses it for them and nothing else (#417), so
+# a workflow's Project token never reaches the issue's calls.
+project_gh() { # gh args...
+  if [[ -n ${PROJECT_GH_TOKEN-} ]]; then GH_TOKEN=$PROJECT_GH_TOKEN gh "$@"; else gh "$@"; fi
+}
 
 # Callers run a Project call with gh's stderr in a file; after a failure, this says whether it
 # was GitHub (or the proxy) refusing access, rather than an error worth stopping for.
