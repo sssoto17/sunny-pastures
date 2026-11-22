@@ -4,7 +4,7 @@
 # scripts/new-issue.sh. The review runs once per milestone instead of in a weekly slot that was
 # missed three weeks running (#290, #407, retro 2026-11-22). Run by .github/workflows/
 # milestone-review.yml on `milestone: created`, and by hand for a backfill. A milestone that
-# already has an issue titled "Architecture review…" (open or closed) is left alone, so a re-run
+# already has an issue titled "Architecture review, …" (open or closed) is left alone, so a re-run
 # never files a second. REST only (`gh api`; docs/agents/github-rest.md).
 # Tests: scripts/milestone-review.test.sh.
 # Needs bash 4.4+, an authenticated gh that can write issues, and for Week the `project` scope or
@@ -37,7 +37,7 @@ the milestone's due date. With no due date, or no iteration containing it yet, W
 and the issue carries `triage` (scripts/new-issue.sh adds it); the log says so.
 
 Does nothing, and exits 0, when the milestone already has an issue whose title starts with
-"Architecture review" (open or closed): a milestone gets one review.
+"Architecture review, " (open or closed): a milestone gets one review.
 
 Exit codes: 0 filed or already there, 2 bad arguments or a closed milestone (nothing filed),
 3 GitHub couldn't be read before filing (nothing filed); otherwise scripts/new-issue.sh's code
@@ -82,9 +82,10 @@ IFS=$'\t' read -r state due_on title <<<"$row"
 [[ $state == open ]] || die 2 "milestone \"$title\" is $state; nothing was filed"
 
 # Every issue of the milestone, closed ones too, so a review already done counts. REST lists PRs
-# as issues, hence the select.
+# as issues, hence the select. The comma matters: #517 itself ("Architecture review per
+# milestone, …") sits in M4 and isn't a review.
 existing=$(gh api --paginate "repos/$OWNER/$REPO/issues?milestone=$number&state=all&per_page=100" \
-  --jq ".[] | select(has(\"pull_request\") | not) | select(.title | startswith(\"$PREFIX\")) | .number") ||
+  --jq ".[] | select(has(\"pull_request\") | not) | select(.title | startswith(\"$PREFIX, \")) | .number") ||
   die 3 "could not list the issues of \"$title\"; nothing was filed"
 if [[ -n $existing ]]; then
   echo "milestone-review: \"$title\" already has its review: #$(paste -sd' ' - <<<"$existing" | sed 's/ /, #/g'). Nothing was filed."

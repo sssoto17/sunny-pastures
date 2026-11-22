@@ -216,6 +216,13 @@ case_ 4
 expect_code 0
 expect_not_filed
 
+# The build issue that asked for these reviews (#517) is no review: the prefix needs the comma.
+reset
+issues '[{"number": 517, "title": "Architecture review per milestone, filed by a milestone-created workflow"}]'
+case_ 4
+expect_code 0
+expect_arg --title "Architecture review, M4 Playable slice live"
+
 # A pull request with that title is not a review issue.
 reset
 issues '[{"number": 601, "title": "Architecture review, M4 Playable slice live", "pull_request": {}}]'
