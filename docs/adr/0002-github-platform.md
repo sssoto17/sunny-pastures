@@ -1950,7 +1950,7 @@ the gap: `guard / secrets` and `ci / audit` below.
 | **Pages** | Skip | Vercel hosts the game; the docs live in the repo. Off today. |
 | **Wiki** | Skip (off today) | Docs belong in `docs/`, versioned with the code, where agents read them. |
 | **Discussions** | Skip (off today) | Solo project. Playtest feedback goes through forms into `triage` (`docs/diagrams/workflow.md`). |
-| **Codespaces / dev container** | Defer; reconsider if the examiners need to run the project | Local WSL plus cloud sessions cover the admin. A dev container would pin Node 24, pnpm and the Supabase CLI for a reader. |
+| **Codespaces / dev container** | Defer for development; reconsider if the examiners need to run the project | Local WSL plus cloud sessions cover the admin. A dev container would pin Node 24, pnpm and the Supabase CLI for a reader. The load run's devcontainer is [ADR-0009](0009-devcontainer-for-the-load-run.md) (load VM only); development use is parked in #502, behind this trigger. |
 | **GitHub Packages** | Skip | Nothing is published; `packages/sim` is a workspace package. |
 | **Copilot code review** | Skip | The reviewer is an own App running the repo's skills (area 2). "Copilot approvals" stays off: an approval from it would count toward the required approval ([Copilot code review](https://docs.github.com/en/copilot/concepts/agent-capabilities/agent-powered-workflows-and-operations/code-review), checked 7 Nov). |
 | **Copilot cloud agent** | Skip | The factory is Claude Code (#37). |
@@ -1958,7 +1958,7 @@ the gap: `guard / secrets` and `ci / audit` below.
 | **Topics** | Adopt now | None set. Suggested: `idle-game`, `typescript`, `nextjs`, `supabase`, `deterministic-simulation`, `bachelor-project`. |
 | **Description** | Keep | Already set and accurate. |
 | **Social preview** | At go-public (#38) | Only shown for public repos. |
-| **A container for the load test and CI** | Out of scope | Not a GitHub feature. Design issue #39 (M3). |
+| **A container for the load test and CI** | Out of scope | Not a GitHub feature. Decided in #39 (M3) and recorded in [ADR-0009](0009-devcontainer-for-the-load-run.md): no app container, a devcontainer for the load run only. |
 
 ### GitHub Marketplace
 

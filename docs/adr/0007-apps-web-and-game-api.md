@@ -614,6 +614,11 @@ T6, T7, T9 and T10 come with M6.
 One **milestone run on a cloud load VM, never in CI**: shared runners make timings noise, and
 Actions minutes are tight.
 
+- **The run happens inside the devcontainer** ([ADR-0009](0009-devcontainer-for-the-load-run.md)):
+  `next start`, Locust and the Supabase stack run in `.devcontainer/devcontainer.json` on the load
+  VM, started with `pnpm exec devcontainer up`. Postgres runs in a container there, where the spike
+  ran it natively; the results record that as a method difference from ADR-0001.
+
 - `tools/load/` is a uv project ported from the spike's (Locust pinned, `exclude-newer` 7 days
   back). It runs against `next start` and the local stack with ADR-0001's method: 50 and 200
   players, the stress run (200 players, no wait, 2 min measured) and the per-phase `Server-Timing`
