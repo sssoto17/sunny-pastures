@@ -72,7 +72,7 @@ else
 
 	echo "== $label: Locust, $users users, $run_time (the first $warmup s are warm-up)"
 	rc=0
-	PLAYERS=$work/players.json REQUEST_LOG=$work/requests.csv WINDOW_FILE=$out/window.json \
+	PLAYERS=$work/players.json RETURNERS=$returners REQUEST_LOG=$work/requests.csv WINDOW_FILE=$out/window.json \
 		WARMUP_S=$warmup NO_WAIT=$no_wait "${uv[@]}" locust -f tools/load/locustfile.py --headless \
 		--only-summary -u "$users" -r 10 -t "$run_time" --host "$base" --json-file "$out/locust" || rc=$?
 	# Locust exits 1 when any request failed: a result, not a harness error.

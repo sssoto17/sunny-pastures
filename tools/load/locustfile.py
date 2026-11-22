@@ -60,7 +60,11 @@ def _read_players() -> dict[str, list[dict]]:
 
 _players = _read_players()
 _active = iter(_players["active"])
-_returning = iter(_players["returning"])
+#: Each returning player's first farm is set aside (RETURNERS: how many returning players run), so a
+#: player spawned after fast ones drained the shared rest (the stress run) still has one.
+_returners = int(os.environ.get("RETURNERS", "0"))
+_firsts = iter(_players["returning"][:_returners])
+_returning = iter(_players["returning"][_returners:])
 _window: dict = {"warmupS": WARMUP_S}
 _log_file = open(os.environ["REQUEST_LOG"], "w", newline="") if os.environ.get("REQUEST_LOG") else None
 _log = csv.writer(_log_file) if _log_file else None
@@ -144,6 +148,13 @@ class Player(HttpUser):
     kind = "player"
     look_share = 0.0
 
+    def take_next(self) -> bool:
+        """The next unused returning farm, if any is left; False keeps the current one."""
+        fresh = next(_returning, None)
+        if fresh is not None:
+            self.take(fresh)
+        return fresh is not None
+
     def take(self, player: dict) -> None:
         self.player = player
         self.auth = {"Authorization": f"Bearer {player['token']}"}
@@ -216,12 +227,15 @@ class ReturningPlayer(Player):
     kind = "return"
     wait_time = waiting(10, 30)
 
+    def on_start(self) -> None:
+        self.take(next(_firsts))
+        self.first = True
+
     @task
     def visit(self) -> None:
-        fresh = next(_returning, None)
-        if fresh is not None:
-            self.take(fresh)
-        self.read_farm("return" if fresh is not None else "revisit")
+        fresh = self.first or self.take_next()
+        self.first = False
+        self.read_farm("return" if fresh else "revisit")
         for i in range(random.randint(2, 5)):
             if i and not NO_WAIT:
                 gevent.sleep(random.uniform(2, 8))
