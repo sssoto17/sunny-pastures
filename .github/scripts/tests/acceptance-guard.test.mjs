@@ -74,6 +74,16 @@ describe("checkAcceptance", () => {
 		expect(r.message).toContain("sunny-factory[bot]");
 	});
 
+	// #425: a copy lists its source as `previous_filename`, and the source can be listed as well.
+	it("names a path once when a copy's source is listed too", async () => {
+		const files = [
+			{ filename: TEST, status: "modified" },
+			{ filename: "tests/acceptance/b.test.ts", status: "copied", previous_filename: TEST },
+		];
+		const r = await checkAcceptance(event(), github(files).deps);
+		expect(r.touched).toEqual([TEST, "tests/acceptance/b.test.ts"]);
+	});
+
 	it("passes a bot PR that doesn't touch it", async () => {
 		const r = await checkAcceptance(event(), github(["README.md", "b.ts"]).deps);
 		expect(r).toMatchObject({ ok: true, touched: [] });
@@ -109,12 +119,19 @@ describe("acceptance-guard.mjs", () => {
 		dir = server = undefined;
 	});
 
-	// A fake REST API on localhost: GITHUB_API_URL points the script at it, as Actions sets it.
+	// A fake REST API on localhost: GITHUB_API_URL points the script at it, as Actions sets it. A
+	// list answers one page at a time, as REST does: `per_page` (default 30) from `page` (default 1).
 	const serve = async (routes) => {
 		const seen = [];
 		server = createServer((req, res) => {
 			seen.push(`${req.method} ${req.url}`);
-			const answer = routes[`${req.method} ${req.url.replace(/\?.*/, "")}`];
+			const url = new URL(req.url, "http://fake");
+			let answer = routes[`${req.method} ${url.pathname}`];
+			if (Array.isArray(answer)) {
+				const size = Number(url.searchParams.get("per_page") ?? 30);
+				const page = Number(url.searchParams.get("page") ?? 1);
+				answer = answer.slice((page - 1) * size, page * size);
+			}
 			res.writeHead(answer ? 200 : 404, { "content-type": "application/json" });
 			res.end(JSON.stringify(answer ?? {}));
 		});
@@ -153,6 +170,31 @@ describe("acceptance-guard.mjs", () => {
 		expect(r.status).toBe(1);
 		expect(r.out).toContain("::error title=guard / acceptance::");
 		expect(r.out).toContain('"tests/acceptance/farm.test.ts"');
+	});
+
+	const hundred = () => Array.from({ length: 100 }, (_, i) => `src/f${i}.ts`);
+	const fileRequests = (api) => api.seen.filter((s) => s.includes("/files"));
+
+	// #425: REST lists 100 files a page, so a PR of 101 files needs page 2, and the touched path is
+	// the 101st. A loop that stops after page 1 lists 100 of 101 and exits 2; one that never moves
+	// to page 2 never ends.
+	it("reads every page of the file list, and fails on a path only page 2 lists", async () => {
+		const files = hundred();
+		const api = await serve(routes([...files, "tests/acceptance/farm.test.ts"]));
+		const r = await run(event(), api.url);
+		expect(r.status).toBe(1);
+		expect(r.out).toContain('"tests/acceptance/farm.test.ts"');
+		expect(fileRequests(api)).toEqual([
+			`GET ${P}/pulls/384/files?per_page=100&page=1`,
+			`GET ${P}/pulls/384/files?per_page=100&page=2`,
+		]);
+	});
+
+	it("stops at the empty page after a full one, and passes 100 untouched files", async () => {
+		const api = await serve(routes(hundred()));
+		const r = await run(event(), api.url);
+		expect(r.status).toBe(0);
+		expect(fileRequests(api)).toHaveLength(2);
 	});
 
 	it("exits 0 for the admin with no request at all", async () => {

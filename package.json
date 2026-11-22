@@ -34,6 +34,7 @@
 		"check:full": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm format:md && pnpm guard:floor && pnpm boundaries && pnpm db:check && SIM_PROPERTY_RUNS=1000 pnpm test && pnpm audit:changed --base origin/main --coverage coverage/coverage-final.json && pnpm coverage:gate && pnpm bench && pnpm determinism"
 	},
 	"devDependencies": {
+		"@devcontainers/cli": "0.90.0",
 		"@eslint/js": "10.0.1",
 		"@ianvs/prettier-plugin-sort-imports": "4.7.1",
 		"@stryker-mutator/api": "10.1.1",
