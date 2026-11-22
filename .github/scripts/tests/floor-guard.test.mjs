@@ -340,7 +340,7 @@ describe("floor guard, end to end", () => {
 			'pnpm dupes --changed-since "origin/$BASE_REF"',
 			"pnpm format:check",
 			// #503: the changed-code audit, run through its script or the tool.
-			'pnpm -s audit:changed --base "$SINCE" --format json >"$report" || status=$?',
+			'pnpm audit:changed --base "$SINCE"',
 			'pnpm exec fallow audit --base "$SINCE"',
 		])("block a removed `%s` step", (step) => {
 			const steps = `jobs:\n  lint:\n    steps:\n      - run: pnpm lint\n      - run: ${step}\n`;

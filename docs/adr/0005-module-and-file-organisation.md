@@ -129,6 +129,10 @@ minimum clone size so today's code passes, and proves that a copied helper fails
 install. A clone detector doesn't catch the same rule written two ways; review and the rule above
 cover that, and `fallow-ignore-*` comments are already a weakened bar (Floor).
 
+Since #503 the check is Fallow's changed-code audit (`pnpm audit:changed`, `CONSTRAINTS.md`,
+Duplication row) across the whole repo: `packages/sim` keeps the bar above, and elsewhere only a
+clone group the change introduces fails.
+
 **Patterns:** package by feature (vertical slices named from `GLOSSARY.md`); a shared kernel for
 cross-cutting modules; DRY at the second occurrence, extracted by concept.
 

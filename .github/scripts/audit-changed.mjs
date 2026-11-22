@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const FALLOW = fileURLToPath(new URL("../../node_modules/.bin/fallow", import.meta.url));
+const ACTIONS = process.env["GITHUB_ACTIONS"] === "true";
 // Outside the checkout, so Prettier and git never see it; removed once rendered.
 const REPORT = join(tmpdir(), `audit-changed-${String(process.pid)}.json`);
 
@@ -52,8 +53,7 @@ for (const group of clones) {
 	);
 	const first = group.instances[0];
 	const line = `A clone group in this change (CONSTRAINTS.md, Duplication): ${where.join(", ")}`;
-	if (process.env["GITHUB_ACTIONS"] === "true")
-		console.log(`::error file=${first.file},line=${String(first.start_line)}::${line}`);
+	if (ACTIONS) console.log(`::error file=${first.file},line=${String(first.start_line)}::${line}`);
 	else console.error(line);
 }
 console.log(
@@ -73,7 +73,7 @@ function render() {
 		}
 		return r.stdout;
 	};
-	if (process.env["GITHUB_ACTIONS"] !== "true") {
+	if (!ACTIONS) {
 		process.stdout.write(as("github-summary"));
 		return;
 	}
@@ -84,7 +84,9 @@ function render() {
 
 // The clone groups that fail the change: those it introduced, and under `new-only` also any group
 // with a copy in packages/sim that the report lists (it touches a changed file), since the
-// Duplication row kept the sim's bar from before #503: 0 clones in its changed files.
+// Duplication row kept the sim's bar from before #503: 0 clones in its changed files. A group also
+// counts when only its copy outside the sim was touched; with 0 clones in the sim on main and every
+// new one failing here, no such group can be inherited.
 function failingClones(r) {
 	const groups = r.duplication?.clone_groups ?? [];
 	if (r.attribution?.gate !== "new-only") return groups;
