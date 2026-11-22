@@ -42,9 +42,6 @@ const WORKFLOW = /^\.github\/(workflows|actions)\/.+\.ya?ml$/;
 const GUARDED_JOBS = new Set(["floor", "stack", "stack-base", "code-owned", "acceptance-guard"]);
 const CHECK_STEP =
 	/floor-guard\.mjs|stack-base-guard\.mjs|code-owned-guard\.mjs|acceptance-guard\.mjs|coverage-gate\.mjs|shell-suites\.sh|pnpm (typecheck|lint|test|dupes|format:check)\b|SIM_PROPERTY_RUNS/;
-// A step's `run:` line. In a job that backs a required check, removing one removes a check (#308),
-// so a new required job's command needs no new pattern in CHECK_STEP.
-const RUN_STEP = /^\s*-?\s*run:/;
 
 // The required checks (#308): the check names in the first column of ADR-0002 area 2's check-name
 // table, its one source (admin, 22 Nov). The table is a superset of ruleset `main checks`, so it
@@ -1521,10 +1518,10 @@ const spentRows = (baseRows, allNow, addedRows) => {
 // Only a PR that already edits CONSTRAINTS.md is told to remove a row: editing it makes any PR
 // code-owned (#310). With `--base` on a stack part the base is an earlier part, whose rows haven't
 // merged yet, so the intro claims only that an earlier PR added the row (#310).
-const spentReport = (spent, edits) => {
+const spentReport = (spent, editsConstraints) => {
 	if (!spent.length) return null;
 	const intro = `${spent.length} spent Exceptions row(s): each is in the base's table, so an earlier PR added it, and only rows a PR adds waive anything (CONSTRAINTS.md, "Exceptions"). A warning, not a finding.`;
-	const todo = edits
+	const todo = editsConstraints
 		? "remove it in this PR"
 		: "the next PR that edits `CONSTRAINTS.md` removes it";
 	const lines = spent.map(
@@ -1669,14 +1666,10 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 			);
 			const kept = new Set(f.added.map((a) => a.text.trim()));
 			const gone = new Set(f.removed.map((r) => r.text.trim()));
-			const backedBefore = backsRequired(f.oldPath ?? f.path, before, required);
 			const backedNow = backsRequired(f.path, now, required);
 			for (const r of f.removed) {
 				// The `stack` job decides whether typecheck, lint and test run (#264): guarded like `floor`.
-				const guarded =
-					CHECK_STEP.test(r.text) ||
-					GUARDED_JOBS.has(jobOf(before, r.line)) ||
-					(RUN_STEP.test(r.text) && backedBefore(r.line));
+				const guarded = CHECK_STEP.test(r.text) || GUARDED_JOBS.has(jobOf(before, r.line));
 				const bump = bumped.has(bumpKey(before, r));
 				if (guarded && !bump && !kept.has(r.text.trim()))
 					weak("check-removed", f.path, `${r.line} (old)`);

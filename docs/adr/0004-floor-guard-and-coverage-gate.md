@@ -284,9 +284,12 @@ required `ci / scripts` job's `bash .github/scripts/shell-suites.sh`, so removin
   `guard / code-owned` and `guard / acceptance`, so it holds all 15 checks of `main checks` (a test
   pins that list).
 - _What changes._ A new `if:` is `check-removed` only on a job or step that backs a required check.
-  In such a job, removing any `run:` line that isn't kept elsewhere is `check-removed` too, so a new
-  required job needs no new pattern; `CHECK_STEP` also learns `shell-suites.sh`.
-  `continue-on-error: true` and any change to a guarded job still count wherever they are.
+  `CHECK_STEP` learns `shell-suites.sh`, so removing `ci / scripts`' step is `check-removed`.
+  `continue-on-error: true` and any change to a guarded job still count wherever they are. A removed
+  `run:` line counts only when `CHECK_STEP` matches it, as before: counting every removed `run:`
+  line in a required job was tried in review and dropped, since it fails honest edits of a one-line
+  `run:`, misses commands inside a `run: |` block, and a `run: |` added elsewhere hides a removed
+  one.
 - _Errs towards required._ A composite action (`.github/actions/`, which any job may use), a line
   outside any job, and every workflow when no table is found (with a note in the log) all count as
   backing a required check, as before.

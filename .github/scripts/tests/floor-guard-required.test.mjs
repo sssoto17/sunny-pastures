@@ -218,12 +218,6 @@ describe("a removed step in a workflow (#308)", () => {
 		expect(r.out).toContain(`[check-removed] ${CI}`);
 	});
 
-	it("fails when any `run:` step of a required job goes", () => {
-		setup();
-		edit("      - run: echo gate\n", "      - run: true\n");
-		expect(guard().out).toContain(`[check-removed] ${CI}`);
-	});
-
 	it("passes a `run:` step removed from a job that is no required check", () => {
 		setup();
 		edit("      - name: Run Claude\n        run: claude\n", "");
