@@ -9,10 +9,11 @@
 #     --generate-hashes --no-header --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
 #     --exclude-newer <YYYY-MM-DD>T00:00:00Z --index-url https://pypi.org/simple \
 #     -o .github/semgrep/requirements.txt
-# then put this header back. The override keeps wcmatch at 11.2, past the `wcmatch~=8.3` Semgrep
-# declares: 8.5.2 has a ReDoS (GHSA-53pm-wgxf-c6qf), and overrides.txt says why it is safe (#455).
-# So `pip check` reports a wcmatch conflict; the `--no-deps` install never runs it. Last generated
-# 15 Nov 2026, cutoff 2026-11-08.
+# then put this header back. The override keeps wcmatch at a fixed version past what Semgrep
+# declares, so a regeneration can't bring back a vulnerable one; overrides.txt says why (#455).
+# `--no-deps` skips pip's resolver and its conflict check, so the install accepts the override; a
+# manual `pip check` reports it. Last generated 15 Nov 2026, cutoff 2026-11-08; wcmatch bumped to
+# 11.2 by #421.
 annotated-types==0.8.0 \
     --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
     --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
