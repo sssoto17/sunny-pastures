@@ -66,6 +66,19 @@ file_tool 2 "$MAIN" Edit "$WT/docs/adr/0002-github-platform.md"
 file_tool 2 "$MAIN" Write "$WT/.scratch/notes.md"
 file_tool 2 "$MAIN" Edit .claude/worktrees/37-identity/docs/adr/0002-github-platform.md
 
+# --- a review copy (REVIEW.md, "Reproduce, then report"; #513) -------------------------------
+# The reviewer plants mutants and links node_modules in it; a lane's worktree stays guarded.
+RC=$MAIN/.claude/worktrees/review-513-abc1234
+file_tool 0 "$MAIN" Edit "$RC/scripts/after-merge.sh"
+file_tool 0 "$MAIN" Edit .claude/worktrees/review-513-abc1234/REVIEW.md
+bash_tool 0 "$MAIN" "ln -s $MAIN/node_modules $RC/node_modules"
+bash_tool 0 "$MAIN" "sed -i 's/open/closed/' $RC/scripts/after-merge.sh"
+bash_tool 0 "$MAIN" "( cd $RC && echo x > mutant.txt )"
+file_tool 2 "$MAIN" Edit "$RC/../75-coordinator-guard/AGENTS.md"
+file_tool 2 "$MAIN" Edit "$MAIN/.claude/worktrees/review/AGENTS.md"
+file_tool 2 "$MAIN" Edit "$MAIN/.claude/worktrees/513-review-x/AGENTS.md"
+bash_tool 2 "$MAIN" "cp $RC/x.md $MAIN/docs/x.md"
+
 # --- relative paths, `..`, `~` ----------------------------------------------------------------
 file_tool 2 "$MAIN" Write docs/x.md
 file_tool 2 "$MAIN" Write .scratch/../docs/x.md
