@@ -172,26 +172,29 @@ describe("acceptance-guard.mjs", () => {
 		expect(r.out).toContain('"tests/acceptance/farm.test.ts"');
 	});
 
+	const hundred = () => Array.from({ length: 100 }, (_, i) => `src/f${i}.ts`);
+	const fileRequests = (api) => api.seen.filter((s) => s.includes("/files"));
+
 	// #425: REST lists 100 files a page, so a PR of 101 files needs page 2, and the touched path is
 	// the 101st. A loop that stops after page 1 lists 100 of 101 and exits 2; one that never moves
 	// to page 2 never ends.
 	it("reads every page of the file list, and fails on a path only page 2 lists", async () => {
-		const files = Array.from({ length: 100 }, (_, i) => `src/f${i}.ts`);
+		const files = hundred();
 		const api = await serve(routes([...files, "tests/acceptance/farm.test.ts"]));
 		const r = await run(event(), api.url);
 		expect(r.status).toBe(1);
 		expect(r.out).toContain('"tests/acceptance/farm.test.ts"');
-		expect(api.seen.filter((s) => s.includes("/files"))).toEqual([
+		expect(fileRequests(api)).toEqual([
 			`GET ${P}/pulls/384/files?per_page=100&page=1`,
 			`GET ${P}/pulls/384/files?per_page=100&page=2`,
 		]);
 	});
 
 	it("stops at the empty page after a full one, and passes 100 untouched files", async () => {
-		const api = await serve(routes(Array.from({ length: 100 }, (_, i) => `src/f${i}.ts`)));
+		const api = await serve(routes(hundred()));
 		const r = await run(event(), api.url);
 		expect(r.status).toBe(0);
-		expect(api.seen.filter((s) => s.includes("/files"))).toHaveLength(2);
+		expect(fileRequests(api)).toHaveLength(2);
 	});
 
 	it("exits 0 for the admin with no request at all", async () => {
