@@ -84,7 +84,12 @@ else
 fi
 
 echo "== $label: checks"
+# Exit 1 with a report means lost updates, a result; no report means the check itself failed.
 node tools/load/seed.mjs verify "$work/plan.json" "$work/requests.csv" >"$out/verify.json" || true
+if [[ ! -s $out/verify.json ]]; then
+	echo "the lost-update check failed" >&2
+	exit 1
+fi
 cat "$out/verify.json"
 unsafe=$(grep -c UNSAFE_TRANSACTION "$work/server.log" || true)
 errors=$(grep -c -i -E '^\s*(Error|error:)' "$work/server.log" || true)

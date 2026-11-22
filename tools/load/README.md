@@ -51,5 +51,5 @@ cd tools/load && uv run --locked python results.py report ../../docs/load/m3
 - `concurrency.py`: two harvests on one farm at the same moment, once per pair farm.
 - `results.py`: `run` cuts a run's request log to the measured window into histograms; `report`
   pools the runs into `results.csv`.
-- `test_locustfile.py`: the tap choice and the header parsing
-  (`uv run --locked python -m unittest -v`).
+- `test_locustfile.py`, `test_results.py`: the tap choice, the header parsing, the percentile and
+  the cut of a run's request log (`uv run --locked python -m unittest -v`).

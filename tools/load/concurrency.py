@@ -4,8 +4,8 @@ gift-and-harvest script. The gift version is MUST-13.5 itself, in M6.
 
     uv run --locked python concurrency.py <work dir> <base url> <out dir>
 
-Each pair farm has wheat ripe on plots 0 and 1 (the player's plots 1 and 2) (prepare.py --pairs, seed.mjs). Two kept-alive
-connections each send one harvest with `expectedSeq: 2`, released by one event, so they reach the
+Each pair farm has wheat ripe on plots 0 and 1, the player's plots 1 and 2 (prepare.py --pairs,
+seed.mjs). Two kept-alive connections each send one harvest with `expectedSeq: 2`, released by one event, so they reach the
 server together; the loser of the race conflicts and must commit on its retry (MUST-13.3). The
 requests go to <work dir>/requests.csv in the Locust log's columns, for seed.mjs's lost-update
 check; <out dir>/concurrency.json gets the counts: statuses, collisions (an answer with a retry),
