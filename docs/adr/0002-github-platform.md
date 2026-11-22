@@ -460,7 +460,9 @@ PR_ means either kind.
     leaves a Comment review on its head, which `guard / code-owned` counts as the code owner's
     sign-off (#494; "Stacks", below), and bypass-merges it; a PR an App opened the admin approves
     (code-owner review stays on; "Stacks", below). The resolved thread and the merge are the record
-    of who decided.
+    of who decided. **Amended 22 Nov 2026, #495:** the go-ahead becomes removing `review:admin`,
+    bound to the head; threads stop being required, and code-owner review goes off ("Solo-admin
+    approvals", below).
   - **The bot's earlier Request changes.** When its re-review finds those findings fixed, the bot's
     Approve replaces its Request changes, on an escalated PR too (#322). Where it withholds with
     every finding fixed (an escalated PR an App opened, or `review:admin` until #104), it dismisses
@@ -476,8 +478,9 @@ PR_ means either kind.
     clear. A draft PR was rejected too: anyone can mark a PR ready, and "draft" would also have to
     mean "unfinished". Deciding at approval time also removes the label's race, where a label added
     after the bot approved could lose to auto-merge.
-  - **Until #104, the label stays.** Until the reviewer App posts escalation threads (#68),
-    `review:admin` is the admin's only queue. So
+  - **Until #104, the label stays.** (**Amended 22 Nov 2026, #495:** the label stays for good, as
+    the admin's sign-off, and #104 is superseded; "Solo-admin approvals", below.) Until the reviewer
+    App posts escalation threads (#68), `review:admin` is the admin's only queue. So
     [Retire review:admin](https://github.com/sssoto17/sunny-pastures/issues/104) waits for #68 and
     #101. Until it lands, agents add the label as `CONSTRAINTS.md` says, the bot never approves a PR
     that carries it, and only the admin removes it. Nothing on GitHub enforces that last rule; see
@@ -650,6 +653,106 @@ which secret", below).
   transcript: rejected, because `actions/upload-artifact` is a new action (as for the factory) and
   the transcript holds the PR's text.
 
+### Solo-admin approvals: removing `review:admin` is the sign-off (#495)
+
+**Decided by the admin, 22 Nov 2026, in #495's grill; amends this area where the notes marked "#495"
+say so. Not built yet: #565 (the guard) blocks #566 (the bot), which blocks #567 (the stack check),
+and until the admin's steps below are done, #494's stopgap and the text it amends still apply.**
+
+**The problem.** GitHub never counts a PR's author as its own approver or code-owner reviewer, and
+its answer for a solo maintainer is the bypass list. "Merge stack" offers no bypass (#315), and
+`main checks` has none (#110). So every code-owned PR the admin's account opens (an `--as-admin`
+lane, #385), and every stack with one, merged by bypass, part by part. #494 made
+`guard / code-owned` count the author-admin's own Comment review, but a Comment review looks the
+same as a plain comment in the timeline (admin, 22 Nov, while merging #487), and the bypass stayed.
+
+**The decisions (Q1–Q7 of the grill):**
+
+1. **The reviewer bot approves every PR it finds clean**: escalated or not, code-owned or not,
+   whoever opened it. Its approval means "the code review passed", meets the count of 1, and lets a
+   stack merge in one action. The admin's gate is never a withheld approval any more; it is a
+   required check in `main checks`, which has no bypass. #322's reason for withholding on a PR an
+   App opened (anyone's resolution of the escalation thread opens the merge before the bot checks
+   who resolved it) goes away, because no thread opens anything (decision 6). What it costs: an
+   approval no longer says the admin agreed, only the check does, so the check must be required and
+   never skipped (a skipped required check passes, #312); and on an escalated PR the bot's
+   auto-merge fires the moment the check turns green, so the admin's sign-off is also the merge.
+2. **GitHub's "Require review from Code Owners" goes off**, and `guard / code-owned` is the only
+   code-owner gate. #68's precondition, the guard being a required check, holds (checked 22 Nov).
+   What it costs: a bug in the guard would let a code-owned PR through. The guard runs `main`'s
+   script, CODEOWNERS and (decision 7) workflow, and all three are code-owned. CODEOWNERS still
+   requests the admin's review. Rejected: keeping it on, which makes #494's bypass merges permanent.
+3. **The admin's sign-off is removing `review:admin`**, read from the PR's events. Removing a label
+   fires `pull_request_target` `unlabeled`, so the guard runs on the admin's act, and the timeline
+   shows it unambiguously. The run that removal fires checks that the event's head is still the PR's
+   head and writes a **sign-off record on that commit as a check run**, which only a GitHub App
+   (here the Actions token) can create, so no user token forges it. Every guard run passes a held PR
+   only when the label is off and a sign-off record exists for the current head. A push re-arms it:
+   the guard runs on `synchronize`, puts the label back on any PR that has ever carried it, and
+   fails; even without that run, the new head has no record, so it can't pass. A held PR is a
+   code-owned one (the guard adds the label from the diff, as today) or one the bot escalated (the
+   bot adds it); from then on the guard reads the label, not the reason. #494's Comment-review rule
+   goes, and [#104](https://github.com/sssoto17/sunny-pastures/issues/104), "Retire review:admin",
+   is superseded: the label is the gate, and the escalation thread is the bot's explanation.
+   Rejected: a Comment review (ambiguous in the timeline), resolving the thread (fires no workflow),
+   and both the label and the thread (two clicks for one decision).
+4. **One writer per head.** The job gets a name of its own, and the script creates or updates one
+   `guard / code-owned` check run on the head through the Checks API, re-reading the live state
+   (label, sign-off record, diff) each time. Runs go one at a time: a per-PR `concurrency` group
+   without `cancel-in-progress`, so a newer pending run replaces an older pending one and the last
+   run reads the final state. A cancelled run carries the job's name, never the required one, so
+   neither #379's stale twin nor #483's cancelled run can decide the result. A head the script
+   hasn't written shows "Expected" and blocks. To prove on throwaway PRs first: an API-written check
+   run satisfies a required check whose source is GitHub Actions, and updating it in place changes
+   the merge box. Rejected: concurrency keyed by head and event (twins both report, and which one
+   the gate reads is #379's open question), and a sweep that re-runs cancelled runs (treats the
+   symptom). `pr-body.yml` keeps #483.
+5. **Only `sssoto17`, a `User`, signs off.** A removal by anyone else (either App, `github-actions`,
+   another collaborator) writes no record; the guard puts the label back and stays red, as the bot
+   reopens an escalation thread someone else resolved. Agents are denied removing the label: the
+   `gh pr edit` and `gh issue edit` patterns in `.claude/settings.json` move from ask to deny, and
+   the REST route (`gh api *labels/review:admin*`, `gh api *labels/review%3Aadmin*`) is denied too.
+   Remote sessions skip the hooks but read the same settings. **The honest limit:** GitHub sees any
+   session on the admin's account as the admin, so one that gets past the deny rules signs off as
+   the admin; it could already bypass-merge, so this adds no power, and the events don't record
+   whether a removal came from the UI or the API. Rejected: a separate sign-off identity (a second
+   account or an App only the admin holds), one more credential and more clicks per PR.
+6. **Thread resolution is no longer required** (`required_review_thread_resolution` off in `main`).
+   The bot still posts the escalation thread, "escalated: <rows>", mentioning the admin, and adds
+   the label, but it stops reopening threads and stops reading its escalation threads as memory: the
+   label's history does that. Nothing is lost on findings: a Required finding is a Request changes,
+   which blocks until the bot approves, and the bot withholds its approval while a finding thread of
+   its own is open. A thread the admin starts no longer blocks on its own; Request changes does.
+7. **`code-owned.yml` runs on `pull_request_target` only** (`opened`, `synchronize`, `reopened`,
+   `labeled`, `unlabeled`): the verdict depends on the label, the sign-off record and the diff, not
+   on reviews. So every run takes `main`'s workflow as well as its script, and it never runs PR
+   code.
+
+**Patterns.** A _quality gate_ (one required check holds the merge for the admin, whoever approved);
+a _single writer_ per head (one check run, updated in place, from serialised runs); a _capability
+record_ (the sign-off is a check run only an App can write, bound to one commit); and the PR's
+events as the _audit log_ (who removed the label, when).
+
+**Migration, in order:**
+
+1. The admin adds the deny rules (decision 5) to `.claude/settings.json`, a protected path.
+2. Build: the new guard (decisions 3, 4, 5's guard half, 7), a hard switch that drops #494's rule in
+   the same PR, with the throwaway proofs of decision 4. It merges under the rules of the day.
+3. Open PRs merge under the old rules before it lands where they can; after it lands, each is
+   updated onto `main` (`scripts/stack.sh refresh` for a stack), so its copy of `code-owned.yml` no
+   longer has the review-triggered job writing under the required name, and the admin signs off by
+   removing the label.
+4. Build: `post-review.sh` approves every clean PR and drops thread reopening and thread memory
+   (decisions 1, 6). Blocked by step 2: until then a PR the bot escalated that touches no code-owned
+   path is held only by the withheld approval, and would auto-merge.
+5. The admin turns off "Require review from Code Owners" and "Require conversation resolution before
+   merging" in `main`.
+6. Verify on a throwaway stack the admin's account opens, with a code-owned part: the bot's
+   approvals meet the count, the merge box asks for 1 approval, not 2 ("Require an additional
+   approval for unattributed Copilot pull requests", on by default and scoped by the docs to PRs
+   Copilot opens: A8), the admin removes the label on each part, and "Merge stack" merges it in one
+   action. Then #68's code-owner criterion is ticked and #104 closed as superseded.
+
 ### Stacks: one approval pass, one test run, one merge (#264)
 
 Related PRs are always a native GitHub stack, built one way (admin, 16 Nov 2026; `CONSTRAINTS.md`,
@@ -741,7 +844,9 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   `guard / code-owned` check (#337) is required (#68's criteria). Since #494 the guard itself passes
   such a part once the admin, as its author and a code owner of each of its code-owned paths, has
   left a Comment review as their last review on its head (below); the bypass is still needed for
-  GitHub's own code-owner review.
+  GitHub's own code-owner review. **Decided 22 Nov 2026, #495:** code-owner review goes off and the
+  guard is the only code-owner gate, so such a stack merges in one action once the admin has removed
+  `review:admin` on each part ("Solo-admin approvals", above).
 - **One test run per stack.** `ci / typecheck`, `ci / lint` and `ci / test` run on a stack's top
   part only, diffing from the stack's base, so one run covers every part. The other jobs, the floor
   guard among them, and the review run on each part. The `if:` in GitHub's
@@ -2020,6 +2125,7 @@ Researched on 7 Nov from each vendor's pricing, terms and docs pages, and each a
 | Policy as code | Rulesets, CODEOWNERS, `labeler.yml`, `dependabot.yml`, `release.yml` | The rules live in versioned config that the platform enforces, instead of in memory. |
 | Peer review by a bot | The reviewer App approves or requests changes; code-owner review and escalation bring in the admin (area 2) | Reviews read like a conversation on the PR, and the admin's attention goes where it counts. |
 | Quality gate | Required checks pinned to Actions (area 2) | A change reaches `main` only through named checks, whoever approved it. |
+| Single writer, capability record | `guard / code-owned` writes one check run per head; the admin's sign-off is a check run only an App can write, bound to one commit (area 2, #495) | Twins and cancelled runs can't decide the result, and no user token can forge the sign-off. |
 | Credential broker | Lanes ask the `open-pr` workflow, by `repository_dispatch`, to open their PRs with the factory App's token (area 2, #336) | The App's key stays in an Actions environment; a session holds only the right to ask, and the workflow checks every request. |
 | Least privilege | Read-only `GITHUB_TOKEN`; `production` environment secrets for `v*` tags only, the reviewer App's key for the review job only; admin bypass for PRs only | Each actor gets only the rights its job needs. |
 | Convention over configuration | `<N>-<slug>` branches, Conventional Commit titles | Tools (#17's parser, the PR-title check, release notes) can rely on the shape. |
