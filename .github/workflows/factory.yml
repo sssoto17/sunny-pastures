@@ -189,8 +189,14 @@ jobs:
       # project's settings load: an `ask` rule has no one to ask here, so it denies. That holds in
       # the default permission mode only: since v1.0.273 the action starts a run with a prompt in
       # auto mode, where a safety review decides what no allow rule covers, so the mode is set
-      # below (#486; the release's upgrade notes). review.yml keeps the default through allowed_bots,
-      # which turns the auto-mode default off. No web tools.
+      # below (#486; the release's upgrade notes). allowed_bots also turns that default off, but
+      # the flag stays explicit. No web tools.
+      # allowed_bots names exactly the bot sweep.yml dispatches as: its GITHUB_TOKEN makes the run's
+      # actor github-actions[bot], which the action's actor check refuses otherwise (#582, run
+      # 45075597193; src/github/validation/actor.ts at the pinned SHA drops the [bot] suffix before
+      # comparing). Never '*'. A run the admin dispatches has a human actor, which the list doesn't
+      # touch. With allowed_bots set the action keeps the token out of .git/config; nothing here
+      # pushes from this runner (docs/security.md at the pinned SHA).
       - id: claude
         timeout-minutes: 55
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
@@ -201,6 +207,7 @@ jobs:
           github_token: ${{ github.token }}
           bot_name: ${{ env.FACTORY_APP }}[bot]
           bot_id: ${{ env.FACTORY_BOT_ID }}
+          allowed_bots: github-actions # sweep.yml's dispatch (#582)
           prompt: >-
             /implement #${{ needs.gate.outputs.issue }} Read .github/factory-prompt.md and follow
             it. The issue is #${{ needs.gate.outputs.issue }}; its context folder is
@@ -243,11 +250,26 @@ jobs:
         run: |
           set -uo pipefail
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
+          # Whether Claude ran (#582), for the "Claude ran" step below: an execution file, or the
+          # prompt file the action writes once its checks pass, just before it starts Claude
+          # (src/modes/agent/index.ts at the pinned SHA, after checkHumanActor). The prompt file
+          # covers a Claude step that timed out, which writes no execution file. Re-check this
+          # path when the pin moves.
+          if [ -f "$f" ] || [ -f "$RUNNER_TEMP/claude-prompts/claude-prompt.txt" ]; then
+            echo "ran=true" >>"$GITHUB_OUTPUT"
+          fi
           [ -f "$f" ] || { echo "RESULT claude=$OUTCOME execution_file=missing"; exit 0; }
           line=$(jq -r '.[] | select(.type == "result") | "subtype=\(.subtype) is_error=\(.is_error)"
             + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" | tail -n1)
           echo "RESULT claude=$OUTCOME $line"
           echo "cost=$line" | tr -cd '[:alnum:] =._\n-' >>"$GITHUB_OUTPUT"
+
+      # The sweep's evidence (#582): sweep.yml skips an issue whose last run opened no PR only when
+      # this step succeeded in it, read by name from the run's jobs (factory-sweep-gather.sh). A
+      # run that failed before Claude ran skips it, so the sweep tries the issue again.
+      - name: Claude ran
+        if: always() && steps.result.outputs.ran == 'true'
+        run: echo "RESULT claude_ran=true"
 
   publish:
     needs: [gate, factory]

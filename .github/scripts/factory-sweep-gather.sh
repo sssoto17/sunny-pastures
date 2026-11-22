@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Reads what the sweep (#108) decides on, into SWEEP_DIR, for .github/scripts/factory-sweep.mjs:
 # - runs.json: the factory workflow's newest 100 runs (the active check and each issue's last run),
-#   with the read-only GITHUB_TOKEN (actions: read);
+#   with the read-only GITHUB_TOKEN (actions: read). Each gets `claude_ran`: true only for a
+#   completed run of an open factory:ready issue whose `factory` job has a successful "Claude ran"
+#   step (factory.yml), read from that run's jobs; false for every other run (#582);
 # - issues.json: the open issues carrying factory:ready, with updated_at (issues: read);
 # - pulls.json and refs.json: the open PRs (head branch and author, drafts included) and every
 #   branch, for the open-PR cap and the gate's duplicate guard (pull-requests: read, contents: read);
@@ -39,6 +41,19 @@ gh api --paginate "$r/issues?state=open&labels=factory:ready&per_page=100" --jq 
 gh api --paginate "$r/pulls?state=open&per_page=100" --jq '.[] | {number, head: {ref: .head.ref}, user: {login: .user.login}}' |
   jq -s . >"$dir/pulls.json"
 gh api --paginate "$r/git/matching-refs/heads/" --jq '.[] | {ref}' | jq -s . >"$dir/refs.json"
+# Did Claude run? Only the completed runs of the open factory:ready issues are read, one jobs call
+# each: a run that failed before Claude ran (#582) mustn't make the sweep skip its issue.
+ids=$(jq -r --slurpfile issues "$dir/issues.json" '[$issues[0][] | "factory #\(.number)"] as $t
+  | .[] | select(.status == "completed" and (.display_title | IN($t[]))) | .id' "$dir/runs.json")
+ran='[]'
+for id in $ids; do
+  [[ $id =~ ^[1-9][0-9]*$ ]] || { echo "::error::unexpected run id: $id"; exit 1; }
+  v=$(gh api "$r/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.name == "factory")
+    | .steps[]? | select(.name == "Claude ran" and .conclusion == "success")] | length > 0')
+  if [[ $v == true ]]; then ran=$(jq -c --argjson id "$id" '. + [$id]' <<<"$ran"); fi
+done
+jq --argjson ran "$ran" 'map(.claude_ran = (.id | IN($ran[])))' "$dir/runs.json" >"$dir/runs.tmp"
+mv "$dir/runs.tmp" "$dir/runs.json"
 # The comments updated since the oldest of those runs, repo-wide in one read: whose comment last
 # moved an issue's updated_at.
 since=$(jq -r '[.[].created_at] | min // empty' "$dir/runs.json")

@@ -5,8 +5,10 @@
 # Triggers: every hour (minute 23, UTC; the hour doesn't matter, so no DST to handle), the
 # factory's own runs finishing (`workflow_run`, the chain; a cancelled factory run is ignored), and
 # `workflow_dispatch` for the admin: `gh workflow run sweep.yml --repo sssoto17/sunny-pastures`.
-# The hourly run also restarts a chain that stops: `workflow_run` doesn't chain more than three
-# levels deep, and whether a `workflow_dispatch` in between resets that count is unproven.
+# The hourly run is the loop for now: a factory run this sweep's GITHUB_TOKEN dispatched didn't
+# start a `workflow_run` sweep when it finished (run 45075597193 on 22 Nov: no sweep after it;
+# #582), as GitHub's rule that GITHUB_TOKEN events start no new runs, `workflow_dispatch` and
+# `repository_dispatch` excepted, reads. The trigger stays for a dispatch with another token.
 # Concurrency group `factory-sweep`: two sweeps never overlap; a newer pending sweep replaces an
 # older pending one (GitHub's rule), which loses nothing, since each reads the board afresh.
 #
@@ -23,13 +25,15 @@
 #   dispatched or why none. It dispatches nothing while a factory run is queued, waiting or in
 #   progress, or while the open PRs by sunny-factory[bot] (drafts included) reach the repo variable
 #   FACTORY_MAX_OPEN_PRS (default 4 when unset; admin, 22 Nov 2026), and skips an issue whose last
-#   factory run opened no PR until the issue is edited after that run.
+#   factory run ran Claude (its "Claude ran" step) and opened no PR until the issue is edited after
+#   that run; a run that failed before Claude ran doesn't count (#582).
 # - dispatch: `actions: write` on this job only, and nothing else: GITHUB_TOKEN dispatches
 #   factory.yml on main with the one issue, then waits until the new run is listed, so a sweep
 #   queued behind this one sees it. A workflow_dispatch is one of the two events a
 #   GITHUB_TOKEN may start a run with ("Triggering a workflow from a workflow",
 #   https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
-#   The factory's own switch and gate check the issue again.
+#   The run's actor is github-actions[bot], which factory.yml's claude-code-action step names in
+#   allowed_bots (#582). The factory's own switch and gate check the issue again.
 # Every event runs the default branch's copy of this file. Event values reach the shell only
 # through env:. Actions are GitHub-owned and pinned to a full SHA, main's pins (ADR-0002, area 8).
 name: sweep
