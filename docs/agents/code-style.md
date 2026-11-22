@@ -80,3 +80,14 @@ them.
 - `check:fast` lints only files whose own content changed. The typed rules read types from other
   files (the exhaustive `switch` over `Action`), so after changing a shared type, run `pnpm lint`
   before you trust a green `check:fast`; `check:task` does.
+- Fallow (#504): run it with `--format json --quiet` and read `verdict` first; run
+  `fallow fix --dry-run` before `fallow fix --yes`; never run `fallow watch`, which doesn't exit.
+  The `fallow` skill points to the pinned package's own copy; after a Fallow bump, rerun
+  `fallow agent install --harness claude --without guide --without mcp --without hooks`.
+- Every `git commit` and `git push` an agent runs goes through `.claude/hooks/fallow-gate.sh`
+  (`fallow audit` on the changes since the merge base with `origin/main`): a new clone, unused
+  export or function over the complexity limits blocks it, with the findings listed and the full
+  report in `.fallow/gate-report.json`. Fix the code; inherited findings don't block. When the audit
+  can't run, the gate lets the command through with a `fallow-gate: ... skipping` notice, so CI
+  stays the real gate. With the admin's user-scope Fallow plugin on, set `FALLOW_PLUGIN_GATE=off` so
+  the audit doesn't run twice.
