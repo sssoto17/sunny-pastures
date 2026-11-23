@@ -1,0 +1,30 @@
+# THROWAWAY (#565, never merge): runs the new guard script from this branch and reads what the merge
+# box reads (GraphQL statusCheckRollup, isRequired) after each step. Readings go to a check run
+# named `throwaway-565 / readings` and to the log.
+name: throwaway-565-proof
+on:
+  pull_request:
+    types: [opened, reopened]
+permissions: {}
+jobs:
+  proof:
+    name: throwaway-565 proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+      actions: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - run: bash .github/throwaway-565-proof.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD: ${{ github.event.pull_request.head.sha }}

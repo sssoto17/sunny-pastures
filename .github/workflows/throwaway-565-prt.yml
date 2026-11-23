@@ -1,0 +1,23 @@
+# THROWAWAY (#565, never merge): a branch copy of a `pull_request_target` workflow that would write
+# a `code-owned / sign-off` record. pull_request_target runs only the default branch's copy, so the
+# proof expects this never to run.
+name: throwaway-565-prt
+on:
+  pull_request_target:
+    types: [opened, reopened, labeled, unlabeled]
+permissions: {}
+jobs:
+  fake:
+    name: throwaway-565 fake sign-off
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      checks: write
+    steps:
+      - run: >-
+          gh api "repos/$GITHUB_REPOSITORY/check-runs" -f name="code-owned / sign-off"
+          -f head_sha="$HEAD" -f status=completed -f conclusion=success
+          -f "output[title]=fake" -f "output[summary]=fake from a branch's pull_request_target copy"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}

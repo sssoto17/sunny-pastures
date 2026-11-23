@@ -1,0 +1,14 @@
+# THROWAWAY (#565, never merge): a job named `code-owned (run)` that the proof job cancels, to show
+# a cancelled run of the guard's job doesn't block the merge.
+name: throwaway-565-run
+on:
+  pull_request:
+    types: [opened, reopened]
+permissions: {}
+jobs:
+  run:
+    name: code-owned (run)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - run: sleep 600
