@@ -504,6 +504,7 @@ describe("factory.yml, Claude's result (#615)", () => {
 	];
 
 	function run(exec) {
+		if (dir) rmSync(dir, { recursive: true, force: true });
 		dir = mkdtempSync(join(tmpdir(), "factory-result-"));
 		const env = { PATH: process.env.PATH, RUNNER_TEMP: dir, OUTCOME: "success" };
 		env.GITHUB_OUTPUT = join(dir, "out");
@@ -512,7 +513,12 @@ describe("factory.yml, Claude's result (#615)", () => {
 			env.EXEC_FILE = join(dir, "exec.json");
 			writeFileSync(env.EXEC_FILE, typeof exec === "string" ? exec : JSON.stringify(exec));
 		}
-		const res = spawnSync("bash", ["-c", script], { encoding: "utf8", env });
+		// GitHub's default shell for run: (`bash --noprofile --norc -eo pipefail {0}`): -e stays on
+		// under the step's own `set -uo pipefail`, so a failing command ends the step.
+		const res = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
+			encoding: "utf8",
+			env,
+		});
 		const lines = res.stdout.split("\n").filter((l) => l.startsWith("RESULT factory"));
 		return { code: res.status, lines, out: res.stdout + res.stderr };
 	}
@@ -565,6 +571,15 @@ describe("factory.yml, Claude's result (#615)", () => {
 			const r = run(execution(`FACTORY stopped: one${br}FACTORY stopped: two${br}tail`));
 			expect(r.lines).toEqual(["RESULT factory=FACTORY stopped: two"]);
 		}
+	});
+
+	it("leaves no workflow command in the line: no `::` run, no legacy `##[`", () => {
+		const r = run(
+			execution("FACTORY stopped: ##[set-output name=ran;]true, ::error::x, ###[a] :::b # [c] #x"),
+		);
+		expect(r.lines).toEqual([
+			"RESULT factory=FACTORY stopped: [set-output name=ran;]true, :error:x, [a] :b # [c] #x",
+		]);
 	});
 
 	it("caps the line at 300 characters", () => {

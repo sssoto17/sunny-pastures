@@ -69,9 +69,9 @@ The task message names the hand-off folder (`OUT` below).
 
 An admin decision is a choice that is the admin's to make and that the issue, its trusted comments
 and the repo's docs don't settle: a design or boundary choice (a Fallow zone, where a module lives),
-a reading of a criterion that could go two ways, or a change to a code-owned config (a path in
-`.github/CODEOWNERS`, such as `.fallowrc.jsonc`) that the criteria can't be met without. It is not a
-reason to stop. For each one:
+or a change to a code-owned config (a path in `.github/CODEOWNERS`, such as `.fallowrc.jsonc`) that
+the criteria can't be met without. A choice that is yours to make still goes under "Concerns". It is
+not a reason to stop. For each one:
 
 1. Take the safest reading: the smallest change that meets the criteria and that is easiest to undo.
    A code-owned config change is the narrowest one that works. It never weakens a check to get to
@@ -81,8 +81,8 @@ reason to stop. For each one:
 3. In `pr-body.md`, add a section `## Decisions to approve` above "Concerns" with one item per
    decision: what you chose, the alternatives, and why this one is the safest. For a code-owned
    config, name the file and why the criteria need the change. Set the Review line to
-   `Admin review: yes (rows: …)`, naming "admin decision" beside any row of `CONSTRAINTS.md`,
-   "Escalation criteria", the PR meets.
+   `Admin review: yes (admin decision; rows: …)`, with every row of `CONSTRAINTS.md`, "Escalation
+   criteria", the PR meets (a code-owned config is the "Code-owned path" row).
 4. Add `review:admin` to `labels`. The label holds the PR: the reviewer App never approves it and it
    never auto-merges; the admin approves it.
 5. Open the PR as usual: write the hand-off and end with `FACTORY ready: <N>-<slug>`.
@@ -125,9 +125,8 @@ changes:
 - **A finding that needs an admin decision** follows "Admin decisions" above: take the safest
   reading, fix it, add `review:admin` to `labels`, write the whole body to `pr-body.md` with the
   decision under "Decisions to approve", and write `comment` as one line
-  `escalated: admin decision (<what>)` (up to 300 characters), naming any row of "Escalation
-  criteria" the PR meets as well.
-- **A finding you can't fix** within these rules (it needs a new dependency, a change to
-  `.github/workflows/**` or `tests/acceptance/**`, or access you don't have; or its checks stay red
-  and you can't tell why): leave it, and fix the rest. End with one line: `FACTORY fixed: PR #P`, or
-  `FACTORY stopped: <reason>` when you fixed nothing.
+  `escalated: admin decision (<what>)`, naming any row of "Escalation criteria" the PR meets as
+  well. Publish refuses a comment over 300 characters: shorten `<what>` first.
+- **A finding you can't fix** because it meets a stop in "When to stop without a PR": leave it, and
+  fix the rest. End with one line: `FACTORY fixed: PR #P`, or `FACTORY stopped: <reason>` when you
+  fixed nothing.

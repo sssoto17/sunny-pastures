@@ -338,18 +338,21 @@ jobs:
           fi
           [ -f "$f" ] || { echo "RESULT claude=$OUTCOME execution_file=missing"; echo "RESULT factory=none"; exit 0; }
           line=$(jq -r '.[] | select(.type == "result") | "subtype=\(.subtype) is_error=\(.is_error)"
-            + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" | tail -n1)
+            + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" | tail -n1) || line=
           echo "RESULT claude=$OUTCOME $line"
           echo "cost=$line" | tr -cd '[:alnum:] =._\n-' >>"$GITHUB_OUTPUT"
           # Why the run ended, in Claude's words (#615): the last line of the final result that
           # starts with `FACTORY ` (ready:, stopped:, fixed:), as .github/factory-prompt.md has
           # Claude end. The model wrote it, so jq makes it one line: it splits on every line break
           # (\r, \n, NEL, U+2028/9), strips control and format characters (\p{Cc}, \p{Cf}: escapes,
-          # NUL, bidi overrides) and keeps 300 characters. The line starts with `RESULT `, so no
-          # workflow command can run from it. Tests: .github/scripts/tests/factory-gate.test.mjs.
+          # NUL, bidi overrides), collapses each run of colons to one and drops the #s before a [
+          # (the runner reads `::` at a line's start and the legacy `##[` anywhere in it as a
+          # workflow command), and keeps 300 characters. The shell runs with -e (GitHub's default
+          # `bash -e {0}`), so a jq failure, a file that isn't JSON, reads as none.
+          # Tests: .github/scripts/tests/factory-gate.test.mjs.
           factory=$(jq -r '[.[] | select(.type == "result")] | last | .result | strings
             | [splits("\r\n|[\n\r\u0085\u2028\u2029]") | select(startswith("FACTORY "))] | last // empty
-            | gsub("[\\p{Cc}\\p{Cf}]"; "") | .[:300]' "$f" 2>/dev/null)
+            | gsub("[\\p{Cc}\\p{Cf}]"; "") | gsub(":{2,}"; ":") | gsub("#+\\["; "[") | .[:300]' "$f" 2>/dev/null) || factory=
           echo "RESULT factory=${factory:-none}"
 
       # The sweep's evidence (#582): sweep.yml skips an issue whose last run opened no PR only when
