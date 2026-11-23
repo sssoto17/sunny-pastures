@@ -27,6 +27,10 @@ cp "$script" "$work/move/board-status.sh"
 cat >"$work/move/issue-fields.sh" <<'EOF'
 #!/usr/bin/env bash
 (IFS='|'; printf '%s\n' "$*") >>"$(dirname "$0")/calls"
+# A guarded move that finds the issue at STUB_NOW answers as issue-fields.sh does: left alone.
+if [[ $* == *--from* && -n ${STUB_NOW-} ]]; then
+  printf 'https://github.com/x/y/issues/%s\n%-9s %s\n' "$1" "Status:" "$STUB_NOW (left alone: $STUB_WHY)"
+fi
 exit "${STUB_EXIT:-0}"
 EOF
 chmod +x "$work/move/issue-fields.sh"
@@ -92,7 +96,7 @@ run() { # args... -> code, out, err
   err=$(cat "$work/err")
 }
 run_move() { # args... -> code, out, err, mcalls
-  out=$(bash "$work/move/board-status.sh" "$@" 2>"$work/err")
+  out=$(PATH="$work/bin:$PATH" bash "$work/move/board-status.sh" "$@" 2>"$work/err")
   code=$?
   err=$(cat "$work/err")
   mcalls=$(cat "$work/move/calls" 2>/dev/null || true)
@@ -113,7 +117,7 @@ move_() { args=("$@"); run_move "$@"; }
 
 # --- arguments ----------------------------------------------------------------------------------
 for bad_args in "" "decide" "decide pr" "decide pr 0" "decide pr 12x" "decide commit abc" \
-  "decide issue 4" "move" "move 4" "move 4:ready" "move 4:start:x" "move x:start" "nope 4"; do
+  "decide nope 4" "move" "move 4" "move 4:ready" "move 4:start:x" "move x:start" "nope 4"; do
   reset
   read -ra words <<<"$bad_args"
   case_ "${words[@]}"
@@ -510,6 +514,69 @@ case_ decide branch 417-x
 expect_code 0
 expect_out "moves="
 
+# --- decide issue: a factory:* label changed (#620) ------------------------------------------------
+labelled() { # number state label... -> an issue with these labels
+  local n=$1 s=$2
+  shift 2
+  printf '%s\n' "$@" | jq -R . | jq -s --argjson n "$n" --arg s "$s" \
+    '{number: $n, state: $s, labels: [.[] | select(. != "") | {name: .}]}' >"$st/get/$R/issues/$n"
+}
+# Each label to its kind: working and failed are In progress, review In review.
+for spec in "factory:working:factory-progress" "factory:failed:factory-progress" \
+  "factory:review:factory-review"; do
+  reset
+  labelled 620 open "${spec%:*}" area:ci-cd
+  case_ decide issue 620
+  expect_code 0
+  expect_out "moves=620:${spec##*:}"
+done
+# factory:ready moves nothing; nor does an issue with no factory label (one removed).
+for labels in "factory:ready" "area:ci-cd" ""; do
+  reset
+  labelled 620 open $labels
+  case_ decide issue 620
+  expect_code 0
+  expect_out "moves="
+done
+# Two at once (a label swapped, the removal not in yet): nothing until one is left.
+reset
+labelled 620 open factory:working factory:review
+case_ decide issue 620
+expect_out "moves="
+expect_err "more than one"
+# ready alongside working: working counts.
+reset
+labelled 620 open factory:ready factory:working
+case_ decide issue 620
+expect_out "moves=620:factory-progress"
+# A closed issue (Done is the built-in's), a PR, a missing issue: nothing.
+reset
+labelled 620 closed factory:review
+case_ decide issue 620
+expect_out "moves="
+reset
+labelled 620 open factory:review
+jq '.pull_request = {}' "$st/get/$R/issues/620" >"$work/i" && mv "$work/i" "$st/get/$R/issues/620"
+case_ decide issue 620
+expect_out "moves="
+# A failed read stops with exit 1 (a missing issue is a 404).
+reset
+case_ decide issue 620
+expect_code 1
+expect_out ""
+# It logs numbers and fixed text, never a label's name.
+reset
+labelled 620 open "::error::x" factory:review
+case_ decide issue 620
+assert "expected no label name in the log" test "${err/::error::/}" == "$err"
+for bad_args in "decide issue 0" "decide issue x" "decide issue 4 5" "move 4:factory-ready"; do
+  reset
+  read -ra words <<<"$bad_args"
+  case_ "${words[@]}"
+  expect_code 2
+  assert "expected no gh calls" test ! -s "$st/calls"
+done
+
 # --- move: through issue-fields.sh's guarded form ---------------------------------------------------
 reset
 move_ move 417:start
@@ -522,7 +589,7 @@ reset
 move_ move 417:review
 assert "expected the review move" test "$mcalls" == "417|--status|In review|--from|Ready,In progress"
 
-# No move sets Ready, starts from Backlog, or touches another field (Mode Factory above all).
+# No PR move sets Ready, starts from Backlog, or touches another field.
 for kind in start back review; do
   reset
   move_ move "417:$kind"
@@ -530,8 +597,82 @@ for kind in start back review; do
   assert "expected --status and --from only ($kind)" test "${#a[@]}" -eq 5
   assert "expected no Ready target ($kind)" test "${a[2]}" != Ready
   assert "expected no Backlog in --from ($kind)" test "${a[4]/Backlog/}" == "${a[4]}"
-  assert "expected no --mode ($kind)" test "${mcalls/--mode/}" == "$mcalls"
 done
+
+# --- move: a factory label's (#620) --------------------------------------------------------------
+# Guarded first, from every open Status but Backlog: the issue's labels are read again, so a label
+# changed since `decide` moves nothing.
+reset
+labelled 620 open factory:working
+move_ move 620:factory-progress
+expect_code 0
+assert "expected the guarded factory-progress move" test "$mcalls" == "620|--status|In progress|--from|Ready,In review"
+reset
+labelled 620 open factory:failed
+move_ move 620:factory-progress
+assert "expected failed to move to In progress" test "$mcalls" == "620|--status|In progress|--from|Ready,In review"
+reset
+labelled 620 open factory:review
+move_ move 620:factory-review
+expect_code 0
+assert "expected the guarded factory-review move" test "$mcalls" == "620|--status|In review|--from|Ready,In progress"
+# The label changed, or the issue closed, since `decide`: nothing moves.
+for spec in "open factory:review" "open factory:ready" "closed factory:working" "open factory:working factory:review"; do
+  reset
+  labelled 620 $spec
+  move_ move 620:factory-progress
+  expect_code 0
+  assert "expected no move ($spec)" test -z "$mcalls"
+  expect_err "nothing moves"
+done
+# A Backlog factory issue moves out of Backlog: the guard reports Backlog, then the plain form.
+for spec in "factory:working:factory-progress:In progress" "factory:failed:factory-progress:In progress" \
+  "factory:review:factory-review:In review"; do
+  IFS=: read -r _ label kind status <<<"$spec"
+  reset
+  labelled 620 open "factory:$label"
+  STUB_NOW=Backlog STUB_WHY="a move starts only from Ready" run_move move "620:$kind"
+  args=(move "620:$kind")
+  expect_code 0
+  assert "expected the guarded move, then the move out of Backlog ($label)" \
+    test "$mcalls" == "620|--status|$status|--from|$(
+      [[ $status == "In review" ]] && echo "Ready,In progress" || echo "Ready,In review")
+620|--status|$status"
+  expect_err "out of Backlog"
+done
+# Never out of Backlog for an issue that still carries triage, nor for one off the Project, nor
+# from Done: the guard's answer stands.
+reset
+labelled 620 open factory:working triage
+STUB_NOW=Backlog STUB_WHY="x" run_move move 620:factory-progress
+args=(move 620:factory-progress)
+expect_code 0
+assert "expected the guarded move only (triage)" test "$mcalls" == "620|--status|In progress|--from|Ready,In review"
+expect_err "triage"
+for now in - Done "In progress"; do
+  reset
+  labelled 620 open factory:working
+  STUB_NOW=$now STUB_WHY="x" run_move move 620:factory-progress
+  args=(move 620:factory-progress)
+  expect_code 0
+  assert "expected the guarded move only ($now)" test "$mcalls" == "620|--status|In progress|--from|Ready,In review"
+done
+# A failed read of the issue, or a failed move, fails the step.
+reset
+move_ move 620:factory-progress
+expect_code 1
+assert "expected no move after a failed read" test -z "$mcalls"
+reset
+labelled 620 open factory:working
+STUB_EXIT=1 run_move move 620:factory-progress
+args=(move 620:factory-progress)
+expect_code 1
+reset
+labelled 620 open factory:working
+STUB_EXIT=1 STUB_NOW=Backlog STUB_WHY=x run_move move 620:factory-progress
+args=(move 620:factory-progress)
+expect_code 1
+assert "expected no second call after a failed guarded move" test "$mcalls" == "620|--status|In progress|--from|Ready,In review"
 
 # A failed move fails the step.
 reset
