@@ -1110,9 +1110,11 @@ seat's usage, apply to these runs too. A billed API key is the fallback, only if
 necessary, for example if the employer's policy ever rules this out. The factory and the reviewer
 share the seat's weekly limit with the admin's paid work, hence the caps below.
 
-**How a factory job starts (decided 8 Nov).** The factory is a `workflow_dispatch` workflow that
-takes an issue number. It refuses an issue that lacks `factory:ready` or isn't in Ready. Three
-things dispatch it:
+**How a factory job starts (decided 8 Nov; historical).** This paragraph and its list record the 8
+Nov plan. Since #619 (admin, 23 Nov 2026) `factory:ready` is the only gate, and neither the gate nor
+the sweep reads Ready or Mode: see "The factory workflow, built" and "The factory sweep, built"
+below. The factory is a `workflow_dispatch` workflow that takes an issue number. The plan had it
+refuse an issue that lacks `factory:ready` or isn't in Ready. Three things dispatch it:
 
 - **a scheduled sweep** at 07:00, 12:00 and 17:00 CET. It dispatches **one** item that is Ready, has
   Mode Factory and carries `factory:ready`, and has no open PR or branch yet, and none while a
@@ -1212,10 +1214,11 @@ and neither the sweep nor the gate reads Status, Mode or Track.
    (`contents: write` to push and to send `open-pr`'s dispatch, `pull-requests: read`), push the
    branch with hooks off, and run `scripts/open-pr.sh`, so `open-pr.yml` opens the PR as
    `sunny-factory[bot]`. The PR's author and every commit's author and committer are the App.
-5. **`labels`** (`if: always()`, #619) moves the issue's `factory:*` label (below, "The factory
-   sweep, built") on a fresh runner in environment `factory`, with an App token minted with
-   `issues: write` only: `factory:review` when publish opened a PR or a fix round ran,
-   `factory:failed` and one comment when the run opened none.
+5. **`labels`** (`if: !cancelled()`, #619; a run the admin cancels leaves its label for the sweep's
+   reconcile) moves the issue's `factory:*` label (below, "The factory sweep, built") on a fresh
+   runner in environment `factory`, with an App token minted with `issues: write` only:
+   `factory:review` when publish opened a PR or a fix round ran, `factory:failed` and one comment
+   when the run opened none.
 6. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
    rounds each job up) and their sum, and the PR.
 

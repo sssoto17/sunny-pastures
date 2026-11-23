@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The label a factory run leaves on its issue (#619; ADR-0002, area 2, "The factory sweep, built"):
-# factory.yml's `labels` job runs it once the run's other jobs are done, whatever happened, and it
+# factory.yml's `labels` job runs it once the run's other jobs are done, unless the run was
+# cancelled (the sweep's reconcile settles that), and it
 # moves the issue through factory-label.sh, the transition code the sweep uses too:
 # - a fix round (#588) whose gate passed: factory:review, since the PR is still open;
 # - an issue run that opened a PR: factory:review;

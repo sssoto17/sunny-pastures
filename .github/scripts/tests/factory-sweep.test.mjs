@@ -306,6 +306,23 @@ describe("decideSweep", () => {
 			expect(d.reason).toBe("fix round 1 of 2 on PR #586 at f6cd23e");
 		});
 
+		it("claims only an open issue that already carries a factory:* label", () => {
+			const pulls = [factoryPull(586)];
+			const reviews = [review(586)];
+			const unlabelled = decide({ issues: [issue(586, { labels: ["chore"] })], pulls, reviews });
+			expect(unlabelled.fix.pr).toBe(586);
+			expect(unlabelled.moves).toEqual([]);
+			const closed = decide({
+				issues: [issue(586, { state: "closed", labels: ["factory:review"] })],
+				pulls,
+				reviews,
+			});
+			expect(closed.fix.pr).toBe(586);
+			expect(closed.moves).toEqual([
+				{ issue: 586, from: ["review"], to: null, why: "the issue is closed" },
+			]);
+		});
+
 		it("moves the PR's issue (its branch's number) to factory:working", () => {
 			const issues = [issue(586, { labels: ["factory:review"] })];
 			const d = decide({ issues, pulls: [factoryPull(586)], reviews: [review(586)] });
@@ -500,9 +517,7 @@ describe("factory-sweep.mjs", () => {
 		const reviews = [review(586), review(587)];
 		const r = cli({ FACTORY_ENABLED: "true" }, { pulls, reviews, runs: [fixRun(586, HEAD)] });
 		expect(r.code).toBe(0);
-		expect(r.out).toBe(
-			`issue=\npr=587\nhead=${HEAD}\nlabels=[{"issue":587,"from":"","to":"working","why":"fix round on PR #587"}]\n`,
-		);
+		expect(r.out).toBe(`issue=\npr=587\nhead=${HEAD}\nlabels=[]\n`);
 		expect(r.log).toMatch(
 			/^SWEEP fix round 1 of 2 on PR #587 at f6cd23e open=2 cap=4; skipped PR #586: a fix round already ran at f6cd23e$/m,
 		);

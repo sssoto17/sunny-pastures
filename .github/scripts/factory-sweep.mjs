@@ -113,8 +113,10 @@ export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 	const counted = { ...base, open, cap, fixSkipped };
 	if (fix) {
 		const reason = `fix round ${fix.round} of ${MAX_FIX_ROUNDS} on PR #${fix.pr} at ${short(fix.head)}`;
+		// Only an open issue that already carries a factory:* label is claimed for a fix round.
 		const n = branchIssue(data.pulls.find((p) => p.number === fix.pr)?.head?.ref);
-		const working = n && claim(moves, states, n, `fix round on PR #${fix.pr}`);
+		const claimable = n && states.get(n)?.to;
+		const working = claimable && claim(moves, states, n, `fix round on PR #${fix.pr}`);
 		return { ...counted, fix, reason, moves: working || moves };
 	}
 	if (open >= cap) {

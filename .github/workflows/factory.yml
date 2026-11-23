@@ -22,7 +22,7 @@
 #   mint the App's token, push the branch and open the PR with scripts/open-pr.sh, so open-pr.yml
 #   opens it as sunny-factory[bot].
 # - labels (#619): a fresh runner in environment `factory` that never ran the model, whatever
-#   happened: .github/scripts/factory-outcome.sh moves the issue through factory-label.sh (the
+#   happened short of a cancel (a cancelled run leaves the label for the sweep's reconcile): .github/scripts/factory-outcome.sh moves the issue through factory-label.sh (the
 #   sweep's transition code too) with the App's token, minted with issues: write and nothing else.
 #   A PR opened, or a fix round done: factory:review. No PR: factory:failed and one comment with
 #   the run's link and the factory job's `RESULT` lines (its GITHUB_TOKEN reads that log,
@@ -457,7 +457,8 @@ jobs:
   # runner, like publish, and the App's token can write issues only.
   labels:
     needs: [gate, factory, publish]
-    if: always() && needs.gate.outputs.issue != ''
+    # !cancelled(): a run the admin cancels leaves the label for the sweep's reconcile.
+    if: ${{ !cancelled() && needs.gate.outputs.issue != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 4
     environment: factory

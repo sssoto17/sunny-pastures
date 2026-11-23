@@ -525,7 +525,7 @@ describe("factory.yml", () => {
 	// #619: the run's label move, whatever happened, with an App token that can write issues only.
 	it("labels the issue once the run is done, with an issues-only App token", () => {
 		expect(labels).toMatch(
-			/^ {4}needs: \[gate, factory, publish\]\n {4}if: always\(\) && needs\.gate\.outputs\.issue != ''\n/m,
+			/^ {4}needs: \[gate, factory, publish\]\n {4}if: \$\{\{ !cancelled\(\) && needs\.gate\.outputs\.issue != '' \}\}\n/m,
 		);
 		expect(labels).toMatch(/permission-issues: write\n/);
 		expect(labels).not.toMatch(/permission-(contents|pull-requests)/);
