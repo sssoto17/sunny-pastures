@@ -1,65 +1,102 @@
-import type * as Supabase from "@supabase/supabase-js";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { makeEnv } from "../../config/tests/env";
-import { createApi } from "../index";
+import type { PlayerId } from "@/server/auth";
+import type { Rules } from "@/server/rules";
 
-const supabase = vi.hoisted(() => ({ clients: 0 }));
+import { createMemoryStore } from "../../store/tests/memoryStore";
+import { createApi, type Connector } from "../index";
+import { buildGetRequest, buildPlantRequest, spyOnLog } from "./helpers";
 
-// Counts the Supabase clients built, so a test can see auth is built once with the graph (#371,
-// #332 decision 4).
-vi.mock("@supabase/supabase-js", async (importOriginal) => {
-	const actual = await importOriginal<typeof Supabase>();
-	return {
-		...actual,
-		createClient: (...args: Parameters<typeof actual.createClient>) => {
-			supabase.clients += 1;
-			return actual.createClient(...args);
-		},
-	};
+const playerId = "0b5d1e7a-3c4f-4a2b-9e8d-7f6a5b4c3d2e" as PlayerId;
+
+afterEach(() => {
+	vi.useRealTimers();
+	vi.restoreAllMocks();
 });
 
-// Tests build the graph from their own environment and never call getApi (#329, decision 5).
 describe("createApi", () => {
 	it("answers the health check once the graph is built", () => {
-		expect(createApi(makeEnv("postgresql://db.test/farm")).health()).toEqual({ status: "ok" });
+		expect(createApi(connectMemory().connect).health()).toEqual({ status: "ok" });
 	});
 
-	it("builds without reading the environment, and its health check throws the config error (#470)", () => {
-		const api = createApi({});
+	it("builds the connection once, on the first call that needs it, not once per request", async () => {
+		const { connect, builds } = connectMemory();
+		const api = createApi(connect);
+		expect(builds).toHaveLength(0);
 
-		expect(() => api.health()).toThrow(/DATABASE_URL/);
+		await Promise.all([api.getFarm(buildGetRequest()), api.getFarm(buildGetRequest())]);
+		api.health();
+
+		expect(builds).toHaveLength(1);
 	});
 
-	it("builds auth once with the graph, not once per request (#371)", async () => {
-		const before = supabase.clients;
-		const api = createApi(makeEnv("postgresql://db.test/farm"));
-		const request = new Request("http://app.test/api/farm");
+	it("builds the store with the rules' version, the one each response carries (#443)", async () => {
+		const { connect, builds } = connectMemory();
 
-		const results = await Promise.all([api.readPlayer(request), api.readPlayer(request)]);
+		const response = await createApi(connect).getFarm(buildGetRequest());
 
-		expect(results).toStrictEqual([{ ok: false }, { ok: false }]);
-		expect(supabase.clients - before).toBe(1);
-	});
-
-	it("wires the game routes so a request without a token is 401 before the database (#397)", async () => {
-		// Nothing listens at db.test: a store call would reject, and the route would answer 503.
-		const api = createApi(makeEnv("postgresql://db.test/farm"));
-		const post = new Request("http://app.test/api/farm/actions", {
-			method: "POST",
-			body: "{}",
-		});
-
-		const responses = await Promise.all([
-			api.getFarm(new Request("http://app.test/api/farm")),
-			api.postAction(post),
+		expect(response.status).toBe(200);
+		expect(builds.map((rules) => rules.rulesVersion)).toEqual([
+			Number(response.headers.get("Rules-Version")),
 		]);
+	});
 
-		for (const response of responses) {
-			expect(response.status).toBe(401);
-			expect(response.headers.get("Rules-Version")).toBe("1");
-			expect(response.headers.get("Cache-Control")).toBe("no-store");
-			expect(response.headers.get("Server-Timing")).toMatch(/^total;dur=/);
-		}
+	it("wires the game routes to the connection's player and store", async () => {
+		const api = createApi(connectMemory().connect);
+
+		const response = await api.getFarm(buildGetRequest());
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ farm: { seq: 0, at: 0 } });
+	});
+
+	it("stamps an action with the server's Date.now(), in ms (T1, MUST-11.1)", async () => {
+		const now = 1_790_000_000_000;
+		vi.useFakeTimers({ toFake: ["Date"], now });
+		const api = createApi(connectMemory().connect);
+
+		const response = await api.postAction(buildPlantRequest());
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ farm: { seq: 1, at: now } });
+		// The store logged the action at that time: a fresh load reads it back.
+		const loaded = await api.getFarm(buildGetRequest());
+		expect(await loaded.json()).toMatchObject({ farm: { seq: 1, at: now } });
+	});
+
+	it("sends a store error to the server's log and answers 503 busy (ADR-0006, section 8)", async () => {
+		const error = new Error("Store error: connection refused.");
+		const logged = spyOnLog();
+		const { connect } = connectMemory({ storeError: error });
+
+		const response = await createApi(connect).getFarm(buildGetRequest());
+
+		expect(response.status).toBe(503);
+		expect(logged).toEqual([["Game API error:", error]]);
 	});
 });
+
+interface MemoryOptions {
+	readonly storeError?: Error;
+}
+
+/**
+ * A connector over the in-memory store that the store contract holds to B100 (ADR-0007, section 6;
+ * #470) and a fixed player, so these tests see the wiring and not postgres.js or the JWKS. `builds`
+ * lists the rules each build received.
+ */
+function connectMemory(options: MemoryOptions = {}): { connect: Connector; builds: Rules[] } {
+	const builds: Rules[] = [];
+	const connect: Connector = (rules) => {
+		builds.push(rules);
+		const store = createMemoryStore({ newFarm: rules.newFarm, replay: rules.replay });
+		if (options.storeError !== undefined) {
+			vi.spyOn(store, "load").mockRejectedValue(options.storeError);
+		}
+		return {
+			store,
+			readPlayer: () => Promise.resolve({ ok: true, playerId }),
+		};
+	};
+	return { connect, builds };
+}

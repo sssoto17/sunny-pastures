@@ -8,6 +8,7 @@ import type { GameStore } from "@/server/store";
 
 import { createMemoryStore } from "../../store/tests/memoryStore";
 import { createFarmRoutes, type Connection, type FarmRouteDeps } from "../farmRoutes";
+import { expectContract500 } from "./helpers";
 
 const rules = createRules(sliceContent);
 const plantWheat: Action = { type: "plant", plot: 0, crop: "wheat" };
@@ -76,13 +77,9 @@ describe("GET /api/farm (getFarm)", () => {
 		const response = await routes.getFarm(buildGetRequest());
 
 		expect(response.status).toBe(500);
-		const body = await response.text();
-		expect(JSON.parse(body)).toEqual({
-			error: "internal",
-			message: "Something went wrong on the server. Try again.",
-		});
-		expect(body).not.toContain("secret");
-		expectContractHeaders(response, ["total"]);
+		expect(logged).toHaveLength(1);
+		await expectContract500(response, "secret");
+		expect(response.headers.get("Retry-After")).toBeNull();
 		expect(logged).toEqual([error]);
 	});
 
@@ -97,13 +94,9 @@ describe("GET /api/farm (getFarm)", () => {
 		const response = await routes.getFarm(buildGetRequest());
 
 		expect(response.status).toBe(500);
-		const body = await response.text();
-		expect(JSON.parse(body)).toEqual({
-			error: "internal",
-			message: "Something went wrong on the server. Try again.",
-		});
-		expect(body).not.toContain("DATABASE_URL");
-		expectContractHeaders(response, ["total"]);
+		expect(response.headers.get("Retry-After")).toBeNull();
+		await expectContract500(response, "DATABASE_URL");
+		expect(logged).toHaveLength(1);
 		expect(logged).toEqual([error]);
 	});
 });
