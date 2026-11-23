@@ -26,7 +26,7 @@ flowchart TB
     R["research<br/>background agent → cited .md"]
     S["spec-driven-development<br/>→ docs/requirements/spec.md"]
     PL["planning-and-task-breakdown<br/>→ the milestone's ADR + tickets"]
-    T["to-tickets → GitHub issues<br/>milestone · type · Priority · Size · Week · Track · Mode"]
+    T["to-tickets → GitHub issues<br/>milestone · type · Priority · Size · Week"]
     G --> Q
     Q -- "needs a runnable answer" --> P
     P -- "what it taught" --> G
