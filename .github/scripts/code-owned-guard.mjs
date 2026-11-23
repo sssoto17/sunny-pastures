@@ -37,7 +37,9 @@
 //
 // Usage: node .github/scripts/code-owned-guard.mjs [--codeowners <file>]
 //   (reads the PR from $GITHUB_EVENT_PATH; REST through $GITHUB_API_URL with $GITHUB_TOKEN; the
-//   sign-off's OIDC token from $ACTIONS_ID_TOKEN_REQUEST_URL, which `id-token: write` sets)
+//   sign-off's OIDC token from $ACTIONS_ID_TOKEN_REQUEST_URL, which `id-token: write` sets; GitHub's
+//   OIDC keys from $CODE_OWNED_JWKS_URL, default https://token.actions.githubusercontent.com/
+//   .well-known/jwks, set only by the tests)
 // Exit codes: 0 the verdict, pass or held, is written to `guard / code-owned`; 2 could not run (the
 // verdict is then written as a failure when the head is known, so it never reads as a pass). A
 // held PR leaves the job green: the required check carries the verdict, and a red job beside it
@@ -163,19 +165,23 @@ export const checkCodeOwned = async (event, deps) => {
 		);
 
 	const signed = await signOff(event, pull, events, audienceOf(repo, number, head), deps);
-	const keys = await deps.getKeys();
-	const records = (await deps.listRecords(head))
-		.filter((r) => fromMain(r, { repo, number, head, keys }))
-		.sort((a, b) => a.id - b.id);
-	if (records.length > 0)
-		return verdict(
-			true,
-			`signed off: ${SIGN_OFF} ${records.at(-1).id} from main's code-owned.yml on ${short}`,
-		);
-
+	// The label's last removal must be the admin's own, so a record from an earlier sign-off on
+	// this head can't carry a later removal by anyone else (the label came back, then went again).
 	const removal = signed ?? latestLabelEvent(events);
+	if (isAdminRemoval(removal)) {
+		const keys = await deps.getKeys();
+		const records = (await deps.listRecords(head))
+			.filter((r) => fromMain(r, { repo, number, head, keys }))
+			.sort((a, b) => a.id - b.id);
+		if (records.length > 0)
+			return verdict(
+				true,
+				`signed off: ${SIGN_OFF} ${records.at(-1).id} from main's code-owned.yml on ${short}`,
+			);
+	}
+
 	const why = isAdminRemoval(removal)
-		? `no ${SIGN_OFF} record from main's code-owned.yml on ${short}, the head (pushed after the sign-off, or removed on an older head)`
+		? `no ${SIGN_OFF} record from main's code-owned.yml on ${short}, the head (pushed after the sign-off, removed on an older head, or the run that would write it was replaced by a newer one; the admin removes the label again)`
 		: `review:admin was removed by ${who(removal)}, which isn't the admin's sign-off`;
 	await rearm(why);
 	return verdict(false, `held: ${why}; review:admin is back`);
@@ -207,12 +213,17 @@ export const writeVerdict = async (verdict, deps) => {
 				},
 			)
 		: false;
-	if (!updated) await deps.createCheck({ name: CHECK, head_sha: verdict.head, ...body });
-	await deps.setStatus(verdict.head, {
-		state: verdict.ok ? "success" : "failure",
-		context: CHECK,
-		description: verdict.message.slice(0, 140),
-	});
+	// Both halves are tried, so one that fails can't leave the other stale; the first error is thrown.
+	const results = await Promise.allSettled([
+		updated ? null : deps.createCheck({ name: CHECK, head_sha: verdict.head, ...body }),
+		deps.setStatus(verdict.head, {
+			state: verdict.ok ? "success" : "failure",
+			context: CHECK,
+			description: verdict.message.slice(0, 140),
+		}),
+	]);
+	const failed = results.find((r) => r.status === "rejected");
+	if (failed) throw failed.reason;
 };
 
 // On the run an `unlabeled` event of `review:admin` fired: the removal it reports, read from the
@@ -410,10 +421,12 @@ const main = async () => {
 			throw new CannotRun(`can't read CODEOWNERS at ${file}`);
 		}
 		verdict = await checkCodeOwned(event, { rules, ...deps });
+		await writeVerdict(verdict, deps);
 	} catch (e) {
+		// Any error, not only CannotRun, writes a failure, so an earlier pass on the head can't stand.
 		const head = event?.pull_request?.head?.sha;
-		if (head && number && e instanceof CannotRun) {
-			const failed = { ok: false, owned: [], head, message: `cannot run: ${e.message}` };
+		if (head && number) {
+			const failed = { ok: false, owned: [], head, message: `cannot run: ${e?.message ?? e}` };
 			// A failure to write it too is reported, and the exit code is still 2.
 			await writeVerdict(failed, deps).catch((w) =>
 				console.error(`code-owned: couldn't write the failure: ${w?.message ?? w}`),
@@ -421,7 +434,6 @@ const main = async () => {
 		}
 		throw e;
 	}
-	await writeVerdict(verdict, deps);
 	for (const p of verdict.owned) console.log(`code-owned: ${JSON.stringify(p)}`);
 	console.log(`code-owned: ${verdict.ok ? "pass" : "held"} (${verdict.message})`);
 	return 0;

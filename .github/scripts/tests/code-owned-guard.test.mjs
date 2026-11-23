@@ -376,6 +376,16 @@ describe("checkCodeOwned", () => {
 		expect(gh.log).toEqual([]);
 	});
 
+	// The admin signed off on HEAD; the label came back on HEAD and someone else removed it.
+	it("doesn't let an earlier sign-off on the head carry a later removal by anyone else", async () => {
+		const gh = github({
+			events: [added(), removed(ADMIN), added(), removed(FACTORY)],
+			records: [record(1)],
+		});
+		const r = await rearmed(gh, unlabeled(FACTORY));
+		expect(r.message).toContain("removed by sunny-factory[bot]");
+	});
+
 	it("doesn't count a record a workflow on the PR's branch wrote", async () => {
 		const branch = { workflow_ref: `${REPO}/.github/workflows/fake.yml@refs/pull/337/merge` };
 		const gh = github({
@@ -486,6 +496,15 @@ describe("writeVerdict", () => {
 		await writeVerdict({ ...verdict, ok: true }, d);
 		expect(d.log[0]).toEqual(["update", 6, expect.objectContaining({ conclusion: "success" })]);
 		expect(d.log[1][2].state).toBe("success");
+	});
+
+	it("still sets the status when the check run can't be written, then fails", async () => {
+		const d = deps([]);
+		d.createCheck = async () => {
+			throw new Error("404");
+		};
+		await expect(writeVerdict(verdict, d)).rejects.toThrow("404");
+		expect(d.log.map(([kind]) => kind)).toEqual(["status"]);
 	});
 
 	it("creates one when the newest can't be updated", async () => {
@@ -616,6 +635,19 @@ describe("code-owned-guard.mjs", () => {
 		expect(r.status).toBe(2);
 		expect(r.out).toContain("cannot run");
 		expect(checkRunPost(api.seen)).toMatchObject({ conclusion: "failure" });
+	});
+
+	// Not a CannotRun: a PR answer without labels throws a TypeError inside the verdict.
+	it("exits 2 and writes a failing status on any error, not only one it expected", async () => {
+		const api = await serve({
+			...routes(["README.md"]),
+			[`GET ${P}/pulls/337`]: { head: { sha: HEAD }, changed_files: 1 },
+		});
+		const r = await run(event(), api.url);
+		expect(r.status).toBe(2);
+		expect(api.seen.find((x) => x.startsWith(`POST ${P}/statuses/${HEAD}`))).toContain(
+			'"state":"failure"',
+		);
 	});
 
 	it("exits 2, never a pass, without an event", async () => {

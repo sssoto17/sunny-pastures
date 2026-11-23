@@ -751,7 +751,12 @@ same as a plain comment in the timeline (admin, 22 Nov, while merging #487), and
    run never reaches the PR's merge box, so the guard also sets a commit status `guard / code-owned`
    with the same verdict, which the merge box shows as required. An API-written check run in a PR's
    own suite does satisfy the required check, and updating it in place changes the merge box; a
-   cancelled `code-owned (run)` isn't required.
+   cancelled `code-owned (run)` isn't required. Alternatives considered for the record's proof: its
+   check suite and workflow run (shown above not to carry provenance); a record written with an App
+   token that only a `main`-only environment holds (sound, but one more credential for the admin to
+   keep); and artifact attestations (the same OIDC root, with more moving parts). The verdict
+   itself, check run and status alike, carries no such proof: a workflow on a PR's branch can still
+   write a `guard / code-owned` of its own, as it could fake any required check before (decision 3).
 5. **Only `sssoto17`, a `User`, signs off.** A removal by anyone else (either App, `github-actions`,
    another collaborator) writes no record; the guard puts the label back and stays red, as the bot
    reopens an escalation thread someone else resolved. Agents are denied removing the label: the
