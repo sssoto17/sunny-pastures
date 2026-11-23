@@ -78,7 +78,8 @@ reset() {
   rm -rf "$st" "$work"/fields-calls "$work"/fail-*
   mkdir -p "$st/get/$R/issues"
   cp "$work/hook" "$st/hook"
-  labels bug feature chore spike design idea area:sim area:tools area:docs review:admin
+  labels bug feature chore spike design idea area:sim area:tools area:docs review:admin triage \
+    factory:ready blocked:admin blocked:decision
   types Chore Bug Feature Design
   jq -n '[{number: 2, title: "M2 Sim properties + factory"}, {number: 5, title: "M3 Game API"}]' \
     >"$st/get/$R/milestones"
@@ -186,12 +187,49 @@ expect_no_gh
 case_ "${base[@]}" --status Backlog
 expect_code 2
 expect_no_gh
-case_ "${base[@]}" --mode Factory
-expect_code 2
-expect_err "only the admin sets Mode to Factory"
+# factory:ready is the admin's to add (docs/agents/triage-labels.md; #621), in any
+# case and either flag form.
+for flag in "--label factory:ready" "--label=factory:ready" "--label Factory:Ready" \
+  "--label blocked:admin --label factory:ready"; do
+  reset
+  read -ra words <<<"$flag"
+  case_ "${base[@]}" "${words[@]}"
+  expect_code 2
+  expect_err "only the admin adds factory:ready"
+  expect_no_gh
+done
+
+# Mode and Track are gone (#621): --mode and --track are refused by name, whatever the value.
+for gone in "--mode Factory" "--mode Manual" "--mode=Manual" "--track Infra" "--track=Build"; do
+  reset
+  read -ra words <<<"$gone"
+  case_ "${base[@]}" "${words[@]}"
+  expect_code 2
+  flag=${words[0]%%=*}
+  expect_err "$flag is gone: the Project's Mode and Track fields were dropped (#621)"
+  expect_no_gh
+done
+
+# --label adds a label beyond the type and area (a blocked:* one, say). The labels other flags
+# or rules own are refused before any gh call: the type, the area and triage.
+for owned in chore Area:tools triage; do
+  reset
+  case_ "${base[@]}" --label "$owned"
+  expect_code 2
+  expect_no_gh
+done
+reset
+case_ "${base[@]}" --label chore
+expect_err "--label chore: the type label is set with --type"
+case_ "${base[@]}" --label area:docs
+expect_err "--label area:docs: the area label is set with --area"
+case_ "${base[@]}" --label triage
+expect_err "--label triage: new-issue.sh adds triage itself"
+case_ "${base[@]}" --label ""
+expect_err "--label is empty"
 expect_no_gh
-case_ "${base[@]}" --mode factory
-expect_code 2
+case_ "${base[@]}" --label blocked:admin --label blocked:admin
+expect_err "--label blocked:admin given twice"
 expect_no_gh
 
 # Parents: every issue sits under one, except an idea, which has none (issue-tracker.md, Grouping).
@@ -256,7 +294,7 @@ expect_no_writes
 # REST only: one create with labels, milestone number and type, then the sub-issue link by the
 # new issue's id. The fake refuses any gh subcommand but api, and nothing calls graphql.
 reset
-case_ "${base[@]}" --track Build --size S --priority P1 --week "Wk 2"
+case_ "${base[@]}" --size S --priority P1 --week "Wk 2"
 expect_code 0
 expect_call "api -X POST $R/issues -f title=Add a thing -F body=@body.md"
 expect_created '[.title, .body, .labels, .milestone, .type]' \
@@ -265,13 +303,42 @@ expect_call "api -X POST $R/issues/73/sub_issues -F sub_issue_id=20000 --silent"
 assert "the link carries the new issue's id" test "$(cat "$st/linked")" == '73/sub_issues {"sub_issue_id":20000}'
 expect_no_call "graphql"
 assert "expected every call to be gh api" test "$(call_lines | grep -vc '^api ')" -eq 0
-assert "issue-fields gets the new number, the native type and the fields" test "$fields" = "200 --type Chore --track Build --size S --priority P1 --week Wk 2"
+assert "issue-fields gets the new number, the native type and the fields" test "$fields" = "200 --type Chore --size S --priority P1 --week Wk 2"
 assert "no warning when all four are set" test -z "$err"
 expect_out "https://github.com/sssoto17/sunny-pastures/issues/200"
 expect_out "Status:   Backlog"
 expect_out "Labels:   chore, area:tools"
 expect_out "Milestone: M2 Sim properties + factory"
 expect_out "Parent:   #73"
+
+# --label: each one is checked against the repo's labels, goes into the create beside the type and
+# area, and must be on the issue at read-back. issue-fields.sh never sees it.
+reset
+readback chore,area:tools,blocked:admin,blocked:decision "M2 Sim properties + factory" 73 Chore
+case_ "${base[@]}" "${three[@]}" --label blocked:admin --label=blocked:decision
+expect_code 0
+expect_created .labels '["chore","area:tools","blocked:admin","blocked:decision"]'
+assert "issue-fields gets no label" test "$fields" = "200 --type Chore --priority P2 --size S --week Wk 2"
+expect_out "Labels:   chore, area:tools, blocked:admin, blocked:decision"
+
+# Labels match without case, as on GitHub: the create carries the repo's spelling.
+reset
+readback chore,area:tools,blocked:admin "M2 Sim properties + factory" 73 Chore
+case_ "${base[@]}" "${three[@]}" --label Blocked:Admin
+expect_code 0
+expect_created .labels '["chore","area:tools","blocked:admin"]'
+
+reset
+case_ "${base[@]}" "${three[@]}" --label blocked:nope
+expect_code 2
+expect_err 'unknown label "blocked:nope"'
+expect_err "Nothing was created."
+expect_no_writes
+
+reset
+case_ "${base[@]}" "${three[@]}" --label blocked:admin
+expect_code 1
+expect_err "missing label blocked:admin"
 
 # Forms the coordinator types: "area:tools", "#73", --flag=value.
 reset

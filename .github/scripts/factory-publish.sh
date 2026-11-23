@@ -14,12 +14,21 @@
 # or tests/acceptance/ (the App can't push workflows, and guard / acceptance fails a [bot] PR there);
 # a commit whose author or committer isn't the App's bot user.
 #
+# Fix mode (#588), with FIX_BRANCH set: the run fixed an open factory PR, and BASE is that PR's head.
+# The hand-off then holds a fifth entry, `comment`, and any of `commits.bundle`, `pr-body.md`,
+# `labels` and `comment` may be empty (a label or body fix needs no commit). Refused besides the
+# above: a branch that isn't FIX_BRANCH; commits that don't descend from BASE (publish pushes
+# without force); a non-empty body without `Closes #<n>` (it replaces the PR's body whole, with no
+# title line); a comment that isn't one line starting `escalated: ` (CONSTRAINTS.md, "Escalation
+# criteria"), up to 300 characters. The diff and identity checks run on the new commits only.
+#
 # Env: ISSUE (the gate's checked number), HANDOFF (the tar.gz), WORK (an empty directory to unpack
 # into), BASE (main's commit to diff against), BOT and BOT_ID (the App's bot user,
 # sunny-factory[bot], and its user id, pinned in factory.yml),
-# GITHUB_OUTPUT. Run inside the repository the branch
+# GITHUB_OUTPUT; FIX_BRANCH in fix mode. Run inside the repository the branch
 # is fetched into. Writes branch=, labels= (comma-separated) and body= (the body file) and logs one
-# PUBLISH line. Exit codes: 0 passed; 1 refused, nothing fetched past the check that failed.
+# PUBLISH line; in fix mode also commits= (the count) and comment=, and body= and comment= are
+# empty when their file is. Exit codes: 0 passed; 1 refused, nothing fetched past the check that failed.
 # Tests: .github/scripts/tests/factory-publish.test.mjs
 set -euo pipefail
 
@@ -46,20 +55,41 @@ while IFS= read -r line; do
   [[ -n $line ]] || continue
   [[ ${line:0:1} == - ]] || refuse "the hand-off holds something that isn't a regular file"
 done <<<"$listing"
+fix=${FIX_BRANCH-}
+want="branch commits.bundle labels pr-body.md "
+[[ -z $fix ]] || want="branch comment commits.bundle labels pr-body.md "
 names=$(tar -tzf "$HANDOFF" | sort | tr '\n' ' ')
-[[ $names == "branch commits.bundle labels pr-body.md " ]] ||
-  refuse "the hand-off holds $(printf %q "$names"), not branch, commits.bundle, labels and pr-body.md"
+[[ $names == "$want" ]] ||
+  refuse "the hand-off holds $(printf %q "$names"), not $want"
 tar -xzf "$HANDOFF" -C "$WORK" --no-same-owner --no-same-permissions
 
 branch=$(head -n1 "$WORK/branch")
 [[ $branch =~ ^$ISSUE-[a-z0-9-]+$ ]] || refuse "the branch $(printf %q "$branch") isn't $ISSUE-<slug>"
 ((${#branch} <= 100)) || refuse "the branch name is over 100 characters"
-! git rev-parse -q --verify "refs/heads/$branch" >/dev/null || refuse "the branch $branch already exists here"
+if [[ -n $fix ]]; then
+  [[ $branch == "$fix" ]] || refuse "the branch $branch isn't the PR's branch $fix"
+else
+  ! git rev-parse -q --verify "refs/heads/$branch" >/dev/null || refuse "the branch $branch already exists here"
+fi
 
-title=$(head -n1 "$WORK/pr-body.md")
-[[ -n ${title//[[:space:]]/} ]] || refuse "the PR body has no title on its first line"
-((${#title} <= 256)) || refuse "the title is over 256 characters"
-grep -qiE "(^|[^[:alnum:]])closes #$ISSUE([^0-9]|$)" "$WORK/pr-body.md" || refuse "the PR body doesn't say Closes #$ISSUE"
+body=$WORK/pr-body.md
+if [[ -n $fix && ! -s $body ]]; then
+  body=""
+elif [[ -z $fix ]]; then
+  title=$(head -n1 "$body")
+  [[ -n ${title//[[:space:]]/} ]] || refuse "the PR body has no title on its first line"
+  ((${#title} <= 256)) || refuse "the title is over 256 characters"
+fi
+[[ -z $body ]] || grep -qiE "(^|[^[:alnum:]])closes #$ISSUE([^0-9]|$)" "$body" || refuse "the PR body doesn't say Closes #$ISSUE"
+
+comment=""
+if [[ -n $fix && -s $WORK/comment ]]; then
+  comment=$WORK/comment
+  (($(grep -c '' "$comment") == 1)) || refuse "the comment isn't one line"
+  c=$(head -n1 "$comment")
+  [[ $c == "escalated: "* ]] || refuse "the comment doesn't start with 'escalated: '"
+  ((${#c} <= 300)) || refuse "the comment is over 300 characters"
+fi
 
 labels=()
 while IFS= read -r l || [[ -n $l ]]; do
@@ -69,10 +99,21 @@ while IFS= read -r l || [[ -n $l ]]; do
   labels+=("$l")
 done <"$WORK/labels"
 
-# The commits.
+# The commits. A fix with none (an empty bundle) has nothing more to check.
+if [[ -n $fix && ! -s $WORK/commits.bundle ]]; then
+  {
+    echo "branch=$branch"
+    echo "labels=$(IFS=,; echo "${labels[*]-}")"
+    printf 'body=%s\ncomment=%s\ncommits=0\n' "$body" "$comment"
+  } >>"$GITHUB_OUTPUT"
+  echo "PUBLISH ok: fix on $branch, no commits, labels: ${labels[*]-none}, body: ${body:+replaced}${body:-unchanged}"
+  exit 0
+fi
 git bundle verify -q "$WORK/commits.bundle" >/dev/null 2>&1 || refuse "git can't verify the bundle against main"
 git fetch -q --no-tags "$WORK/commits.bundle" "refs/heads/$branch:refs/heads/$branch" 2>/dev/null ||
   refuse "the bundle has no branch $branch"
+[[ -z $fix ]] || git merge-base --is-ancestor "$BASE" "refs/heads/$branch" ||
+  refuse "the branch $branch doesn't descend from the PR's head: publish never force-pushes"
 count=$(git rev-list --count "$BASE..refs/heads/$branch")
 ((count >= 1)) || refuse "the branch $branch has no commits past main"
 ((count <= 100)) || refuse "the branch $branch has $count commits, over 100"
@@ -89,5 +130,6 @@ others=$(git log --format='%an <%ae>%n%cn <%ce>' "$BASE..refs/heads/$branch" |
 
 echo "branch=$branch" >>"$GITHUB_OUTPUT"
 echo "labels=$(IFS=,; echo "${labels[*]-}")" >>"$GITHUB_OUTPUT"
-echo "body=$WORK/pr-body.md" >>"$GITHUB_OUTPUT"
-echo "PUBLISH ok: $branch, $count commit(s), labels: ${labels[*]-none}"
+echo "body=$body" >>"$GITHUB_OUTPUT"
+[[ -z $fix ]] || printf 'comment=%s\ncommits=%s\n' "$comment" "$count" >>"$GITHUB_OUTPUT"
+echo "PUBLISH ok: ${fix:+fix on }$branch, $count commit(s), labels: ${labels[*]-none}"

@@ -1,75 +1,55 @@
-# `guard / code-owned` (#337): a PR whose diff touches a path in .github/CODEOWNERS fails until a
-# code owner, the admin, approves its current head, and gets `review:admin` from the diff, not from
-# the reviewer bot. The rules are in code-owned-guard.mjs. Its own workflow, so a review re-runs
-# this check only, not all of ci, and the overlap with ci.yml and pr-body.yml stays small. No path
-# filter: it reports on every reviewed PR and is a required check (ADR-0002, area 2). Actions are
-# GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
+# `guard / code-owned` (#337, #565): a held PR (one whose diff touches a path in `main`'s
+# .github/CODEOWNERS, or one that has ever carried `review:admin`) fails until the admin signs off
+# by removing `review:admin` on its current head. The rules are in code-owned-guard.mjs; the design
+# is ADR-0002, area 2, "Solo-admin approvals: removing `review:admin` is the sign-off" (#495).
+# `guard / code-owned` is a required check; this job, `code-owned (run)`, isn't: the script writes
+# the required check run itself, through the Checks API, and a commit status of the same name, so
+# each head has one writer and a cancelled or older run can't stand as the head's result. Its own
+# workflow, so a label change re-runs this check only. Actions are GitHub-owned and pinned to a
+# full SHA (ADR-0002, area 8).
 name: code-owned
 
-# Reviews only (#379): when a `pull_request` run and a review run both reported on one head, the
-# merge gate kept the `pull_request` run's failure after the review run passed (PR #377). `main`
-# needs an approval, so every PR gets a review, and with it this check, before it can merge. A push
-# leaves the new head without the check ("Expected"), which blocks, until a review of that head runs
-# it; if the stale-approval dismissal on a push fires `dismissed`, that is such a run (to be shown on
-# #379's throwaway PRs). A dismissed approval runs it again, red on a code-owned PR.
+# `pull_request_target` only (#565): the verdict depends on the label, the sign-off record and the
+# diff, never on reviews, so there is no `pull_request_review` trigger. This event always runs the
+# default branch's copy of this file and checks out the default branch (ADR-0002, area 2, "Stacks",
+# #404), so a PR can't change the workflow, script or CODEOWNERS that judge it, and the sign-off
+# record this run writes carries a token GitHub signs for this workflow on `main` only.
+# `unlabeled` is the admin's sign-off; `synchronize` re-arms it; `labeled` and the rest re-read the
+# state.
 on:
-  pull_request_review:
-    types: [submitted, dismissed]
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
-permissions:
-  contents: read
+permissions: {}
 
-# One run per PR (admin, 19 Nov): a review that lands while an older run is going cancels it, and
-# the newer run, which reads the PR's state when it starts, reports for the head. Each run takes
-# seconds, so the overlap is rare. Whether a cancelled review run can stand as the head's result,
-# as cancelled `pull_request` twins did on #313 (ADR-0002), is a check on #379's throwaway PRs.
+# Runs go one at a time per PR, and none is cancelled while it runs: a newer pending run replaces an
+# older pending one, so the last run reads the final state. The script re-reads the live state each
+# time, and only it writes `guard / code-owned`, so a replaced run leaves nothing behind.
 concurrency:
   group: code-owned-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
 
-# The job has no `if:`, on the review's state or anything else (#379): a skipped required check
-# reads as passing (ADR-0002, #312), so a COMMENTED review would turn it green. It always runs, and
-# the script passes or fails it.
+# The job has no `if:` (#379): a skipped required check reads as passing (ADR-0002, #312). It is
+# named neither `guard / code-owned` nor `code-owned / sign-off`, the two check runs it writes.
 jobs:
   code-owned:
-    name: guard / code-owned
+    name: code-owned (run)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Reads the PR's files and reviews and adds `review:admin`: write on pull requests only, with
-    # the token in env, never in a `run:` expression.
+    # The token stays in env, never in a `run:` expression.
     permissions:
-      contents: read
-      pull-requests: write
+      contents: read # main's checkout of .github/scripts and CODEOWNERS
+      pull-requests: write # the PR, its files, and adding `review:admin` with its comment
+      issues: read # the PR's events: who added or removed `review:admin`
+      checks: write # the `guard / code-owned` check run and the `code-owned / sign-off` record
+      statuses: write # the `guard / code-owned` commit status, which reaches the merge box always
+      id-token: write # the OIDC token in the sign-off record, proof that main's workflow wrote it
     steps:
+      # The default branch's commit, which `pull_request_target` checks out: never the PR's code.
+      # Cone mode keeps .github/CODEOWNERS, a file in a parent folder of the sparse path.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: .github/scripts
-      # Run the default branch's script and CODEOWNERS, not the PR's, so a PR can't switch off the
-      # check that judges it or drop a path from its list (as the floor job does, #99). Its own
-      # checkout, since a sparse checkout leaves other refs' blobs off the runner; cone mode keeps
-      # .github/CODEOWNERS, a file in a parent folder. The PR's script runs only while the default
-      # branch has none; CODEOWNERS always comes from the default branch.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.event.repository.default_branch }}
-          path: .code-owned
-          sparse-checkout: .github/scripts
-      - name: Take the script and CODEOWNERS from the default branch
-        run: |
-          dir="$RUNNER_TEMP/code-owned"
-          mkdir -p "$dir"
-          owners=$(git -C .code-owned ls-tree HEAD -- .github/CODEOWNERS) || exit 1
-          [[ -n $owners ]] || { echo "::error::the default branch has no .github/CODEOWNERS"; exit 1; }
-          cp .code-owned/.github/CODEOWNERS "$dir/"
-          listed=$(git -C .code-owned ls-tree HEAD -- .github/scripts/code-owned-guard.mjs) || exit 1
-          if [[ -n $listed ]]; then
-            cp .code-owned/.github/scripts/code-owned-guard.mjs .code-owned/.github/scripts/diff.mjs "$dir/"
-          else
-            echo "::warning::the default branch has no code-owned-guard.mjs yet; using this PR's copy"
-            cp .github/scripts/code-owned-guard.mjs .github/scripts/diff.mjs "$dir/"
-          fi
-      - run: node "$RUNNER_TEMP/code-owned/code-owned-guard.mjs" --codeowners "$RUNNER_TEMP/code-owned/CODEOWNERS"
+      - run: node .github/scripts/code-owned-guard.mjs --codeowners .github/CODEOWNERS
         env:
           GITHUB_TOKEN: ${{ github.token }}

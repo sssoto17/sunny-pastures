@@ -12,9 +12,18 @@
 #                                               closed unmerged
 #   review  In review    Ready, In progress     that PR is ready (not a draft) and its checks are
 #                                               green, `guard / code-owned` apart (admin, 21 Nov)
+#   factory-progress  In progress  Ready, In review, Backlog   the issue carries factory:working
+#                                                              or factory:failed (#620)
+#   factory-review    In review    Ready, In progress, Backlog  the issue carries factory:review
 #
-# Never Ready, never out of Backlog, never Mode: issue-fields.sh refuses each, and an issue that
-# isn't on the Project is left alone. Only the PR that closes #N moves #N: on main, the issues
+# A factory issue's Status mirrors its label and never gates the factory (admin, 23 Nov):
+# factory:ready moves nothing, and an issue with two of those labels at once (one being swapped)
+# waits for the next label event. The labels are read when the job runs, not taken from the event,
+# so two quick label events that finish out of order still end on the current label.
+# Never Ready, never another field: issue-fields.sh refuses Ready, and every move here sets Status
+# alone. Never out of Backlog, but for a factory issue: issue-fields.sh's guard refuses Backlog,
+# so a factory move that its guard reports in Backlog takes the plain form (move_factory). An
+# issue that isn't on the Project is left alone. Only the PR that closes #N moves #N: on main, the issues
 # GitHub records (closingIssuesReferences); on another base (a stack's closing part, for which
 # GitHub records none), the body's closing keyword, which `guard / pr-body` allows only on the
 # closing part. So the `Part of #N` parts of a split don't move it.
@@ -42,6 +51,7 @@ usage() {
 usage: scripts/board-status.sh decide pr <number> [<action>]
        scripts/board-status.sh decide commit <sha> [<pr>...]
        scripts/board-status.sh decide branch <name>
+       scripts/board-status.sh decide issue <number>
        scripts/board-status.sh move <issue>:<kind>
 
 decide  reads GitHub (read-only) and prints one line, `moves=` then the moves, each
@@ -55,15 +65,23 @@ decide  reads GitHub (read-only) and prints one line, `moves=` then the moves, e
                 may be main's commit, so its PRs come from the event). Checks only: review
                 when a ready PR is green, back when it's red, nothing otherwise
         branch  a new branch: <N>-<slug>, optionally after one `<prefix>/` and `issue-`
+        issue   an issue whose factory:* label changed: an open issue with one of
+                factory:working or factory:failed (factory-progress) or factory:review
+                (factory-review); factory:ready, none or two of them move nothing
 move    one move: scripts/issue-fields.sh <issue> --status <Status> --from <list>
-        start  -> In progress from Ready
-        back   -> In progress from Ready, In review
-        review -> In review from Ready, In progress
+        start            -> In progress from Ready
+        back             -> In progress from Ready, In review
+        review           -> In review from Ready, In progress
+        factory-progress -> In progress from Ready, In review, and Backlog
+        factory-review   -> In review from Ready, In progress, and Backlog
+        A factory move reads the issue's labels again and moves nothing if they no longer
+        give it. Out of Backlog only when the guarded form reports Backlog, and then with
+        `scripts/issue-fields.sh <issue> --status <Status>`; never for an issue carrying
+        `triage`, one off the Project, or one in Done.
 
 Checks are green when every check run on the head (the latest of each name) passed, skipped or
-was neutral and every commit status passed, leaving out `guard / code-owned` (red until the
-admin approves a code-owned head, or reviews it on a PR the admin opened) and this workflow's
-own `board / ...` jobs. Any failure, time-out or start-up failure is red; anything still
+was neutral and every commit status passed, leaving out `guard / code-owned` (red on a held PR until
+the admin removes `review:admin` on its head, #565) and this workflow's own `board / ...` jobs. Any failure, time-out or start-up failure is red; anything still
 running, cancelled or stale, or no check at all, is pending.
 
 Exit codes: 0 done (nothing to move is done too), 1 a gh call or a move failed, 2 bad arguments.
@@ -243,17 +261,98 @@ decide_branch() { # name
   printf '%s:start\n' "$n"
 }
 
+# The factory's labels (#620): Status mirrors the one a factory issue carries, never gates it.
+# working and failed are In progress, review In review; factory:ready moves nothing.
+factory_kind() { # label -> its move kind, or nothing
+  case $1 in
+    factory:working | factory:failed) printf 'factory-progress' ;;
+    factory:review) printf 'factory-review' ;;
+  esac
+  return 0
+}
+
+# The kind an issue's labels give: an open issue (not a PR) with exactly one of the factory's
+# labels that move it. Prints the kind, then " triage" when it carries `triage`, or says why
+# nothing moves; never prints a label's name.
+issue_kind() { # issue -> "<kind>[ triage]" on stdout, or nothing; exit 1 on a failed read
+  local n=$1 row state is_pr label kind kinds=() labels triage=""
+  row=$(gh api "$R/issues/$n" --jq '[.state, has("pull_request")] + [.labels[]?.name] | @tsv') || return 1
+  IFS=$'\t' read -r state is_pr _ <<<"$row"
+  if [[ $state != open || $is_pr != false ]]; then
+    say "#$n isn't an open issue: nothing moves (Done is the Project's built-in workflow)"
+    return 0
+  fi
+  IFS=$'\t' read -ra labels <<<"$row"
+  for label in "${labels[@]:2}"; do
+    [[ $label == triage ]] && triage=" triage"
+    kind=$(factory_kind "$label")
+    [[ -n $kind ]] && kinds+=("$kind")
+  done
+  case ${#kinds[@]} in
+    0) say "#$n carries no factory:working, factory:review or factory:failed: nothing moves" ;;
+    1) printf '%s%s' "${kinds[0]}" "$triage" ;;
+    *) say "#$n carries more than one of factory:working, factory:review and factory:failed: nothing moves until one is left" ;;
+  esac
+}
+
+decide_issue() { # issue
+  local kind
+  kind=$(issue_kind "$1") || die 1 "could not read issue #$1"
+  kind=${kind%% *}
+  [[ -n $kind ]] || return 0
+  say "a factory label: #$1 $kind"
+  printf '%s:%s\n' "$1" "$kind"
+}
+
 # --- move ---------------------------------------------------------------------------------------
 
 move() { # issue:kind
-  [[ $1 =~ ^([1-9][0-9]{0,6}):(start|back|review)$ ]] || die 2 "not a move: \"$1\" (<issue>:start|back|review)"
+  [[ $1 =~ ^([1-9][0-9]{0,6}):(start|back|review|factory-progress|factory-review)$ ]] ||
+    die 2 "not a move: \"$1\" (<issue>:start|back|review|factory-progress|factory-review)"
   local n=${BASH_REMATCH[1]} kind=${BASH_REMATCH[2]} status from
   case $kind in
     start) status="In progress" from="Ready" ;;
     back) status="In progress" from="Ready,In review" ;;
     review) status="In review" from="Ready,In progress" ;;
+    factory-progress) status="In progress" from="Ready,In review" ;;
+    factory-review) status="In review" from="Ready,In progress" ;;
   esac
-  "$here/issue-fields.sh" "$n" --status "$status" --from "$from"
+  if [[ $kind != factory-* ]]; then
+    "$here/issue-fields.sh" "$n" --status "$status" --from "$from"
+    return
+  fi
+  move_factory "$n" "$kind" "$status" "$from"
+}
+
+# A factory label's move (#620). The labels are read again, so one changed since `decide` moves
+# nothing. Then the guarded form, from every open Status but Backlog (issue-fields.sh refuses
+# Backlog in --from). Only when that guard reports the issue in Backlog does the plain form move
+# it out: the one exception to "never out of Backlog" (admin, 23 Nov). Never for an issue that
+# isn't on the Project or is Done (the guard's answer stands), nor for one still carrying `triage`
+# (the plain form would try to remove it, with the job's read-only token).
+move_factory() { # issue kind status from
+  local n=$1 kind=$2 status=$3 from=$4 now triage out rc
+  now=$(issue_kind "$n") || die 1 "could not read issue #$n"
+  read -r now triage <<<"$now"
+  if [[ $now != "$kind" ]]; then
+    say "#$n no longer gives $kind: nothing moves"
+    return 0
+  fi
+  out=$("$here/issue-fields.sh" "$n" --status "$status" --from "$from") || {
+    rc=$?
+    [[ -z $out ]] || printf '%s\n' "$out"
+    return "$rc"
+  }
+  printf '%s\n' "$out"
+  # issue-fields.sh's answer when its guard leaves an issue alone: "Status:   <now> (left alone:
+  # <why>)". Its tests pin that line; this reads only <now>.
+  grep -qE '^Status:[[:space:]]+Backlog \(left alone: ' <<<"$out" || return 0
+  if [[ -n $triage ]]; then
+    say "#$n is a factory issue in Backlog but still carries triage: it stays in Backlog"
+    return 0
+  fi
+  say "#$n is a factory issue in Backlog: $kind moves it out of Backlog"
+  "$here/issue-fields.sh" "$n" --status "$status"
 }
 
 # --- arguments ----------------------------------------------------------------------------------
@@ -275,6 +374,10 @@ case ${1-} in
         out=$(decide_commit "${@:3}")
         ;;
       branch) out=$(decide_branch "$3") ;;
+      issue)
+        valid_number "$3" || die 2 "not an issue number: \"$3\""
+        out=$(decide_issue "$3")
+        ;;
       *) usage; exit 2 ;;
     esac
     printf 'moves=%s\n' "$(sort -u <<<"$out" | paste -sd' ' - | sed 's/^ *//')"

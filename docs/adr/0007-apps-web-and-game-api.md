@@ -589,11 +589,12 @@ sim type-only (#383).
   checked. A check on the pushing identity can't tell a lane from the admin while lanes push as the
   admin's account (ADR-0002, area 2; #107). It could tell an App's push today (the reviewer App
   holds `contents: write`, ADR-0002, area 2), but on such a PR that push is covered another way: the
-  folder is code-owned, and `guard / code-owned` takes the admin's own review as the sign-off only
-  on the current head (#494), so any later push needs the admin to read the PR again before it can
-  merge. The guarantee above is unchanged: the factory can't _open_ a change to the acceptance
-  tests, and an admin-authored PR is the admin's act, every commit on it included. Revisit when
-  lanes push from an App (#107): the pushing identity then tells a bot from the admin.
+  folder is code-owned, and `guard / code-owned` takes the admin's removal of `review:admin` as the
+  sign-off only on the current head, and a push puts the label back (#565; #494's own-review rule
+  before it), so any later push needs the admin to read the PR again before it can merge. The
+  guarantee above is unchanged: the factory can't _open_ a change to the acceptance tests, and an
+  admin-authored PR is the admin's act, every commit on it included. Revisit when lanes push from an
+  App (#107): the pushing identity then tells a bot from the admin.
 - **Harness:** its own `tests/acceptance/vitest.config.mts`, outside the root projects and with no
   coverage. The target comes from env (`ACCEPTANCE_BASE_URL`, the Supabase URL and publishable key),
   so the same suite can point at a Vercel preview in M4. The app runs as `next build && next start`,

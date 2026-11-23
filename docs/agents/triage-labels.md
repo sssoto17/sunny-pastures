@@ -4,7 +4,7 @@ Labels on issues and PRs in this repo: what each means, when to use it, and how 
 canonical triage roles map onto them. Decided in #18.
 
 Labels carry what a Project field can't: they show on PRs and in `gh` queries. Anything already a
-Project field (Status, Track, Mode, Size, Priority, Week) stays a field and never becomes a label.
+Project field (Status, Size, Priority, Week) stays a field and never becomes a label.
 
 ## Naming and colours
 
@@ -81,7 +81,7 @@ Set them by hand (a labeler is an automation candidate below).
 | -------------------------- | -------------------- | ------- |
 | `needs-triage`             | `triage`             | Needs evaluation before it can be worked |
 | `needs-info`               | a `blocked:*` label  | Can't move until the reason named below clears |
-| `ready-for-agent`          | `factory:ready`      | Fully specified; the factory may pick it up without the admin |
+| `ready-for-agent`          | `factory:ready`      | Fully specified; the factory may pick it up without the admin. Only the admin adds it (see **Factory and reserved prefixes**) |
 | `ready-for-human`          | no label             | The default. Readiness is the Project **Status** `Ready` (see `issue-tracker.md`, **Status rules**) |
 | `wontfix`                  | no label             | Close with `gh issue close <n> --reason "not planned" --comment "<why>"` |
 
@@ -97,8 +97,8 @@ what adds and removes the label, is `issue-tracker.md`, **Issue fields**.
 
 ## Blocked
 
-A `blocked:*` label says why an issue can't be worked, or can't be queued for the factory, yet.
-Remove it when the reason clears. An issue may carry more than one.
+A `blocked:*` label says why an issue can't be worked yet; on a `factory:ready` issue it keeps the
+factory from picking it up. Remove it when the reason clears. An issue may carry more than one.
 
 <!-- prettier-ignore -->
 | Label | Use when |
@@ -117,11 +117,46 @@ the view's filter together.
 
 ## Factory and reserved prefixes
 
-- **`factory:ready`** is the only label that says an issue can be worked without the admin in the
-  loop; when you apply it, also set the issue's Project **Mode** to `Factory`. The Mode field
-  (Manual / Factory) is the top-level split; `factory:*` labels scope factory work further.
-- **`factory:*`**: more states arrive with the factory itself (e.g. `factory:changes`). They're
-  designed with the factory, not created ahead of time.
+**`factory:ready`** is the only label that says an issue can be worked without the admin in the
+loop. What the factory checks before it picks one up, which issues may carry it, and the hard limits
+are `issue-tracker.md`, **Status rules**, "`factory:ready`" (admin, 23 Nov 2026, #619, #622).
+
+**Four states, one at a time.** A factory issue carries at most one `factory:*` label. The factory
+moves it from one to the next with its own token, removing the old label before adding the new one.
+
+<!-- prettier-ignore -->
+| Label | Means | Set by |
+|---|---|---|
+| `factory:ready` | Take this | The admin, or the coordinator with the admin's go-ahead. Nobody else |
+| `factory:working` | A factory run is working on it | The sweep, just before it dispatches the run (a fix round's issue too) |
+| `factory:review` | The factory's PR is open and waiting for review | The factory run, once it opened the PR or ran a fix round |
+| `factory:failed` | The last run ended without a PR, or its PR closed unmerged. A comment on the issue says why | The factory run, or the sweep's reconcile |
+
+- **Which label is right is checked every sweep.** Before it chooses, the sweep repairs drift: a
+  closed issue loses every `factory:*` label; an issue with several keeps the most advanced
+  (`failed` over `review` over `working` over `ready`); `factory:working` with no live run goes to
+  `factory:review` when its `<N>-` PR is open, else to `factory:failed`; `factory:review` whose PR
+  closed unmerged goes to `factory:failed`, and one with no closed PR found is left alone (ADR-0002,
+  area 2, "The factory sweep, built").
+- **On close** every `factory:*` label goes: the next sweep's reconcile removes it (only while the
+  factory is switched on). The Status goes to Done like any issue's.
+- **Retry** is the admin replacing `factory:failed` with `factory:ready`. Remove `factory:failed`
+  when adding `factory:ready`: with both on, the reconcile keeps `factory:failed`. #628 will make
+  adding `factory:ready` alone a retry.
+- **`factory:failed` gets no `blocked:*` label.** The comment says why the run failed; the admin
+  fixes the issue (or not) and relabels it. A `blocked:*` label is for an issue that can't be picked
+  up yet, and it gates pickup whatever the `factory:*` label.
+- **The Status follows the label**: `issue-tracker.md`, **Status rules**, "Factory issues".
+- **A lane that takes over a factory issue** (the admin or a session works it by hand instead)
+  removes its `factory:*` label when it creates its `<N>-<slug>` branch, so the issue no longer
+  reads as factory work.
+- **Escalation is on the PR**: a factory PR that needs the admin carries `review:admin` (**Pull
+  requests**).
+
+**Reserved prefixes.**
+
+- **`factory:*`**: only the four states above. A new state is designed with the factory, not created
+  ahead of time.
 - **`wayfinder:*`**: `wayfinder:map` and `wayfinder:<type>` (`research`, `prototype`, `grilling`,
   `task`), created by `/wayfinder` when a map is charted (see `issue-tracker.md`, **Wayfinding
   operations**). Not created ahead of time.
@@ -133,7 +168,9 @@ A PR carries area labels (see **Areas**), plus `review:admin` when it needs the 
 criteria in `CONSTRAINTS.md` ("Admin review"). Code-owned PRs carry it too, so the label is the one
 queue of PRs waiting for the admin. Any agent may add it, and so may the reviewer bot. The bot never
 approves a PR that carries it, and only the admin removes it (ADR-0002, area 2). Added 7 Nov by the
-admin; widened to code-owned PRs in #47.
+admin; widened to code-owned PRs in #47. It is a PR label only: an issue that needs the admin
+carries `blocked:admin` (**Blocked**) instead (admin, 23 Nov 2026, #622; #618 renames the PR label
+later).
 
 A PR's type is its title's Conventional Commit prefix, which is also the squash-commit message:
 
@@ -165,4 +202,3 @@ when one reaches 3.
 |---|---|---|
 | Path labeler | A GitHub Action that sets a PR's `area:*` labels from the path table above | 1 |
 | PR-title check | A CI check that a PR title uses one of the prefixes above; `scripts/open-pr.sh` and `scripts/stack.sh` check it as they open a PR (#471), so CI would catch only a title edited later | 0 |
-| Mode ↔ `factory:ready` sync | Keep the Project's Mode field and the `factory:ready` label in step | 0 |

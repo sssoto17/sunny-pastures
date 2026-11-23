@@ -121,20 +121,25 @@ chmod +x "$work/bin/gh" "$work/bin/git"
 T=$'\t'
 WK2="Wk 2 · 9–15 Nov"
 WK3="Wk 3 · 16–22 Nov"
-# One board row as the script's --jq filter emits it: number, type, status, mode, priority, size,
-# week title, week start, week duration, title. Missing fields are "-".
-item() { # number status mode priority size week-title week-start title (a week lasts 7 days)
+# One board row as the script's --jq filter emits it: number, type, status, priority, size, week
+# title, week start, week duration, title. Missing fields are "-".
+item() { # number status priority size week-title week-start title (a week lasts 7 days)
   local dur=7
-  [[ $7 == - ]] && dur=-
-  printf '%s\tIssue\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$dur" "$8"
+  [[ $6 == - ]] && dur=-
+  printf '%s\tIssue\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$dur" "$7"
 }
 board() { # rows... -> the items' answer, through the script's filter
   printf '%s' "$*" >"$work/board"
 }
-# The Project's fields as REST lists them: ids, and the Week iterations.
+# The Project's fields as REST lists them: ids, and the Week iterations. Mode (4) and Track (7)
+# are still on the Project until the admin deletes them (#621); the script never asks for them.
 fields_json() {
   jq -n --arg w2 "$WK2" --arg w3 "$WK3" '[{id: 1, name: "Title", data_type: "title"},
     {id: 2, name: "Status", data_type: "single_select", options: []},
+    {id: 4, name: "Mode", data_type: "single_select", options: []},
+    {id: 5, name: "Priority", data_type: "single_select", options: []},
+    {id: 6, name: "Size", data_type: "single_select", options: []},
+    {id: 7, name: "Track", data_type: "single_select", options: []},
     {id: 3, name: "Week", data_type: "iteration", configuration: {iterations: [
       {id: "7f9c9b7a", title: {raw: $w2, html: $w2}, start_date: "2026-11-09", duration: 7},
       {id: "b40f9349", title: {raw: $w3, html: $w3}, start_date: "2026-11-16", duration: 7}]}}]' \
@@ -223,8 +228,8 @@ done
 
 # --- today: the date, this week's iteration, where things are --------------------------------
 # The week is the iteration whose dates contain the date: start <= date < start + duration.
-two_weeks="$(item 81 'In progress' Manual P0 M "$WK2" 2026-11-09 'Sim package')
-$(item 82 Backlog Manual P0 M "$WK3" 2026-11-16 'Wheat end to end')"
+two_weeks="$(item 81 'In progress' P0 M "$WK2" 2026-11-09 'Sim package')
+$(item 82 Backlog P0 M "$WK3" 2026-11-16 'Wheat end to end')"
 for pair in "2026-11-09|$WK2" "2026-11-15|$WK2" "2026-11-16|$WK3"; do
   reset
   board "$two_weeks"
@@ -253,7 +258,7 @@ expect_call() { # substring of one call, its arguments joined by spaces
     grep -qF -- "$1"; then ok; else bad "expected a gh call containing: $1"; fi
 }
 expect_call "api users/sssoto17/projectsV2/3/fields?per_page=100 --jq"
-expect_call "api --paginate users/sssoto17/projectsV2/3/items?per_page=100&fields=1,2,3 --jq"
+expect_call "api --paginate users/sssoto17/projectsV2/3/items?per_page=100&fields=1,2,5,6,3 --jq"
 
 # No --date: today in Copenhagen. A `date` stub answers a bare `date +%F` by TZ (late on 8 Nov
 # in UTC is already 9 Nov in Copenhagen) and passes every other call to the real date.
@@ -288,12 +293,12 @@ expect_err "no Week iteration on the board contains 2026-12-01"
 # .scratch/brief-<N>-*.md exists in the output folder; /today leaves it alone.
 P72=https://api.github.com/repos/sssoto17/sunny-pastures/issues/72
 P73=https://api.github.com/repos/sssoto17/sunny-pastures/issues/73
-ready_board="$(item 55 Ready Manual P2 S "$WK2" 2026-11-09 'Retro inbox')
-$(item 81 Ready Manual P0 M "$WK2" 2026-11-09 'Sim package, purity guard and state hash')
-$(item 82 Backlog Manual P0 M "$WK3" 2026-11-16 'Wheat end to end')
-$(item 90 Ready Factory P1 S "$WK3" 2026-11-16 'Factory job')
-$(item 91 Ready Manual P1 S - - 'No week yet')
-$(item 92 Ready Manual - - - - 'No priority yet')"
+ready_board="$(item 55 Ready P2 S "$WK2" 2026-11-09 'Retro inbox')
+$(item 81 Ready P0 M "$WK2" 2026-11-09 'Sim package, purity guard and state hash')
+$(item 82 Backlog P0 M "$WK3" 2026-11-16 'Wheat end to end')
+$(item 90 Ready P1 S "$WK3" 2026-11-16 'Factory job')
+$(item 91 Ready P1 S - - 'No week yet')
+$(item 92 Ready - - - - 'No priority yet')"
 reset
 board "$ready_board"
 printf '81\t%s\n55\t-\n90\t%s\n91\t-\n92\t-\n' "$P72" "$P73" >"$work/parents"
@@ -302,21 +307,21 @@ echo "hand-written" >"$work/repo/.scratch/brief-81-sim-package.md"
 case_ "ready" --date 2026-11-09
 expect_code 0
 repo=$(cd "$work/repo" && pwd -P)
-expect_section ready "#81${T}Manual${T}P0${T}M${T}$WK2${T}#72${T}$repo/.scratch/brief-81-sim-package.md${T}Sim package, purity guard and state hash
-#90${T}Factory${T}P1${T}S${T}$WK3${T}#73${T}-${T}Factory job
-#91${T}Manual${T}P1${T}S${T}-${T}-${T}-${T}No week yet
-#55${T}Manual${T}P2${T}S${T}$WK2${T}-${T}-${T}Retro inbox
-#92${T}Manual${T}-${T}-${T}-${T}-${T}-${T}No priority yet"
+expect_section ready "#81${T}P0${T}M${T}$WK2${T}#72${T}$repo/.scratch/brief-81-sim-package.md${T}Sim package, purity guard and state hash
+#90${T}P1${T}S${T}$WK3${T}#73${T}-${T}Factory job
+#91${T}P1${T}S${T}-${T}-${T}-${T}No week yet
+#55${T}P2${T}S${T}$WK2${T}-${T}-${T}Retro inbox
+#92${T}-${T}-${T}-${T}-${T}-${T}No priority yet"
 expect_call "api -X GET repos/sssoto17/sunny-pastures/issues/81 --jq"
 
 # A brief for another number that starts with the same digits isn't this item's brief.
 reset
-board "$(item 8 Ready Manual P1 S "$WK2" 2026-11-09 'Eight')"
+board "$(item 8 Ready P1 S "$WK2" 2026-11-09 'Eight')"
 printf '8\t-\n' >"$work/parents"
 mkdir -p "$work/repo/.scratch"
 echo "x" >"$work/repo/.scratch/brief-81-sim-package.md"
 case_ "brief prefix" --date 2026-11-09
-expect_section ready "#8${T}Manual${T}P1${T}S${T}$WK2${T}-${T}-${T}Eight"
+expect_section ready "#8${T}P1${T}S${T}$WK2${T}-${T}-${T}Eight"
 
 # A parent that can't be read stops the run: a brief drafted without its parent's Context
 # would miss what the lane must read.
@@ -329,19 +334,19 @@ expect_err "could not read the parent of #"
 
 # --- week: every issue in this week's iteration, by number; drafts have no number, so none -----
 reset
-board "$(item 111 Done Manual P2 S "$WK2" 2026-11-09 'PostToolUse hook')
-$(printf -- '-\tDraftIssue\tBacklog\t-\t-\t-\t%s\t2026-11-09\t7\tA draft' "$WK2")
-$(item 82 Backlog Manual P0 M "$WK3" 2026-11-16 'Wheat end to end')
-$(item 78 'In progress' Manual P1 M "$WK2" 2026-11-09 '/today stage 1 (read-only)')
-$(item 31 Backlog Manual P2 S "$WK2" 2026-11-09 'Decide how action logs stay replayable')"
+board "$(item 111 Done P2 S "$WK2" 2026-11-09 'PostToolUse hook')
+$(printf -- '-\tDraftIssue\tBacklog\t-\t-\t%s\t2026-11-09\t7\tA draft' "$WK2")
+$(item 82 Backlog P0 M "$WK3" 2026-11-16 'Wheat end to end')
+$(item 78 'In progress' P1 M "$WK2" 2026-11-09 '/today stage 1 (read-only)')
+$(item 31 Backlog P2 S "$WK2" 2026-11-09 'Decide how action logs stay replayable')"
 case_ "week" --date 2026-11-10
 expect_code 0
-expect_section week "#31${T}Backlog${T}Manual${T}P2${T}S${T}Decide how action logs stay replayable
-#78${T}In progress${T}Manual${T}P1${T}M${T}/today stage 1 (read-only)
-#111${T}Done${T}Manual${T}P2${T}S${T}PostToolUse hook"
+expect_section week "#31${T}Backlog${T}P2${T}S${T}Decide how action logs stay replayable
+#78${T}In progress${T}P1${T}M${T}/today stage 1 (read-only)
+#111${T}Done${T}P2${T}S${T}PostToolUse hook"
 
 reset
-board "$(item 82 Backlog Manual P0 M "$WK3" 2026-11-16 'Wheat end to end')"
+board "$(item 82 Backlog P0 M "$WK3" 2026-11-16 'Wheat end to end')"
 case_ "week, none" --date 2026-12-01
 expect_code 0
 expect_section week ""
@@ -451,8 +456,8 @@ expect_code 3
 expect_err "could not read Project 3"
 assert "expected no stdout when the fields fail" test -z "$out"
 
-for broken in "$(printf 'abc\tIssue\tReady\tManual\tP0\tM\t-\t-\t-\tT')" \
-  "$(printf '81\tIssue\tReady\tManual\tP0\tM\t%s\tsoon\t7\tT' "$WK2")"; do
+for broken in "$(printf 'abc\tIssue\tReady\tP0\tM\t-\t-\t-\tT')" \
+  "$(printf '81\tIssue\tReady\tP0\tM\t%s\tsoon\t7\tT' "$WK2")"; do
   reset
   printf '%s\n' "$broken" >"$work/board"
   case_ "board shape: $broken" --date 2026-11-09
@@ -464,7 +469,7 @@ done
 # Every section is still printed in its format, the board's empty; exit 4 names what was skipped.
 reset
 touch "$work/refuse-projects"
-board "$(item 81 Ready Manual P0 M "$WK2" 2026-11-09 'Sim package')"
+board "$(item 81 Ready P0 M "$WK2" 2026-11-09 'Sim package')"
 printf '7\tissue\tnone\t0\tchore\tLonely\n' >"$work/orphan-rows"
 add_worktree 9-merged chore/9-merged
 printf 'chore/9-merged\tMERGED\t114\n' >"$work/prs"
@@ -490,7 +495,8 @@ assert "expected no 'no Week iteration' warning when the board was skipped" test
 # REST shapes as GitHub's REST description shows them ("List items for a user owned project",
 # "List pull requests"): a single-select value's name is {raw, html}; an iteration value has a
 # title and may lack its dates (taken from the field's iterations); a draft has no number; an
-# item may have no week or no mode; a closed PR with merged_at is merged.
+# item may have no week or no size; Mode, still on the board until the admin deletes it (#621),
+# is left out of the rows; a closed PR with merged_at is merged.
 cat >"$work/board.json.in" <<'JSON'
 [
   {"id": 1, "content_type": "Issue", "content": {"number": 81, "title": "Sim package"}, "fields": [
@@ -525,8 +531,8 @@ case_ "filters over real shapes" --date 2026-11-09
 expect_code 0
 # No item carries its own dates, so this week is found only by filling them from the field.
 assert "expected this week from the field's iterations" contains "$(section today)" "week${T}$WK2"$'\n'
-expect_section ready "#81${T}Manual${T}P0${T}M${T}$WK2${T}#72${T}-${T}Sim package"
-expect_section week "#81${T}Ready${T}Manual${T}P0${T}M${T}Sim package"
+expect_section ready "#81${T}P0${T}M${T}$WK2${T}#72${T}-${T}Sim package"
+expect_section week "#81${T}Ready${T}P0${T}M${T}Sim package"
 expect_section worktrees ".claude/worktrees/10-open${T}chore/10-open${T}open${T}#116${T}-
 .claude/worktrees/9-merged${T}chore/9-merged${T}merged${T}#114${T}-"
 

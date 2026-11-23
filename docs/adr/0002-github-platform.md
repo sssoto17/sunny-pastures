@@ -321,7 +321,7 @@ has a row here, `guard / code-owned` and `guard / acceptance` included; ADR-0004
 | `ci / scripts` | the shell scripts' test suites, every `*.test.sh` under `scripts/` and `.claude/hooks/`, with their fake `gh`; the suites need no secret or network (#255) |
 | `guard / pr-body` | a body that says `Part of #N` and also links #N with a closing keyword (#270), or a closing keyword that names an issue other than the PR's own `<N>` outside an `Also closes #M` line (#512); required since 16 Nov (`main checks`, 10 checks) |
 | `guard / stack-base` | a PR whose base isn't `main` and isn't in a native stack: a hand-chained PR (#264); required once the admin adds it after #264 merges |
-| `guard / code-owned` | a PR that touches a code-owned path (`.github/CODEOWNERS`) needs the code owner's review on its head (#337, #379, #494); required in `main checks` |
+| `guard / code-owned` | a held PR (it touches a code-owned path in `.github/CODEOWNERS`, or has ever carried `review:admin`) needs the admin to remove `review:admin` on its head (#337, #565; "Solo-admin approvals"); required in `main checks` |
 | `guard / acceptance` | `guard / protected-paths` as built: fails a `[bot]`-authored PR that touches `tests/acceptance/**` (MUST-15.2; #384, [ADR-0007](0007-apps-web-and-game-api.md), section 6); required in `main checks` |
 | `guard / secrets` | the gitleaks CLI over the PR's commits (area 8) |
 | `guard / code-scan` | Semgrep (area 8) |
@@ -475,12 +475,12 @@ PR_ means either kind.
   - **The admin's go-ahead** is resolving the thread. The bot's approval already meets the count, so
     the PR, or the whole stack, then merges like any other. A code-owned PR still needs the code
     owner's approval: on a PR the admin's account opened, which the admin can't approve, the admin
-    leaves a Comment review on its head, which `guard / code-owned` counts as the code owner's
-    sign-off (#494; "Stacks", below), and bypass-merges it; a PR an App opened the admin approves
-    (code-owner review stays on; "Stacks", below). The resolved thread and the merge are the record
-    of who decided. **Amended 22 Nov 2026, #495:** the go-ahead becomes removing `review:admin`,
-    bound to the head; threads stop being required, and code-owner review goes off ("Solo-admin
-    approvals", below).
+    left a Comment review on its head, which `guard / code-owned` counted as the code owner's
+    sign-off until #565 removed that rule (#494; "Stacks", below), and bypass-merged it; a PR an App
+    opened the admin approves (code-owner review stays on; "Stacks", below). The resolved thread and
+    the merge are the record of who decided. **Amended 22 Nov 2026, #495:** the go-ahead becomes
+    removing `review:admin`, bound to the head; threads stop being required, and code-owner review
+    goes off ("Solo-admin approvals", below).
   - **The bot's earlier Request changes.** When its re-review finds those findings fixed, the bot's
     Approve replaces its Request changes, on an escalated PR too (#322). Where it withholds with
     every finding fixed (an escalated PR an App opened, or `review:admin` until #104), it dismisses
@@ -683,8 +683,9 @@ which secret", below).
 ### Solo-admin approvals: removing `review:admin` is the sign-off (#495)
 
 **Decided by the admin, 22 Nov 2026, in #495's grill; amends this area where the notes marked "#495"
-say so. Not built yet: #565 (the guard) blocks #566 (the bot), which blocks #567 (the stack check),
-and until the admin's steps below are done, #494's stopgap and the text it amends still apply.**
+say so. #565 built the guard (migration step 2; #494's stopgap is gone from it); #566 (the bot) and
+#567 (the stack check) follow, and until the admin's steps below are done, the text the decisions
+amend still applies where those PRs haven't changed it.**
 
 **The problem.** GitHub never counts a PR's author as its own approver or code-owner reviewer, and
 its answer for a solo maintainer is the bypass list. "Merge stack" offers no bypass (#315), and
@@ -740,7 +741,22 @@ same as a plain comment in the timeline (admin, 22 Nov, while merging #487), and
    satisfies a required check whose source is GitHub Actions, and updating it in place changes the
    merge box. Rejected: concurrency keyed by head and event (twins both report, and which one the
    gate reads is #379's open question), and a sweep that re-runs cancelled runs (treats the
-   symptom). `pr-body.yml` keeps #483.
+   symptom). `pr-body.yml` keeps #483. **What #565's throwaway PRs found (23 Nov 2026; #629, #630;
+   admin to approve in #565's PR):** a check run written through the Checks API with an Actions
+   token lands in the commit's oldest GitHub Actions check suite, whichever workflow that is. So (a)
+   the record's check suite and workflow run don't say who wrote it, and the guard proves provenance
+   instead with an OIDC token GitHub signs for the writing run, in the record's summary: audience
+   the repo, PR and head; claims `main`'s code-owned.yml on `pull_request_target`. (b) When that
+   suite is a `create` run (board-branch.yml on a branch pushed with its first commit), the check
+   run never reaches the PR's merge box, so the guard also sets a commit status `guard / code-owned`
+   with the same verdict, which the merge box shows as required. An API-written check run in a PR's
+   own suite does satisfy the required check, and updating it in place changes the merge box; a
+   cancelled `code-owned (run)` isn't required. Alternatives considered for the record's proof: its
+   check suite and workflow run (shown above not to carry provenance); a record written with an App
+   token that only a `main`-only environment holds (sound, but one more credential for the admin to
+   keep); and artifact attestations (the same OIDC root, with more moving parts). The verdict
+   itself, check run and status alike, carries no such proof: a workflow on a PR's branch can still
+   write a `guard / code-owned` of its own, as it could fake any required check before (decision 3).
 5. **Only `sssoto17`, a `User`, signs off.** A removal by anyone else (either App, `github-actions`,
    another collaborator) writes no record; the guard puts the label back and stays red, as the bot
    reopens an escalation thread someone else resolved. Agents are denied removing the label: the
@@ -877,12 +893,12 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   the admin can't approve their own PRs, so it merges only by bypass, and a bypass can't merge a
   stack (above): a stack with a code-owned part merges part by part. Code-owner review stays on
   (Q15). This is input for #68, which turns code-owner review off only after the deterministic
-  `guard / code-owned` check (#337) is required (#68's criteria). Since #494 the guard itself passes
-  such a part once the admin, as its author and a code owner of each of its code-owned paths, has
-  left a Comment review as their last review on its head (below); the bypass is still needed for
-  GitHub's own code-owner review. **Decided 22 Nov 2026, #495:** code-owner review goes off and the
-  guard is the only code-owner gate, so such a stack merges in one action once the admin has removed
-  `review:admin` on each part ("Solo-admin approvals", above).
+  `guard / code-owned` check (#337) is required (#68's criteria). From #494 until #565 the guard
+  itself passed such a part once the admin, as its author and a code owner of each of its code-owned
+  paths, had left a Comment review as their last review on its head (below); the bypass is still
+  needed for GitHub's own code-owner review. **Decided 22 Nov 2026, #495:** code-owner review goes
+  off and the guard is the only code-owner gate, so such a stack merges in one action once the admin
+  has removed `review:admin` on each part ("Solo-admin approvals", above).
 - **One test run per stack.** `ci / typecheck`, `ci / lint` and `ci / test` run on a stack's top
   part only, diffing from the stack's base, so one run covers every part. The other jobs, the floor
   guard among them, and the review run on each part. The `if:` in GitHub's
@@ -953,7 +969,8 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   full, so the newest suite holds checks that ran. **The residual** is #313's twin race: two runs
   created in the same instant, where the cancelled one lands in the newer suite. It fails closed:
   the merge box shows cancelled checks and blocks, and a re-run clears it.
-- **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). It ran on `pull_request`
+- **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). _Historical: since #565
+  it runs on `pull_request_target` only ("Solo-admin approvals", area 2)._ It ran on `pull_request`
   and on `pull_request_review`, and on PR #377 the admin's approval didn't unblock the merge: the
   review run passed in its own check suite, but the merge stayed blocked on the `pull_request` run's
   earlier failure until that run was re-run by hand. So `code-owned.yml` triggers on
@@ -971,21 +988,22 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   PR's merge ref, as for `pull_request`; the script and CODEOWNERS still come from the default
   branch (#337). The label `review:admin` it adds now lands at the first review, not at open; the
   agent and the reviewer bot still add it earlier (CONSTRAINTS.md, "Escalation criteria").
-- **`guard / code-owned` on a PR a code owner opened** (#494; admin, 22 Nov 2026: option A). The
-  guard waited for a code owner to approve the head, GitHub never lets an author approve their own
-  PR, and `main checks` has no bypass (#110), so a code-owned PR the admin's account opened (an
-  `--as-admin` lane, #385; ADR-0007 section 6) could never pass it: #386's stack (#487, #488) was
-  the first. Now, when the PR's author is a code owner of every code-owned path the PR touches, the
-  guard counts the author's own latest review that isn't dismissed as the sign-off, if it is on the
-  current head (`commit_id`) and APPROVED or COMMENTED. Latest means last submitted (`submitted_at`,
-  then `id`), since a review's id likely dates from when its draft started (inferred from REST, not
-  checked here). The author is read from the REST PR the run already fetches to pin the head
-  (`user.login`, and `user.type` must be `User`), never the event, as `post-review.sh` reads who
-  opened a PR (#322). Every other case keeps the rule: on any other PR only a code owner's APPROVED
-  review on the head counts; the bot's reviews never count; a review of an older head never counts.
-  `code-owned.yml` already runs on `submitted` and `dismissed` reviews, so the admin's Comment
-  review runs the check; the script and CODEOWNERS still come from the default branch. **The admin's
-  steps** on such a PR, and on each part of such a stack in turn:
+- **`guard / code-owned` on a PR a code owner opened** (#494; admin, 22 Nov 2026: option A).
+  _Historical: #565 removed this rule; the sign-off is removing `review:admin` on the head
+  ("Solo-admin approvals", area 2)._ The guard waited for a code owner to approve the head, GitHub
+  never lets an author approve their own PR, and `main checks` has no bypass (#110), so a code-owned
+  PR the admin's account opened (an `--as-admin` lane, #385; ADR-0007 section 6) could never pass
+  it: #386's stack (#487, #488) was the first. Now, when the PR's author is a code owner of every
+  code-owned path the PR touches, the guard counts the author's own latest review that isn't
+  dismissed as the sign-off, if it is on the current head (`commit_id`) and APPROVED or COMMENTED.
+  Latest means last submitted (`submitted_at`, then `id`), since a review's id likely dates from
+  when its draft started (inferred from REST, not checked here). The author is read from the REST PR
+  the run already fetches to pin the head (`user.login`, and `user.type` must be `User`), never the
+  event, as `post-review.sh` reads who opened a PR (#322). Every other case keeps the rule: on any
+  other PR only a code owner's APPROVED review on the head counts; the bot's reviews never count; a
+  review of an older head never counts. `code-owned.yml` already runs on `submitted` and `dismissed`
+  reviews, so the admin's Comment review runs the check; the script and CODEOWNERS still come from
+  the default branch. **The admin's steps** on such a PR, and on each part of such a stack in turn:
   1. resolve the escalation thread;
   2. leave a Comment review on the part's head, which runs `guard / code-owned` green;
   3. bypass-merge the part ("Merge stack" offers no bypass, above); for a stack, run
@@ -1110,9 +1128,11 @@ seat's usage, apply to these runs too. A billed API key is the fallback, only if
 necessary, for example if the employer's policy ever rules this out. The factory and the reviewer
 share the seat's weekly limit with the admin's paid work, hence the caps below.
 
-**How a factory job starts (decided 8 Nov).** The factory is a `workflow_dispatch` workflow that
-takes an issue number. It refuses an issue that lacks `factory:ready` or isn't in Ready. Three
-things dispatch it:
+**How a factory job starts (decided 8 Nov; historical).** This paragraph and its list record the 8
+Nov plan. Since #619 (admin, 23 Nov 2026) `factory:ready` is the only gate, and neither the gate nor
+the sweep reads Ready or Mode: see "The factory workflow, built" and "The factory sweep, built"
+below. The factory is a `workflow_dispatch` workflow that takes an issue number. The plan had it
+refuse an issue that lacks `factory:ready` or isn't in Ready. Three things dispatch it:
 
 - **a scheduled sweep** at 07:00, 12:00 and 17:00 CET. It dispatches **one** item that is Ready, has
   Mode Factory and carries `factory:ready`, and has no open PR or branch yet, and none while a
@@ -1177,8 +1197,9 @@ cancelling a running job), and `GITHUB_TOKEN` read-only in every job.
 **Ready and Mode (admin, 21 Nov 2026, option b).** The workflow doesn't read the Project: no Actions
 token can read this user-owned board (#102). `factory:ready` stands for Mode Factory, which
 `triage-labels.md` keeps in step with it, and the admin's manual dispatch stands for Ready. Only the
-admin and collaborators can set labels. The sweep (#108, below) reads Ready and Mode from the board
-before it dispatches, since its dispatch isn't the admin's choice.
+admin and collaborators can set labels. The sweep (#108, below) read Ready and Mode from the board
+before it dispatched; since #619 (admin, 23 Nov 2026) `factory:ready` is the factory's only gate,
+and neither the sweep nor the gate reads Status, Mode or Track.
 
 1. **`switch`** calls `factory-switch.yml`, exactly as its header shows. With the switch off the run
    logs `SWITCH off` and stops; that is how the workflow is tested without turning the factory on.
@@ -1187,7 +1208,9 @@ before it dispatches, since its dispatch isn't the admin's choice.
    branches, and `.github/scripts/factory-gate.sh` refuses (`GATE refused: …`) unless the input is
    an issue number and the issue exists, is open, isn't a PR, was opened by the owner or a
    collaborator (`author_association`: the repo is public, and an issue's author can edit its body
-   after it is labelled), carries `factory:ready`, and has no open PR and no `<n>-` branch yet (one
+   after it is labelled), carries `factory:ready` (or `factory:working`, which the sweep sets just
+   before it dispatches; #619), has no `blocked:*` label and no open native blocker (read from
+   `GET …/issues/{n}/dependencies/blocked_by`), and has no open PR and no `<n>-` branch yet (one
    factory branch per issue).
 3. **`factory`** (`timeout-minutes: 60`; environment `claude-seat`, which holds only
    `CLAUDE_CODE_OAUTH_TOKEN`) checks out `main` and installs. It runs the gate again on a fresh
@@ -1209,7 +1232,12 @@ before it dispatches, since its dispatch isn't the admin's choice.
    (`contents: write` to push and to send `open-pr`'s dispatch, `pull-requests: read`), push the
    branch with hooks off, and run `scripts/open-pr.sh`, so `open-pr.yml` opens the PR as
    `sunny-factory[bot]`. The PR's author and every commit's author and committer are the App.
-5. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
+5. **`labels`** (`if: !cancelled()`, #619; a run the admin cancels leaves its label for the sweep's
+   reconcile) moves the issue's `factory:*` label (below, "The factory sweep, built") on a fresh
+   runner in environment `factory`, with an App token minted with `issues: write` only:
+   `factory:review` when publish opened a PR or a fix round ran, `factory:failed` and one comment
+   when the run opened none.
+6. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
    rounds each job up) and their sum, and the PR.
 
 **Caps.** `--max-turns` doesn't count the turns of `Task` subagents, so the 55-minute step timeout
@@ -1233,9 +1261,11 @@ dispatches (it would hold the Project token and `actions: write` together).
   behind it sees that run.
 - **Credentials (admin, 22 Nov 2026; #102 closed as moot):** `select` enters environment `board`
   (main only) for `BOARD_PROJECT_TOKEN`, used on the Project's calls only (`PROJECT_GH_TOKEN`, as
-  `board.yml`'s `move` does), REST only; the read-only `GITHUB_TOKEN` reads the runs, issues, PRs
-  and branches. `dispatch` alone has `actions: write`, and `GITHUB_TOKEN` dispatches `factory.yml`
-  on `main`: a `workflow_dispatch` is one of the two events a `GITHUB_TOKEN` may start a run with
+  `board.yml`'s `move` does), REST only, for Priority and board order; the read-only `GITHUB_TOKEN`
+  reads the runs, issues, PRs and branches. `labels` (#619) enters environment `factory` and mints
+  the App's token with `issues: write` alone, to write the label moves before `dispatch` runs.
+  `dispatch` alone has `actions: write`, and `GITHUB_TOKEN` dispatches `factory.yml` on `main`: a
+  `workflow_dispatch` is one of the two events a `GITHUB_TOKEN` may start a run with
   ([triggering a workflow from a workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)).
   That makes the factory run's actor `github-actions[bot]`, so `factory.yml`'s Claude step names
   exactly `github-actions` in `allowed_bots` (#582: run 45075597193 failed at the action's actor
@@ -1249,21 +1279,51 @@ dispatches (it would hold the Project token and `actions: write` together).
   (default 4 when unset; a value that isn't a whole number dispatches nothing). It is backpressure
   on the review queue, and works the same before and after auto-merge: a PR that merges lowers the
   count and the chain goes on (admin, 22 Nov 2026, replacing a per-day run cap). Then the eligible
-  issues: on the board in this repo, Status Ready, Mode Factory or not set, open, carrying
-  `factory:ready`, opened by the owner or a collaborator, with no open PR from a `<n>-` branch and
-  no `<n>-` branch (the gate's rules, so the sweep doesn't dispatch what the gate would refuse).
-- **A run that opens no PR** doesn't raise the count, so the loop could re-dispatch one issue for
-  ever. The sweep skips an issue whose newest factory run (by its `run-name`, `factory #<n>`)
-  finished after the issue's `updated_at`, and only if that run ran Claude: its `factory` job's
-  "Claude ran" step succeeded, which needs an execution file or the action's prompt file, written
-  once its checks pass. A run that failed before Claude ran (an actor check, a runner or install
-  failure) did no work and doesn't count (#582). Updating the issue retries it (admin, 22 Nov 2026).
-  It compares with the run's finish, so an update while the run is going doesn't retry it, and a
-  comment by anyone but the owner or a collaborator doesn't count (the repo is public, and any
-  comment moves `updated_at`), read from the comments updated since the oldest run it lists.
+  issues (admin, 23 Nov 2026, #619: `factory:ready` is the only gate): open, at `factory:ready`
+  after the reconcile (below), opened by the owner or a collaborator, with no `blocked:*` label, no
+  open native blocker (`GET …/issues/{n}/dependencies/blocked_by`), no open PR from a `<n>-` branch
+  and no `<n>-` branch (the gate's rules, so the sweep doesn't dispatch what the gate would refuse).
+  Status, Mode and Track aren't read: Backlog, Ready, In progress or In review all qualify, so the
+  admin can label a whole chain at once and the factory walks it in blocker order.
+- **The `factory:*` states (#619).** An issue carries at most one: `factory:ready` (the admin's
+  "take this"; only the admin sets it), `factory:working` (a run is going), `factory:review` (a PR
+  is waiting), `factory:failed` (the last run ended without a PR, or its PR closed unmerged). Each
+  transition is written with the App's token by one script, `.github/scripts/factory-label.sh`,
+  which removes the other `factory:*` labels before adding the new one: `sweep.yml`'s `labels` job
+  sets `factory:working` on what it dispatches (a fix round's issue too, read from its PR's `<n>-`
+  branch), before the dispatch; `factory.yml`'s `labels` job (`factory-outcome.sh`) sets
+  `factory:review` once publish opened the PR or a fix round ran, and `factory:failed` with one
+  comment when a run that passed the gate opened none: the run's link and the factory job's last
+  `RESULT claude=`, `RESULT handoff=` and `RESULT factory=` lines (Claude's `FACTORY …` reason,
+  #615), read from that job's log, backticks dropped, in a code block so the model's words can't
+  format, link or mention. A gate refusal moves only an issue at `factory:working` to
+  `factory:failed`, with the gate's reason; an issue the admin dispatched keeps its label. Retry is
+  the admin replacing `factory:failed` with `factory:ready`. `review:admin` stays on PRs only. This
+  replaces the rule that skipped an issue whose last run ran Claude and opened no PR until the issue
+  was edited (`claude_ran`, #582): a run that opens no PR can't loop, since its issue leaves
+  `factory:ready`. Pattern: a state machine kept in labels, with one transition function shared by
+  both workflows, and drift repaired by a reconcile, as a controller reconciles desired with
+  observed state. Alternatives considered: deriving the state from runs and PRs on every sweep with
+  no labels (stateless like the fix-round guard, but invisible on the issue and the board, which is
+  the point of the labels); writing each label inline in each job (four copies of the
+  one-label-at-a-time rule to drift apart); `GITHUB_TOKEN` with `issues: write` (a second writing
+  identity, which "The factory App's permissions" rules out).
+- **The reconcile (#619)**, in `factory-sweep.mjs` before any choice, from what the gather read
+  (every issue under each `factory:*` label, open or closed, the newest 100 factory runs, the open
+  PRs, and the newest 100 closed PRs by `sunny-factory[bot]`): a closed issue loses every
+  `factory:*` label; an issue with several keeps the most advanced (`failed` over `review` over
+  `working` over `ready`); `factory:working` with no live run (`factory #<n>`, or a fix round on its
+  `<n>-` PR) goes to `factory:review` when an open `<n>-` PR exists, else to `factory:failed` ("run
+  vanished"); `factory:review` with no open `<n>-` PR goes to `factory:failed` ("PR #x closed
+  unmerged") when its newest closed one there closed unmerged; with none found it is left alone,
+  since a merged PR past the newest 100 isn't read. The choice reads the labels as reconciled; the
+  moves are written by the same `labels` job. A move into `factory:failed` comments its reason, as a
+  run's does. Each move is one `LABELS #<n> <from> -> <to> (<why>)` line in `select`'s log and the
+  job summary, and one `LABEL #<n>: …` line where it is written.
 - **Order:** Priority (P0 first, unset last), then board order, read as the order the REST items
-  list returns. `/today`'s agreed order isn't wired to the sweep yet: the sweep has no input for it,
-  and the admin steers by Priority and by what is Ready with `factory:ready`.
+  list returns; an issue not on the board comes last, by number. `/today`'s agreed order isn't wired
+  to the sweep yet: the sweep has no input for it, and the admin steers by Priority, by which issues
+  carry `factory:ready` and by their blockers.
 - **The chaining limit:** `workflow_run` doesn't chain more than three levels of workflows. Whether
   a `workflow_dispatch` between the sweep and the factory resets that count is **unproven**: not
   tested here, and the docs say nothing on it. A factory run that the sweep's `GITHUB_TOKEN`
@@ -1273,6 +1333,54 @@ dispatches (it would hold the Project token and `actions: write` together).
   is the loop, at worst one issue an hour, until a dispatch with another token.
 - **Logs:** one `SWEEP` line and a job summary per run: the switch, the open factory PRs against the
   cap, the eligible issues in order, the skipped ones and why, and the one dispatched or why none.
+
+**Fix rounds (#588; admin, 22 Nov 2026).** Step 4 of the review flow ("the factory fixes them and
+pushes", above), built: when `sunny-reviewer[bot]` sends a factory PR back, the sweep dispatches the
+factory on that PR, which fixes only the Required findings on the same branch, so the factory can
+fix its own PRs overnight while the coordinator's laptop is off. Pattern: the same guard pipeline
+and model/writer split as an issue run, in a second mode of the same workflow (inputs `pr` and
+`head` instead of `issue`), and a stateless loop guard derived from the factory's own run titles.
+Alternatives considered: a separate `factory-fix.yml` (a second copy of the switch, environments,
+bubblewrap and caps, which would drift apart from the first); a label or a comment on the PR as the
+round counter (state anyone with write access can edit, and one more write per round); fixing in the
+reviewer's own job (it would run Claude next to the reviewer App's key, which "Which environment
+holds which secret" rules out).
+
+- **What the sweep picks:** after the kill switch, the cap's parse and the serial rule, and before
+  the open-PR cap and any new issue (a fix round adds no PR), the open PR with the lowest number
+  that the factory made: opened by `sunny-factory[bot]` with every commit authored and committed by
+  its bot user. Lanes open their PRs as `sunny-factory[bot]` too ("Lanes open PRs as sunny-factory",
+  below) but commit as themselves, so a lane PR is never picked. Its newest review from
+  `sunny-reviewer[bot]` that gives a verdict (not dismissed, not pending, not one of the
+  empty-bodied reviews that carry its line comments) must be on the PR's current head and be Request
+  changes or start "merge after fixes". `factory-review.mjs` holds those rules for the sweep and the
+  fix gate both.
+- **The loop guard:** at most **2** fix rounds per PR, and never two on one head. A fix run's
+  `run-name` is `factory fix #<pr> at <head SHA>`, so the sweep counts a PR's rounds from the
+  factory runs it already reads: every such run counts, whatever it did, a run that pushed nothing
+  or failed included. A PR over the limit, or with a run at its head, is skipped, and the `SWEEP`
+  line and the summary say why. The sweep reads the newest 100 factory runs, so a round older than
+  that falls out of the count. After 2 rounds the reviewer's own "Not converging" row (3 Request
+  changes) is one review away.
+- **Fix mode in `factory.yml`:** `gate` runs `factory-fix-gate.mjs` (through `factory-gather.sh`),
+  which refuses unless the PR is open, the factory made it (the rule above), its branch is
+  `<n>-<slug>` in this repo, its head is still `head`, and the newest verdict on that head asks for
+  fixes and lists at least one Required finding; the issue is the branch's number. `factory` makes
+  the PR's branch at `head` and hands Claude only the Required findings and the PR's body, with
+  `.github/factory-prompt.md`'s "Fix mode": fix those findings and nothing else, commit on top,
+  never rewrite history. Same environment, read-only `GITHUB_TOKEN`, tools, `--max-turns` and
+  timeouts as an issue run.
+- **Labels and the body are publish's:** a finding like "`review:admin` is missing" or a wrong
+  Review line isn't applied by Claude, which holds no write token. Claude writes the labels to add,
+  a whole new body and an `escalated:` comment into the hand-off; `factory-publish.sh` (with
+  `FIX_BRANCH`) checks them (labels only `review:admin` and `area:*`, added, never removed; the body
+  still says `Closes #<n>`; the comment one line starting `escalated: `) and checks the new commits
+  as for an issue run (identity, protected paths, at most 100), plus that they descend from the
+  reviewed head. `publish` then fetches the branch and refuses if it moved since the gate, mints the
+  App's token with `contents: write` and, in fix mode only, `pull-requests: write`, applies the
+  labels, body and comment, and pushes the commits last with a plain push, which GitHub refuses
+  unless it fast-forwards the branch: never a force-push. The push starts the next review ("An
+  approved head isn't reviewed", above).
 
 **Two environments, both `main` only (admin, 21 Nov 2026, in the coordinator session).** The Claude
 job runs in `claude-seat`, which holds only `CLAUDE_CODE_OAUTH_TOKEN` and is named for the seat, not
