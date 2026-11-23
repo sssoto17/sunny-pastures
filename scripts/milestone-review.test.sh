@@ -130,8 +130,9 @@ expect_arg --milestone "M4 Playable slice live"
 expect_arg --type chore
 expect_arg --area tools
 expect_arg --parent 73
-expect_arg --track Infra
-expect_arg --mode Manual
+# The Project's Mode and Track fields were dropped (#621): neither flag goes to new-issue.sh.
+expect_no_arg --track
+expect_no_arg --mode
 expect_arg --priority P2
 expect_arg --size M
 # 29 Nov is Wk 4's last day: the iteration runs 23 Nov plus 7 days.

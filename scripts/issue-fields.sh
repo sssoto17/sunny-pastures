@@ -28,8 +28,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/issue-fields.sh <issue> [--type NAME] [--track NAME] [--mode NAME] [--size NAME]
-                               [--priority NAME] [--week NAME] [--status NAME]
+usage: scripts/issue-fields.sh <issue> [--type NAME] [--size NAME] [--priority NAME] [--week NAME]
+                               [--status NAME]
        scripts/issue-fields.sh <issue> --status NAME --from NAME[,NAME...]
 
 Adds the issue to the Sunny Pastures Project if it's missing, sets the named fields, then prints
@@ -43,8 +43,12 @@ and the "Triage:" line says so. While one is missing, `triage` is left as it is 
 names what's missing (docs/agents/issue-tracker.md, "Issue fields").
 
 Status: a new item, or one with no Status, gets Backlog. A Status already set is left alone
-unless --status is given (--status Backlog may move an issue back). Admin-only values are
-refused: --status Ready and --mode Factory.
+unless --status is given (--status Backlog may move an issue back). The admin-only value is
+refused: --status Ready.
+
+Mode and Track: the Project's Mode and Track fields were dropped (#621). --mode and --track are
+refused, and the script never reads, writes or prints either field, even while the Project
+still has them. It reads only Status, Size, Priority and Week from the Project.
 
 Guarded move (--from, the board workflow's form, #417): sets Status alone, and only when the
 issue is on the Project and its Status is now one of the --from names. Otherwise it changes
@@ -68,7 +72,7 @@ name (nothing changed), 4 the Project step was skipped: the issue's type is set,
 wasn't touched and its field names weren't checked; run the printed command where the Project
 can be reached.
 
-example: scripts/issue-fields.sh 47 --type Chore --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
+example: scripts/issue-fields.sh 47 --type Chore --size S --priority P2 --week "Wk 2"
 EOF
 }
 
@@ -77,10 +81,10 @@ die() { # code message
   exit "$1"
 }
 
-# Values only the admin sets (docs/agents/issue-tracker.md, Status rules; triage-labels.md,
-# Factory): refused on the command line and left out of the valid-names lists.
+# The value only the admin sets (docs/agents/issue-tracker.md, Status rules): refused on the
+# command line and left out of the valid-names lists.
 admin_only() { # field name
-  [[ $1 == Status && ${2,,} == ready ]] || [[ $1 == Mode && ${2,,} == factory ]]
+  [[ $1 == Status && ${2,,} == ready ]]
 }
 
 # --- arguments ----------------------------------------------------------------------------------
@@ -104,15 +108,15 @@ while (($#)); do
   case $flag in
     --from) field=From ;;
     --type) field=Type ;;
-    --track) field=Track ;;
-    --mode) field=Mode ;;
+    --mode | --track)
+      die 2 "$flag is gone: the Project's Mode and Track fields were dropped (#621). Set --priority, --size and --week instead" ;;
     --size) field=Size ;;
     --priority) field=Priority ;;
     --week) field=Week ;;
     --status) field=Status ;;
     -h | --help) usage; exit 0 ;;
     --*) die 2 "unknown option \"$flag\"" ;;
-    *) die 2 "unexpected argument \"$1\" (fields are set with --track, --size, ...)" ;;
+    *) die 2 "unexpected argument \"$1\" (fields are set with --size, --priority, ...)" ;;
   esac
   if [[ $1 == *=* ]]; then
     value=${1#*=}
@@ -140,10 +144,7 @@ while (($#)); do
     [[ $f == "$field" ]] && die 2 "$flag given twice"
   done
   if admin_only "$field" "$value"; then
-    if [[ $field == Status ]]; then
-      die 2 "only the admin moves an issue to Ready (docs/agents/issue-tracker.md, Status rules)"
-    fi
-    die 2 "only the admin sets Mode to Factory, with factory:ready (docs/agents/triage-labels.md)"
+    die 2 "only the admin moves an issue to Ready (docs/agents/issue-tracker.md, Status rules)"
   fi
   req_fields+=("$field")
   req_names+=("$value")
@@ -155,13 +156,16 @@ fi
 # --- the lookup ---------------------------------------------------------------------------------
 # All REST (docs/agents/github-rest.md): the issue (its id, native type and labels) and the
 # repo's issue types from repos/<owner>/<repo>; the Project's fields and the issue's item from
-# the REST Projects API. Each output line is tab-separated: a record type, then its values. A
+# the REST Projects API. Only the four Project fields the script sets are read (PROJECT_FIELDS):
+# the item is asked for those by id, so any other field (Mode and Track until the admin deletes
+# them, #621) is never read. Each output line is tab-separated: a record type, then its values. A
 # type is set by its name over REST, so a type's option id is its name.
 ISSUE_FILTER='["issue", .html_url, .id], (.type.name // empty | ["value", "Type", .]),
   (.labels[] | ["label", .name]) | @tsv'
 TYPES_FILTER='.[] | select(.is_enabled) | ["option", "Type", "-", "type", .name, .name] | @tsv'
+PROJECT_FIELDS='"Status", "Size", "Priority", "Week"'
 FIELDS_FILTER="$PROJECT_JQ_DEFS"'
-.[] | . as $f
+.[] | select(.name | IN('"$PROJECT_FIELDS"')) | . as $f
 | if .data_type == "single_select" then
     .options[] | ["option", $f.name, $f.id, "select", .id, (.name | txt)]
   elif .data_type == "iteration" then
@@ -379,7 +383,7 @@ if ((project_ok && ${#missing[@]} == 0)) && has_triage && [[ -z $from_given ]]; 
 fi
 
 printf '%s\n' "$issue_url"
-for field in Type Status Track Mode Size Priority Week; do
+for field in Type Status Size Priority Week; do
   value=$(current "$field")
   [[ $field != Type ]] && ((!project_ok)) && value="?"
   printf '%-9s %s\n' "$field:" "${value:--}"

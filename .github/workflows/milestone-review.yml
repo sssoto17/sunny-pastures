@@ -1,5 +1,5 @@
 # A milestone's architecture review (#517): when a milestone is created, file "Architecture review,
-# <milestone>" into it with its type, area, Track, Mode, Priority, Size and Week, under #73. The
+# <milestone>" into it with its type, area, Priority, Size and Week, under #73. The
 # rules are in scripts/milestone-review.sh, which files through scripts/new-issue.sh; a milestone
 # that already has its review is left alone, so a re-run never files a second.
 # One job, in environment `board`, which lets only main read the secret BOARD_PROJECT_TOKEN (a
