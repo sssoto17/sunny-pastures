@@ -96,16 +96,21 @@ const github = ({
 	changed = files.length,
 	records = [],
 	lag = 0,
+	labelLag = 0,
 }) => {
 	const log = [];
 	const state = { labels: [...labels], records: [...records], slept: 0 };
 	let reads = 0;
+	let pulls = 0;
 	const deps = {
 		rules: RULES,
+		// The first `labelLag` reads still list review:admin, as REST can just after a removal.
 		getPull: async () => ({
 			head: { sha: head },
 			changed_files: changed,
-			labels: state.labels.map((name) => ({ name })),
+			labels: [...state.labels, ...(pulls++ < labelLag ? ["review:admin"] : [])].map((name) => ({
+				name,
+			})),
 		}),
 		listFiles: async () => files.map((f) => (typeof f === "string" ? { filename: f } : f)),
 		// The first `lag` reads miss the last event, as a lagging REST list would.
@@ -415,9 +420,25 @@ describe("checkCodeOwned", () => {
 		expect(gh.state.slept).toBe(2);
 	});
 
-	it("writes no record when the removal the event reports never shows in the events", async () => {
+	it("says the removal isn't listed yet when the events never show it, not who removed it", async () => {
 		const gh = github({ events: [added(), removed(ADMIN)], lag: 99 });
-		expect((await refused(gh, unlabeled())).message).toContain("held");
+		const r = await refused(gh, unlabeled());
+		expect(r.message).toContain("isn't listed in the PR's events yet");
+		expect(r.message).toContain("by sssoto17");
+		expect(r.message).not.toContain("removed by");
+		expect(gh.state.labels).toEqual(["review:admin"]);
+	});
+
+	it("re-reads the PR while it still lists the label the admin just removed", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)], labelLag: 2 });
+		expect((await check(gh, unlabeled())).ok).toBe(true);
+		expect(gh.state.slept).toBe(2);
+	});
+
+	it("holds a removal run whose PR still lists the label after every re-read", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)], labelLag: 99 });
+		const r = await refused(gh, unlabeled());
+		expect(r.message).toContain("review:admin is on");
 	});
 
 	// The sender on the payload must be the removal the events list: a spoofed or stale payload

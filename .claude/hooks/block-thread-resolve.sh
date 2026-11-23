@@ -2,8 +2,9 @@
 # PreToolUse hook on Bash and MCP tools: agents never resolve review threads (#264), submit a PR
 # review or reply on a review thread (#497); CONSTRAINTS.md, "Admin review". An open escalation
 # thread is what holds a PR for the admin, so resolving it is the admin's go-ahead (ADR-0002,
-# area 2). A review from a session on the admin's account counts as the admin's sign-off under
-# `guard / code-owned` (#494), and a thread reply creates a review. Agents answer a finding with a
+# area 2). A review from a session on the admin's account reads as the admin's review (it was the
+# sign-off under `guard / code-owned` until #565 dropped #494's rule), and a thread reply creates a
+# review. Agents answer a finding with a
 # plain PR comment (`gh pr comment`), which creates none. Denies:
 # - an MCP tool, on any server, that resolves a thread (resolve_review_thread) or writes a review or
 #   a thread reply (pull_request_review_write, the pending-review tools, reply_to_pull_request_comment);
@@ -36,7 +37,7 @@ deny() { # reason
   cat >&2 <<EOF
 Blocked: $1. Agents never resolve review threads, submit a PR review or reply on a review
 thread (#264, #497; CONSTRAINTS.md, "Admin review"). An open thread holds the PR for the admin,
-and a review from a session on the admin's account would count as the admin's sign-off (#494).
+and a review from a session on the admin's account would read as the admin's own review.
 Answer a finding with a plain PR comment (gh pr comment <N> --body-file <file>), and leave reviews
 and resolving to the admin. To read threads or reviews, use a REST GET or a GraphQL query written
 out in the command, with no \$ variables, files or stdin.

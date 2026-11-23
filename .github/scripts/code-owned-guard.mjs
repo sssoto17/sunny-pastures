@@ -130,29 +130,17 @@ export const isAdminRemoval = (e) =>
  * on a commit, and `getKeys()` GitHub's OIDC signing keys. Throws CannotRun when it can't judge.
  */
 export const checkCodeOwned = async (event, deps) => {
-	const { rules, getPull, listFiles, listEvents, escalate, rearm } = deps;
-	const number = event?.pull_request?.number;
-	const repo = event?.repository?.full_name;
-	if (!event?.pull_request?.head?.sha || !number || !repo)
-		throw new CannotRun("the event has no pull_request head");
-	if (!rules.some((r) => r.owners.length)) throw new CannotRun("CODEOWNERS lists no owned path");
-
-	const [pull, files, events] = await Promise.all([getPull(), listFiles(), listEvents()]);
-	// REST lists at most 3000 files; a shorter list than the PR's count could hide an owned path.
-	if (files.length < pull.changed_files)
-		throw new CannotRun(`GitHub listed ${files.length} of the PR's ${pull.changed_files} files`);
-
+	const { pull, events, owned, number, repo } = await readPr(event, deps);
 	const head = pull.head.sha;
 	const short = head.slice(0, 7);
-	const paths = [...new Set(files.flatMap((f) => [f.filename, f.previous_filename ?? []].flat()))];
-	const owned = paths.filter((p) => isOwned(rules, p));
-	const labelled = pull.labels.some((l) => l.name === LABEL);
+	const labelled = hasLabel(pull);
 	const carried = labelled || events.some((e) => e.event === "labeled" && e.label?.name === LABEL);
 	const verdict = (ok, message) => ({ ok, owned, head, message });
 
+	if (!carried && owned.length === 0)
+		return verdict(true, "not held: no code-owned path, never escalated");
 	if (!carried) {
-		if (owned.length === 0) return verdict(true, "not held: no code-owned path, never escalated");
-		await escalate();
+		await deps.escalate();
 		return verdict(
 			false,
 			`held: code-owned, so review:admin was added; the admin removes it on ${short}`,
@@ -167,23 +155,16 @@ export const checkCodeOwned = async (event, deps) => {
 	const signed = await signOff(event, pull, events, audienceOf(repo, number, head), deps);
 	// The label's last removal must be the admin's own, so a record from an earlier sign-off on
 	// this head can't carry a later removal by anyone else (the label came back, then went again).
-	const removal = signed ?? latestLabelEvent(events);
-	if (isAdminRemoval(removal)) {
-		const keys = await deps.getKeys();
-		const records = (await deps.listRecords(head))
-			.filter((r) => fromMain(r, { repo, number, head, keys }))
-			.sort((a, b) => a.id - b.id);
-		if (records.length > 0)
-			return verdict(
-				true,
-				`signed off: ${SIGN_OFF} ${records.at(-1).id} from main's code-owned.yml on ${short}`,
-			);
-	}
+	const removal = signed ? signed.removal : latestLabelEvent(events);
+	const record = isAdminRemoval(removal) ? await recordFromMain(repo, number, head, deps) : null;
+	if (record)
+		return verdict(
+			true,
+			`signed off: ${SIGN_OFF} ${record.id} from main's code-owned.yml on ${short}`,
+		);
 
-	const why = isAdminRemoval(removal)
-		? `no ${SIGN_OFF} record from main's code-owned.yml on ${short}, the head (pushed after the sign-off, removed on an older head, or the run that would write it was replaced by a newer one; the admin removes the label again)`
-		: `review:admin was removed by ${who(removal)}, which isn't the admin's sign-off`;
-	await rearm(why);
+	const why = rearmReason(event, signed, removal, short);
+	await deps.rearm(why);
 	return verdict(false, `held: ${why}; review:admin is back`);
 };
 
@@ -228,8 +209,9 @@ export const writeVerdict = async (verdict, deps) => {
 
 // On the run an `unlabeled` event of `review:admin` fired: the removal it reports, read from the
 // PR's events (re-read while the list lags the webhook), and the record written when it is the
-// admin's on the event's head, which is still the PR's head and has the label off. Returns the
-// removal, or null when the run isn't one.
+// admin's on the event's head, which is still the PR's head and has the label off. Returns
+// `{ removal, listed }` (listed: the events show the removal this run reports), or null when the
+// run isn't one.
 async function signOff(event, pull, events, audience, { listEvents, writeRecord, sleep = delay }) {
 	if (event.action !== "unlabeled" || event.label?.name !== LABEL) return null;
 
@@ -239,8 +221,9 @@ async function signOff(event, pull, events, audience, { listEvents, writeRecord,
 		await sleep(WAIT_MS);
 		removal = latestLabelEvent(await listEvents());
 	}
-	if (!reports(removal, sender) || !isAdminRemoval(removal)) return removal;
-	if (event.pull_request.head.sha !== pull.head.sha) return removal;
+	const listed = reports(removal, sender);
+	if (!listed || !isAdminRemoval(removal)) return { removal, listed };
+	if (event.pull_request.head.sha !== pull.head.sha) return { removal, listed };
 
 	const at = pull.head.sha.slice(0, 7);
 	const output = {
@@ -250,7 +233,53 @@ async function signOff(event, pull, events, audience, { listEvents, writeRecord,
 			`${pull.head.sha}, the PR's head, in event ${removal.id} (${removal.created_at}).`,
 	};
 	await writeRecord(pull.head.sha, output, audience);
-	return removal;
+	return { removal, listed };
+}
+
+function hasLabel(pull) {
+	return pull.labels.some((l) => l.name === LABEL);
+}
+
+// The PR the event names, read live: `{ pull, events, owned, number, repo }`. On the run a removal
+// fired, the PR can still list the label for a moment after the webhook, so it is re-read, as
+// signOff re-reads the events, and the removal isn't judged as "the label is on".
+async function readPr(event, { rules, getPull, listFiles, listEvents, sleep = delay }) {
+	const number = event?.pull_request?.number;
+	const repo = event?.repository?.full_name;
+	if (!event?.pull_request?.head?.sha || !number || !repo)
+		throw new CannotRun("the event has no pull_request head");
+	if (!rules.some((r) => r.owners.length)) throw new CannotRun("CODEOWNERS lists no owned path");
+
+	let [pull, files, events] = await Promise.all([getPull(), listFiles(), listEvents()]);
+	const removalRun = event.action === "unlabeled" && event.label?.name === LABEL;
+	for (let i = 1; i < TRIES && removalRun && hasLabel(pull); i++) {
+		await sleep(WAIT_MS);
+		pull = await getPull();
+	}
+	// REST lists at most 3000 files; a shorter list than the PR's count could hide an owned path.
+	if (files.length < pull.changed_files)
+		throw new CannotRun(`GitHub listed ${files.length} of the PR's ${pull.changed_files} files`);
+
+	const paths = [...new Set(files.flatMap((f) => [f.filename, f.previous_filename ?? []].flat()))];
+	return { pull, events, owned: paths.filter((p) => isOwned(rules, p)), number, repo };
+}
+
+// The newest `code-owned / sign-off` record on `head` that `fromMain` counts, or null.
+async function recordFromMain(repo, number, head, { getKeys, listRecords }) {
+	const keys = await getKeys();
+	const counted = (await listRecords(head)).filter((r) =>
+		fromMain(r, { repo, number, head, keys }),
+	);
+	return counted.sort((a, b) => a.id - b.id).at(-1) ?? null;
+}
+
+// Why a held PR with the label off gets it back, in words the admin can act on.
+function rearmReason(event, signed, removal, short) {
+	if (signed?.listed === false)
+		return `the removal this run reports, by ${event.sender?.login ?? "an unnamed sender"}, isn't listed in the PR's events yet; the admin removes the label again`;
+	if (isAdminRemoval(removal))
+		return `no ${SIGN_OFF} record from main's code-owned.yml on ${short}, the head (pushed after the sign-off, removed on an older head, or the run that would write it was replaced by a newer one; the admin removes the label again)`;
+	return `review:admin was removed by ${who(removal)}, which isn't the admin's sign-off`;
 }
 
 // The PR's last event that added or removed `review:admin`; events come oldest first.

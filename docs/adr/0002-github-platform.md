@@ -321,7 +321,7 @@ has a row here, `guard / code-owned` and `guard / acceptance` included; ADR-0004
 | `ci / scripts` | the shell scripts' test suites, every `*.test.sh` under `scripts/` and `.claude/hooks/`, with their fake `gh`; the suites need no secret or network (#255) |
 | `guard / pr-body` | a body that says `Part of #N` and also links #N with a closing keyword (#270), or a closing keyword that names an issue other than the PR's own `<N>` outside an `Also closes #M` line (#512); required since 16 Nov (`main checks`, 10 checks) |
 | `guard / stack-base` | a PR whose base isn't `main` and isn't in a native stack: a hand-chained PR (#264); required once the admin adds it after #264 merges |
-| `guard / code-owned` | a PR that touches a code-owned path (`.github/CODEOWNERS`) needs the code owner's review on its head (#337, #379, #494); required in `main checks` |
+| `guard / code-owned` | a held PR (it touches a code-owned path in `.github/CODEOWNERS`, or has ever carried `review:admin`) needs the admin to remove `review:admin` on its head (#337, #565; "Solo-admin approvals"); required in `main checks` |
 | `guard / acceptance` | `guard / protected-paths` as built: fails a `[bot]`-authored PR that touches `tests/acceptance/**` (MUST-15.2; #384, [ADR-0007](0007-apps-web-and-game-api.md), section 6); required in `main checks` |
 | `guard / secrets` | the gitleaks CLI over the PR's commits (area 8) |
 | `guard / code-scan` | Semgrep (area 8) |
@@ -475,12 +475,12 @@ PR_ means either kind.
   - **The admin's go-ahead** is resolving the thread. The bot's approval already meets the count, so
     the PR, or the whole stack, then merges like any other. A code-owned PR still needs the code
     owner's approval: on a PR the admin's account opened, which the admin can't approve, the admin
-    leaves a Comment review on its head, which `guard / code-owned` counts as the code owner's
-    sign-off (#494; "Stacks", below), and bypass-merges it; a PR an App opened the admin approves
-    (code-owner review stays on; "Stacks", below). The resolved thread and the merge are the record
-    of who decided. **Amended 22 Nov 2026, #495:** the go-ahead becomes removing `review:admin`,
-    bound to the head; threads stop being required, and code-owner review goes off ("Solo-admin
-    approvals", below).
+    left a Comment review on its head, which `guard / code-owned` counted as the code owner's
+    sign-off until #565 removed that rule (#494; "Stacks", below), and bypass-merged it; a PR an App
+    opened the admin approves (code-owner review stays on; "Stacks", below). The resolved thread and
+    the merge are the record of who decided. **Amended 22 Nov 2026, #495:** the go-ahead becomes
+    removing `review:admin`, bound to the head; threads stop being required, and code-owner review
+    goes off ("Solo-admin approvals", below).
   - **The bot's earlier Request changes.** When its re-review finds those findings fixed, the bot's
     Approve replaces its Request changes, on an escalated PR too (#322). Where it withholds with
     every finding fixed (an escalated PR an App opened, or `review:admin` until #104), it dismisses
@@ -893,12 +893,12 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   the admin can't approve their own PRs, so it merges only by bypass, and a bypass can't merge a
   stack (above): a stack with a code-owned part merges part by part. Code-owner review stays on
   (Q15). This is input for #68, which turns code-owner review off only after the deterministic
-  `guard / code-owned` check (#337) is required (#68's criteria). Since #494 the guard itself passes
-  such a part once the admin, as its author and a code owner of each of its code-owned paths, has
-  left a Comment review as their last review on its head (below); the bypass is still needed for
-  GitHub's own code-owner review. **Decided 22 Nov 2026, #495:** code-owner review goes off and the
-  guard is the only code-owner gate, so such a stack merges in one action once the admin has removed
-  `review:admin` on each part ("Solo-admin approvals", above).
+  `guard / code-owned` check (#337) is required (#68's criteria). From #494 until #565 the guard
+  itself passed such a part once the admin, as its author and a code owner of each of its code-owned
+  paths, had left a Comment review as their last review on its head (below); the bypass is still
+  needed for GitHub's own code-owner review. **Decided 22 Nov 2026, #495:** code-owner review goes
+  off and the guard is the only code-owner gate, so such a stack merges in one action once the admin
+  has removed `review:admin` on each part ("Solo-admin approvals", above).
 - **One test run per stack.** `ci / typecheck`, `ci / lint` and `ci / test` run on a stack's top
   part only, diffing from the stack's base, so one run covers every part. The other jobs, the floor
   guard among them, and the review run on each part. The `if:` in GitHub's
@@ -969,7 +969,8 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   full, so the newest suite holds checks that ran. **The residual** is #313's twin race: two runs
   created in the same instant, where the cancelled one lands in the newer suite. It fails closed:
   the merge box shows cancelled checks and blocks, and a re-run clears it.
-- **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). It ran on `pull_request`
+- **`guard / code-owned` runs on reviews only** (#379; admin, 19 Nov 2026). _Historical: since #565
+  it runs on `pull_request_target` only ("Solo-admin approvals", area 2)._ It ran on `pull_request`
   and on `pull_request_review`, and on PR #377 the admin's approval didn't unblock the merge: the
   review run passed in its own check suite, but the merge stayed blocked on the `pull_request` run's
   earlier failure until that run was re-run by hand. So `code-owned.yml` triggers on
@@ -987,21 +988,22 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   PR's merge ref, as for `pull_request`; the script and CODEOWNERS still come from the default
   branch (#337). The label `review:admin` it adds now lands at the first review, not at open; the
   agent and the reviewer bot still add it earlier (CONSTRAINTS.md, "Escalation criteria").
-- **`guard / code-owned` on a PR a code owner opened** (#494; admin, 22 Nov 2026: option A). The
-  guard waited for a code owner to approve the head, GitHub never lets an author approve their own
-  PR, and `main checks` has no bypass (#110), so a code-owned PR the admin's account opened (an
-  `--as-admin` lane, #385; ADR-0007 section 6) could never pass it: #386's stack (#487, #488) was
-  the first. Now, when the PR's author is a code owner of every code-owned path the PR touches, the
-  guard counts the author's own latest review that isn't dismissed as the sign-off, if it is on the
-  current head (`commit_id`) and APPROVED or COMMENTED. Latest means last submitted (`submitted_at`,
-  then `id`), since a review's id likely dates from when its draft started (inferred from REST, not
-  checked here). The author is read from the REST PR the run already fetches to pin the head
-  (`user.login`, and `user.type` must be `User`), never the event, as `post-review.sh` reads who
-  opened a PR (#322). Every other case keeps the rule: on any other PR only a code owner's APPROVED
-  review on the head counts; the bot's reviews never count; a review of an older head never counts.
-  `code-owned.yml` already runs on `submitted` and `dismissed` reviews, so the admin's Comment
-  review runs the check; the script and CODEOWNERS still come from the default branch. **The admin's
-  steps** on such a PR, and on each part of such a stack in turn:
+- **`guard / code-owned` on a PR a code owner opened** (#494; admin, 22 Nov 2026: option A).
+  _Historical: #565 removed this rule; the sign-off is removing `review:admin` on the head
+  ("Solo-admin approvals", area 2)._ The guard waited for a code owner to approve the head, GitHub
+  never lets an author approve their own PR, and `main checks` has no bypass (#110), so a code-owned
+  PR the admin's account opened (an `--as-admin` lane, #385; ADR-0007 section 6) could never pass
+  it: #386's stack (#487, #488) was the first. Now, when the PR's author is a code owner of every
+  code-owned path the PR touches, the guard counts the author's own latest review that isn't
+  dismissed as the sign-off, if it is on the current head (`commit_id`) and APPROVED or COMMENTED.
+  Latest means last submitted (`submitted_at`, then `id`), since a review's id likely dates from
+  when its draft started (inferred from REST, not checked here). The author is read from the REST PR
+  the run already fetches to pin the head (`user.login`, and `user.type` must be `User`), never the
+  event, as `post-review.sh` reads who opened a PR (#322). Every other case keeps the rule: on any
+  other PR only a code owner's APPROVED review on the head counts; the bot's reviews never count; a
+  review of an older head never counts. `code-owned.yml` already runs on `submitted` and `dismissed`
+  reviews, so the admin's Comment review runs the check; the script and CODEOWNERS still come from
+  the default branch. **The admin's steps** on such a PR, and on each part of such a stack in turn:
   1. resolve the escalation thread;
   2. leave a Comment review on the part's head, which runs `guard / code-owned` green;
   3. bypass-merge the part ("Merge stack" offers no bypass, above); for a stack, run
