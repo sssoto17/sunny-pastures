@@ -112,8 +112,9 @@ mcp_method 2 mcp__plugin_github_github__pull_request_review_write submit_pending
 mcp_method 2 mcp__github__pull_request_review_write delete_pending
 
 # --- #497: no PR review and no thread reply, in any form ---------------------------------------
-# A lane on the admin's account that reviews its own PR would sign it off under
-# `guard / code-owned` (#494); a thread reply is a review too. A PR comment stays allowed.
+# A lane on the admin's account that reviews its own PR would review it as the admin (the sign-off
+# under `guard / code-owned` until #565 dropped #494's rule); a thread reply is a review too. A PR
+# comment stays allowed.
 deny 'gh pr review 12 --approve' 'submit a PR review'
 deny 'gh pr review 12 --comment -b "fixed in abc123"'
 deny 'gh pr review'
