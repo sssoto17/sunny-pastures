@@ -470,3 +470,114 @@ describe("factory.yml", () => {
 		expect(factory).toContain("total_cost_usd");
 	});
 });
+
+// #615: the "Claude's result" step logs Claude's last `FACTORY …` line, so a run that publishes
+// nothing still says why. The step's own run block is executed, as the workflow has it, against an
+// execution file shaped like claude-code-action's (a JSON array of messages, the `result` last).
+describe("factory.yml, Claude's result (#615)", () => {
+	const yml = readFileSync(WORKFLOW, "utf8");
+	const step = yml.slice(yml.indexOf("name: Claude's result"));
+	const script = step
+		.slice(step.indexOf("run: |\n") + "run: |\n".length)
+		.split("\n")
+		.filter((l, i, all) =>
+			all.slice(0, i + 1).every((x) => x === "" || x.startsWith(" ".repeat(10))),
+		)
+		.map((l) => l.slice(10))
+		.join("\n");
+
+	const execution = (...results) => [
+		{ type: "system", subtype: "init" },
+		{
+			type: "assistant",
+			message: { content: [{ type: "text", text: "FACTORY ready: 1-not-this" }] },
+		},
+		...results.map((result) => ({
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			num_turns: 18,
+			total_cost_usd: 0.43,
+			duration_ms: 1000,
+			result,
+		})),
+	];
+
+	function run(exec) {
+		dir = mkdtempSync(join(tmpdir(), "factory-result-"));
+		const env = { PATH: process.env.PATH, RUNNER_TEMP: dir, OUTCOME: "success" };
+		env.GITHUB_OUTPUT = join(dir, "out");
+		writeFileSync(env.GITHUB_OUTPUT, "");
+		if (exec !== undefined) {
+			env.EXEC_FILE = join(dir, "exec.json");
+			writeFileSync(env.EXEC_FILE, typeof exec === "string" ? exec : JSON.stringify(exec));
+		}
+		const res = spawnSync("bash", ["-c", script], { encoding: "utf8", env });
+		const lines = res.stdout.split("\n").filter((l) => l.startsWith("RESULT factory"));
+		return { code: res.status, lines, out: res.stdout + res.stderr };
+	}
+
+	it("prints the final result's last line that starts with FACTORY", () => {
+		const r = run(execution("Done.\nThe PR body is written.\nFACTORY ready: 543-boundary-zone\n"));
+		expect(r.code).toBe(0);
+		expect(r.lines).toEqual(["RESULT factory=FACTORY ready: 543-boundary-zone"]);
+	});
+
+	it("takes the last FACTORY line of the last result, and only lines that start with it", () => {
+		const r = run(
+			execution(
+				"FACTORY stopped: an older result",
+				"FACTORY stopped: first try\nthen  FACTORY ready: mid-line\n  FACTORY fixed: indented\nFACTORY fixed: PR #612\nThanks.",
+			),
+		);
+		expect(r.lines).toEqual(["RESULT factory=FACTORY fixed: PR #612"]);
+	});
+
+	it.each([
+		["no FACTORY line", execution("I could not finish.")],
+		["a result without text", execution(null)],
+		["no result message", execution().slice(0, 2)],
+		["an execution file that isn't JSON", "not json"],
+	])("prints factory=none for %s", (_name, exec) => {
+		const r = run(exec);
+		expect(r.code).toBe(0);
+		expect(r.lines).toEqual(["RESULT factory=none"]);
+	});
+
+	it("prints factory=none when there is no execution file", () => {
+		const r = run(undefined);
+		expect(r.lines).toEqual(["RESULT factory=none"]);
+	});
+
+	it("strips control characters, so the line stays one line and runs no workflow command", () => {
+		const r = run(
+			execution(
+				"FACTORY stopped: a\u001b[31m red\u0007 \tword\u0085\n::add-mask::x\u2028::error::y\rFACTORY stopped: b\u202e\u0000 end",
+			),
+		);
+		expect(r.lines).toEqual(["RESULT factory=FACTORY stopped: b end"]);
+		expect(r.out).not.toMatch(/^::/m);
+		expect(r.lines[0]).not.toMatch(/\p{Cc}|\p{Cf}/u);
+	});
+
+	it("treats every Unicode line break as a line end", () => {
+		for (const br of ["\r\n", "\r", "\u0085", "\u2028", "\u2029"]) {
+			const r = run(execution(`FACTORY stopped: one${br}FACTORY stopped: two${br}tail`));
+			expect(r.lines).toEqual(["RESULT factory=FACTORY stopped: two"]);
+		}
+	});
+
+	it("caps the line at 300 characters", () => {
+		const r = run(execution(`FACTORY stopped: ${"é".repeat(400)}`));
+		expect(r.lines).toHaveLength(1);
+		const line = r.lines[0].slice("RESULT factory=".length);
+		expect([...line]).toHaveLength(300);
+		expect(line).toBe(`FACTORY stopped: ${"é".repeat(283)}`);
+	});
+
+	it("still logs the run's other fields and the cost output", () => {
+		const r = run(execution("FACTORY ready: 9-x"));
+		expect(r.out).toMatch(/^RESULT claude=success subtype=success is_error=false num_turns=18 /m);
+		expect(readFileSync(join(dir, "out"), "utf8")).toMatch(/^cost=subtype=success /m);
+	});
+});

@@ -15,7 +15,8 @@
 # - factory: claude-code-action runs /implement on the issue with .github/factory-prompt.md, on the
 #   setup-token and the read-only GITHUB_TOKEN only. Claude commits locally and writes the branch
 #   name, PR body and labels to files; a plain step packs them with a git bundle into the job's
-#   output (the hand-off). No App token exists on this runner.
+#   output (the hand-off). No App token exists on this runner. It logs Claude's last `FACTORY …`
+#   line as `RESULT factory=` (#615), so a run that opens no PR says why.
 # - publish: a fresh runner that never ran the model. .github/scripts/factory-publish.sh checks the
 #   hand-off (branch name, labels, body, no workflow or acceptance-test paths); only then does it
 #   mint the App's token, push the branch and open the PR with scripts/open-pr.sh, so open-pr.yml
@@ -335,11 +336,21 @@ jobs:
           if [ -f "$f" ] || [ -f "$RUNNER_TEMP/claude-prompts/claude-prompt.txt" ]; then
             echo "ran=true" >>"$GITHUB_OUTPUT"
           fi
-          [ -f "$f" ] || { echo "RESULT claude=$OUTCOME execution_file=missing"; exit 0; }
+          [ -f "$f" ] || { echo "RESULT claude=$OUTCOME execution_file=missing"; echo "RESULT factory=none"; exit 0; }
           line=$(jq -r '.[] | select(.type == "result") | "subtype=\(.subtype) is_error=\(.is_error)"
             + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" | tail -n1)
           echo "RESULT claude=$OUTCOME $line"
           echo "cost=$line" | tr -cd '[:alnum:] =._\n-' >>"$GITHUB_OUTPUT"
+          # Why the run ended, in Claude's words (#615): the last line of the final result that
+          # starts with `FACTORY ` (ready:, stopped:, fixed:), as .github/factory-prompt.md has
+          # Claude end. The model wrote it, so jq makes it one line: it splits on every line break
+          # (\r, \n, NEL, U+2028/9), strips control and format characters (\p{Cc}, \p{Cf}: escapes,
+          # NUL, bidi overrides) and keeps 300 characters. The line starts with `RESULT `, so no
+          # workflow command can run from it. Tests: .github/scripts/tests/factory-gate.test.mjs.
+          factory=$(jq -r '[.[] | select(.type == "result")] | last | .result | strings
+            | [splits("\r\n|[\n\r\u0085\u2028\u2029]") | select(startswith("FACTORY "))] | last // empty
+            | gsub("[\\p{Cc}\\p{Cf}]"; "") | .[:300]' "$f" 2>/dev/null)
+          echo "RESULT factory=${factory:-none}"
 
       # The sweep's evidence (#582): sweep.yml skips an issue whose last run opened no PR only when
       # this step succeeded in it, read by name from the run's jobs (factory-sweep-gather.sh). A
