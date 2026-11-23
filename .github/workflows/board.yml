@@ -2,9 +2,13 @@
 # In progress when work starts on it, to In review when the PR that closes it is ready and its
 # checks are green (`guard / code-owned` apart, admin 21 Nov), and back to In progress when that PR
 # turns red, becomes a draft or closes unmerged. Done is the Project's built-in "Item closed" and
-# "Pull request merged" workflows; this never sets Done, Ready or Mode, never moves an issue out of
-# Backlog, and leaves an issue that isn't on the Project alone. The rules are in
-# scripts/board-status.sh; the field writes go through scripts/issue-fields.sh's guarded form.
+# "Pull request merged" workflows; this never sets Done or Ready, never moves an issue out of
+# Backlog but for a factory issue, and leaves an issue that isn't on the Project alone.
+# A factory issue's Status also follows its `factory:*` label (#620): factory:working and
+# factory:failed are In progress, factory:review In review, factory:ready nothing; such an issue
+# may leave Backlog. The rules are in scripts/board-status.sh; the field writes go through
+# scripts/issue-fields.sh's guarded form, and its plain --status form only for a factory issue
+# the guard reports in Backlog.
 #
 # Two jobs, so the Project token never shares a job with anything a PR wrote:
 # - `board / decide` reads the PR, its head's checks and the issues it closes with the run's own
@@ -36,22 +40,30 @@ on:
   workflow_run:
     workflows: [ci, security, pr-body, acceptance-guard, review, Labeler, board-branch]
     types: [completed]
+  # An issue's label added or removed. `on:` can't filter by label name, so `board / decide` runs
+  # only for a `factory:*` label (its `if:`); any other label's run skips both jobs. A label set
+  # with a workflow's GITHUB_TOKEN starts no run (GitHub's rule); the factory's App token does.
+  issues:
+    types: [labeled, unlabeled]
 
 permissions: {}
 
 jobs:
   decide:
     name: board / decide
-    # Not a fork's PR: the board follows the lanes' branches only.
+    # Not a fork's PR: the board follows the lanes' branches only. An issue's label: a factory:*
+    # one only (startsWith ignores case; the script matches the exact names).
     if: >-
       github.event_name == 'workflow_run' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event_name == 'issues' && startsWith(github.event.label.name, 'factory:')) ||
+      (github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read # main's checkout of scripts/
       pull-requests: read # the PR and the PRs of a commit
-      issues: read # the issues a PR closes, a branch's issue
+      issues: read # the issues a PR closes, a branch's issue, an issue's labels
       checks: read # the head's check runs
       statuses: read # the head's commit statuses
     outputs:
@@ -77,9 +89,12 @@ jobs:
           # A pull_request_target run (review, Labeler) may carry main's commit as its head, so
           # its PRs come from the event too; the script checks each is a number.
           RUN_PRS: ${{ join(github.event.workflow_run.pull_requests.*.number, ' ') }}
+          ISSUE: ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
-          if [[ $EVENT == pull_request_target ]]; then
+          if [[ $EVENT == issues ]]; then
+            bash scripts/board-status.sh decide issue "$ISSUE" >>"$GITHUB_OUTPUT"
+          elif [[ $EVENT == pull_request_target ]]; then
             bash scripts/board-status.sh decide pr "$PR" "$ACTION" >>"$GITHUB_OUTPUT"
           elif [[ $RUN_EVENT == create ]]; then
             if [[ $RUN_CONCLUSION == success ]]; then
@@ -101,7 +116,7 @@ jobs:
     environment: board
     permissions:
       contents: read # main's checkout of scripts/
-      issues: read # issue-fields.sh reads the issue and the repo's issue types
+      issues: read # issue-fields.sh reads the issue and the repo's issue types; a factory move its labels
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
