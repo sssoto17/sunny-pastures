@@ -34,8 +34,19 @@ gh api "repos/$R/commits/$HEAD/check-suites?app_id=15368&per_page=100" \
 
 note ""
 note "### A. API-written guard / code-owned (failure) on this head"
-id=$(gh api "repos/$R/check-runs" -f name="guard / code-owned" -f head_sha="$HEAD" -f status=completed \
-  -f conclusion=failure -f "output[title]=throwaway: failure" -f "output[summary]=API-written" --jq .id)
+note "suites by workflow run:"
+for s in $(gh api "repos/$R/commits/$HEAD/check-suites?app_id=15368&per_page=100" --jq '.check_suites | sort_by(.id)[].id'); do
+  note "- $s: $(gh api "repos/$R/actions/runs?check_suite_id=$s" --jq '[.workflow_runs[] | "\(.name) on \(.event)"] | join(", ")')"
+done
+set +e
+resp=$(gh api -i "repos/$R/check-runs" -f name="guard / code-owned" -f head_sha="$HEAD" -f status=completed \
+  -f conclusion=failure -f "output[title]=throwaway: failure" -f "output[summary]=API-written" 2>&1)
+set -e
+note "POST check-runs answered: $(head -1 <<<"$resp")"
+note "$(tail -1 <<<"$resp" | head -c 600)"
+id=$(tail -1 <<<"$resp" | jq -r '.id // empty' 2>/dev/null || true)
+[[ -n $id ]] || note "no check run written"
+if [[ -n $id ]]; then
 suite=$(gh api "repos/$R/check-runs/$id" --jq .check_suite.id)
 note "check run $id landed in suite $suite, whose run is:"
 gh api "repos/$R/actions/runs?check_suite_id=$suite" \
@@ -50,6 +61,7 @@ gh api -X PATCH "repos/$R/check-runs/$id" -f status=completed -f conclusion=fail
   -f "output[title]=throwaway: failure" -f "output[summary]=updated in place again" --silent
 sleep 5
 reading "A3. After PATCH back to failure" "$PR"
+fi
 
 note ""
 note "### B. #629: its API-written check runs landed in the branch's create suite; a commit status instead"
