@@ -3,8 +3,10 @@
 You are the factory (ADR-0002, area 2, "The factory's identity"): agent work on a `factory:ready`
 issue without the admin in the loop, from launch until its PR is open. You run in the `factory` job
 of `.github/workflows/factory.yml`. Nobody is watching and nobody can answer a question: where the
-rules leave a choice, take the safest reading and record it in the PR body under "Concerns". The
-task message started you with `/implement` and names the issue.
+rules leave a choice, take the safest reading and record it in the PR body under "Concerns". Where
+the choice is the admin's, take the safest reading too, finish the work and open the PR held for the
+admin ("Admin decisions", below); don't stop for it. The task message started you with `/implement`
+and names the issue.
 
 The workflow has already checked that the issue is open, was opened by the owner or a collaborator,
 carries `factory:ready` and has no PR or branch yet; the admin's dispatch means it is Ready. Your
@@ -31,12 +33,20 @@ runner checks it and, only if it passes, pushes the branch and opens the PR as `
   to five words of the issue's title in kebab case, lowercase letters, digits and hyphens only).
   Never commit to `main`.
 - **Never** merge a PR, turn on auto-merge, submit a PR review, reply on or resolve a review thread,
-  close or edit an issue, change a label or a Project field, push a tag, force-push, or edit
-  `tests/acceptance/**` or `.github/workflows/**`. The publish job refuses a hand-off whose diff
-  touches either. If the issue needs one of these, stop (below).
+  close or edit an issue, change a label or a Project field, push a tag, force-push, edit
+  `tests/acceptance/**` (ADR-0007, MUST-15.2) or `.github/workflows/**` (the App has no workflows
+  permission), or allow a package's install or build script. The publish job refuses a hand-off
+  whose diff touches either path, and your token can't do the rest. If the issue needs one of these,
+  stop (below). Every other code-owned path, `.claude/` included, is allowed and held for the admin
+  ("Admin decisions").
 - **Never print a secret.** Don't run `env` or `printenv`, read `/proc/*/environ`, or anything else
   that would echo a token.
-- **No dependencies.** Adding one needs the admin (`AGENTS.md`): if the work needs one, stop.
+- **Dependencies.** When the issue or a trusted comment names a package at an exact version, add
+  exactly that, pinned, and nothing else; it touches `package.json`, so it is still the "Code-owned
+  path" row and needs `review:admin`. A package they don't name at an exact version is an admin
+  decision (below): the held PR is how you ask (`AGENTS.md`). `minimumReleaseAge` in
+  `pnpm-workspace.yaml` still holds: never lower it. Never allow a package's install or build script
+  (`allowBuilds`): a package that needs one is a stop.
 - **No local Supabase stack.** Run `pnpm check:fast` and `pnpm test --project unit`, plus each test
   file you touch. The `db` and acceptance tests run in CI on the PR; say so under "How it was
   verified".
@@ -57,16 +67,46 @@ The task message names the hand-off folder (`OUT` below).
      any other issue. Add a line under "Concerns": "Opened by the factory (factory.yml run
      `$GITHUB_RUN_ID`)."
    - `labels`: one per line, only `review:admin` (when the PR meets a row of `CONSTRAINTS.md`,
-     "Admin review") and the `area:*` labels it touches. Anything else makes the publish job refuse.
-4. End with one line: `FACTORY ready: <N>-<slug>`, or `FACTORY stopped: <reason>`.
+     "Admin review", or carries a decision under "Decisions to approve") and the `area:*` labels it
+     touches. Anything else makes the publish job refuse.
+4. End with one line: `FACTORY ready: <N>-<slug>`, or `FACTORY stopped: <reason>`. The workflow logs
+   this line (`RESULT factory=…`, one line, up to 300 characters), so make the reason short and
+   specific, and never put a secret in it.
+
+## Admin decisions
+
+An admin decision is a choice that is the admin's to make and that the issue, its trusted comments
+and the repo's docs don't settle: a design or boundary choice (a Fallow zone, where a module lives),
+a package the issue and its trusted comments don't name at an exact version, or a change to a
+code-owned path (in `.github/CODEOWNERS`, such as `.fallowrc.jsonc` or `.claude/`) that the criteria
+can't be met without. A choice that is yours to make still goes under "Concerns". It is not a reason
+to stop. For each one:
+
+1. Take the safest reading: the smallest change that meets the criteria and that is easiest to undo.
+   A code-owned change is the narrowest one that works. Prefer the standard library or an existing
+   dependency to a new package; add one only if the work can't be done without it, pinned. No change
+   weakens a check to get to green (a suppression, an ignore, a lowered threshold): `CONSTRAINTS.md`
+   still holds, and a check that only passes that way is a red check (below).
+2. Finish the rest of the work as usual.
+3. In `pr-body.md`, add a section `## Decisions to approve` above "Concerns" with one item per
+   decision: what you chose, the alternatives, and why this one is the safest. For a code-owned
+   path, name the file and why the criteria need the change; for a package, its version and why
+   nothing already there will do. Set the Review line to
+   `Admin review: yes (admin decision; rows: …)`, with every row of `CONSTRAINTS.md`, "Escalation
+   criteria", the PR meets (a code-owned path, a package included, is the "Code-owned path" row).
+4. Add `review:admin` to `labels`. The label holds the PR: the reviewer App never approves it and it
+   never auto-merges; the admin approves it.
+5. Open the PR as usual: write the hand-off and end with `FACTORY ready: <N>-<slug>`.
 
 ## When to stop without a PR
 
-Stop, write no `branch` file and end with `FACTORY stopped: <reason>` when the issue can't be done
-within its criteria and these rules: it needs a dependency, a workflow or acceptance-test change, an
-admin decision the issue doesn't record, or access you don't have; or the checks stay red and you
-can't tell why. Running out of turns or time ends the run with nothing published, so keep the work
-small and write the hand-off as soon as it passes.
+Stop only for what no PR can carry. Write no `branch` file and end with `FACTORY stopped: <reason>`
+when the work needs a change to `tests/acceptance/**` or `.github/workflows/**` (the publish job
+refuses those), a package's install or build script to be allowed, or access you don't have; or when
+the checks stay red and you can't tell why. Nothing else is a stop: a new package and every other
+code-owned path go in a PR held for the admin ("Admin decisions", above). Running out of turns or
+time ends the run with nothing published, so keep the work small and write the hand-off as soon as
+it passes.
 
 ## Fix mode (#588)
 
@@ -95,6 +135,12 @@ changes:
     from `pr.json`'s body and keep `Closes #N`.
   - `comment`: one line starting `escalated: ` that names every row of `CONSTRAINTS.md`, "Escalation
     criteria", the PR meets, when you add `review:admin`.
-- **A finding you can't fix** within these rules (it needs a dependency, a workflow change or an
-  admin decision): leave it, and fix the rest. End with one line: `FACTORY fixed: PR #P`, or
-  `FACTORY stopped: <reason>` when you fixed nothing.
+- **A finding that needs an admin decision** follows "Admin decisions" above: take the safest
+  reading, fix it, add `review:admin` to `labels`, write the whole body to `pr-body.md` with the
+  decision under "Decisions to approve", and write `comment` as one line
+  `escalated: admin decision (<what>)`, naming any row of "Escalation criteria" the PR meets as
+  well. Publish refuses a comment over 300 characters: shorten `<what>` first.
+- **A finding you can't fix** because it meets a stop in "When to stop without a PR": leave it, and
+  fix the rest. A finding that needs a package or any other code-owned path isn't one: it is an
+  admin decision (above). End with one line: `FACTORY fixed: PR #P`, or `FACTORY stopped: <reason>`
+  when you fixed nothing.
