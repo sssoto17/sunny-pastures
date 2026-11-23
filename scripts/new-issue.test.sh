@@ -321,6 +321,13 @@ expect_created .labels '["chore","area:tools","blocked:admin","blocked:decision"
 assert "issue-fields gets no label" test "$fields" = "200 --type Chore --priority P2 --size S --week Wk 2"
 expect_out "Labels:   chore, area:tools, blocked:admin, blocked:decision"
 
+# Labels match without case, as on GitHub: the create carries the repo's spelling.
+reset
+readback chore,area:tools,blocked:admin "M2 Sim properties + factory" 73 Chore
+case_ "${base[@]}" "${three[@]}" --label Blocked:Admin
+expect_code 0
+expect_created .labels '["chore","area:tools","blocked:admin"]'
+
 reset
 case_ "${base[@]}" "${three[@]}" --label blocked:nope
 expect_code 2

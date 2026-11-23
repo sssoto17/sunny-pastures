@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# File one issue the way docs/agents/issue-tracker.md asks: one type and one area label, the
-# native issue type, a milestone, a body file, under its workstream parent, on the Project in
+# File one issue the way docs/agents/issue-tracker.md asks: one type and one area label (plus any
+# --label, never factory:ready), the native issue type, a milestone, a body file, under its workstream parent, on the Project in
 # Backlog, with `triage` while the type, Priority, Size or Week is missing. The coordinator
 # files issues only through this script (#153). Names are checked against GitHub before the
 # first write, so a typo creates nothing. REST only (`gh api`), local and cloud alike (#346;
@@ -26,7 +26,7 @@ usage: scripts/new-issue.sh --title TEXT --type TYPE --area AREA --milestone TIT
                             --body-file FILE --parent N
                             [--size NAME] [--priority NAME] [--week NAME] [--label NAME]...
 
-Creates an issue in sssoto17/sunny-pastures with the type label and the area label, in the
+Creates an issue in sssoto17/sunny-pastures with the type label, the area label and any --label, in the
 milestone, as a sub-issue of the parent, then adds it to the Project in Backlog and sets its
 native issue type and the fields given, through scripts/issue-fields.sh. Prints the type and
 the Project fields, then the labels, milestone and parent as GitHub stored them. Each flag also
@@ -190,9 +190,11 @@ if ! grep -qxF -- "$area" <<<"$labels"; then
   mapfile -t areas < <(grep '^area:' <<<"$labels")
   die 2 "unknown area \"$area\". Valid areas: $(join "${areas[@]}"). Nothing was created."
 fi
-for label in "${extra_labels[@]}"; do
-  grep -qxF -- "$label" <<<"$labels" ||
-    die 2 "unknown label \"$label\" in $OWNER/$REPO. Nothing was created."
+# Labels match without case, as on GitHub; each --label takes the repo's own spelling.
+for i in "${!extra_labels[@]}"; do
+  name=$(awk -v l="${extra_labels[i],,}" 'tolower($0) == l { print; exit }' <<<"$labels")
+  [[ -n $name ]] || die 2 "unknown label \"${extra_labels[i]}\" in $OWNER/$REPO. Nothing was created."
+  extra_labels[i]=$name
 done
 
 # The repo's enabled issue types (REST "List issue types for a repository").

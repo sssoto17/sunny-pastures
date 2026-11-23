@@ -392,9 +392,8 @@ assert "expected no Mode or Track line in the output" test "$(grep -cE '^(Mode|T
 assert "expected the field lines Type, Status, Size, Priority, Week" \
   test "$(sed -n '2,6p' <<<"$out" | cut -d: -f1 | paste -sd' ')" == "Type Status Size Priority Week"
 
-# --- admin-only values ---------------------------------------------------------------------------
-
-# The valid-names lists don't offer what the script refuses.
+# --- the admin-only value -----------------------------------------------------------------------
+# The valid-names list doesn't offer Ready, which the script refuses.
 reset Status=Backlog
 case_ 47 --status Blocked
 expect_code 2
