@@ -216,18 +216,22 @@ are pinned by commit SHA. `vitest bench` is built into Vitest, so the benchmark 
 
 ADR-0002 (area 2) owns the mechanism: the reviewer bot approves a PR, which then auto-merges, or
 requests changes, and the label `review:admin` holds a PR for the admin. The bot never approves a PR
-that carries it, and only the admin removes it. This file owns when a PR gets the label and when the
-bot asks for a split. Auto-merge stays off until this section is merged (ADR-0002, Q16).
+that carries it, and only the admin removes it. Removing it on the PR's current head is the admin's
+sign-off: `guard / code-owned` holds a PR that is code-owned or has ever carried the label until the
+admin's own account removes it on the head, and a push or a removal by anyone else puts it back
+(ADR-0002, area 2, "Solo-admin approvals"; #565). This file owns when a PR gets the label and when
+the bot asks for a split. Auto-merge stays off until this section is merged (ADR-0002, Q16).
 
 ### Escalation criteria
 
 A PR that meets any row carries `review:admin`. An agent that knows it adds the label at
 `gh pr create --label review:admin`. The reviewer bot checks every row on each review and adds the
 label when it's missing. For the Code-owned path row, the check `guard / code-owned` adds it from
-the diff as well, on the PR's first review, since it runs on reviews only (#337, #379). Whoever adds
-it also posts a one-line comment that names every row the PR meets, for example "escalated:
-interface (sim exports)". Those comments are the tuning data (below). The bot checks these rows
-before the [split size](#split-size), so on a PR it escalates, the size is only a note.
+the diff as well, on the PR's first run: it runs when the PR opens, on each push and on each label
+change (#337, #565). Whoever adds it also posts a one-line comment that names every row the PR
+meets, for example "escalated: interface (sim exports)". Those comments are the tuning data (below).
+The bot checks these rows before the [split size](#split-size), so on a PR it escalates, the size is
+only a note.
 
 <!-- prettier-ignore -->
 | Criterion | Applies when | Who adds the label | Why |
@@ -253,12 +257,14 @@ account either way.
 
 **Agents never submit a PR review or reply on a review thread** (admin, 22 Nov 2026, #497). They
 answer a finding with a plain PR comment (`gh pr comment`), which creates no review. A review from a
-session on the admin's account, and a thread reply is one, would count as the admin's sign-off under
-`guard / code-owned` on a PR the admin opened (#494). The rule holds for every session: lanes, the
-coordinator and the reviewers it dispatches (the CI reviewer App posts from Actions). A standard
-plus a check: `deny` rules in `.claude/settings.json` on `gh pr review`, the review and reply API
-paths and GitHub's MCP review tools, and the hook `.claude/hooks/block-thread-resolve.sh`, which
-also refuses the `gh api` and GraphQL forms a rule can't match and a GraphQL query it can't read.
+session on the admin's account, and a thread reply is one, counts as the admin's review: under
+#494's rule `guard / code-owned` read it as the sign-off on a PR the admin opened, and since #565
+removed that rule it still reads as the admin's agreement in the timeline. The rule holds for every
+session: lanes, the coordinator and the reviewers it dispatches (the CI reviewer App posts from
+Actions). A standard plus a check: `deny` rules in `.claude/settings.json` on `gh pr review`, the
+review and reply API paths and GitHub's MCP review tools, and the hook
+`.claude/hooks/block-thread-resolve.sh`, which also refuses the `gh api` and GraphQL forms a rule
+can't match and a GraphQL query it can't read.
 
 ### Split size
 
@@ -432,11 +438,7 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 <!-- prettier-ignore -->
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| E16 | check-removed | .github/workflows/ci.yml | `ci / lint`'s `pnpm dupes --changed-since "$SINCE"` step becomes `pnpm audit:changed --base "$SINCE"` (#503): `fallow audit` over the whole repo, which still fails any clone in a changed `packages/sim` file, fails introduced clones elsewhere, and adds complexity and dead code. Remove this row once the PR has merged | Soto | 2026-12-06 |
-| E17 | check-removed | package.json | The `dupes` script goes, and `check:task` and `check:full` run `pnpm audit:changed` in place of `pnpm dupes --changed-since origin/main`, after the tests so CRAP reads their coverage (#503). The duplication check widens from `packages/sim` to the repo. Remove this row once the PR has merged | Soto | 2026-12-06 |
-| E18 | config-loosened | .fallowrc.jsonc | Dead code starts at 0 (#503): `ignoreBinaries` names the Supabase CLI, a system binary that `pnpm supabase:check` pins, and `ignoreExports` keeps the error body's types that ADR-0007 section 3 exports for the M4 client. The same PR adds the store's schema as an `entry`, since drizzle-kit reads its exports. Remove this row once the PR has merged | Soto | 2026-12-06 |
-| E19 | rule-narrowed | CONSTRAINTS.md | The Duplication row's check changes from `fallow dupes --changed-since <merge base>` to `fallow audit` through `pnpm audit:changed` (#503), so that list item leaves its "Checked by" cell. The rule keeps `packages/sim`'s bar word for word (0 clones in its changed files) and adds every other folder, where only introduced clone groups fail. Remove this row once the PR has merged | Soto | 2026-12-06 |
-| E20 | check-removed | .github/workflows/ci.yml | ci / acceptance is a new job (#49), so no check is removed. Its job-level if: is the draft gate every per-part job has (#358), which skips only on a draft, and a draft can't merge. Its step-level if:s are the path filter the admin chose (22 Nov, PR #508): on a PR that touches none of apps/, packages/, supabase/, tests/acceptance/, package.json, pnpm-lock.yaml, pnpm-workspace.yaml, the root tsconfig*.json, ci.yml and the setup and supabase-stack actions, the tests don't run and the check passes; every push to main runs them. Remove this row once the PR has merged | Soto | 2026-12-06 |
+| E21 | check-removed | .github/workflows/code-owned.yml | The job `guard / code-owned` becomes `code-owned (run)` and its review-triggered steps go (#565; ADR-0002, area 2, "Solo-admin approvals", decision 4): the required check `guard / code-owned` is now a check run the script writes through the Checks API on each head, with a commit status of the same name, from `main`'s copy of the workflow on `pull_request_target`, so no check is removed. Remove this row once the PR has merged | Soto | 2026-12-07 |
 
 ## Interview record
 
@@ -465,7 +467,7 @@ Decided in the interview on #47 (7 Nov), for
 [Admin review](#admin-review-escalation-and-split-size):
 
 - **Code-owned PRs:** they carry `review:admin` too, added by the bot from CODEOWNERS and by
-  `guard / code-owned` at the PR's first review (#337, #379), so the label is the one queue of PRs
+  `guard / code-owned` at the PR's first run (#337, #565), so the label is the one queue of PRs
   waiting for the admin. A new dependency, an Exceptions row and a loosened tool config fall under
   that row. Until `guard / floor` reports, the bot escalates a weakened bar on any path.
 - **Feature slice, interface, security:** a feature slice is a PR that closes a `feature` issue. An
