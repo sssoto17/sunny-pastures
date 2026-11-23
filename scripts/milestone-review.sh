@@ -32,8 +32,7 @@ usage: scripts/milestone-review.sh <milestone-number>
 
 Files "Architecture review, <milestone title>" into the open milestone of that number (the number
 in the milestone's URL), as a sub-issue of #73, with: type chore (native Chore), area:tools,
-Track Infra, Mode Manual, Priority P2, Size M, and Week set to the board iteration that contains
-the milestone's due date. With no due date, or no iteration containing it yet, Week is left unset
+Priority P2, Size M, and Week set to the board iteration that contains the milestone's due date. With no due date, or no iteration containing it yet, Week is left unset
 and the issue carries `triage` (scripts/new-issue.sh adds it); the log says so.
 
 Does nothing, and exits 0, when the milestone already has an issue whose title starts with
@@ -139,6 +138,6 @@ Run this milestone's architecture review with the \`improve-codebase-architectur
 EOF
 
 args=(--title "$PREFIX, $title" --type chore --area tools --milestone "$title" --body-file "$body"
-  --parent "$PARENT" --track Infra --mode Manual --priority P2 --size M)
+  --parent "$PARENT" --priority P2 --size M)
 [[ -n $week ]] && args+=(--week "$week")
 "$here/new-issue.sh" "${args[@]}"

@@ -36,10 +36,10 @@ in this order:
              read from the items, so an iteration no item is in yet shows as -); root (the
              main folder); out (.scratch/ of the checkout it runs in); handoff (path,
              present|missing)
-  ready      every Ready issue, by priority (none last) then number: #N, mode, priority, size,
-             week, parent (#N), an existing <out>/brief-<N>-*.md, title
-  week       every issue in this week's iteration, by number: #N, status, mode, priority,
-             size, title
+  ready      every Ready issue, by priority (none last) then number: #N, priority, size, week,
+             parent (#N), an existing <out>/brief-<N>-*.md, title
+  week       every issue in this week's iteration, by number: #N, status, priority, size,
+             title
   orphans    open issues without a workstream parent (scripts/orphan-issues.sh): #N, title
   worktrees  every worktree but the main folder: path, branch, the state of its PR into main
              (open|merged|closed|none|detached; an open PR wins), PR (#N), locked
@@ -101,19 +101,21 @@ add_section() { # name lines -> "== name", then the lines; an empty section is j
 }
 
 # --- the board ----------------------------------------------------------------------------------
-# Read through the REST Projects API: the fields first (their ids, and each Week iteration's start
-# and length), then every item with those fields, paginated. One row per item, tab-separated:
-# number, type (Issue/PullRequest/DraftIssue), status, mode, priority, size, week title, week
-# start, week duration, title; "-" for a missing field. An item's iteration value carries its
+# Read through the REST Projects API: the fields first (the ids of the five it uses, and each Week
+# iteration's start and length), then every item with those fields, paginated. Any other field
+# (Mode and Track until the admin deletes them, #621) is never asked for. One row per item,
+# tab-separated: number, type (Issue/PullRequest/DraftIssue), status, priority, size, week title,
+# week start, week duration, title; "-" for a missing field. An item's iteration value carries its
 # title; its start and length come from the field's iterations when the value lacks them.
 FIELDS_FILTER="$PROJECT_JQ_DEFS"'
-  (["ids", ([.[].id] | map(tostring) | join(","))] | @tsv),
+  (["ids", ([.[] | select(.name | IN("Title", "Status", "Priority", "Size", "Week")) | .id]
+    | map(tostring) | join(","))] | @tsv),
   (.[] | select(.name == "Week") | (.configuration.iterations // []) + (.configuration.completed_iterations // [])
     | .[] | ["iteration", (.title | txt), .start_date, .duration] | @tsv)'
 BOARD_FILTER="$PROJECT_JQ_DEFS"'
   .[] | ([.fields[]? | select(.name == "Week") | .value] | first) as $w
   | [(.content.number // "-"), (.content_type // "-"),
-    (fv("Status") // "-"), (fv("Mode") // "-"), (fv("Priority") // "-"), (fv("Size") // "-"),
+    (fv("Status") // "-"), (fv("Priority") // "-"), (fv("Size") // "-"),
     (if $w then ($w.title | txt) else "-" end), ($w.start_date // "-"), ($w.duration // "-"),
     (fv("Title") // .content.title // "-")] | @tsv'
 board_ok=1
@@ -141,9 +143,9 @@ if ((board_ok)); then
 fi
 
 # Parsed once into parallel arrays (item_*), one entry per board item, after checking the shape.
-item_number=() item_type=() item_status=() item_mode=() item_priority=() item_size=()
+item_number=() item_type=() item_status=() item_priority=() item_size=()
 item_week=() item_start=() item_days=() item_title=()
-while IFS=$'\t' read -r number type status mode priority size wtitle wstart wdays title; do
+while IFS=$'\t' read -r number type status priority size wtitle wstart wdays title; do
   [[ -n $number ]] || continue
   if [[ $wtitle != - && $wstart == - && -n ${iter_start[$wtitle]-} ]]; then
     wstart=${iter_start[$wtitle]} wdays=${iter_days[$wtitle]}
@@ -151,7 +153,7 @@ while IFS=$'\t' read -r number type status mode priority size wtitle wstart wday
   [[ $number =~ ^[0-9]+$ || ($number == - && $type != Issue) ]] &&
     [[ ($wstart == - && $wdays == -) || ($wstart =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && $wdays =~ ^[0-9]+$) ]] ||
     die 3 "unexpected board row from GitHub, has the API changed? $number $type $wstart $wdays"
-  item_number+=("$number") item_type+=("$type") item_status+=("$status") item_mode+=("$mode")
+  item_number+=("$number") item_type+=("$type") item_status+=("$status")
   item_priority+=("$priority") item_size+=("$size") item_week+=("$wtitle") item_start+=("$wstart")
   item_days+=("$wdays") item_title+=("$title")
 done <<<"$rows"
@@ -172,8 +174,8 @@ add_section today "$(
 )"
 
 # --- ready --------------------------------------------------------------------------------------
-# Every Ready issue, whatever its week, by priority (none last) then number: number, mode,
-# priority, size, week, parent ("#N" or "-"), the path of a brief already written for it (or
+# Every Ready issue, whatever its week, by priority (none last) then number: number, priority,
+# size, week, parent ("#N" or "-"), the path of a brief already written for it (or
 # "-"), title. The parent comes from REST (item-list doesn't carry it): one GET per Ready item.
 parent_of() { # issue number -> "#N" or "-"
   local url
@@ -204,20 +206,19 @@ for i in "${!item_number[@]}"; do
   number=${item_number[i]}
   parent=$(parent_of "$number") # a failed read exits here (set -e), with parent_of's code
   sort_key=${item_priority[i]/#-/P9} # no priority sorts after P3
-  ready+=$(printf '%s\t#%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$sort_key" "$number" "${item_mode[i]}" \
-    "${item_priority[i]}" "${item_size[i]}" "${item_week[i]}" "$parent" "$(brief_of "$number")" \
-    "${item_title[i]}")$'\n'
+  ready+=$(printf '%s\t#%s\t%s\t%s\t%s\t%s\t%s\t%s' "$sort_key" "$number" "${item_priority[i]}" \
+    "${item_size[i]}" "${item_week[i]}" "$parent" "$(brief_of "$number")" "${item_title[i]}")$'\n'
 done
 add_section ready "$(printf '%s' "$ready" | LC_ALL=C sort -t$'\t' -k1,1 -k2.2n | cut -f2-)"
 
 # --- week ---------------------------------------------------------------------------------------
-# Every issue in this week's iteration, by number: number, status, mode, priority, size, title.
+# Every issue in this week's iteration, by number: number, status, priority, size, title.
 # Drafts have no number, so they're left out.
 in_week=""
 for i in "${!item_number[@]}"; do
   [[ $week != - && ${item_week[i]} == "$week" && ${item_type[i]} == Issue ]] || continue
-  in_week+=$(printf '#%s\t%s\t%s\t%s\t%s\t%s' "${item_number[i]}" "${item_status[i]}" \
-    "${item_mode[i]}" "${item_priority[i]}" "${item_size[i]}" "${item_title[i]}")$'\n'
+  in_week+=$(printf '#%s\t%s\t%s\t%s\t%s' "${item_number[i]}" "${item_status[i]}" \
+    "${item_priority[i]}" "${item_size[i]}" "${item_title[i]}")$'\n'
 done
 add_section week "$(printf '%s' "$in_week" | LC_ALL=C sort -k1.2n)"
 

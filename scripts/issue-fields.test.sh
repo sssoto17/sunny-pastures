@@ -103,6 +103,7 @@ case "$method $path" in
     out='{"id": 4799, "node_id": "PVTI_new", "content_type": "Issue"}' ;;
   "PATCH users/sssoto17/projectsV2/3/items/"*) # update item; drop-edit: accepted, not stored
     id=${path##*/}
+    printf '%s\n' "$input" >>"$st/item-patches"
     [[ -f $st/drop-edit ]] || {
       jq --argjson id "$id" --argjson body "$input" --slurpfile f "$fieldsf" '
         ($f[0]) as $fs
@@ -200,7 +201,7 @@ expect_err "usage:"
 expect_no_writes
 
 for bad_args in "abc --size M" "47 --colour red" "47 --size" "47 --size M --size L" \
-  "47 --size --track Build" "47 extra" "0 --size M" "--size M"; do
+  "47 --size --week Wk" "47 extra" "0 --size M" "--size M"; do
   reset null
   read -ra words <<<"$bad_args"
   case_ "${words[@]}"
@@ -232,7 +233,7 @@ expect_call "api $R/issues/47 --jq"
 # --- REST only ----------------------------------------------------------------------------------
 # Every call is `gh api` on a REST path: the fake refuses anything else, and nothing is graphql.
 reset null
-case_ 47 --type Chore --track Infra --size S --priority P1 --week "Wk 2"
+case_ 47 --type Chore --size S --priority P1 --week "Wk 2"
 expect_code 0
 expect_no_call "graphql"
 assert "expected every call to be gh api" test "$(call_lines | grep -vc '^api ')" -eq 0
@@ -248,16 +249,16 @@ expect_no_call "-X POST $PA/items"
 assert "expected one item update" test "$(count "PATCH $PA/items")" -eq 1
 
 reset Status=Backlog
-case_ 47 --track Infra --mode Manual --size M --week "Wk 2"
+case_ 47 --priority P2 --size M --week "Wk 2"
 expect_code 0
-expect_item Track=3200c1d7 Mode=ca9bd7b8 Size=e0e2efb6 Week=7f9c9b7a
+expect_item Priority=a38a49d8 Size=e0e2efb6 Week=7f9c9b7a
 assert "expected one item update" test "$(count "PATCH $PA/items")" -eq 1
 
 # The full iteration title works too, a completed week is still a valid name, and names ignore case.
 reset Status=Backlog
-case_ 47 --week "Wk 1 · 2–8 Nov" --track infra
+case_ 47 --week "Wk 1 · 2–8 Nov" --size m
 expect_code 0
-expect_item Week=f9409a73 Track=3200c1d7
+expect_item Week=f9409a73 Size=e0e2efb6
 
 # --flag=value, and a value with a space survives (the zsh/bash word-splitting bug of 7 Nov).
 reset Status=Backlog
@@ -265,11 +266,12 @@ case_ 47 --size=S "--week=Wk 3"
 expect_code 0
 expect_item Size=7a7f9f73 Week=b40f9349
 
-# The item is read for the field ids the Project has, not only the title (REST "List items":
-# without fields[], only the title comes back).
+# The item is read for the ids of the four fields the script sets (Status, Size, Week, Priority),
+# not only the title (REST "List items": without fields[], only the title comes back), and never
+# for Mode (102) or Track (103), which the Project still has until the admin deletes them (#621).
 reset Status=Backlog
 case_ 47 --size S
-expect_call "$PA/items?per_page=100&fields=101,102,103,104,105,106"
+expect_call "$PA/items?per_page=100&fields=101,104,105,106"
 
 # --- adding to the Project, and Status --------------------------------------------------------
 # Not on the Project yet: add it by the issue's id, then set Backlog and the fields.
@@ -316,12 +318,10 @@ expect_no_call "-X PATCH"
 
 # --- the result is read back and printed ------------------------------------------------------
 reset null
-case_ 47 --track Infra --size S --priority P1 --week "Wk 2"
+case_ 47 --size S --priority P1 --week "Wk 2"
 expect_code 0
 expect_out "https://github.com/sssoto17/sunny-pastures/issues/47"
 expect_out "Status:   Backlog"
-expect_out "Track:    Infra"
-expect_out "Mode:     -"
 expect_out "Size:     S"
 expect_out "Priority: P1"
 expect_out "Week:     Wk 2 · 9–15 Nov"
@@ -368,24 +368,37 @@ expect_err "Size is M, expected S"
 expect_err "Priority is -, expected P1"
 expect_err "re-run to check"
 
-# --- admin-only values ---------------------------------------------------------------------------
-for factory in Factory factory "--mode=Factory"; do
+# --- Mode and Track are gone (#621) ---------------------------------------------------------------
+# The Project's Mode and Track fields were dropped: --mode and --track are refused by name, before
+# any gh call, whatever the value, and nothing reads, writes or prints them.
+for gone in "--mode Factory" "--mode Manual" "--mode=Manual" "--track Infra" "--track=Build"; do
   reset Status=Backlog
-  if [[ $factory == --* ]]; then case_ 47 "$factory"; else case_ 47 --size S --mode "$factory"; fi
+  read -ra words <<<"$gone"
+  case_ 47 --size S "${words[@]}"
   expect_code 2
-  expect_err "only the admin sets Mode to Factory"
+  flag=${words[0]%%=*}
+  expect_err "$flag is gone: the Project's Mode and Track fields were dropped (#621)"
   expect_no_gh
 done
+# Mode and Track still on the Project (until the admin deletes them) and set on the item: the
+# item update never names them, and the printed fields leave them out.
+reset Status=Backlog Mode=Manual Track=Infra
+case_ 47 --size S --priority P1 --week "Wk 2"
+expect_code 0
+expect_item Size=7a7f9f73 Priority=ad39d061 Week=7f9c9b7a Mode=ca9bd7b8 Track=3200c1d7
+assert "expected the item update to name Size, Priority and Week only (fields 104-106)" \
+  test "$(jq -c '[.fields[].id] | sort' "$st/item-patches")" == "[104,105,106]"
+assert "expected no Mode or Track line in the output" test "$(grep -cE '^(Mode|Track):' <<<"$out")" -eq 0
+assert "expected the field lines Type, Status, Size, Priority, Week" \
+  test "$(sed -n '2,6p' <<<"$out" | cut -d: -f1 | paste -sd' ')" == "Type Status Size Priority Week"
+
+# --- admin-only values ---------------------------------------------------------------------------
 
 # The valid-names lists don't offer what the script refuses.
 reset Status=Backlog
 case_ 47 --status Blocked
 expect_code 2
 expect_err "Valid names: Backlog, In progress, In review, Done."
-reset Status=Backlog
-case_ 47 --mode Robot
-expect_code 2
-expect_err "Valid names: Manual."
 
 # --- unknown names fail loudly and change nothing ---------------------------------------------
 reset Status=Backlog
@@ -403,9 +416,9 @@ expect_no_writes
 
 # An empty value is an unknown name, not a skipped field.
 reset Status=Backlog
-case_ 47 --track ""
+case_ 47 --size ""
 expect_code 2
-expect_err 'unknown Track ""'
+expect_err 'unknown Size ""'
 expect_no_writes
 
 # --- the native issue type ---------------------------------------------------------------------
@@ -467,7 +480,7 @@ for drop in Type Priority Size Week; do
   pairs=()
   for pair in "${four[@]}"; do [[ ${pair%%=*} == "$drop" ]] || pairs+=("$pair"); done
   reset Status=Backlog "${pairs[@]}" -- "" triage
-  case_ 47 --track Build
+  case_ 47
   expect_code 0
   expect_no_call "labels/triage"
   expect_out "Triage:   yes (missing: $drop)"
@@ -592,7 +605,7 @@ case_ 47 --status Ready --from "In progress"
 expect_code 2
 expect_err "only the admin moves an issue to Ready"
 expect_no_gh
-for extra in "--mode Factory" "--mode Manual" "--size S"; do
+for extra in "--priority P1" "--size S"; do
   reset Status=Ready
   read -ra words <<<"$extra"
   case_ 47 --status "In progress" --from Ready "${words[@]}"

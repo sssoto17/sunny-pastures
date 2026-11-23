@@ -24,8 +24,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: scripts/new-issue.sh --title TEXT --type TYPE --area AREA --milestone TITLE
                             --body-file FILE --parent N
-                            [--track NAME] [--mode NAME] [--size NAME] [--priority NAME]
-                            [--week NAME]
+                            [--size NAME] [--priority NAME] [--week NAME] [--label NAME]...
 
 Creates an issue in sssoto17/sunny-pastures with the type label and the area label, in the
 milestone, as a sub-issue of the parent, then adds it to the Project in Backlog and sets its
@@ -43,9 +42,14 @@ takes the form --size=M.
   --parent    the workstream parent's number ("73" or "#73"), an open issue. Required, except
               for an idea, which has none (docs/agents/issue-tracker.md, "Grouping"). Framing a
               new workstream parent is the Kickoff, not this script.
+  --label     one more label, an existing one (a verify issue's blocked:admin, say); repeat it
+              for more. Not the type, an area or triage: --type, --area and the triage rule
+              set those. factory:ready is refused: only the admin adds it.
 
-A new issue always starts in Backlog: --status is refused, and so is --mode Factory. Only the
-admin moves an issue to Ready or sets Factory.
+A new issue always starts in Backlog: --status is refused, and so is --label factory:ready.
+Only the admin moves an issue to Ready or adds factory:ready (docs/agents/triage-labels.md).
+
+The Project's Mode and Track fields were dropped (#621): --mode and --track are refused.
 
 Set --priority, --size and --week: with the type, they're your proposal, which the admin
 confirms at Ready (docs/agents/issue-tracker.md, "Issue fields"). If one is left out, the issue
@@ -68,7 +72,7 @@ filed but its Project step was skipped: run the printed command where the Projec
 
 example: scripts/new-issue.sh --title "Bench advance in CI" --type chore --area ci-cd \
            --milestone "M3 Actions persist end to end" --body-file .scratch/issue-bench.md --parent 58 \
-           --track Infra --size S --priority P2 --week "Wk 2"
+           --size S --priority P2 --week "Wk 2"
 EOF
 }
 
@@ -92,12 +96,15 @@ esac
 
 title="" type="" area="" milestone="" body_file="" parent=""
 fields=() # passed through to issue-fields.sh, in the order given
+extra_labels=() # --label, in the order given
 seen=" "
 while (($#)); do
   flag=${1%%=*}
   case $flag in
     --title | --type | --area | --milestone | --body-file | --parent) ;;
-    --track | --mode | --size | --priority | --week) ;;
+    --size | --priority | --week | --label) ;;
+    --mode | --track)
+      die 2 "$flag is gone: the Project's Mode and Track fields were dropped (#621). Set --priority, --size and --week instead" ;;
     --status) die 2 "a new issue always starts in Backlog; only the admin moves it on (docs/agents/issue-tracker.md, Status rules)" ;;
     -h | --help) usage; exit 0 ;;
     --*) die 2 "unknown option \"$flag\"" ;;
@@ -112,6 +119,14 @@ while (($#)); do
   else
     die 2 "$flag needs a value"
   fi
+  if [[ $flag == --label ]]; then
+    [[ -n $value ]] || die 2 "--label is empty"
+    [[ ${value,,} == factory:ready ]] &&
+      die 2 "only the admin adds factory:ready (docs/agents/triage-labels.md); file the issue without it"
+    [[ " ${extra_labels[*],,} " == *" ${value,,} "* ]] && die 2 "--label $value given twice"
+    extra_labels+=("$value")
+    continue
+  fi
   [[ $seen == *" $flag "* ]] && die 2 "$flag given twice"
   seen+="$flag "
   case $flag in
@@ -121,11 +136,6 @@ while (($#)); do
     --milestone) milestone=$value ;;
     --body-file) body_file=$value ;;
     --parent) parent=$value ;;
-    --mode)
-      [[ ${value,,} == factory ]] &&
-        die 2 "only the admin sets Mode to Factory, with factory:ready (docs/agents/triage-labels.md)"
-      fields+=("$flag" "$value")
-      ;;
     *) fields+=("$flag" "$value") ;;
   esac
 done
@@ -140,6 +150,17 @@ done
 
 area=area:${area#area:}
 [[ $area =~ ^area:[a-z0-9-]+$ ]] || die 2 "not an area label: \"$area\""
+
+# --label adds labels no other flag or rule owns.
+for label in "${extra_labels[@]}"; do
+  if [[ " ${TYPE_LABELS[*]} " == *" ${label,,} "* ]]; then
+    die 2 "--label $label: the type label is set with --type"
+  elif [[ ${label,,} == area:* ]]; then
+    die 2 "--label $label: the area label is set with --area"
+  elif [[ ${label,,} == triage ]]; then
+    die 2 "--label $label: new-issue.sh adds triage itself, while Priority, Size or Week is missing"
+  fi
+done
 
 if [[ $type == idea ]]; then
   [[ -z $parent ]] || die 2 "an idea has no parent (docs/agents/issue-tracker.md, Grouping); drop --parent"
@@ -169,6 +190,10 @@ if ! grep -qxF -- "$area" <<<"$labels"; then
   mapfile -t areas < <(grep '^area:' <<<"$labels")
   die 2 "unknown area \"$area\". Valid areas: $(join "${areas[@]}"). Nothing was created."
 fi
+for label in "${extra_labels[@]}"; do
+  grep -qxF -- "$label" <<<"$labels" ||
+    die 2 "unknown label \"$label\" in $OWNER/$REPO. Nothing was created."
+done
 
 # The repo's enabled issue types (REST "List issue types for a repository").
 types=$(gh api "repos/$OWNER/$REPO/issue-types" --jq '.[] | select(.is_enabled) | .name') ||
@@ -200,6 +225,7 @@ fi
 # new issue's id).
 create=(gh api -X POST "repos/$OWNER/$REPO/issues" -f title="$title" -F body=@"$body_file"
   -f "labels[]=$type" -f "labels[]=$area" -F milestone="$milestone_number" -f type="$issue_type")
+for label in "${extra_labels[@]}"; do create+=(-f "labels[]=$label"); done
 ((${#missing[@]})) && create+=(-f "labels[]=triage")
 row=$("${create[@]}" --jq '[.number, .id, .html_url] | @tsv') ||
   die 1 "creating the issue failed. Check whether it exists before re-running: gh api \"repos/$OWNER/$REPO/issues?state=open&per_page=5\" --jq '.[].title'"
@@ -239,7 +265,7 @@ printf '%-9s %s\n' "Labels:" "${got_labels//,/, }" "Milestone:" "$got_milestone"
   "Parent:" "$([[ $got_parent == - ]] && echo - || echo "#$got_parent")"
 
 mismatches=()
-for want in "$type" "$area"; do
+for want in "$type" "$area" "${extra_labels[@]}"; do
   [[ ",$got_labels," == *",$want,"* ]] || mismatches+=("missing label $want")
 done
 [[ $got_type == "$issue_type" ]] || mismatches+=("issue type is $got_type, expected $issue_type")
