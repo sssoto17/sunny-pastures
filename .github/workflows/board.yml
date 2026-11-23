@@ -6,8 +6,9 @@
 # Backlog but for a factory issue, and leaves an issue that isn't on the Project alone.
 # A factory issue's Status also follows its `factory:*` label (#620): factory:working and
 # factory:failed are In progress, factory:review In review, factory:ready nothing; such an issue
-# may leave Backlog. The mapping is in scripts/board-status.sh with the rest of the rules. The rules are in
-# scripts/board-status.sh; the field writes go through scripts/issue-fields.sh's guarded form.
+# may leave Backlog. The rules are in scripts/board-status.sh; the field writes go through
+# scripts/issue-fields.sh's guarded form, and its plain --status form only for a factory issue
+# the guard reports in Backlog.
 #
 # Two jobs, so the Project token never shares a job with anything a PR wrote:
 # - `board / decide` reads the PR, its head's checks and the issues it closes with the run's own

@@ -273,9 +273,10 @@ factory_kind() { # label -> its move kind, or nothing
 }
 
 # The kind an issue's labels give: an open issue (not a PR) with exactly one of the factory's
-# labels that move it. Prints the kind, or says why nothing moves; never prints a label's name.
-issue_kind() { # issue -> kind on stdout, or nothing; exit 1 on a failed read
-  local n=$1 row state is_pr label kind kinds=()
+# labels that move it. Prints the kind, then " triage" when it carries `triage`, or says why
+# nothing moves; never prints a label's name.
+issue_kind() { # issue -> "<kind>[ triage]" on stdout, or nothing; exit 1 on a failed read
+  local n=$1 row state is_pr label kind kinds=() labels triage=""
   row=$(gh api "$R/issues/$n" --jq '[.state, has("pull_request")] + [.labels[]?.name] | @tsv') || return 1
   IFS=$'\t' read -r state is_pr _ <<<"$row"
   if [[ $state != open || $is_pr != false ]]; then
@@ -284,12 +285,13 @@ issue_kind() { # issue -> kind on stdout, or nothing; exit 1 on a failed read
   fi
   IFS=$'\t' read -ra labels <<<"$row"
   for label in "${labels[@]:2}"; do
+    [[ $label == triage ]] && triage=" triage"
     kind=$(factory_kind "$label")
     [[ -n $kind ]] && kinds+=("$kind")
   done
   case ${#kinds[@]} in
     0) say "#$n carries no factory:working, factory:review or factory:failed: nothing moves" ;;
-    1) printf '%s' "${kinds[0]}" ;;
+    1) printf '%s%s' "${kinds[0]}" "$triage" ;;
     *) say "#$n carries more than one of factory:working, factory:review and factory:failed: nothing moves until one is left" ;;
   esac
 }
@@ -297,8 +299,9 @@ issue_kind() { # issue -> kind on stdout, or nothing; exit 1 on a failed read
 decide_issue() { # issue
   local kind
   kind=$(issue_kind "$1") || die 1 "could not read issue #$1"
+  kind=${kind%% *}
   [[ -n $kind ]] || return 0
-  say "#$1 factory label: #$1 $kind"
+  say "a factory label: #$1 $kind"
   printf '%s:%s\n' "$1" "$kind"
 }
 
@@ -329,8 +332,9 @@ move() { # issue:kind
 # isn't on the Project or is Done (the guard's answer stands), nor for one still carrying `triage`
 # (the plain form would try to remove it, with the job's read-only token).
 move_factory() { # issue kind status from
-  local n=$1 kind=$2 status=$3 from=$4 now out rc
+  local n=$1 kind=$2 status=$3 from=$4 now triage out rc
   now=$(issue_kind "$n") || die 1 "could not read issue #$n"
+  read -r now triage <<<"$now"
   if [[ $now != "$kind" ]]; then
     say "#$n no longer gives $kind: nothing moves"
     return 0
@@ -341,11 +345,10 @@ move_factory() { # issue kind status from
     return "$rc"
   }
   printf '%s\n' "$out"
+  # issue-fields.sh's answer when its guard leaves an issue alone: "Status:   <now> (left alone:
+  # <why>)". Its tests pin that line; this reads only <now>.
   grep -qE '^Status:[[:space:]]+Backlog \(left alone: ' <<<"$out" || return 0
-  local labels
-  labels=$(gh api "$R/issues/$n" --jq '[.labels[]?.name] | index("triage") != null') ||
-    die 1 "could not read issue #$n"
-  if [[ $labels == true ]]; then
+  if [[ -n $triage ]]; then
     say "#$n is a factory issue in Backlog but still carries triage: it stays in Backlog"
     return 0
   fi
