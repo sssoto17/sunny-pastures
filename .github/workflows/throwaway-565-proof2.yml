@@ -1,0 +1,28 @@
+# THROWAWAY (#565, never merge): see .github/throwaway-565-proof2.sh.
+name: throwaway-565-proof2
+on:
+  pull_request:
+    types: [opened, reopened]
+permissions: {}
+jobs:
+  proof:
+    name: throwaway-565 proof 2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      checks: write
+      statuses: write
+      actions: read
+      pull-requests: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - run: bash .github/throwaway-565-proof2.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          OTHER_HEAD: 131f02d42ac188addeea9971fd135569ff12578b
