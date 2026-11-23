@@ -741,7 +741,17 @@ same as a plain comment in the timeline (admin, 22 Nov, while merging #487), and
    satisfies a required check whose source is GitHub Actions, and updating it in place changes the
    merge box. Rejected: concurrency keyed by head and event (twins both report, and which one the
    gate reads is #379's open question), and a sweep that re-runs cancelled runs (treats the
-   symptom). `pr-body.yml` keeps #483.
+   symptom). `pr-body.yml` keeps #483. **What #565's throwaway PRs found (23 Nov 2026; #629, #630;
+   admin to approve in #565's PR):** a check run written through the Checks API with an Actions
+   token lands in the commit's oldest GitHub Actions check suite, whichever workflow that is. So (a)
+   the record's check suite and workflow run don't say who wrote it, and the guard proves provenance
+   instead with an OIDC token GitHub signs for the writing run, in the record's summary: audience
+   the repo, PR and head; claims `main`'s code-owned.yml on `pull_request_target`. (b) When that
+   suite is a `create` run (board-branch.yml on a branch pushed with its first commit), the check
+   run never reaches the PR's merge box, so the guard also sets a commit status `guard / code-owned`
+   with the same verdict, which the merge box shows as required. An API-written check run in a PR's
+   own suite does satisfy the required check, and updating it in place changes the merge box; a
+   cancelled `code-owned (run)` isn't required.
 5. **Only `sssoto17`, a `User`, signs off.** A removal by anyone else (either App, `github-actions`,
    another collaborator) writes no record; the guard puts the label back and stays red, as the bot
    reopens an escalation thread someone else resolved. Agents are denied removing the label: the

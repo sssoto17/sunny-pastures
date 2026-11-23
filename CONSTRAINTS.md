@@ -438,7 +438,7 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 <!-- prettier-ignore -->
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| E21 | check-removed | .github/workflows/code-owned.yml | The job `guard / code-owned` becomes `code-owned (run)` and its review-triggered steps go (#565; ADR-0002, area 2, "Solo-admin approvals", decision 4): the required check `guard / code-owned` is now a check run the script writes through the Checks API on each head, from `main`'s copy of the workflow on `pull_request_target`, so no check is removed. Remove this row once the PR has merged | Soto | 2026-12-07 |
+| E21 | check-removed | .github/workflows/code-owned.yml | The job `guard / code-owned` becomes `code-owned (run)` and its review-triggered steps go (#565; ADR-0002, area 2, "Solo-admin approvals", decision 4): the required check `guard / code-owned` is now a check run the script writes through the Checks API on each head, with a commit status of the same name, from `main`'s copy of the workflow on `pull_request_target`, so no check is removed. Remove this row once the PR has merged | Soto | 2026-12-07 |
 
 ## Interview record
 

@@ -1,4 +1,6 @@
+import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -8,12 +10,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	ACTIONS_APP,
+	audienceOf,
 	checkCodeOwned,
 	fromMain,
 	isAdminRemoval,
 	isOwned,
 	parseCodeOwners,
-	WORKFLOW,
 	writeVerdict,
 } from "../code-owned-guard.mjs";
 
@@ -44,9 +46,34 @@ const labelEvent = (event, actor, more = {}) => ({
 const added = (actor = FACTORY) => labelEvent("labeled", actor);
 const removed = (actor = ADMIN, more) => labelEvent("unlabeled", actor, more);
 
-// The workflow runs a check suite can belong to, as `GET actions/runs?check_suite_id=` lists them.
-const MAIN_RUN = { event: "pull_request_target", path: WORKFLOW };
-const BRANCH_RUN = { event: "pull_request", path: ".github/workflows/fake.yml" };
+// GitHub's OIDC issuer, faked: a key pair whose public half stands in for the published JWKS.
+const REPO = "sssoto17/sunny-pastures";
+const PR = 337;
+const pair = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const KEYS = [{ ...pair.publicKey.export({ format: "jwk" }), kid: "k1", alg: "RS256" }];
+const OTHER_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+const jwt = (claims, { key = pair.privateKey, kid = "k1", alg = "RS256" } = {}) => {
+	const data = `${b64({ alg, kid, typ: "JWT" })}.${b64(claims)}`;
+	return `${data}.${sign("RSA-SHA256", Buffer.from(data), key).toString("base64url")}`;
+};
+// The claims of a token that main's code-owned.yml asked for on a pull_request_target run.
+const mainClaims = (head = HEAD, more = {}) => ({
+	iss: "https://token.actions.githubusercontent.com",
+	aud: audienceOf(REPO, PR, head),
+	repository: REPO,
+	workflow_ref: `${REPO}/.github/workflows/code-owned.yml@refs/heads/main`,
+	event_name: "pull_request_target",
+	ref: "refs/heads/main",
+	...more,
+});
+// A `code-owned / sign-off` check run on `sha` carrying `token`, by Actions' App unless `app`.
+const record = (id, { sha = HEAD, token = jwt(mainClaims(sha)), app = ACTIONS_APP } = {}) => ({
+	id,
+	head_sha: sha,
+	app: { id: app },
+	output: { summary: `Sign-off: ...\n\ntoken: ${token}` },
+});
 
 // The run's event: by default a push (`synchronize`) of HEAD.
 const event = (more = {}, head = HEAD) => ({
@@ -68,11 +95,10 @@ const github = ({
 	head = HEAD,
 	changed = files.length,
 	records = [],
-	runs = {},
 	lag = 0,
 }) => {
 	const log = [];
-	const state = { labels: [...labels], records: [...records], runs: { ...runs }, slept: 0 };
+	const state = { labels: [...labels], records: [...records], slept: 0 };
 	let reads = 0;
 	const deps = {
 		rules: RULES,
@@ -85,7 +111,7 @@ const github = ({
 		// The first `lag` reads miss the last event, as a lagging REST list would.
 		listEvents: async () => (reads++ < lag ? events.slice(0, -1) : events),
 		listRecords: async (sha) => state.records.filter((r) => r.head_sha === sha),
-		runOfSuite: async (id) => state.runs[id] ?? null,
+		getKeys: async () => KEYS,
 		escalate: async () => {
 			state.labels.push("review:admin");
 			log.push("escalate");
@@ -94,15 +120,9 @@ const github = ({
 			state.labels.push("review:admin");
 			log.push(`rearm: ${why}`);
 		},
-		writeRecord: async (sha, output) => {
-			// What this run's own record looks like: Actions' App, in the suite of main's run.
-			state.records.push({
-				id: 900,
-				head_sha: sha,
-				app: { id: ACTIONS_APP },
-				check_suite: { id: 9 },
-			});
-			state.runs[9] = { ...MAIN_RUN, check_suite_id: 9 };
+		// What main's run writes: its summary, and a token GitHub signed for main's workflow.
+		writeRecord: async (sha, output, audience) => {
+			state.records.push(record(900, { sha, token: jwt(mainClaims(sha, { aud: audience })) }));
 			log.push(`record on ${sha.slice(0, 7)}: ${output.summary}`);
 		},
 		sleep: async () => {
@@ -112,6 +132,13 @@ const github = ({
 	return { log, state, deps };
 };
 const check = (gh, ev = event()) => checkCodeOwned(ev, gh.deps);
+// A run that must fail and put the label back; returns the verdict.
+const rearmed = async (gh, ev) => {
+	const r = await check(gh, ev);
+	expect(r.ok).toBe(false);
+	expect(gh.state.labels).toEqual(["review:admin"]);
+	return r;
+};
 // A run that must fail and write no sign-off record; returns the verdict.
 const refused = async (gh, ev) => {
 	const r = await check(gh, ev);
@@ -119,14 +146,6 @@ const refused = async (gh, ev) => {
 	expect(gh.state.records).toEqual([]);
 	return r;
 };
-
-// A `code-owned / sign-off` record on `sha` in check suite `suite`, by Actions' App unless `app`.
-const record = (id, suite, sha = HEAD, app = ACTIONS_APP) => ({
-	id,
-	head_sha: sha,
-	app: { id: app },
-	check_suite: { id: suite },
-});
 
 describe("isOwned", () => {
 	// One path per pattern style in .github/CODEOWNERS.
@@ -207,24 +226,52 @@ describe("isAdminRemoval", () => {
 });
 
 describe("fromMain", () => {
-	const run = (more) => ({ ...MAIN_RUN, check_suite_id: 7, ...more });
+	const at = { repo: REPO, number: PR, head: HEAD, keys: KEYS };
 
-	it("counts a record from main's code-owned.yml on pull_request_target", () => {
-		expect(fromMain(record(1, 7), run())).toBe(true);
+	it("counts a record whose token main's code-owned.yml got on pull_request_target", () => {
+		expect(fromMain(record(1), at)).toBe(true);
+	});
+
+	it("takes the audience as a one-item list too", () => {
+		const token = jwt(mainClaims(HEAD, { aud: [audienceOf(REPO, PR, HEAD)] }));
+		expect(fromMain(record(1, { token }), at)).toBe(true);
 	});
 
 	it.each([
-		["a workflow on the PR's branch (pull_request)", run({ event: "pull_request" })],
-		["another workflow on pull_request_target", run({ path: ".github/workflows/review.yml" })],
-		["a push run of code-owned.yml", run({ event: "push" })],
-		["a run of another check suite", run({ check_suite_id: 8 })],
-		["no workflow run", null],
-	])("doesn't count a record from %s", (_, r) => {
-		expect(fromMain(record(1, 7), r)).toBe(false);
+		[
+			"a workflow on the PR's branch",
+			{ workflow_ref: `${REPO}/.github/workflows/fake.yml@refs/pull/337/merge` },
+		],
+		[
+			"code-owned.yml from another branch",
+			{ workflow_ref: `${REPO}/.github/workflows/code-owned.yml@refs/heads/lane` },
+		],
+		["main's code-owned.yml on another event", { event_name: "workflow_dispatch" }],
+		["another repo", { repository: "someone/sunny-pastures" }],
+		["another issuer", { iss: "https://example.com" }],
+		["another PR", { aud: audienceOf(REPO, 338, HEAD) }],
+		["another head", { aud: audienceOf(REPO, PR, OLD) }],
+		["two audiences", { aud: [audienceOf(REPO, PR, HEAD), "x"] }],
+	])("doesn't count a token from %s", (_, more) => {
+		expect(fromMain(record(1, { token: jwt(mainClaims(HEAD, more)) }), at)).toBe(false);
 	});
 
-	it("doesn't count a record another App wrote", () => {
-		expect(fromMain(record(1, 7, HEAD, 999), run())).toBe(false);
+	it.each([
+		["a key GitHub didn't publish", jwt(mainClaims(), { key: OTHER_KEY })],
+		["an unknown key id", jwt(mainClaims(), { kid: "k2" })],
+		["another algorithm", jwt(mainClaims(), { alg: "HS256" })],
+		[
+			"a token with its claims swapped",
+			`${jwt(mainClaims()).split(".")[0]}.${b64(mainClaims())}x.sig`,
+		],
+		["no token", "none"],
+	])("doesn't count a record signed with %s", (_, token) => {
+		expect(fromMain(record(1, { token }), at)).toBe(false);
+	});
+
+	it("doesn't count a record another App wrote, or one on another commit", () => {
+		expect(fromMain(record(1, { app: 999 }), at)).toBe(false);
+		expect(fromMain(record(1, { sha: OLD, token: jwt(mainClaims()) }), at)).toBe(false);
 	});
 });
 
@@ -311,38 +358,29 @@ describe("checkCodeOwned", () => {
 		// The sign-off's record is on OLD; HEAD, the push, has none.
 		const gh = github({
 			events: [added(), removed(ADMIN)],
-			records: [record(1, 7, OLD)],
-			runs: { 7: { ...MAIN_RUN, check_suite_id: 7 } },
+			records: [record(1, { sha: OLD, token: jwt(mainClaims(OLD)) })],
 		});
-		const r = await check(gh, event());
-		expect(r.ok).toBe(false);
-		expect(gh.state.labels).toEqual(["review:admin"]);
+		const r = await rearmed(gh, event());
 		expect(r.message).toContain("pushed after the sign-off");
 	});
 
 	it("keeps a PR that once carried the label held after a push, though no path is code-owned", async () => {
 		const gh = github({ files: ["README.md"], events: [added(), removed(ADMIN)] });
-		const r = await check(gh, event());
-		expect(r.ok).toBe(false);
-		expect(gh.state.labels).toEqual(["review:admin"]);
+		expect((await rearmed(gh, event())).owned).toEqual([]);
 	});
 
 	it("passes a later run on the signed-off head, from the record alone", async () => {
-		const gh = github({
-			events: [added(), removed(ADMIN)],
-			records: [record(1, 7)],
-			runs: { 7: { ...MAIN_RUN, check_suite_id: 7 } },
-		});
+		const gh = github({ events: [added(), removed(ADMIN)], records: [record(1)] });
 		const r = await check(gh, event({ action: "labeled", label: { name: "area:ci-cd" } }));
 		expect(r.ok).toBe(true);
 		expect(gh.log).toEqual([]);
 	});
 
 	it("doesn't count a record a workflow on the PR's branch wrote", async () => {
+		const branch = { workflow_ref: `${REPO}/.github/workflows/fake.yml@refs/pull/337/merge` };
 		const gh = github({
-			events: [added(), removed(FACTORY)],
-			records: [record(1, 7)],
-			runs: { 7: { ...BRANCH_RUN, check_suite_id: 7 } },
+			events: [added(), removed(ADMIN)],
+			records: [record(1, { token: jwt(mainClaims(HEAD, branch)) })],
 		});
 		const r = await check(gh);
 		expect(r.ok).toBe(false);
@@ -409,37 +447,51 @@ describe("checkCodeOwned", () => {
 
 describe("writeVerdict", () => {
 	const verdict = { ok: false, owned: [".github/x.yml"], head: HEAD, message: "held: x" };
-	const deps = (checks, runs) => {
+	const deps = (checks, { failUpdate = false } = {}) => {
 		const log = [];
 		return {
 			log,
 			listChecks: async () => checks,
-			runOfSuite: async (id) => runs[id] ?? null,
 			createCheck: async (body) => log.push(["create", body]),
-			updateCheck: async (id, body) => log.push(["update", id, body]),
+			updateCheck: async (id, body) => {
+				if (failUpdate) throw new Error("403");
+				log.push(["update", id, body]);
+			},
+			setStatus: async (sha, body) => log.push(["status", sha, body]),
 		};
 	};
+	const run = (id, app = ACTIONS_APP) => ({ id, app: { id: app } });
 
-	it("creates guard / code-owned on the head when main's guard hasn't written one", async () => {
-		const d = deps([record(5, 7)], { 7: { ...BRANCH_RUN, check_suite_id: 7 } });
+	it("creates guard / code-owned on the head when Actions wrote none, and sets the status", async () => {
+		const d = deps([run(5, 999)]);
 		await writeVerdict(verdict, d);
-		expect(d.log).toHaveLength(1);
-		const [kind, body] = d.log[0];
-		expect(kind).toBe("create");
-		expect(body).toMatchObject({
+		expect(d.log).toHaveLength(2);
+		expect(d.log[0][0]).toBe("create");
+		expect(d.log[0][1]).toMatchObject({
 			name: "guard / code-owned",
 			head_sha: HEAD,
 			status: "completed",
 			conclusion: "failure",
 		});
-		expect(body.output.summary).toContain('- ".github/x.yml"');
+		expect(d.log[0][1].output.summary).toContain('- ".github/x.yml"');
+		expect(d.log[1]).toEqual([
+			"status",
+			HEAD,
+			{ state: "failure", context: "guard / code-owned", description: "held: x" },
+		]);
 	});
 
-	it("updates the newest one main's guard wrote, in place", async () => {
-		const main = (id) => ({ ...MAIN_RUN, check_suite_id: id });
-		const d = deps([record(6, 8), record(5, 7)], { 7: main(7), 8: main(8) });
+	it("updates the newest one in place", async () => {
+		const d = deps([run(6), run(5)]);
 		await writeVerdict({ ...verdict, ok: true }, d);
-		expect(d.log).toEqual([["update", 6, expect.objectContaining({ conclusion: "success" })]]);
+		expect(d.log[0]).toEqual(["update", 6, expect.objectContaining({ conclusion: "success" })]);
+		expect(d.log[1][2].state).toBe("success");
+	});
+
+	it("creates one when the newest can't be updated", async () => {
+		const d = deps([run(6)], { failUpdate: true });
+		await writeVerdict(verdict, d);
+		expect(d.log.map(([kind]) => kind)).toEqual(["create", "status"]);
 	});
 });
 
@@ -483,6 +535,9 @@ describe("code-owned-guard.mjs", () => {
 		[`POST ${P}/issues/337/labels`]: [],
 		[`POST ${P}/issues/337/comments`]: {},
 		[`POST ${P}/check-runs`]: { id: 1 },
+		[`POST ${P}/statuses/${HEAD}`]: {},
+		[`GET /jwks`]: { keys: KEYS },
+		[`GET /token`]: { value: jwt(mainClaims()) },
 	});
 
 	// An async child: spawnSync would block the event loop the fake server answers on.
@@ -496,6 +551,9 @@ describe("code-owned-guard.mjs", () => {
 				GITHUB_EVENT_PATH: path,
 				GITHUB_API_URL: api,
 				GITHUB_TOKEN: "test",
+				CODE_OWNED_JWKS_URL: `${api}/jwks`,
+				ACTIONS_ID_TOKEN_REQUEST_URL: `${api}/token?x=1`,
+				ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-test",
 			},
 		});
 		let out = "";
@@ -542,12 +600,17 @@ describe("code-owned-guard.mjs", () => {
 		const posts = api.seen.filter((s) => s.startsWith(`POST ${P}/check-runs `));
 		expect(posts[0]).toContain('"name":"code-owned / sign-off"');
 		expect(posts[0]).toContain('"conclusion":"success"');
+		expect(posts[0]).toContain("token: ey");
+		expect(api.seen).toContain(
+			`GET /token?x=1&audience=${encodeURIComponent(audienceOf(REPO, PR, HEAD))}`,
+		);
 	});
 
 	it("exits 2, never a pass, and writes a failing check run when GitHub can't be read", async () => {
 		const api = await serve({
 			[`GET ${P}/commits/${HEAD}/check-runs`]: { check_runs: [] },
 			[`POST ${P}/check-runs`]: { id: 1 },
+			[`POST ${P}/statuses/${HEAD}`]: {},
 		});
 		const r = await run(event(), api.url);
 		expect(r.status).toBe(2);
@@ -604,8 +667,9 @@ describe("code-owned.yml", () => {
 		);
 	});
 
-	it("can write check runs and read the workflow runs behind them", () => {
+	it("can write the check run, the status and a signed sign-off record", () => {
 		expect(block("jobs")).toMatch(/checks: write/);
-		expect(block("jobs")).toMatch(/actions: read/);
+		expect(block("jobs")).toMatch(/statuses: write/);
+		expect(block("jobs")).toMatch(/id-token: write/);
 	});
 });

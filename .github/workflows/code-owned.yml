@@ -3,17 +3,19 @@
 # by removing `review:admin` on its current head. The rules are in code-owned-guard.mjs; the design
 # is ADR-0002, area 2, "Solo-admin approvals: removing `review:admin` is the sign-off" (#495).
 # `guard / code-owned` is a required check; this job, `code-owned (run)`, isn't: the script writes
-# the required check run itself, through the Checks API, so each head has one writer and a
-# cancelled or older run can't stand as the head's result. Its own workflow, so a label change
-# re-runs this check only. Actions are GitHub-owned and pinned to a full SHA (ADR-0002, area 8).
+# the required check run itself, through the Checks API, and a commit status of the same name, so
+# each head has one writer and a cancelled or older run can't stand as the head's result. Its own
+# workflow, so a label change re-runs this check only. Actions are GitHub-owned and pinned to a
+# full SHA (ADR-0002, area 8).
 name: code-owned
 
 # `pull_request_target` only (#565): the verdict depends on the label, the sign-off record and the
 # diff, never on reviews, so there is no `pull_request_review` trigger. This event always runs the
 # default branch's copy of this file and checks out the default branch (ADR-0002, area 2, "Stacks",
 # #404), so a PR can't change the workflow, script or CODEOWNERS that judge it, and the sign-off
-# record this run writes can be told from one a workflow on the PR's branch writes. `unlabeled` is
-# the admin's sign-off; `synchronize` re-arms it; `labeled` and the rest re-read the state.
+# record this run writes carries a token GitHub signs for this workflow on `main` only.
+# `unlabeled` is the admin's sign-off; `synchronize` re-arms it; `labeled` and the rest re-read the
+# state.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled]
@@ -38,8 +40,9 @@ jobs:
       contents: read # main's checkout of .github/scripts and CODEOWNERS
       pull-requests: write # the PR, its files, and adding `review:admin` with its comment
       issues: read # the PR's events: who added or removed `review:admin`
-      checks: write # `guard / code-owned` and the `code-owned / sign-off` record
-      actions: read # the workflow run behind each record, to count only main's
+      checks: write # the `guard / code-owned` check run and the `code-owned / sign-off` record
+      statuses: write # the `guard / code-owned` commit status, which reaches the merge box always
+      id-token: write # the OIDC token in the sign-off record, proof that main's workflow wrote it
     steps:
       # The default branch's commit, which `pull_request_target` checks out: never the PR's code.
       # Cone mode keeps .github/CODEOWNERS, a file in a parent folder of the sparse path.

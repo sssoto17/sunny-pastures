@@ -12,27 +12,39 @@
 // through a GitHub App. The run that the `unlabeled` event fires checks that the event's head is
 // still the PR's head, then writes a record on that commit: a check run named
 // `code-owned / sign-off`, conclusion success, its summary naming the removal's event id and actor.
-// Only an App can write a check run, but a workflow on a PR's own branch holds an Actions token too,
-// so a record counts only when its check suite's workflow run is `main`'s code-owned.yml on
-// `pull_request_target` (that event always runs the default branch's copy of a workflow; ADR-0002,
-// area 2, "Stacks", #404).
 //
-// The verdict: a held PR passes only when the label is off and such a record exists for the current
-// head. A held PR with the label off and no record (a push after the sign-off, a removal by anyone
-// else, a removal on an older head) gets the label back and fails. #494's Comment-review rule is
-// gone: reviews play no part.
+// Which records count (#565's throwaway PRs #629 and #630): a check run written through the Checks
+// API with an Actions token lands in the commit's oldest GitHub Actions check suite, whichever
+// workflow that suite belongs to, so its suite and workflow run say nothing about who wrote it. A
+// workflow on the PR's own branch holds an Actions token too. So the record carries proof: an OIDC
+// token GitHub signed for the run that wrote it, whose audience names the repo, the PR and the head,
+// and whose claims say the workflow was `main`'s code-owned.yml on `pull_request_target`. A record
+// counts only when that token verifies against GitHub's published keys and its claims match; a
+// branch's workflow can only get a token naming its own workflow and ref. The token's expiry isn't
+// checked: the audience binds it to one head, so a copy proves nothing new.
 //
-// One writer per head: the job is `code-owned (run)`, and this script creates or updates one
-// `guard / code-owned` check run on the PR's live head through the Checks API, re-reading the live
-// state (label, events, records, diff) on every run. It never checks out or runs the PR's code.
+// The verdict: a held PR passes only when the label is off and a counted record exists for the
+// current head. A held PR with the label off and no counted record (a push after the sign-off, a
+// removal by anyone else, a removal on an older head) gets the label back and fails. #494's
+// Comment-review rule is gone: reviews play no part.
+//
+// One writer per head: the job is `code-owned (run)`, and this script updates the head's newest
+// `guard / code-owned` check run through the Checks API, or creates one, re-reading the live state
+// (label, events, records, diff) on every run. It also sets a commit status of the same name with
+// the same verdict: on a head whose oldest Actions check suite is a `create` run (a branch pushed
+// with its first commit, board-branch.yml), the check run never reaches the PR's merge box, and the
+// status does (#630). It never checks out or runs the PR's code.
 //
 // Usage: node .github/scripts/code-owned-guard.mjs [--codeowners <file>]
-//   (reads the PR from $GITHUB_EVENT_PATH; REST through $GITHUB_API_URL with $GITHUB_TOKEN)
+//   (reads the PR from $GITHUB_EVENT_PATH; REST through $GITHUB_API_URL with $GITHUB_TOKEN; the
+//   sign-off's OIDC token from $ACTIONS_ID_TOKEN_REQUEST_URL, which `id-token: write` sets)
 // Exit codes: 0 the verdict, pass or held, is written to `guard / code-owned`; 2 could not run (the
-// check run is then written as a failure when the head is known, so it never reads as a pass). A
+// verdict is then written as a failure when the head is known, so it never reads as a pass). A
 // held PR leaves the job green: the required check carries the verdict, and a red job beside it
 // would keep the board from reading the PR as green (scripts/board-status.sh leaves out only
 // `guard / code-owned`). It prints paths JSON-quoted, so a file name can't start a workflow command.
+import { Buffer } from "node:buffer";
+import { createPublicKey, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -43,6 +55,7 @@ export const ADMIN = "sssoto17";
 export const CHECK = "guard / code-owned";
 export const SIGN_OFF = "code-owned / sign-off";
 export const WORKFLOW = ".github/workflows/code-owned.yml";
+export const ISSUER = "https://token.actions.githubusercontent.com";
 // GitHub Actions' App id: the integration the ruleset's required checks name.
 export const ACTIONS_APP = 15368;
 // The REST events list can lag the webhook: how often a removal run re-reads it, and how far apart.
@@ -74,17 +87,29 @@ export const parseCodeOwners = (text) =>
 export const isOwned = (rules, path) =>
 	(rules.findLast((r) => r.rx.test(path))?.owners.length ?? 0) > 0;
 
+/** The OIDC audience a sign-off record's token carries: one repo, one PR, one head. */
+export const audienceOf = (repo, number, head) => `code-owned-sign-off:${repo}#${number}@${head}`;
+
 /**
- * Whether a check run is a record from `main`'s code-owned.yml: written by GitHub Actions, and its
- * check suite's one workflow run (`run`, as `GET actions/runs?check_suite_id=` lists it) is
- * code-owned.yml on `pull_request_target`, which always runs the default branch's copy. Anything it
- * can't show, it doesn't count.
+ * Whether a `code-owned / sign-off` check run counts for PR `number` of `repo` at `head`: written by
+ * GitHub Actions on that head, and its summary's `token:` line an OIDC token that verifies against
+ * GitHub's `keys` (JWKS), for `audienceOf(repo, number, head)`, from `main`'s code-owned.yml on
+ * `pull_request_target` in `repo`.
  */
-export const fromMain = (checkRun, run) =>
-	checkRun?.app?.id === ACTIONS_APP &&
-	run?.event === "pull_request_target" &&
-	run.path === WORKFLOW &&
-	run.check_suite_id === checkRun.check_suite?.id;
+export const fromMain = (record, { repo, number, head, keys }) => {
+	if (record?.app?.id !== ACTIONS_APP || record.head_sha !== head) return false;
+
+	const claims = verifyJwt(record.output?.summary?.match(/^token: (\S+)$/m)?.[1], keys);
+	const aud = [claims?.aud].flat();
+	return (
+		claims?.iss === ISSUER &&
+		aud.length === 1 &&
+		aud[0] === audienceOf(repo, number, head) &&
+		claims.repository === repo &&
+		claims.workflow_ref === `${repo}/${WORKFLOW}@refs/heads/main` &&
+		claims.event_name === "pull_request_target"
+	);
+};
 
 /** Whether an issue event is the admin's sign-off: `sssoto17`, a User, removing the label itself. */
 export const isAdminRemoval = (e) =>
@@ -97,15 +122,16 @@ export const isAdminRemoval = (e) =>
 /**
  * The verdict on the PR an event names: `{ ok, owned, head, message }`. On the way it adds the label
  * to a code-owned PR that never carried it (`escalate`), writes the sign-off record on the run an
- * admin removal fired (`writeRecord`), and puts the label back on a held PR with neither the label
- * nor a record (`rearm`). `getPull`, `listFiles` and `listEvents` (every page) answer as REST does;
- * `listRecords(sha)` lists the `code-owned / sign-off` check runs on a commit and `runOfSuite(id)`
- * the workflow run of a check suite (null when there isn't exactly one). Throws CannotRun when it
- * can't judge.
+ * admin removal fired (`writeRecord(sha, output, audience)`), and puts the label back on a held PR
+ * with neither the label nor a counted record (`rearm`). `getPull`, `listFiles` and `listEvents`
+ * (every page) answer as REST does; `listRecords(sha)` lists the `code-owned / sign-off` check runs
+ * on a commit, and `getKeys()` GitHub's OIDC signing keys. Throws CannotRun when it can't judge.
  */
 export const checkCodeOwned = async (event, deps) => {
 	const { rules, getPull, listFiles, listEvents, escalate, rearm } = deps;
-	if (!event?.pull_request?.head?.sha || !event.pull_request.number)
+	const number = event?.pull_request?.number;
+	const repo = event?.repository?.full_name;
+	if (!event?.pull_request?.head?.sha || !number || !repo)
 		throw new CannotRun("the event has no pull_request head");
 	if (!rules.some((r) => r.owners.length)) throw new CannotRun("CODEOWNERS lists no owned path");
 
@@ -136,8 +162,11 @@ export const checkCodeOwned = async (event, deps) => {
 			`held: review:admin is on; the admin signs off by removing it on ${short}`,
 		);
 
-	const signed = await signOff(event, pull, events, deps);
-	const records = await recordsFromMain(head, deps);
+	const signed = await signOff(event, pull, events, audienceOf(repo, number, head), deps);
+	const keys = await deps.getKeys();
+	const records = (await deps.listRecords(head))
+		.filter((r) => fromMain(r, { repo, number, head, keys }))
+		.sort((a, b) => a.id - b.id);
 	if (records.length > 0)
 		return verdict(
 			true,
@@ -153,28 +182,44 @@ export const checkCodeOwned = async (event, deps) => {
 };
 
 /**
- * Writes `guard / code-owned` on `verdict.head`: updates the newest such check run from `main`'s
- * code-owned.yml there, or creates one, so each head has one writer. `listChecks(sha)` lists the
- * `guard / code-owned` check runs on a commit; `createCheck(body)` and `updateCheck(id, body)`
- * answer as REST does.
+ * Writes the verdict on `verdict.head`: updates the newest `guard / code-owned` check run GitHub
+ * Actions wrote there, or creates one (`listChecks(sha)`, `createCheck(body)`, `updateCheck(id,
+ * body)` answer as REST does), then sets the commit status of the same name (`setStatus(sha,
+ * body)`), which reaches the merge box when the check run can't.
  */
 export const writeVerdict = async (verdict, deps) => {
-	const ours = await fromMainOnly(await deps.listChecks(verdict.head), deps);
 	const body = {
 		status: "completed",
 		conclusion: verdict.ok ? "success" : "failure",
 		output: { title: verdict.message.slice(0, 255), summary: summaryOf(verdict) },
 	};
-	const latest = ours.at(-1);
-	if (latest) return deps.updateCheck(latest.id, body);
-	return deps.createCheck({ name: CHECK, head_sha: verdict.head, ...body });
+	const latest = (await deps.listChecks(verdict.head))
+		.filter((r) => r.app?.id === ACTIONS_APP)
+		.sort((a, b) => a.id - b.id)
+		.at(-1);
+	// A check run this token can't update (another workflow's job) still leaves room for a new one.
+	const updated = latest
+		? await deps.updateCheck(latest.id, body).then(
+				() => true,
+				(e) => {
+					console.error(`code-owned: couldn't update check run ${latest.id}: ${e?.message ?? e}`);
+					return false;
+				},
+			)
+		: false;
+	if (!updated) await deps.createCheck({ name: CHECK, head_sha: verdict.head, ...body });
+	await deps.setStatus(verdict.head, {
+		state: verdict.ok ? "success" : "failure",
+		context: CHECK,
+		description: verdict.message.slice(0, 140),
+	});
 };
 
 // On the run an `unlabeled` event of `review:admin` fired: the removal it reports, read from the
 // PR's events (re-read while the list lags the webhook), and the record written when it is the
 // admin's on the event's head, which is still the PR's head and has the label off. Returns the
 // removal, or null when the run isn't one.
-async function signOff(event, pull, events, { listEvents, writeRecord, sleep = delay }) {
+async function signOff(event, pull, events, audience, { listEvents, writeRecord, sleep = delay }) {
 	if (event.action !== "unlabeled" || event.label?.name !== LABEL) return null;
 
 	const sender = event.sender?.login?.toLowerCase();
@@ -187,12 +232,13 @@ async function signOff(event, pull, events, { listEvents, writeRecord, sleep = d
 	if (event.pull_request.head.sha !== pull.head.sha) return removal;
 
 	const at = pull.head.sha.slice(0, 7);
-	await writeRecord(pull.head.sha, {
+	const output = {
 		title: `${removal.actor.login} removed review:admin on ${at}`,
 		summary:
 			`Sign-off: \`${removal.actor.login}\` (${removal.actor.type}) removed \`review:admin\` on ` +
 			`${pull.head.sha}, the PR's head, in event ${removal.id} (${removal.created_at}).`,
-	});
+	};
+	await writeRecord(pull.head.sha, output, audience);
 	return removal;
 }
 
@@ -207,19 +253,20 @@ function reports(removal, sender) {
 	return removal?.event === "unlabeled" && removal.actor?.login?.toLowerCase() === sender;
 }
 
-async function recordsFromMain(head, deps) {
-	return fromMainOnly(await deps.listRecords(head), deps);
-}
-
-// The check runs among `runs` that `fromMain` counts, oldest first.
-async function fromMainOnly(runs, { runOfSuite }) {
-	const kept = [];
-	for (const r of [...runs].sort((a, b) => a.id - b.id)) {
-		if (r.app?.id !== ACTIONS_APP || !r.check_suite?.id) continue;
-
-		if (fromMain(r, await runOfSuite(r.check_suite.id))) kept.push(r);
+// A JWT's claims when its RS256 signature verifies against the key its header names; else null.
+function verifyJwt(jwt, keys) {
+	try {
+		const [h, p, s, ...rest] = jwt.split(".");
+		if (rest.length > 0) return null;
+		const header = JSON.parse(Buffer.from(h, "base64url").toString("utf8"));
+		const jwk = keys.find((k) => k.kid === header.kid);
+		if (header.alg !== "RS256" || !jwk) return null;
+		const key = createPublicKey({ key: jwk, format: "jwk" });
+		const ok = verify("RSA-SHA256", Buffer.from(`${h}.${p}`), key, Buffer.from(s, "base64url"));
+		return ok ? JSON.parse(Buffer.from(p, "base64url").toString("utf8")) : null;
+	} catch {
+		return null;
 	}
-	return kept;
 }
 
 function who(e) {
@@ -275,7 +322,7 @@ const api = (repo, token) => {
 			throw new CannotRun(`${method} ${path.replace(/\?.*/, "")} answered ${res.status}`);
 		return res.json();
 	};
-	// Every page of a list; `key` names the array in an object answer (check-runs, workflow_runs).
+	// Every page of a list; `key` names the array in an object answer (check-runs).
 	const all = async (path, key) => {
 		const items = [];
 		const sep = path.includes("?") ? "&" : "?";
@@ -287,6 +334,26 @@ const api = (repo, token) => {
 		}
 	};
 	return { call, all };
+};
+
+// GitHub's OIDC signing keys, and a token for `audience` from this run (`id-token: write`).
+const oidc = {
+	keys: async () => {
+		const res = await globalThis.fetch(
+			process.env.CODE_OWNED_JWKS_URL ?? `${ISSUER}/.well-known/jwks`,
+		);
+		if (!res.ok) throw new CannotRun(`GitHub's OIDC keys answered ${res.status}`);
+		return (await res.json()).keys ?? [];
+	},
+	token: async (audience) => {
+		const url = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+		if (!url) throw new CannotRun("no OIDC token: the job needs `id-token: write`");
+		const res = await globalThis.fetch(`${url}&audience=${encodeURIComponent(audience)}`, {
+			headers: { authorization: `bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+		});
+		if (!res.ok) throw new CannotRun(`the OIDC token request answered ${res.status}`);
+		return (await res.json()).value;
+	},
 };
 
 const main = async () => {
@@ -305,16 +372,14 @@ const main = async () => {
 		);
 	const comment = (body) => call("POST", `issues/${number}/comments`, { body });
 	const addLabel = () => call("POST", `issues/${number}/labels`, { labels: [LABEL] });
+	let keys;
 	const deps = {
 		getPull: () => call("GET", `pulls/${number}`),
 		listFiles: () => all(`pulls/${number}/files`),
 		listEvents: () => all(`issues/${number}/events`),
 		listRecords: checksNamed(SIGN_OFF),
 		listChecks: checksNamed(CHECK),
-		runOfSuite: async (id) => {
-			const runs = (await call("GET", `actions/runs?check_suite_id=${id}`)).workflow_runs ?? [];
-			return runs.length === 1 ? runs[0] : null;
-		},
+		getKeys: async () => (keys ??= await oidc.keys()),
 		escalate: async () => {
 			await addLabel();
 			await comment(ESCALATED);
@@ -323,16 +388,17 @@ const main = async () => {
 			await addLabel();
 			await comment(`\`guard / code-owned\` put \`review:admin\` back: ${why}.`);
 		},
-		writeRecord: (sha, output) =>
+		writeRecord: async (sha, output, audience) =>
 			call("POST", "check-runs", {
 				name: SIGN_OFF,
 				head_sha: sha,
 				status: "completed",
 				conclusion: "success",
-				output,
+				output: { ...output, summary: `${output.summary}\n\ntoken: ${await oidc.token(audience)}` },
 			}),
 		createCheck: (body) => call("POST", "check-runs", body),
 		updateCheck: (id, body) => call("PATCH", `check-runs/${id}`, body),
+		setStatus: (sha, body) => call("POST", `statuses/${sha}`, body),
 	};
 
 	let verdict;
