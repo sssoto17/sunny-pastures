@@ -10,7 +10,7 @@ Project field (Status, Size, Priority, Week) stays a field and never becomes a l
 
 - A **type** is a bare label with its own colour.
 - Every other label is `prefix:value`, and all labels with one prefix share one colour, except the
-  four `factory:*` states: each has its own, so the state shows at a glance (#619).
+  four `factory:*` states, which #619 created with a colour each (23 Nov 2026).
 - No new prefix without the admin.
 
 <!-- prettier-ignore -->
@@ -122,10 +122,8 @@ the view's filter together.
 ## Factory and reserved prefixes
 
 **`factory:ready`** is the only label that says an issue can be worked without the admin in the
-loop, and the factory's only gate: the sweep picks up an open issue that carries it, has no open
-native blocker and no `blocked:*` label, whatever its Status (admin, 23 Nov 2026, #619). Which
-issues may carry it, and the hard limits, are `issue-tracker.md`, **Status rules**,
-"`factory:ready`".
+loop. What the factory checks before it picks one up, which issues may carry it, and the hard limits
+are `issue-tracker.md`, **Status rules**, "`factory:ready`" (admin, 23 Nov 2026, #619, #622).
 
 **Four states, one at a time.** A factory issue carries at most one `factory:*` label. The factory
 moves it from one to the next with its own token, removing the old label before adding the new one.
@@ -142,8 +140,10 @@ moves it from one to the next with its own token, removing the old label before 
   closed issue loses every `factory:*` label; an issue with several keeps the most advanced
   (`failed` over `review` over `working` over `ready`); `factory:working` with no live run goes to
   `factory:review` when its `<N>-` PR is open, else to `factory:failed`; `factory:review` whose PR
-  closed unmerged goes to `factory:failed` (ADR-0002, area 2, "The factory sweep, built").
-- **On close** every `factory:*` label goes, and the Status goes to Done like any issue's.
+  closed unmerged goes to `factory:failed`, and one with no closed PR found is left alone (ADR-0002,
+  area 2, "The factory sweep, built").
+- **On close** every `factory:*` label goes: the next sweep's reconcile removes it (only while the
+  factory is switched on). The Status goes to Done like any issue's.
 - **Retry** is the admin replacing `factory:failed` with `factory:ready`. Remove `factory:failed`
   when adding `factory:ready`: with both on, the reconcile keeps `factory:failed`.
 - **`factory:failed` gets no `blocked:*` label.** The comment says why the run failed; the admin
@@ -153,8 +153,8 @@ moves it from one to the next with its own token, removing the old label before 
 - **A lane that takes over a factory issue** (the admin or a session works it by hand instead)
   removes its `factory:*` label when it creates its `<N>-<slug>` branch, so the issue no longer
   reads as factory work.
-- **Escalation is on the PR**: the factory opens a PR that needs the admin with `review:admin`
-  (**Pull requests**); it never labels the issue `blocked:admin`.
+- **Escalation is on the PR**: a factory PR that needs the admin carries `review:admin` (**Pull
+  requests**).
 
 **Reserved prefixes.**
 
@@ -172,7 +172,8 @@ criteria in `CONSTRAINTS.md` ("Admin review"). Code-owned PRs carry it too, so t
 queue of PRs waiting for the admin. Any agent may add it, and so may the reviewer bot. The bot never
 approves a PR that carries it, and only the admin removes it (ADR-0002, area 2). Added 7 Nov by the
 admin; widened to code-owned PRs in #47. It is a PR label only: an issue that needs the admin
-carries `blocked:admin` (**Blocked**) instead (admin, 23 Nov 2026).
+carries `blocked:admin` (**Blocked**) instead (admin, 23 Nov 2026, #622; #618 renames the PR label
+later).
 
 A PR's type is its title's Conventional Commit prefix, which is also the squash-commit message:
 

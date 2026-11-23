@@ -328,29 +328,29 @@ its body meets rules 2–6.
 An issue that meets all six but isn't chosen stays in Backlog. When its last blocker closes, nothing
 moves automatically: whether it becomes the focus is the admin's call.
 
-**`factory:ready`** is the admin's choice to delegate an issue rather than work it, and it is the
-factory's only gate (admin, 23 Nov 2026, #619).
+**`factory:ready`** is the admin's choice to delegate an issue rather than work it, and the only
+gate the admin sets for the factory: no Status, no other field (admin, 23 Nov 2026, #619, #622).
 
 - **Only the admin adds it**, or the coordinator with the admin's go-ahead for that issue. A filer
   never does, and `scripts/new-issue.sh` refuses `--label factory:ready`.
 - **What the factory checks**: the issue is open, carries `factory:ready`, has no open native
-  blocker (**Blocking** above) and no `blocked:*` label. (The sweep and the gate also check that the
-  owner or a collaborator opened it and that it has no `<N>-` PR or branch yet.) It doesn't read the
-  Status: an issue in Backlog qualifies as well as one in Ready, so the admin can label a whole
-  chain at once and the factory works it in blocker order, highest Priority first. Size, Priority
-  and Week are set as on any issue (**Issue fields**).
+  blocker (**Blocking** above) and no `blocked:*` label, was opened by the owner or a collaborator,
+  and has no `<N>-` PR or branch yet. (The gate accepts `factory:working` too: the sweep sets it
+  just before it dispatches.) It doesn't read the Status: an issue in Backlog qualifies as well as
+  one in Ready, so the admin can label a whole chain at once and the factory works it in blocker
+  order, highest Priority first. Size, Priority and Week are set as on any issue (**Issue fields**).
 - **What the admin checks before labelling**: the issue meets the definition of ready above, rules
   1–3, 5 and 6. Rule 4 (unblocked) is the one it may break: the factory waits for the blockers.
 - **The hard limits.** The factory stops without a PR when the work needs a change to
   `tests/acceptance/**` or `.github/workflows/**`, a package's install or build script allowed, or
   access the run doesn't have (a secret, a dashboard, a manual step). An issue that needs one of
   these isn't given `factory:ready`.
-- **Everything else is held, not refused.** A change to any other code-owned path
-  (`.github/CODEOWNERS`, `.claude/` included) is allowed, and the PR is opened with `review:admin`
-  so it waits for the admin. A new package dependency escalates the same way: a package the issue
-  names at an exact version is added exactly that, pinned; one it doesn't name is an admin decision,
-  added pinned and held. The factory's rules are `.github/factory-prompt.md` ("Admin decisions",
-  "When to stop without a PR").
+- **Everything else is held, not refused.** A change to any other code-owned path (any path in
+  `.github/CODEOWNERS`, `.claude/` included) is allowed, and the PR is opened with `review:admin` so
+  it waits for the admin. A new package dependency escalates the same way: a package the issue names
+  at an exact version is added exactly that, pinned; one it doesn't name is an admin decision, added
+  pinned and held. The factory's rules are `.github/factory-prompt.md` ("Admin decisions", "When to
+  stop without a PR").
 - **Escalation stays on the PR.** `review:admin` is a PR label only; an issue that needs the admin
   carries `blocked:admin` (`triage-labels.md`).
 
@@ -374,7 +374,7 @@ PR's checks turn green or red; the PR's own events (opened, ready, draft, closed
 <!-- prettier-ignore -->
 | Move                     | When                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------- |
-| Ready → In progress      | _Automatic._ Work starts: a branch named `<N>-<slug>` is created, or a PR with `Closes #N` opens. The admin is assigned (manual), or the sweep sets `factory:working` (factory, below). |
+| Ready → In progress      | _Automatic._ Work starts: a branch named `<N>-<slug>` is created, or a PR with `Closes #N` opens. The admin is assigned (manual). A factory issue moves by its label instead, from Backlog too ("Factory issues", below). |
 | In progress → In review  | _Automatic._ A PR with `Closes #N` is open, not a draft, and its checks are green. Green means every check passes apart from `guard / code-owned`, which stays red on a code-owned PR until the admin approves its head, or reviews it on a PR the admin opened (admin, 21 Nov, on #417; #494). A check still running, cancelled or stale isn't green yet: a re-run decides it. A draft stays In progress until it's marked ready. |
 | In review → In progress  | _Automatic._ That PR's checks go red, it turns back into a draft, or it closes unmerged. |
 | In review → Done         | _Automatic._ The PR merged (the issue closes, and the Project's built-in workflow moves it). |
@@ -396,9 +396,9 @@ and sets it through `scripts/board-status.sh`.
 This is the one exception to "never out of Backlog": an issue carrying `factory:working`,
 `factory:review` or `factory:failed` leaves Backlog for the Status its label gives, unless it still
 carries `triage`. Every other issue, `factory:ready` included, keeps the rules above. The move reads
-the labels when it runs, so two at once (which the factory never leaves) moves nothing, and removing
-the last `factory:*` label leaves the Status where it is. The PR-driven rows above still apply to
-the factory's PR as they do to a lane's.
+the labels when it runs, so two of `working`, `review` and `failed` at once moves nothing (`ready`
+beside one of them doesn't count), and removing the last `factory:*` label leaves the Status where
+it is. The PR-driven rows above still apply to the factory's PR as they do to a lane's.
 
 **The coordinator only fixes a wrong status.** It no longer moves issues as PRs open and merge. When
 the board shows a status the rows above don't explain (a move the workflow missed, or a run that
