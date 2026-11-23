@@ -19,11 +19,10 @@
   "entry": ["apps/web/src/server/store/schema.ts", "tools/load/seed.mjs"],
   // The Supabase CLI is a system binary, pinned by `pnpm supabase:check`, not an npm package.
   "ignoreBinaries": ["supabase"],
-  // ADR-0007, section 3 ("Errors"): the error body's types are exported for the M4 client, and
-  // where the client reads them from is still M4's decision (ADR-0007, "Open, for the admin").
-  "ignoreExports": [
-    { "file": "apps/web/src/server/http/index.ts", "exports": ["ErrorCode", "ErrorBody"] }
-  ],
+  // The game frontend's libraries (ADR-0010, section 3), added ahead of their first import by the
+  // foundation ticket (#594) so the structure tickets that use them add no dependency. Each entry
+  // goes with the PR that first imports its package.
+  "ignoreDependencies": ["react-aria-components", "zustand", "lucide-react"],
   // Duplication (CONSTRAINTS.md, duplication row; ADR-0005, section 3): exact copies of 50 tokens
   // and 5 lines or more. `mild` matches token for token, so two loops of the same shape over
   // different data aren't clones ("the same rule, not the same shape"). Fallow's built-in
@@ -56,6 +55,12 @@
       { "name": "routeTests", "patterns": ["apps/web/src/app/api/**/tests/*.test.ts"] },
       { "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
       { "name": "pages", "patterns": ["apps/web/src/app/**"] },
+      // The browser's zones (ADR-0010, sections 5 and 8; #594): the game API's response types,
+      // shared by server and client; the gateway to the server (session, api) and the client
+      // store; and the React components. None of them, nor `pages`, can import src/server/**.
+      { "name": "contract", "patterns": ["apps/web/src/contract/**"] },
+      { "name": "client", "patterns": ["apps/web/src/client/**"] },
+      { "name": "components", "patterns": ["apps/web/src/components/**"] },
       // The composition root's tests (#470's criteria; ADR-0007 section 6), before `api`,
       // so they take its `tests/*.test.ts` files only, never a helper beside them: they run the
       // routes on the in-memory store (store/tests/memoryStore.ts), which the store contract holds
@@ -98,7 +103,11 @@
       // A test-files-only allowance: the route files, and `api`, which the tests replace with
       // `vi.mock("@/server/api")` (Fallow reads the mock as an import) and never run.
       { "from": "routeTests", "allow": ["routes", "api"] },
-      { "from": "pages", "allow": ["sim"] },
+      { "from": "pages", "allow": ["sim", "components", "client"] },
+      // Types only (ADR-0010, section 5): FarmEnvelope names the sim's FarmState, never its code.
+      { "from": "contract", "allow": [], "allowTypeOnly": ["sim"] },
+      { "from": "client", "allow": ["contract", "sim"] },
+      { "from": "components", "allow": ["client", "contract", "sim"] },
       {
         "from": "api",
         "allow": ["config", "db", "rules", "store", "auth", "timing", "http", "game", "sim"]
@@ -124,9 +133,10 @@
       {
         "from": "game",
         "allow": ["rules", "timing", "sim"],
-        "allowTypeOnly": ["store", "auth"]
+        "allowTypeOnly": ["store", "auth", "contract"]
       },
-      { "from": "store", "allow": [], "allowTypeOnly": ["db", "sim"] },
+      // `contract` holds the stored `Answer` since #594 (ADR-0010, section 5).
+      { "from": "store", "allow": [], "allowTypeOnly": ["db", "sim", "contract"] },
       { "from": "rules", "allow": ["sim"] },
       { "from": "auth", "allow": ["config"] },
       { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
@@ -134,14 +144,18 @@
       { "from": "timing", "allow": [] },
       // The HTTP contract (#395; admin, 21 Nov): the request checks, the error builder and the
       // headers. It sees the sim's types, never its code; the timing value is passed in.
-      { "from": "http", "allow": [], "allowTypeOnly": ["sim"] },
+      { "from": "http", "allow": ["contract"], "allowTypeOnly": ["sim"] },
       { "from": "sim", "allow": [] },
       // No allowances, type-only included: the suite's expected values are written out literally.
       { "from": "acceptance", "allow": [] },
       { "from": "load", "allow": [] },
       // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
       { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
-      { "from": "storeTests", "allow": ["store", "dbTests"], "allowTypeOnly": ["db", "sim"] },
+      {
+        "from": "storeTests",
+        "allow": ["store", "dbTests"],
+        "allowTypeOnly": ["db", "sim", "contract"]
+      },
       { "from": "authTests", "allow": ["auth", "config", "dbTests"] },
       // The store's test zone, plus the rules and the sim's code to play the script with.
       {
@@ -153,7 +167,7 @@
       {
         "from": "gameTests",
         "allow": ["game", "rules", "timing", "sim", "storeTests"],
-        "allowTypeOnly": ["store", "auth"]
+        "allowTypeOnly": ["store", "auth", "contract"]
       }
     ],
     // A pattern matches a call and a constructor call, also through an import or a namespace.

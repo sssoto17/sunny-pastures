@@ -192,12 +192,13 @@ jobs:
       # ADR-0007 section 6, "The `db` project" (#382). The `db` project's tests need the Supabase
       # stack, which costs runner time, so a PR starts it only when it changes apps/web/src/server/
       # or supabase/, or what runs the `db` tests: the stack action or vitest.config.mts (admin,
-      # 21 Nov, #439 review). Every push to main starts it, so main runs both projects and the full
+      # 21 Nov, #439 review). Every push to main starts it, so main runs every project and the full
       # coverage gate, ratchet included (admin, 19 Nov), and a drop merged without the stack turns
       # main red.
-      # Without the stack only the `unit` project runs, and the gate skips the whole-project ratchet,
-      # since the untested store files would read 0% (as `check:task` does). The changed-line
-      # floors apply either way. The decision is this step, not a skip in a test.
+      # Without the stack only the `unit` and `ui` projects run (`ui` needs no stack; #594), and the
+      # gate skips the whole-project ratchet, since the untested store files would read 0% (as
+      # `check:task` does). The changed-line floors apply either way.
+      # The decision is this step, not a skip in a test.
       - name: Choose the Vitest projects
         id: projects
         run: |
@@ -217,9 +218,9 @@ jobs:
             fi
           fi
           if [[ $stack == true ]]; then
-            summary="Projects unit and db, with the Supabase stack, and the full coverage gate: $why."
+            summary="Projects unit, ui and db, with the Supabase stack, and the full coverage gate: $why."
           else
-            summary="Project unit only, no stack, and the coverage gate with --skip-ratchet: $why."
+            summary="Projects unit and ui only, no stack, and the coverage gate with --skip-ratchet: $why."
           fi
           echo "stack=$stack" >> "$GITHUB_OUTPUT"
           echo "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -233,7 +234,7 @@ jobs:
           if [[ $STACK == true ]]; then
             pnpm test
           else
-            pnpm test --project unit
+            pnpm test --project unit --project ui
           fi
       - name: Check coverage
         env:

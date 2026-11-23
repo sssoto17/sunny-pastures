@@ -23,13 +23,17 @@ const propertyTimeout = Math.max(5_000, 15 * simPropertyRuns);
 // to do the same, so an exact alias keeps it to one line.
 const fromRoot = (path: string) => decodeURIComponent(new URL(path, import.meta.url).pathname);
 
-// Two projects in one coverage run (#382; ADR-0007 section 6, "The `db` project"), so
+// Three projects in one coverage run (#382; ADR-0007 section 6, "The `db` project"; ADR-0010), so
 // coverage-gate.mjs still reads one lcov. `db` is every `*.db.test.ts`: it needs the local Supabase
 // stack, and its global setup fails the run, naming `pnpm db:start`, when none answers. It never
-// skips. `unit` is everything else. Both inherit this file's options (Vitest 5's inline projects
-// extend the root), and arrays merge, so the include lists live in the projects, not at the root.
-// `ci / test` picks `--project unit` when a PR can't reach the database (ci.yml).
+// skips. `ui` is apps/web's component tests, every `*.test.tsx`, in jsdom (#594). `unit` is the
+// rest, all `.ts`, on Node, so the sim and API tests never see a DOM. All inherit this file's
+// options (Vitest 5's inline projects extend the root), and arrays merge, so the include lists live
+// in the projects, not at the root. `ci / test` picks `--project unit --project ui` when a PR can't
+// reach the database (ci.yml).
 const dbTests = "{apps,packages}/*/src/**/*.db.test.ts";
+// `.test.tsx` is the only UI test suffix: no `.spec` (ADR-0005, section 5).
+const uiTests = "apps/web/src/**/*.test.tsx";
 
 export default defineConfig({
 	resolve: {
@@ -48,11 +52,17 @@ export default defineConfig({
 			{
 				test: {
 					name: "unit",
-					include: [
-						"{apps,packages}/*/src/**/*.{test,spec}.{ts,tsx}",
-						".github/scripts/**/*.test.mjs",
-					],
+					include: ["{apps,packages}/*/src/**/*.{test,spec}.ts", ".github/scripts/**/*.test.mjs"],
 					exclude: [...configDefaults.exclude, dbTests],
+				},
+			},
+			{
+				test: {
+					name: "ui",
+					include: [uiTests],
+					environment: "jsdom",
+					// Testing Library unmounts after each test only when it sees a global `afterEach`.
+					globals: true,
 				},
 			},
 			{

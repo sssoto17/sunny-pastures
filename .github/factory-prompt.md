@@ -47,9 +47,9 @@ runner checks it and, only if it passes, pushes the branch and opens the PR as `
   decision (below): the held PR is how you ask (`AGENTS.md`). `minimumReleaseAge` in
   `pnpm-workspace.yaml` still holds: never lower it. Never allow a package's install or build script
   (`allowBuilds`): a package that needs one is a stop.
-- **No local Supabase stack.** Run `pnpm check:fast` and `pnpm test --project unit`, plus each test
-  file you touch. The `db` and acceptance tests run in CI on the PR; say so under "How it was
-  verified".
+- **No local Supabase stack.** Run `pnpm check:fast` and `pnpm test --project unit --project ui`,
+  plus each test file you touch. The `db` and acceptance tests run in CI on the PR; say so under
+  "How it was verified".
 
 ## Steps
 

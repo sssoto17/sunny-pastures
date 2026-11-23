@@ -4,6 +4,7 @@ import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 
 import type { Action, FarmState } from "@sunny-pastures/sim";
 
+import type { Answer } from "@/contract";
 import type { Db } from "@/server/db";
 
 import { actions, snapshots } from "./schema";
@@ -44,14 +45,6 @@ export interface FarmRecord {
 	readonly state: FarmState;
 	readonly seq: number;
 	readonly at: number;
-}
-
-/** What `POST /api/farm/actions` answers for an accepted action, stored with its key (ADR-0001). */
-export interface Answer {
-	readonly seq: number;
-	readonly hash: string;
-	readonly rebased: boolean;
-	readonly retries: number;
 }
 
 export interface CommitEntry {

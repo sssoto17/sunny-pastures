@@ -2,9 +2,10 @@ import "server-only";
 
 import { stateHash, type Action, type FarmState } from "@sunny-pastures/sim";
 
+import type { Answer, FarmEnvelope } from "@/contract";
 import type { PlayerId } from "@/server/auth";
 import type { Rules } from "@/server/rules";
-import type { Answer, FarmRecord, GameStore } from "@/server/store";
+import type { FarmRecord, GameStore } from "@/server/store";
 import type { Timing } from "@/server/timing";
 
 /**
@@ -18,17 +19,6 @@ export interface GameDeps {
 	readonly timing: Timing;
 	/** Server time in ms (`Date.now` in `api/`). `submitAction` reads it once per request (T1). */
 	readonly serverTime: () => number;
-}
-
-/**
- * The farm both routes return (ADR-0007, section 3, "Response"): the state after action `seq`,
- * which took effect at `at` (ms), not advanced past it, under rules version `rulesVersion`.
- */
-export interface FarmEnvelope {
-	readonly seq: number;
-	readonly at: number;
-	readonly state: FarmState;
-	readonly rulesVersion: number;
 }
 
 /** One action as the request checks read it (`ActionRequest` in `http/`, #395). */
