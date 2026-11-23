@@ -683,8 +683,9 @@ which secret", below).
 ### Solo-admin approvals: removing `review:admin` is the sign-off (#495)
 
 **Decided by the admin, 22 Nov 2026, in #495's grill; amends this area where the notes marked "#495"
-say so. Not built yet: #565 (the guard) blocks #566 (the bot), which blocks #567 (the stack check),
-and until the admin's steps below are done, #494's stopgap and the text it amends still apply.**
+say so. #565 built the guard (migration step 2; #494's stopgap is gone from it); #566 (the bot) and
+#567 (the stack check) follow, and until the admin's steps below are done, the text the decisions
+amend still applies where those PRs haven't changed it.**
 
 **The problem.** GitHub never counts a PR's author as its own approver or code-owner reviewer, and
 its answer for a solo maintainer is the bypass list. "Merge stack" offers no bypass (#315), and

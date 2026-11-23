@@ -6,7 +6,16 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkCodeOwned, isOwned, ownersOf, parseCodeOwners } from "../code-owned-guard.mjs";
+import {
+	ACTIONS_APP,
+	checkCodeOwned,
+	fromMain,
+	isAdminRemoval,
+	isOwned,
+	parseCodeOwners,
+	WORKFLOW,
+	writeVerdict,
+} from "../code-owned-guard.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../code-owned-guard.mjs", import.meta.url));
 // The real list, so a pattern style added there is matched the way GitHub matches it.
@@ -16,49 +25,110 @@ const RULES = parseCodeOwners(
 const HEAD = "b".repeat(40);
 const OLD = "a".repeat(40);
 
-const event = () => ({
-	repository: { full_name: "sssoto17/sunny-pastures" },
-	pull_request: { number: 337, head: { sha: HEAD } },
-});
-const review = (id, state, commit_id = HEAD, login = "sssoto17") => ({
-	id,
-	state,
-	commit_id,
-	user: { login },
-});
-
-// Stands in for REST, so each case sets only the PR state it's about; `added` records each
-// escalation (the label and its comment). A file is a name, or an entry as REST lists it.
-// The PR's author defaults to the factory App (#336), the PR the rule before #494 was written for.
-const APP = { login: "sunny-factory[bot]", type: "Bot" };
 const ADMIN = { login: "sssoto17", type: "User" };
+const FACTORY = { login: "sunny-factory[bot]", type: "Bot" };
+const ACTIONS_BOT = { login: "github-actions[bot]", type: "Bot" };
+const SOMEONE = { login: "someone", type: "User" };
+
+// An issue event on the PR's label, as `GET issues/<n>/events` lists it.
+let nextId = 100;
+const labelEvent = (event, actor, more = {}) => ({
+	id: nextId++,
+	event,
+	actor,
+	label: { name: "review:admin" },
+	created_at: "2026-11-23T12:00:00Z",
+	performed_via_github_app: null,
+	...more,
+});
+const added = (actor = FACTORY) => labelEvent("labeled", actor);
+const removed = (actor = ADMIN, more) => labelEvent("unlabeled", actor, more);
+
+// The workflow runs a check suite can belong to, as `GET actions/runs?check_suite_id=` lists them.
+const MAIN_RUN = { event: "pull_request_target", path: WORKFLOW };
+const BRANCH_RUN = { event: "pull_request", path: ".github/workflows/fake.yml" };
+
+// The run's event: by default a push (`synchronize`) of HEAD.
+const event = (more = {}, head = HEAD) => ({
+	action: "synchronize",
+	repository: { full_name: "sssoto17/sunny-pastures" },
+	pull_request: { number: 337, head: { sha: head } },
+	...more,
+});
+// The `unlabeled` event a removal fires, sent by `actor`, raised while `head` was the PR's head.
+const unlabeled = (actor = ADMIN, head = HEAD) =>
+	event({ action: "unlabeled", label: { name: "review:admin" }, sender: actor }, head);
+
+// Stands in for REST, so each case sets only the PR state it's about. `labels` is live: escalate,
+// rearm and writeRecord change it as GitHub would, and `log` records each write.
 const github = ({
-	files,
-	reviews = [],
+	files = ["CONSTRAINTS.md"],
 	labels = [],
+	events = [],
 	head = HEAD,
 	changed = files.length,
-	author = APP,
+	records = [],
+	runs = {},
+	lag = 0,
 }) => {
-	const added = [];
-	return {
-		added,
-		deps: {
-			getPull: async () => ({
-				head: { sha: head },
-				changed_files: changed,
-				labels: labels.map((name) => ({ name })),
-				user: author,
-			}),
-			listFiles: async () => files.map((f) => (typeof f === "string" ? { filename: f } : f)),
-			listReviews: async () => reviews,
-			escalate: async () => added.push("review:admin"),
+	const log = [];
+	const state = { labels: [...labels], records: [...records], runs: { ...runs }, slept: 0 };
+	let reads = 0;
+	const deps = {
+		rules: RULES,
+		getPull: async () => ({
+			head: { sha: head },
+			changed_files: changed,
+			labels: state.labels.map((name) => ({ name })),
+		}),
+		listFiles: async () => files.map((f) => (typeof f === "string" ? { filename: f } : f)),
+		// The first `lag` reads miss the last event, as a lagging REST list would.
+		listEvents: async () => (reads++ < lag ? events.slice(0, -1) : events),
+		listRecords: async (sha) => state.records.filter((r) => r.head_sha === sha),
+		runOfSuite: async (id) => state.runs[id] ?? null,
+		escalate: async () => {
+			state.labels.push("review:admin");
+			log.push("escalate");
+		},
+		rearm: async (why) => {
+			state.labels.push("review:admin");
+			log.push(`rearm: ${why}`);
+		},
+		writeRecord: async (sha, output) => {
+			// What this run's own record looks like: Actions' App, in the suite of main's run.
+			state.records.push({
+				id: 900,
+				head_sha: sha,
+				app: { id: ACTIONS_APP },
+				check_suite: { id: 9 },
+			});
+			state.runs[9] = { ...MAIN_RUN, check_suite_id: 9 };
+			log.push(`record on ${sha.slice(0, 7)}: ${output.summary}`);
+		},
+		sleep: async () => {
+			state.slept += 1;
 		},
 	};
+	return { log, state, deps };
 };
-const check = (gh) => checkCodeOwned(event(), { rules: RULES, ...gh.deps });
+const check = (gh, ev = event()) => checkCodeOwned(ev, gh.deps);
+// A run that must fail and write no sign-off record; returns the verdict.
+const refused = async (gh, ev) => {
+	const r = await check(gh, ev);
+	expect(r.ok).toBe(false);
+	expect(gh.state.records).toEqual([]);
+	return r;
+};
 
-describe("isOwned and ownersOf", () => {
+// A `code-owned / sign-off` record on `sha` in check suite `suite`, by Actions' App unless `app`.
+const record = (id, suite, sha = HEAD, app = ACTIONS_APP) => ({
+	id,
+	head_sha: sha,
+	app: { id: app },
+	check_suite: { id: suite },
+});
+
+describe("isOwned", () => {
 	// One path per pattern style in .github/CODEOWNERS.
 	it.each([
 		["/dir/, nested", ".github/workflows/ci.yml"],
@@ -75,7 +145,6 @@ describe("isOwned and ownersOf", () => {
 		["/path/name.* with a wildcard", "packages/sim/src/sim/tests/determinismScript.json"],
 	])("owns a path matched by %s", (_, path) => {
 		expect(isOwned(RULES, path)).toBe(true);
-		expect(ownersOf(RULES, path)).toEqual(["sssoto17"]);
 	});
 
 	it.each([
@@ -104,66 +173,212 @@ describe("isOwned and ownersOf", () => {
 		expect(isOwned(rules, "docs/plans/x.md")).toBe(false);
 	});
 
-	// Only a user can approve: never a bot or App (CODEOWNERS header), and a team can't be resolved.
-	it("lets only user logins approve", () => {
-		const rules = parseCodeOwners("/x  @sssoto17 @sunny-factory[bot] @org/team me@example.com\n");
-		expect(ownersOf(rules, "x")).toEqual(["sssoto17"]);
+	// Fails closed: a path owned only by a team or an email is still owned.
+	it("keeps a path owned only by a team owned", () => {
+		expect(isOwned(parseCodeOwners("/x  @org/team\n"), "x")).toBe(true);
+	});
+});
+
+describe("isAdminRemoval", () => {
+	it("is the admin's User account removing review:admin itself", () => {
+		expect(isAdminRemoval(removed(ADMIN))).toBe(true);
+		expect(isAdminRemoval(removed({ login: "SSSoto17", type: "User" }))).toBe(true);
 	});
 
-	// Fails closed: a path owned only by a team is still owned, and nobody here can approve it.
-	it("keeps a path owned only by a team owned, with no one to approve it", () => {
-		const rules = parseCodeOwners("/x  @org/team\n");
-		expect(isOwned(rules, "x")).toBe(true);
-		expect(ownersOf(rules, "x")).toEqual([]);
+	it.each([
+		["an App", FACTORY],
+		["github-actions", ACTIONS_BOT],
+		["another user", SOMEONE],
+		["a bot with the admin's login", { login: "sssoto17", type: "Bot" }],
+		["an actor with no type", { login: "sssoto17" }],
+	])("isn't a removal by %s", (_, actor) => {
+		expect(isAdminRemoval(removed(actor))).toBe(false);
+	});
+
+	it("isn't the admin's removal made through a GitHub App", () => {
+		const viaApp = removed(ADMIN, { performed_via_github_app: { slug: "claude" } });
+		expect(isAdminRemoval(viaApp)).toBe(false);
+	});
+
+	it("isn't an addition, or a removal of another label", () => {
+		expect(isAdminRemoval(added(ADMIN))).toBe(false);
+		expect(isAdminRemoval(removed(ADMIN, { label: { name: "area:ci-cd" } }))).toBe(false);
+	});
+});
+
+describe("fromMain", () => {
+	const run = (more) => ({ ...MAIN_RUN, check_suite_id: 7, ...more });
+
+	it("counts a record from main's code-owned.yml on pull_request_target", () => {
+		expect(fromMain(record(1, 7), run())).toBe(true);
+	});
+
+	it.each([
+		["a workflow on the PR's branch (pull_request)", run({ event: "pull_request" })],
+		["another workflow on pull_request_target", run({ path: ".github/workflows/review.yml" })],
+		["a push run of code-owned.yml", run({ event: "push" })],
+		["a run of another check suite", run({ check_suite_id: 8 })],
+		["no workflow run", null],
+	])("doesn't count a record from %s", (_, r) => {
+		expect(fromMain(record(1, 7), r)).toBe(false);
+	});
+
+	it("doesn't count a record another App wrote", () => {
+		expect(fromMain(record(1, 7, HEAD, 999), run())).toBe(false);
 	});
 });
 
 describe("checkCodeOwned", () => {
-	it("passes a PR that touches no code-owned path, without a label or a review", async () => {
+	it("passes a PR that isn't held: no code-owned path, never labelled", async () => {
 		const gh = github({ files: ["packages/sim/src/index.ts", "docs/plans/m4.md"] });
 		const r = await check(gh);
 		expect(r.ok).toBe(true);
 		expect(r.owned).toEqual([]);
-		expect(gh.added).toEqual([]);
+		expect(gh.log).toEqual([]);
 	});
 
-	it("holds a code-owned PR without the admin's approval, and adds review:admin", async () => {
+	it("holds a code-owned PR that never carried the label, and adds it", async () => {
 		const gh = github({ files: ["packages/sim/src/index.ts", ".github/CODEOWNERS"] });
 		const r = await check(gh);
 		expect(r.ok).toBe(false);
 		expect(r.owned).toEqual([".github/CODEOWNERS"]);
+		expect(r.head).toBe(HEAD);
+		expect(gh.log).toEqual(["escalate"]);
+	});
+
+	it("holds a held PR while the label is on, adding nothing", async () => {
+		const gh = github({ labels: ["review:admin"], events: [added()] });
+		const r = await check(gh);
+		expect(r.ok).toBe(false);
+		expect(r.message).toContain("review:admin is on");
 		expect(r.message).toContain(HEAD.slice(0, 7));
-		expect(gh.added).toEqual(["review:admin"]);
+		expect(gh.log).toEqual([]);
 	});
 
-	it("holds a PR with a team-owned path that a user's approval can't clear", async () => {
-		const rules = parseCodeOwners("/CONSTRAINTS.md  @sssoto17\n/x  @org/team\n");
-		const gh = github({ files: ["x"], reviews: [review(1, "APPROVED")] });
-		expect((await checkCodeOwned(event(), { rules, ...gh.deps })).ok).toBe(false);
-	});
-
-	it("doesn't add review:admin again when the PR has it", async () => {
-		const gh = github({ files: ["CONSTRAINTS.md"], labels: ["area:ci-cd", "review:admin"] });
-		await check(gh);
-		expect(gh.added).toEqual([]);
-	});
-
-	it("holds a PR whose only approval is of an older head", async () => {
-		const gh = github({ files: ["CONSTRAINTS.md"], reviews: [review(1, "APPROVED", OLD)] });
+	// The bot escalated a PR that touches no code-owned path: the label, not the reason, holds it.
+	it("holds a PR the bot labelled that touches no code-owned path", async () => {
+		const gh = github({ files: ["README.md"], labels: ["review:admin"], events: [added()] });
 		expect((await check(gh)).ok).toBe(false);
 	});
 
-	it("passes once the admin approves the current head, and still labels the PR", async () => {
-		const gh = github({
-			files: ["CONSTRAINTS.md"],
-			reviews: [review(1, "APPROVED", OLD), review(2, "APPROVED")],
-		});
-		const r = await check(gh);
+	it("passes once the admin's User account removes the label on the head, writing the record", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)] });
+		const r = await check(gh, unlabeled());
 		expect(r.ok).toBe(true);
-		expect(gh.added).toEqual(["review:admin"]);
+		expect(r.message).toContain("signed off");
+		expect(gh.log).toHaveLength(1);
+		expect(gh.log[0]).toMatch(/^record on bbbbbbb: Sign-off: `sssoto17` \(User\)/);
 	});
 
-	// A rename out of an owned folder changes the owned path too.
+	it("names the removal's event id and actor in the record", async () => {
+		const removal = removed(ADMIN);
+		const gh = github({ events: [added(), removal] });
+		await check(gh, unlabeled());
+		expect(gh.log[0]).toContain(`in event ${removal.id}`);
+		expect(gh.log[0]).toContain("`sssoto17`");
+		expect(gh.log[0]).toContain(HEAD);
+	});
+
+	it("fails a removal on an older head, writes no record and puts the label back", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)] });
+		const r = await refused(gh, unlabeled(ADMIN, OLD));
+		expect(gh.state.labels).toEqual(["review:admin"]);
+		expect(r.message).toContain("older head");
+	});
+
+	it.each([
+		["the factory App", FACTORY],
+		["github-actions", ACTIONS_BOT],
+		["another user", SOMEONE],
+		["a bot with the admin's login", { login: "sssoto17", type: "Bot" }],
+	])("fails a removal by %s, writes no record and puts the label back", async (_, actor) => {
+		const gh = github({ events: [added(), removed(actor)] });
+		await refused(gh, unlabeled(actor));
+		expect(gh.state.labels).toEqual(["review:admin"]);
+		expect(gh.log).toEqual([expect.stringContaining(`removed by ${actor.login}`)]);
+	});
+
+	it("fails the admin's removal made through a GitHub App", async () => {
+		const viaApp = removed(ADMIN, { performed_via_github_app: { slug: "claude" } });
+		const gh = github({ events: [added(), viaApp] });
+		const r = await check(gh, unlabeled());
+		expect(r.ok).toBe(false);
+		expect(r.message).toContain("through the App claude");
+		expect(gh.state.labels).toEqual(["review:admin"]);
+	});
+
+	it("fails a push after the sign-off and puts the label back", async () => {
+		// The sign-off's record is on OLD; HEAD, the push, has none.
+		const gh = github({
+			events: [added(), removed(ADMIN)],
+			records: [record(1, 7, OLD)],
+			runs: { 7: { ...MAIN_RUN, check_suite_id: 7 } },
+		});
+		const r = await check(gh, event());
+		expect(r.ok).toBe(false);
+		expect(gh.state.labels).toEqual(["review:admin"]);
+		expect(r.message).toContain("pushed after the sign-off");
+	});
+
+	it("keeps a PR that once carried the label held after a push, though no path is code-owned", async () => {
+		const gh = github({ files: ["README.md"], events: [added(), removed(ADMIN)] });
+		const r = await check(gh, event());
+		expect(r.ok).toBe(false);
+		expect(gh.state.labels).toEqual(["review:admin"]);
+	});
+
+	it("passes a later run on the signed-off head, from the record alone", async () => {
+		const gh = github({
+			events: [added(), removed(ADMIN)],
+			records: [record(1, 7)],
+			runs: { 7: { ...MAIN_RUN, check_suite_id: 7 } },
+		});
+		const r = await check(gh, event({ action: "labeled", label: { name: "area:ci-cd" } }));
+		expect(r.ok).toBe(true);
+		expect(gh.log).toEqual([]);
+	});
+
+	it("doesn't count a record a workflow on the PR's branch wrote", async () => {
+		const gh = github({
+			events: [added(), removed(FACTORY)],
+			records: [record(1, 7)],
+			runs: { 7: { ...BRANCH_RUN, check_suite_id: 7 } },
+		});
+		const r = await check(gh);
+		expect(r.ok).toBe(false);
+		expect(gh.state.labels).toEqual(["review:admin"]);
+	});
+
+	// An `unlabeled` run for another label, or a replayed one after the label came back, writes nothing.
+	it("writes no record when the last review:admin event is an addition", async () => {
+		const gh = github({ labels: ["review:admin"], events: [added(), removed(ADMIN), added()] });
+		expect((await refused(gh, unlabeled())).message).toContain("held");
+	});
+
+	it("writes no record on a run another label's removal fired", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)] });
+		const ev = event({ action: "unlabeled", label: { name: "area:ci-cd" }, sender: ADMIN });
+		expect((await refused(gh, ev)).message).toContain("held");
+	});
+
+	it("re-reads the events while REST hasn't listed the removal yet", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)], lag: 2 });
+		expect((await check(gh, unlabeled())).ok).toBe(true);
+		expect(gh.state.slept).toBe(2);
+	});
+
+	it("writes no record when the removal the event reports never shows in the events", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)], lag: 99 });
+		expect((await refused(gh, unlabeled())).message).toContain("held");
+	});
+
+	// The sender on the payload must be the removal the events list: a spoofed or stale payload
+	// can't borrow another actor's removal.
+	it("writes no record when the event's sender isn't the removal's actor", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)] });
+		expect((await refused(gh, unlabeled(SOMEONE))).message).toContain("held");
+	});
+
 	it("reads a rename's old path", async () => {
 		const gh = github({
 			files: [{ filename: "docs/plans/x.md", previous_filename: "docs/adr/x.md" }],
@@ -171,186 +386,60 @@ describe("checkCodeOwned", () => {
 		expect((await check(gh)).owned).toEqual(["docs/adr/x.md"]);
 	});
 
-	// What a PR could do to have the bot, or a stale review, stand in for the admin.
-	it.each([
-		// REST shows a dismissed review in place, with its state changed.
-		["the approval is dismissed", [review(1, "DISMISSED")]],
-		["a later review requests changes", [review(1, "APPROVED"), review(2, "CHANGES_REQUESTED")]],
-		["only the bot approved", [review(1, "APPROVED", HEAD, "sunny-reviewer[bot]")]],
-		["only someone who isn't a code owner approved", [review(1, "APPROVED", HEAD, "someone")]],
-	])("holds the PR when %s", async (_, reviews) => {
-		expect((await check(github({ files: ["CONSTRAINTS.md"], reviews }))).ok).toBe(false);
-	});
-
-	it("keeps an approval that a later comment follows, as GitHub does", async () => {
-		const reviews = [review(2, "COMMENTED"), review(1, "APPROVED")];
-		expect((await check(github({ files: ["CONSTRAINTS.md"], reviews }))).ok).toBe(true);
-	});
-
-	it("matches the admin's login without regard to case", async () => {
-		const reviews = [review(1, "APPROVED", HEAD, "SSSoto17")];
-		expect((await check(github({ files: ["CONSTRAINTS.md"], reviews }))).ok).toBe(true);
-	});
-
-	// The check reports on the event's head; files and reviews for a newer head can't judge it.
-	// Runs come from reviews only (#379), so the new head waits for a review of it.
-	it("holds a run whose head has moved, leaving the new head to a review of it", async () => {
-		const gh = github({ files: ["README.md"], head: OLD });
-		const r = await check(gh);
-		expect(r.ok).toBe(false);
-		expect(r.message).toContain("moved");
-		expect(r.message).toContain("a review of it");
+	it("judges the PR's live head, not the event's", async () => {
+		const gh = github({ files: ["README.md"] });
+		expect((await check(gh, event({}, OLD))).head).toBe(HEAD);
 	});
 
 	it("can't run on a file list GitHub cut short", async () => {
-		const gh = github({ files: ["README.md"], changed: 3001 });
-		await expect(check(gh)).rejects.toThrow("3001");
+		await expect(check(github({ files: ["README.md"], changed: 3001 }))).rejects.toThrow("3001");
 	});
 
 	it("can't run without a list of code-owned paths", async () => {
 		const gh = github({ files: ["README.md"] });
 		await expect(
-			checkCodeOwned(event(), { rules: parseCodeOwners("# none\n"), ...gh.deps }),
+			checkCodeOwned(event(), { ...gh.deps, rules: parseCodeOwners("# none\n") }),
 		).rejects.toThrow("CODEOWNERS");
 	});
+
+	it("can't run without a pull_request head", async () => {
+		await expect(check(github({}), { action: "opened" })).rejects.toThrow("pull_request head");
+	});
 });
 
-// #494 (admin, 22 Nov: option A): GitHub refuses a self-approval, so on a PR whose author is a code
-// owner of every code-owned path in it, the author's own latest review on the head that isn't
-// dismissed, APPROVED or COMMENTED, is the code owner's sign-off. Every other PR keeps the rule above.
-describe("checkCodeOwned on a PR a code owner opened", () => {
-	const adminPr = (reviews, more = {}) =>
-		github({ files: ["CONSTRAINTS.md"], author: ADMIN, reviews, ...more });
+describe("writeVerdict", () => {
+	const verdict = { ok: false, owned: [".github/x.yml"], head: HEAD, message: "held: x" };
+	const deps = (checks, runs) => {
+		const log = [];
+		return {
+			log,
+			listChecks: async () => checks,
+			runOfSuite: async (id) => runs[id] ?? null,
+			createCheck: async (body) => log.push(["create", body]),
+			updateCheck: async (id, body) => log.push(["update", id, body]),
+		};
+	};
 
-	it("holds it until the author has reviewed the head", async () => {
-		const gh = adminPr([]);
-		const r = await check(gh);
-		expect(r.ok).toBe(false);
-		expect(gh.added).toEqual(["review:admin"]);
-	});
-
-	it.each(["COMMENTED", "APPROVED"])(
-		"passes it once the author's %s review is on the head",
-		async (state) => {
-			const r = await check(adminPr([review(1, state)]));
-			expect(r.ok).toBe(true);
-			expect(r.message).toContain("the author");
-			expect(r.message).toContain(HEAD.slice(0, 7));
-		},
-	);
-
-	it("holds it again after a new push, until the author reviews the new head", async () => {
-		expect((await check(adminPr([review(1, "COMMENTED", OLD)]))).ok).toBe(false);
-		expect((await check(adminPr([review(1, "COMMENTED", OLD), review(2, "COMMENTED")]))).ok).toBe(
-			true,
-		);
-	});
-
-	// A review's id likely dates from its draft, so ids can disagree with the order of submission.
-	it("takes the author's last submitted review, whatever its id", async () => {
-		const at = (r, submitted_at) => ({ ...r, submitted_at });
-		const reviews = [
-			at(review(1, "COMMENTED", OLD), "2026-11-22T10:05:00Z"),
-			at(review(2, "COMMENTED"), "2026-11-22T10:00:00Z"),
-		];
-		expect((await check(adminPr(reviews))).ok).toBe(false);
-	});
-
-	it("matches the author to the code owner without regard to case", async () => {
-		const gh = adminPr([review(1, "COMMENTED", HEAD, "SSSoto17")], {
-			author: { login: "SSSoto17", type: "User" },
+	it("creates guard / code-owned on the head when main's guard hasn't written one", async () => {
+		const d = deps([record(5, 7)], { 7: { ...BRANCH_RUN, check_suite_id: 7 } });
+		await writeVerdict(verdict, d);
+		expect(d.log).toHaveLength(1);
+		const [kind, body] = d.log[0];
+		expect(kind).toBe("create");
+		expect(body).toMatchObject({
+			name: "guard / code-owned",
+			head_sha: HEAD,
+			status: "completed",
+			conclusion: "failure",
 		});
-		expect((await check(gh)).ok).toBe(true);
+		expect(body.output.summary).toContain('- ".github/x.yml"');
 	});
 
-	it.each([
-		// The author's latest review decides, so an older one on the head can't outlast a newer one.
-		[
-			"the author's latest review is of an older head",
-			[review(2, "COMMENTED", OLD), review(1, "COMMENTED")],
-		],
-		[
-			"the author's latest review requests changes",
-			[review(1, "COMMENTED"), review(2, "CHANGES_REQUESTED")],
-		],
-		[
-			"the author's only review of the head was dismissed",
-			[review(1, "COMMENTED", OLD), review(2, "DISMISSED")],
-		],
-		["only the bot commented", [review(1, "COMMENTED", HEAD, "sunny-reviewer[bot]")]],
-		["only someone who isn't a code owner commented", [review(1, "COMMENTED", HEAD, "someone")]],
-	])("holds it when %s", async (_, reviews) => {
-		expect((await check(adminPr(reviews))).ok).toBe(false);
-	});
-
-	// The author must own every code-owned path: a path someone else, or a team, owns needs them.
-	it.each([
-		["someone else", "/CONSTRAINTS.md  @sssoto17\n/x  @someone\n"],
-		["a team", "/CONSTRAINTS.md  @sssoto17\n/x  @org/team\n"],
-	])("holds it when another code-owned path belongs to %s", async (_, text) => {
-		const gh = github({
-			files: ["CONSTRAINTS.md", "x"],
-			author: ADMIN,
-			reviews: [review(1, "COMMENTED")],
-		});
-		expect((await checkCodeOwned(event(), { rules: parseCodeOwners(text), ...gh.deps })).ok).toBe(
-			false,
-		);
-	});
-
-	// The author is read from the PR as REST returns it, and only a User account can be an author
-	// whose own review counts (CODEOWNERS header: never a bot or an App).
-	it.each([
-		["the PR has no author", null],
-		["the author is a bot with the owner's login", { login: "sssoto17", type: "Bot" }],
-	])("holds it when %s", async (_, author) => {
-		expect((await check(adminPr([review(1, "COMMENTED")], { author }))).ok).toBe(false);
-	});
-});
-
-// #494, unchanged: on a PR the factory App opened, only a code owner's APPROVED review counts.
-describe("checkCodeOwned on a PR an App opened", () => {
-	it.each([
-		["the admin only commented on the head", [review(1, "COMMENTED")]],
-		[
-			"the bot approved and commented",
-			[
-				review(1, "APPROVED", HEAD, "sunny-factory[bot]"),
-				review(2, "COMMENTED", HEAD, "sunny-factory[bot]"),
-			],
-		],
-		["someone who isn't a code owner commented", [review(1, "COMMENTED", HEAD, "someone")]],
-	])("holds it when %s", async (_, reviews) => {
-		expect((await check(github({ files: ["CONSTRAINTS.md"], reviews }))).ok).toBe(false);
-	});
-
-	it("passes it on the admin's APPROVED review of the head", async () => {
-		expect(
-			(await check(github({ files: ["CONSTRAINTS.md"], reviews: [review(1, "APPROVED")] }))).ok,
-		).toBe(true);
-	});
-});
-
-// #379: the check runs on `pull_request_review` only. The review that fired the run is not the
-// verdict: the PR's reviews as REST lists them are, so every review ends in a pass or a fail.
-describe("checkCodeOwned on a review event", () => {
-	const onReview = (state, login = "sssoto17") => ({
-		...event(),
-		action: state === "dismissed" ? "dismissed" : "submitted",
-		review: { id: 1, state, commit_id: HEAD, user: { login } },
-	});
-
-	it("fails a code-owned PR on a COMMENTED review with no approval, rather than skipping", async () => {
-		const gh = github({ files: ["CONSTRAINTS.md"], reviews: [review(1, "COMMENTED")] });
-		const r = await checkCodeOwned(onReview("commented"), { rules: RULES, ...gh.deps });
-		expect(r.ok).toBe(false);
-	});
-
-	// An event delivered late, or replayed, can say "approved" after the approval was dismissed.
-	it("trusts the PR's reviews over the event's own review", async () => {
-		const gh = github({ files: ["CONSTRAINTS.md"], reviews: [review(1, "DISMISSED")] });
-		const r = await checkCodeOwned(onReview("approved"), { rules: RULES, ...gh.deps });
-		expect(r.ok).toBe(false);
+	it("updates the newest one main's guard wrote, in place", async () => {
+		const main = (id) => ({ ...MAIN_RUN, check_suite_id: id });
+		const d = deps([record(6, 8), record(5, 7)], { 7: main(7), 8: main(8) });
+		await writeVerdict({ ...verdict, ok: true }, d);
+		expect(d.log).toEqual([["update", 6, expect.objectContaining({ conclusion: "success" })]]);
 	});
 });
 
@@ -370,7 +459,9 @@ describe("code-owned-guard.mjs", () => {
 			let body = "";
 			req.on("data", (c) => (body += c));
 			req.on("end", () => {
-				seen.push(`${req.method} ${req.url}${body ? ` ${body}` : ""}`);
+				seen.push(
+					`${req.method} ${req.url.replace(/[?&]per_page=100&page=1$/, "")}${body ? ` ${body}` : ""}`,
+				);
 				const answer = routes[`${req.method} ${req.url.replace(/\?.*/, "")}`];
 				res.writeHead(answer ? 200 : 404, { "content-type": "application/json" });
 				res.end(JSON.stringify(answer ?? {}));
@@ -380,12 +471,18 @@ describe("code-owned-guard.mjs", () => {
 		return { seen, url: `http://127.0.0.1:${server.address().port}` };
 	};
 	const P = "/repos/sssoto17/sunny-pastures";
-	const routes = (files, reviews, user = APP) => ({
-		[`GET ${P}/pulls/337`]: { head: { sha: HEAD }, changed_files: files.length, labels: [], user },
+	const routes = (files, { labels = [], events = [] } = {}) => ({
+		[`GET ${P}/pulls/337`]: {
+			head: { sha: HEAD },
+			changed_files: files.length,
+			labels: labels.map((name) => ({ name })),
+		},
 		[`GET ${P}/pulls/337/files`]: files.map((filename) => ({ filename })),
-		[`GET ${P}/pulls/337/reviews`]: reviews,
+		[`GET ${P}/issues/337/events`]: events,
+		[`GET ${P}/commits/${HEAD}/check-runs`]: { total_count: 0, check_runs: [] },
 		[`POST ${P}/issues/337/labels`]: [],
 		[`POST ${P}/issues/337/comments`]: {},
+		[`POST ${P}/check-runs`]: { id: 1 },
 	});
 
 	// An async child: spawnSync would block the event loop the fake server answers on.
@@ -407,47 +504,55 @@ describe("code-owned-guard.mjs", () => {
 		const status = await new Promise((done) => child.on("close", done));
 		return { status, out };
 	};
+	const checkRunPost = (seen) =>
+		JSON.parse(seen.find((s) => s.startsWith(`POST ${P}/check-runs `)).replace(/^\S+ \S+ /, ""));
 
-	it("exits 0 for a PR with no code-owned path", async () => {
-		const api = await serve(routes(["README.md"], []));
+	it("exits 0 and writes a passing guard / code-owned for a PR that isn't held", async () => {
+		const api = await serve(routes(["README.md"]));
 		const r = await run(event(), api.url);
 		expect(r.status).toBe(0);
 		expect(r.out).toContain("code-owned: pass");
-		expect(api.seen.some((s) => s.startsWith("POST"))).toBe(false);
+		expect(checkRunPost(api.seen)).toMatchObject({
+			name: "guard / code-owned",
+			head_sha: HEAD,
+			conclusion: "success",
+		});
 	});
 
-	it("exits 1 and adds review:admin for a code-owned PR the admin hasn't approved", async () => {
-		const api = await serve(routes([".github/workflows/code-owned.yml"], []));
+	// The required check run carries the verdict; the job stays green (scripts/board-status.sh).
+	it("exits 0, adds review:admin and writes a failing check run for a code-owned PR", async () => {
+		const api = await serve(routes([".github/workflows/code-owned.yml"]));
 		const r = await run(event(), api.url);
-		expect(r.status).toBe(1);
-		expect(r.out).toContain("::error title=guard / code-owned::");
+		expect(r.status).toBe(0);
+		expect(r.out).toContain("code-owned: held");
 		expect(r.out).toContain('".github/workflows/code-owned.yml"');
 		expect(api.seen).toContain(`POST ${P}/issues/337/labels {"labels":["review:admin"]}`);
 		expect(api.seen.find((s) => s.startsWith(`POST ${P}/issues/337/comments`))).toContain(
 			"escalated: Code-owned path",
 		);
+		expect(checkRunPost(api.seen)).toMatchObject({
+			name: "guard / code-owned",
+			conclusion: "failure",
+		});
 	});
 
-	it("exits 0 once the admin approves the head", async () => {
-		const api = await serve(routes(["CONSTRAINTS.md"], [review(1, "APPROVED")]));
-		expect((await run(event(), api.url)).status).toBe(0);
+	it("writes the sign-off record on the admin's removal of the label on the head", async () => {
+		const api = await serve(routes(["CONSTRAINTS.md"], { events: [added(), removed(ADMIN)] }));
+		await run(unlabeled(), api.url);
+		const posts = api.seen.filter((s) => s.startsWith(`POST ${P}/check-runs `));
+		expect(posts[0]).toContain('"name":"code-owned / sign-off"');
+		expect(posts[0]).toContain('"conclusion":"success"');
 	});
 
-	it("exits 0 once the admin, as the PR's author, comments on the head (#494)", async () => {
-		const api = await serve(routes(["CONSTRAINTS.md"], [review(1, "COMMENTED")], ADMIN));
-		expect((await run(event(), api.url)).status).toBe(0);
-	});
-
-	it("exits 1 on the admin's comment when the factory App opened the PR", async () => {
-		const api = await serve(routes(["CONSTRAINTS.md"], [review(1, "COMMENTED")]));
-		expect((await run(event(), api.url)).status).toBe(1);
-	});
-
-	it("exits 2, never a pass, when GitHub can't be read", async () => {
-		const api = await serve({});
+	it("exits 2, never a pass, and writes a failing check run when GitHub can't be read", async () => {
+		const api = await serve({
+			[`GET ${P}/commits/${HEAD}/check-runs`]: { check_runs: [] },
+			[`POST ${P}/check-runs`]: { id: 1 },
+		});
 		const r = await run(event(), api.url);
 		expect(r.status).toBe(2);
 		expect(r.out).toContain("cannot run");
+		expect(checkRunPost(api.seen)).toMatchObject({ conclusion: "failure" });
 	});
 
 	it("exits 2, never a pass, without an event", async () => {
@@ -457,8 +562,7 @@ describe("code-owned-guard.mjs", () => {
 	});
 });
 
-// #379: a required check that a `pull_request` run and a review run both report on reads the
-// `pull_request` suite (PR #377), so the check runs on reviews only, once per review.
+// ADR-0002, area 2, "Solo-admin approvals", decisions 4 and 7.
 describe("code-owned.yml", () => {
 	const yml = readFileSync(
 		fileURLToPath(new URL("../../workflows/code-owned.yml", import.meta.url)),
@@ -467,29 +571,41 @@ describe("code-owned.yml", () => {
 	const code = yml.replace(/^\s*#.*$/gm, "");
 	const block = (key) => code.match(new RegExp(`^${key}:\\n((?:[ \\t]+.*\\n|\\n)*)`, "m"))?.[1];
 
-	it("runs on a submitted or dismissed review only", () => {
+	it("runs on pull_request_target only, for the PR's label and head changes", () => {
 		const on = block("on");
-		expect(on).toBeDefined();
-		expect(on.match(/^ {2}[\w_]+:/gm)).toEqual(["  pull_request_review:"]);
-		expect(on).toMatch(/types: \[submitted, dismissed\]/);
+		expect(on.match(/^ {2}[\w_]+:/gm)).toEqual(["  pull_request_target:"]);
+		expect(on).toMatch(/types: \[opened, synchronize, reopened, labeled, unlabeled\]/);
+		expect(code).not.toContain("pull_request_review");
 	});
 
-	// A skipped required check reads as passing (ADR-0002, #312), so a COMMENTED review would pass.
+	// A skipped required check reads as passing (ADR-0002, #312).
 	it("never skips the job", () => {
 		expect(block("jobs")).not.toMatch(/^\s+if:/m);
 	});
 
-	it("keeps one run per PR, cancelling an older one", () => {
+	// A newer pending run replaces an older pending one; a running one finishes.
+	it("runs one at a time per PR, never cancelling a running one", () => {
 		const group = block("concurrency");
 		expect(group).toMatch(/group: .*github\.event\.pull_request\.number/);
-		expect(group).toMatch(/cancel-in-progress: true/);
+		expect(code).not.toContain("cancel-in-progress");
 	});
 
-	// #337: a PR can't switch off the check that judges it or drop a path from its list.
-	it("runs the default branch's script and CODEOWNERS", () => {
-		expect(code).toContain("ref: ${{ github.event.repository.default_branch }}");
+	it("names the job code-owned (run), neither check run's name", () => {
+		expect(block("jobs")).toMatch(/^ {4}name: code-owned \(run\)$/m);
+		expect(code).not.toMatch(/name: guard \/ code-owned/);
+	});
+
+	// pull_request_target checks out the default branch; nothing may point it at the PR.
+	it("never checks out or runs the PR's code", () => {
+		expect(code).not.toMatch(/ref:/);
+		expect(code).not.toMatch(/head\.(sha|ref)|head_ref|merge_commit_sha|refs\/pull/);
 		expect(code).toContain(
-			'node "$RUNNER_TEMP/code-owned/code-owned-guard.mjs" --codeowners "$RUNNER_TEMP/code-owned/CODEOWNERS"',
+			"node .github/scripts/code-owned-guard.mjs --codeowners .github/CODEOWNERS",
 		);
+	});
+
+	it("can write check runs and read the workflow runs behind them", () => {
+		expect(block("jobs")).toMatch(/checks: write/);
+		expect(block("jobs")).toMatch(/actions: read/);
 	});
 });
