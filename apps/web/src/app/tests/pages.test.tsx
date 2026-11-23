@@ -25,4 +25,8 @@ describe("the home page", () => {
 	it("shows the game's name as its heading", () => {
 		expect(renderToStaticMarkup(<Home />)).toContain("<h1>Sunny Pastures</h1>");
 	});
+
+	it("mounts the game, which shows its loading state first", () => {
+		expect(renderToStaticMarkup(<Home />)).toContain('<p role="status">Loading your farm…</p>');
+	});
 });

@@ -13,15 +13,22 @@
 		"@sunny-pastures/sim": "workspace:*",
 		"@supabase/supabase-js": "2.119.0",
 		"drizzle-orm": "0.45.4",
+		"lucide-react": "1.73.0",
 		"next": "16.4.6",
 		"postgres": "4.1.1",
 		"react": "19.3.1",
-		"react-dom": "19.3.1"
+		"react-aria-components": "1.22.1",
+		"react-dom": "19.3.1",
+		"zustand": "5.1.0"
 	},
 	"devDependencies": {
+		"@testing-library/dom": "10.4.2",
+		"@testing-library/react": "16.3.3",
+		"@testing-library/user-event": "14.6.10",
 		"@types/node": "26.6.6",
 		"@types/react": "19.3.0",
 		"@types/react-dom": "19.3.0",
-		"drizzle-kit": "0.31.11"
+		"drizzle-kit": "0.31.11",
+		"jsdom": "31.0.1"
 	}
 }

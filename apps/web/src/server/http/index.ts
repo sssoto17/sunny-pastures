@@ -2,28 +2,10 @@ import "server-only";
 
 import type { Action } from "@sunny-pastures/sim";
 
+import type { ErrorBody, ErrorCode } from "@/contract";
+
 import { hasExactKeys, isJsonObject, isWholeNumber, readAction } from "./actions";
 import { readBodyText } from "./body";
-
-/**
- * The closed set of error codes a game API error body carries (#330, "Errors"; ADR-0007, section
- * 3). Exported so the M4 client can switch on it exhaustively.
- */
-export type ErrorCode =
-	| "bad_request"
-	| "unauthorized"
-	| "too_large"
-	| "unsupported_media_type"
-	| "refused"
-	| "rate_limited"
-	| "busy"
-	| "internal";
-
-/** The body of every game API error. */
-export interface ErrorBody {
-	readonly error: ErrorCode;
-	readonly message: string;
-}
 
 /** A checked request, or the error that refuses it. */
 export type Checked<T> =

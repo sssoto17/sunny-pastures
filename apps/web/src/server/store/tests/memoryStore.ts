@@ -1,6 +1,8 @@
 import type { Action, FarmState } from "@sunny-pastures/sim";
 
-import type { Answer, CommitResult, FarmRecord, GameStore, StoreDeps } from "../index";
+import type { Answer } from "@/contract";
+
+import type { CommitResult, FarmRecord, GameStore, StoreDeps } from "../index";
 
 /**
  * What the in-memory store is built from: the rules' `newFarm` and `replay`, as B100 takes them,

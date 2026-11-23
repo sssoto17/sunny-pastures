@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { sliceContent, stateHash, type Action } from "@sunny-pastures/sim";
 
+import type { Answer, FarmEnvelope } from "@/contract";
 import type { PlayerId } from "@/server/auth";
 import { createRules } from "@/server/rules";
-import type { Answer, GameStore } from "@/server/store";
+import type { GameStore } from "@/server/store";
 import { createMemoryStore } from "@/server/store/tests/memoryStore";
 import { createTiming } from "@/server/timing";
 import type { Timing } from "@/server/timing";
@@ -12,7 +13,6 @@ import type { Timing } from "@/server/timing";
 import {
 	loadFarm,
 	submitAction,
-	type FarmEnvelope,
 	type GameDeps,
 	type LoadResult,
 	type SubmitRequest,
