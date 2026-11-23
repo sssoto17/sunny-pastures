@@ -33,12 +33,17 @@ runner checks it and, only if it passes, pushes the branch and opens the PR as `
   to five words of the issue's title in kebab case, lowercase letters, digits and hyphens only).
   Never commit to `main`.
 - **Never** merge a PR, turn on auto-merge, submit a PR review, reply on or resolve a review thread,
-  close or edit an issue, change a label or a Project field, push a tag, force-push, or edit
-  `tests/acceptance/**` or `.github/workflows/**`. The publish job refuses a hand-off whose diff
-  touches either. If the issue needs one of these, stop (below).
+  close or edit an issue, change a label or a Project field, push a tag, force-push, edit
+  `tests/acceptance/**` (ADR-0007, MUST-15.2) or `.github/workflows/**` (the App has no workflows
+  permission), or allow a package's install or build script. The publish job refuses a hand-off
+  whose diff touches either path. If the issue needs one of these, stop (below). Every other
+  code-owned path, `.claude/` included, is allowed and held for the admin ("Admin decisions").
 - **Never print a secret.** Don't run `env` or `printenv`, read `/proc/*/environ`, or anything else
   that would echo a token.
-- **No dependencies.** Adding one needs the admin (`AGENTS.md`): if the work needs one, stop.
+- **Dependencies.** When the issue or a trusted comment names a package at an exact version, add
+  exactly that, pinned, and nothing else. A package it doesn't name is an admin decision (below).
+  `minimumReleaseAge` in `pnpm-workspace.yaml` still holds: never lower it. Never allow a package's
+  install or build script (`allowBuilds`): a package that needs one is a stop.
 - **No local Supabase stack.** Run `pnpm check:fast` and `pnpm test --project unit`, plus each test
   file you touch. The `db` and acceptance tests run in CI on the PR; say so under "How it was
   verified".
@@ -69,20 +74,22 @@ The task message names the hand-off folder (`OUT` below).
 
 An admin decision is a choice that is the admin's to make and that the issue, its trusted comments
 and the repo's docs don't settle: a design or boundary choice (a Fallow zone, where a module lives),
-or a change to a code-owned config (a path in `.github/CODEOWNERS`, such as `.fallowrc.jsonc`) that
-the criteria can't be met without. A choice that is yours to make still goes under "Concerns". It is
-not a reason to stop. For each one:
+a package the issue doesn't name, or a change to a code-owned path (in `.github/CODEOWNERS`, such as
+`.fallowrc.jsonc` or `.claude/`) that the criteria can't be met without. A choice that is yours to
+make still goes under "Concerns". It is not a reason to stop. For each one:
 
 1. Take the safest reading: the smallest change that meets the criteria and that is easiest to undo.
-   A code-owned config change is the narrowest one that works. It never weakens a check to get to
-   green (a suppression, an ignore, a lowered threshold): `CONSTRAINTS.md` still holds, and a check
-   that only passes that way is a red check (below).
+   A code-owned change is the narrowest one that works. Prefer the standard library or an existing
+   dependency to a new package; add one only if the work can't be done without it, pinned. No change
+   weakens a check to get to green (a suppression, an ignore, a lowered threshold): `CONSTRAINTS.md`
+   still holds, and a check that only passes that way is a red check (below).
 2. Finish the rest of the work as usual.
 3. In `pr-body.md`, add a section `## Decisions to approve` above "Concerns" with one item per
    decision: what you chose, the alternatives, and why this one is the safest. For a code-owned
-   config, name the file and why the criteria need the change. Set the Review line to
+   path, name the file and why the criteria need the change; for a package, its version and why
+   nothing already there will do. Set the Review line to
    `Admin review: yes (admin decision; rows: …)`, with every row of `CONSTRAINTS.md`, "Escalation
-   criteria", the PR meets (a code-owned config is the "Code-owned path" row).
+   criteria", the PR meets (a code-owned path, a package included, is the "Code-owned path" row).
 4. Add `review:admin` to `labels`. The label holds the PR: the reviewer App never approves it and it
    never auto-merges; the admin approves it.
 5. Open the PR as usual: write the hand-off and end with `FACTORY ready: <N>-<slug>`.
@@ -90,10 +97,12 @@ not a reason to stop. For each one:
 ## When to stop without a PR
 
 Stop only for what no PR can carry. Write no `branch` file and end with `FACTORY stopped: <reason>`
-when the work needs a new dependency, a change to `.github/workflows/**` or `tests/acceptance/**`
-(the publish job refuses those), or access you don't have; or when the checks stay red and you can't
-tell why. An admin decision is not on this list (above). Running out of turns or time ends the run
-with nothing published, so keep the work small and write the hand-off as soon as it passes.
+when the work needs a change to `tests/acceptance/**` or `.github/workflows/**` (the publish job
+refuses those), a package's install or build script allowed, or access you don't have; or when the
+checks stay red and you can't tell why. Nothing else is a stop: a new package and every other
+code-owned path go in a PR held for the admin ("Admin decisions", above). Running out of turns or
+time ends the run with nothing published, so keep the work small and write the hand-off as soon as
+it passes.
 
 ## Fix mode (#588)
 
@@ -128,5 +137,6 @@ changes:
   `escalated: admin decision (<what>)`, naming any row of "Escalation criteria" the PR meets as
   well. Publish refuses a comment over 300 characters: shorten `<what>` first.
 - **A finding you can't fix** because it meets a stop in "When to stop without a PR": leave it, and
-  fix the rest. End with one line: `FACTORY fixed: PR #P`, or `FACTORY stopped: <reason>` when you
-  fixed nothing.
+  fix the rest. A finding that needs a package or a code-owned path isn't one: it is an admin
+  decision (above). End with one line: `FACTORY fixed: PR #P`, or `FACTORY stopped: <reason>` when
+  you fixed nothing.
