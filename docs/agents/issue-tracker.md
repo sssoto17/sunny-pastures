@@ -139,7 +139,7 @@ one repo milestone (`M1 Persistence spike` … `M9 Hand-in`; list them with
 - **Add to the Project and set its fields**: one command, with names, not ids:
 
   ```bash
-  scripts/issue-fields.sh 47 --type Chore --track Infra --mode Manual --size S --priority P2 --week "Wk 2"
+  scripts/issue-fields.sh 47 --type Chore --size S --priority P2 --week "Wk 2"
   ```
 
   It adds the issue to the Project if it's missing, sets each field you name, then reads the item
@@ -154,13 +154,14 @@ one repo milestone (`M1 Persistence spike` … `M9 Hand-in`; list them with
     alone unless you pass `--status`, so fixing a field never undoes the admin's move to Ready.
     `--status Backlog` moves an issue back, as the **Any → Backlog** move in **Status rules**
     allows. Decided by the admin on 7 Nov (#56).
-  - **Admin-only values are refused**: `--status Ready` (see **Status rules**) and `--mode Factory`
-    (it goes with `factory:ready`, see `triage-labels.md`).
+  - **Admin-only values are refused**: `--status Ready` (see **Status rules**).
   - **`--from` makes a guarded move** (#417), the form the board workflow uses (**Status rules**):
     `--status "In review" --from "Ready,In progress"` sets Status alone, and only when the issue is
     on the Project and its Status is now one of the `--from` names. Otherwise it changes nothing,
     says why and exits 0. It never adds the issue to the Project, never removes `triage`, takes no
-    other field, and refuses Backlog in `--from`, so it never moves an issue out of Backlog.
+    other field, and refuses Backlog in `--from`, so it never moves an issue out of Backlog. (The
+    board moves a factory issue out of Backlog with the plain `--status` form instead: **Status
+    rules**, "Factory issues".)
   - **`PROJECT_GH_TOKEN`**, when set, is the token for the Project's calls only; the issue's calls
     keep `gh`'s own. The board workflow keeps its Project token off the repo's endpoints that way.
   - **`--type`** sets GitHub's native issue type (Chore, Bug, Feature, Design) on the issue itself.
@@ -177,18 +178,17 @@ REST Projects API numbers its fields instead: `gh api users/sssoto17/projectsV2/
 | Field  | Field id                         | Options (name = option id)                                                                 |
 | ------ | -------------------------------- | ------------------------------------------------------------------------------------------ |
 | Status | `PVTSSF_lAHOCI1msM4BqXYMzhou1Sw` | Backlog=`97a20eba` Ready=`eb23e874` In progress=`03b81b61` In review=`e763de54` Done=`04fb4a2b` |
-| Track  | `PVTSSF_lAHOCI1msM4BqXYMzhou1gg` | Build=`60e95dc9` Design=`df832856` Report=`d064f0c0` Infra=`3200c1d7` Evaluation=`145afb58` |
-| Mode   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g0` | Manual=`ca9bd7b8` Factory=`f92520e5`                                                       |
 | Size   | `PVTSSF_lAHOCI1msM4BqXYMzhou1g4` | S=`7a7f9f73` M=`e0e2efb6` L=`c7dede81`                                                     |
 | Priority | `PVTSSF_lAHOCI1msM4BqXYMzhowjRE` | P0=`598fd74b` P1=`ad39d061` P2=`a38a49d8` P3=`cad16246`                                  |
 | Week   | `PVTIF_lAHOCI1msM4BqXYMzhou1aQ`  | iteration ids: `gh api users/sssoto17/projectsV2/3/fields --jq '.[] \| select(.name == "Week") \| .configuration.iterations[] \| [.id, .title.raw, .start_date] \| @tsv'` |
 
 When a skill publishes tickets, make each one a sub-issue of its workstream parent (see
-**Grouping**), give it a milestone, add it to the Project and set the native type, Track, Mode,
-Size, Priority and Week (all with `scripts/issue-fields.sh`), and add one type and one area label
-(see `triage-labels.md`). The type, Size, Priority and Week are the skill's proposal (see **Issue
-fields**). Mode is `Manual` unless the ticket carries `factory:ready`. Status is always `Backlog`:
-only the admin moves an issue to `Ready` (see **Status rules**).
+**Grouping**), give it a milestone, add it to the Project and set the native type, Size, Priority
+and Week (all with `scripts/issue-fields.sh`), and add one type and one area label (see
+`triage-labels.md`). The type, Size, Priority and Week are the skill's proposal (see **Issue
+fields**). Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status
+rules**). A skill never adds `factory:ready`: only the admin does (**Status rules**,
+"`factory:ready`").
 
 ## Issue fields
 
@@ -197,7 +197,7 @@ Every issue carries four values: GitHub's native **issue type**, and the Project
 
 - **The filer proposes, the admin confirms.** The agent that files an issue sets all four when
   filing; they're its proposal. The issue lands in Backlog, and the admin confirms or changes them
-  when moving it to Ready, which only the admin does (**Status rules**).
+  when moving it to Ready or adding `factory:ready`, which only the admin does (**Status rules**).
 - **`triage` while one is missing.** An issue missing any of the four carries `triage` until all
   four are set. `scripts/new-issue.sh` adds it when one isn't given, and `scripts/issue-fields.sh`
   removes it once all four are set.
@@ -229,10 +229,9 @@ Every issue sits under a workstream parent (the admin's rule of 7 Nov, recorded 
 by #76). The milestone still gives each ticket its due date; the parent groups tickets by goal.
 
 - **The parent** is an issue named for the workstream's goal, with no milestone prefix (for example
-  #72 "Sim properties", #58 "CI/CD pipeline"). It's in a milestone and on the Project with Track and
-  Mode set, carries the four fields every issue does (**Issue fields**), and has one type and one
-  area label. Its body states the goal and an "Acceptance criteria" list, and links the ADRs and PRs
-  it rests on.
+  #72 "Sim properties", #58 "CI/CD pipeline"). It's in a milestone and on the Project, carries the
+  four fields every issue does (**Issue fields**), and has one type and one area label. Its body
+  states the goal and an "Acceptance criteria" list, and links the ADRs and PRs it rests on.
 - **It may span milestones**: its tickets keep their own milestones (#58 sits in M4 and has tickets
   in M2, M3 and M4).
 - **Its tickets are its sub-issues** (see **Make an issue a sub-issue of a parent**). A new ticket
@@ -298,9 +297,9 @@ moves an issue to Ready; skills and agents create issues in Backlog and never pr
 The admin may move an issue **Backlog → Ready** only when it is chosen _and_ every one of these
 holds (the definition of ready):
 
-1. **Fields set**: milestone, native issue type, Track, Mode, Size, Priority and Week, plus one type
-   and one area label (`triage-labels.md`). The admin confirms the filer's type, Priority, Size and
-   Week here (**Issue fields**).
+1. **Fields set**: milestone, native issue type, Size, Priority and Week, plus one type and one area
+   label (`triage-labels.md`). The admin confirms the filer's type, Priority, Size and Week here
+   (**Issue fields**).
 2. **Checkable outcome**: the body states the goal and an "Acceptance criteria" list that a reviewer
    can verify (a test, a command, a file, a number).
 3. **Fits one session**: Size is S or M. An L is split into smaller issues first.
@@ -329,36 +328,77 @@ its body meets rules 2–6.
 An issue that meets all six but isn't chosen stays in Backlog. When its last blocker closes, nothing
 moves automatically: whether it becomes the focus is the admin's call.
 
-**`factory:ready`** is also the admin's choice, to delegate rather than work it. The factory only
-picks up issues that are in Ready _and_ carry `factory:ready`, and the label additionally requires
-all of:
+**`factory:ready`** is the admin's choice to delegate an issue rather than work it, and it is the
+factory's only gate (admin, 23 Nov 2026, #619).
 
-- no step needs the admin (no secrets, dashboards or manual setup);
-- it doesn't touch protected paths: `tests/acceptance/`, `.github/`, config files, `AGENTS.md`,
-  `CONSTRAINTS.md`;
-- every item under "Acceptance criteria" is verified by CI alone.
+- **Only the admin adds it**, or the coordinator with the admin's go-ahead for that issue. A filer
+  never does, and `scripts/new-issue.sh` refuses `--label factory:ready`.
+- **What the factory checks**: the issue is open, carries `factory:ready`, has no open native
+  blocker (**Blocking** above) and no `blocked:*` label. (The sweep and the gate also check that the
+  owner or a collaborator opened it and that it has no `<N>-` PR or branch yet.) It doesn't read the
+  Status: an issue in Backlog qualifies as well as one in Ready, so the admin can label a whole
+  chain at once and the factory works it in blocker order, highest Priority first. Size, Priority
+  and Week are set as on any issue (**Issue fields**).
+- **What the admin checks before labelling**: the issue meets the definition of ready above, rules
+  1–3, 5 and 6. Rule 4 (unblocked) is the one it may break: the factory waits for the blockers.
+- **The hard limits.** The factory stops without a PR when the work needs a change to
+  `tests/acceptance/**` or `.github/workflows/**`, a package's install or build script allowed, or
+  access the run doesn't have (a secret, a dashboard, a manual step). An issue that needs one of
+  these isn't given `factory:ready`.
+- **Everything else is held, not refused.** A change to any other code-owned path
+  (`.github/CODEOWNERS`, `.claude/` included) is allowed, and the PR is opened with `review:admin`
+  so it waits for the admin. A new package dependency escalates the same way: a package the issue
+  names at an exact version is added exactly that, pinned; one it doesn't name is an admin decision,
+  added pinned and held. The factory's rules are `.github/factory-prompt.md` ("Admin decisions",
+  "When to stop without a PR").
+- **Escalation stays on the PR.** `review:admin` is a PR label only; an issue that needs the admin
+  carries `blocked:admin` (`triage-labels.md`).
+
+Where the issue goes from there (`factory:working`, `factory:review`, `factory:failed`), how a
+failed run is retried, and how a lane takes over a factory issue: `triage-labels.md`, **Factory and
+reserved prefixes**. The Status follows that label ("Factory issues", below).
 
 **The other moves.** The board moves itself (#417): nobody runs a script for the rows marked
 _automatic_. The workflow `.github/workflows/board.yml` does the In progress and In review rows,
 through `scripts/board-status.sh` and `scripts/issue-fields.sh --from`; the Project's built-in "Item
 closed" and "Pull request merged" workflows do Done. The automation never sets Ready, never moves an
-issue out of Backlog, never sets Mode, and leaves an issue that isn't on the Project alone. Only the
-PR that closes the issue moves it, so the `Part of #N` parts of a split or stack don't: on `main`,
-the issues GitHub records the PR as closing; on another base (a stack's closing part, for which
-GitHub records none until it sits on `main`), the body's closing keyword, which `guard / pr-body`
-allows only on the closing part. A lane PR opens as a draft and is marked ready once linked (#358):
-it's In progress as a draft, and In review once ready and green: the CI run that the ready mark
-starts decides, not the mark itself. A finished check moves an issue only when the PR's checks turn
-green or red; the PR's own events (opened, ready, draft, closed) do the rest.
+issue out of Backlog (factory issues aside, below), and leaves an issue that isn't on the Project
+alone. Only the PR that closes the issue moves it, so the `Part of #N` parts of a split or stack
+don't: on `main`, the issues GitHub records the PR as closing; on another base (a stack's closing
+part, for which GitHub records none until it sits on `main`), the body's closing keyword, which
+`guard / pr-body` allows only on the closing part. A lane PR opens as a draft and is marked ready
+once linked (#358): it's In progress as a draft, and In review once ready and green: the CI run that
+the ready mark starts decides, not the mark itself. A finished check moves an issue only when the
+PR's checks turn green or red; the PR's own events (opened, ready, draft, closed) do the rest.
 
 <!-- prettier-ignore -->
 | Move                     | When                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------- |
-| Ready → In progress      | _Automatic._ Work starts: a branch named `<N>-<slug>` is created, or a PR with `Closes #N` opens. The admin is assigned (manual), or the factory claims it (factory). |
+| Ready → In progress      | _Automatic._ Work starts: a branch named `<N>-<slug>` is created, or a PR with `Closes #N` opens. The admin is assigned (manual), or the sweep sets `factory:working` (factory, below). |
 | In progress → In review  | _Automatic._ A PR with `Closes #N` is open, not a draft, and its checks are green. Green means every check passes apart from `guard / code-owned`, which stays red on a code-owned PR until the admin approves its head, or reviews it on a PR the admin opened (admin, 21 Nov, on #417; #494). A check still running, cancelled or stale isn't green yet: a re-run decides it. A draft stays In progress until it's marked ready. |
 | In review → In progress  | _Automatic._ That PR's checks go red, it turns back into a draft, or it closes unmerged. |
 | In review → Done         | _Automatic._ The PR merged (the issue closes, and the Project's built-in workflow moves it). |
 | Any → Backlog            | It turns out not ready (add the `blocked:*` label that says why, or split it), or the admin drops it from the current focus. |
+
+**Factory issues** (admin, 23 Nov 2026, #620). For an issue the factory works, the Status mirrors
+its `factory:*` label: `.github/workflows/board.yml` runs on each `factory:*` label added or removed
+and sets it through `scripts/board-status.sh`.
+
+<!-- prettier-ignore -->
+| Label             | Status                                                    |
+| ----------------- | --------------------------------------------------------- |
+| `factory:ready`   | Unchanged: the label alone moves nothing                  |
+| `factory:working` | In progress                                               |
+| `factory:review`  | In review                                                 |
+| `factory:failed`  | In progress                                               |
+| (issue closed)    | Done, by the Project's built-in workflow, as for any issue |
+
+This is the one exception to "never out of Backlog": an issue carrying `factory:working`,
+`factory:review` or `factory:failed` leaves Backlog for the Status its label gives, unless it still
+carries `triage`. Every other issue, `factory:ready` included, keeps the rules above. The move reads
+the labels when it runs, so two at once (which the factory never leaves) moves nothing, and removing
+the last `factory:*` label leaves the Status where it is. The PR-driven rows above still apply to
+the factory's PR as they do to a lane's.
 
 **The coordinator only fixes a wrong status.** It no longer moves issues as PRs open and merge. When
 the board shows a status the rows above don't explain (a move the workflow missed, or a run that
