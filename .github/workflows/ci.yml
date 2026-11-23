@@ -197,7 +197,8 @@ jobs:
       # main red.
       # Without the stack only the `unit` and `ui` projects run (`ui` needs no stack; #594), and the
       # gate skips the whole-project ratchet, since the untested store files would read 0% (as
-      # `check:task` does). The changed-line floors apply either way. The decision is this step, not a skip in a test.
+      # `check:task` does). The changed-line floors apply either way.
+      # The decision is this step, not a skip in a test.
       - name: Choose the Vitest projects
         id: projects
         run: |
