@@ -9,8 +9,7 @@ Project field (Status, Size, Priority, Week) stays a field and never becomes a l
 ## Naming and colours
 
 - A **type** is a bare label with its own colour.
-- Every other label is `prefix:value`, and all labels with one prefix share one colour, except the
-  four `factory:*` states, which #619 created with a colour each (23 Nov 2026).
+- Every other label is `prefix:value`, and all labels with one prefix share one colour.
 - No new prefix without the admin.
 
 <!-- prettier-ignore -->
@@ -25,10 +24,7 @@ Project field (Status, Size, Priority, Week) stays a field and never becomes a l
 | `area:*` | `#1D76DB` |
 | `triage` | `#FBCA04` |
 | `blocked:*` | `#B60205` |
-| `factory:ready` | `#D93F0B` |
-| `factory:working` | `#FBCA04` |
-| `factory:review` | `#1D76DB` |
-| `factory:failed` | `#B60205` |
+| `factory:*` | `#D93F0B` |
 | `wayfinder:*` | `#5319E7` |
 | `review:*` | `#C5DEF5` |
 
@@ -145,7 +141,8 @@ moves it from one to the next with its own token, removing the old label before 
 - **On close** every `factory:*` label goes: the next sweep's reconcile removes it (only while the
   factory is switched on). The Status goes to Done like any issue's.
 - **Retry** is the admin replacing `factory:failed` with `factory:ready`. Remove `factory:failed`
-  when adding `factory:ready`: with both on, the reconcile keeps `factory:failed`.
+  when adding `factory:ready`: with both on, the reconcile keeps `factory:failed`. #628 will make
+  adding `factory:ready` alone a retry.
 - **`factory:failed` gets no `blocked:*` label.** The comment says why the run failed; the admin
   fixes the issue (or not) and relabels it. A `blocked:*` label is for an issue that can't be picked
   up yet, and it gates pickup whatever the `factory:*` label.
