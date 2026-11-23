@@ -36,14 +36,17 @@ runner checks it and, only if it passes, pushes the branch and opens the PR as `
   close or edit an issue, change a label or a Project field, push a tag, force-push, edit
   `tests/acceptance/**` (ADR-0007, MUST-15.2) or `.github/workflows/**` (the App has no workflows
   permission), or allow a package's install or build script. The publish job refuses a hand-off
-  whose diff touches either path. If the issue needs one of these, stop (below). Every other
-  code-owned path, `.claude/` included, is allowed and held for the admin ("Admin decisions").
+  whose diff touches either path, and your token can't do the rest. If the issue needs one of these,
+  stop (below). Every other code-owned path, `.claude/` included, is allowed and held for the admin
+  ("Admin decisions").
 - **Never print a secret.** Don't run `env` or `printenv`, read `/proc/*/environ`, or anything else
   that would echo a token.
 - **Dependencies.** When the issue or a trusted comment names a package at an exact version, add
-  exactly that, pinned, and nothing else. A package it doesn't name is an admin decision (below).
-  `minimumReleaseAge` in `pnpm-workspace.yaml` still holds: never lower it. Never allow a package's
-  install or build script (`allowBuilds`): a package that needs one is a stop.
+  exactly that, pinned, and nothing else; it touches `package.json`, so it is still the "Code-owned
+  path" row and needs `review:admin`. A package they don't name at an exact version is an admin
+  decision (below): the held PR is how you ask (`AGENTS.md`). `minimumReleaseAge` in
+  `pnpm-workspace.yaml` still holds: never lower it. Never allow a package's install or build script
+  (`allowBuilds`): a package that needs one is a stop.
 - **No local Supabase stack.** Run `pnpm check:fast` and `pnpm test --project unit`, plus each test
   file you touch. The `db` and acceptance tests run in CI on the PR; say so under "How it was
   verified".
@@ -74,9 +77,10 @@ The task message names the hand-off folder (`OUT` below).
 
 An admin decision is a choice that is the admin's to make and that the issue, its trusted comments
 and the repo's docs don't settle: a design or boundary choice (a Fallow zone, where a module lives),
-a package the issue doesn't name, or a change to a code-owned path (in `.github/CODEOWNERS`, such as
-`.fallowrc.jsonc` or `.claude/`) that the criteria can't be met without. A choice that is yours to
-make still goes under "Concerns". It is not a reason to stop. For each one:
+a package the issue and its trusted comments don't name at an exact version, or a change to a
+code-owned path (in `.github/CODEOWNERS`, such as `.fallowrc.jsonc` or `.claude/`) that the criteria
+can't be met without. A choice that is yours to make still goes under "Concerns". It is not a reason
+to stop. For each one:
 
 1. Take the safest reading: the smallest change that meets the criteria and that is easiest to undo.
    A code-owned change is the narrowest one that works. Prefer the standard library or an existing
@@ -98,8 +102,8 @@ make still goes under "Concerns". It is not a reason to stop. For each one:
 
 Stop only for what no PR can carry. Write no `branch` file and end with `FACTORY stopped: <reason>`
 when the work needs a change to `tests/acceptance/**` or `.github/workflows/**` (the publish job
-refuses those), a package's install or build script allowed, or access you don't have; or when the
-checks stay red and you can't tell why. Nothing else is a stop: a new package and every other
+refuses those), a package's install or build script to be allowed, or access you don't have; or when
+the checks stay red and you can't tell why. Nothing else is a stop: a new package and every other
 code-owned path go in a PR held for the admin ("Admin decisions", above). Running out of turns or
 time ends the run with nothing published, so keep the work small and write the hand-off as soon as
 it passes.
@@ -137,6 +141,6 @@ changes:
   `escalated: admin decision (<what>)`, naming any row of "Escalation criteria" the PR meets as
   well. Publish refuses a comment over 300 characters: shorten `<what>` first.
 - **A finding you can't fix** because it meets a stop in "When to stop without a PR": leave it, and
-  fix the rest. A finding that needs a package or a code-owned path isn't one: it is an admin
-  decision (above). End with one line: `FACTORY fixed: PR #P`, or `FACTORY stopped: <reason>` when
-  you fixed nothing.
+  fix the rest. A finding that needs a package or any other code-owned path isn't one: it is an
+  admin decision (above). End with one line: `FACTORY fixed: PR #P`, or `FACTORY stopped: <reason>`
+  when you fixed nothing.
