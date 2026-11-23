@@ -1110,9 +1110,11 @@ seat's usage, apply to these runs too. A billed API key is the fallback, only if
 necessary, for example if the employer's policy ever rules this out. The factory and the reviewer
 share the seat's weekly limit with the admin's paid work, hence the caps below.
 
-**How a factory job starts (decided 8 Nov).** The factory is a `workflow_dispatch` workflow that
-takes an issue number. It refuses an issue that lacks `factory:ready` or isn't in Ready. Three
-things dispatch it:
+**How a factory job starts (decided 8 Nov; historical).** This paragraph and its list record the 8
+Nov plan. Since #619 (admin, 23 Nov 2026) `factory:ready` is the only gate, and neither the gate nor
+the sweep reads Ready or Mode: see "The factory workflow, built" and "The factory sweep, built"
+below. The factory is a `workflow_dispatch` workflow that takes an issue number. The plan had it
+refuse an issue that lacks `factory:ready` or isn't in Ready. Three things dispatch it:
 
 - **a scheduled sweep** at 07:00, 12:00 and 17:00 CET. It dispatches **one** item that is Ready, has
   Mode Factory and carries `factory:ready`, and has no open PR or branch yet, and none while a
@@ -1177,8 +1179,9 @@ cancelling a running job), and `GITHUB_TOKEN` read-only in every job.
 **Ready and Mode (admin, 21 Nov 2026, option b).** The workflow doesn't read the Project: no Actions
 token can read this user-owned board (#102). `factory:ready` stands for Mode Factory, which
 `triage-labels.md` keeps in step with it, and the admin's manual dispatch stands for Ready. Only the
-admin and collaborators can set labels. The sweep (#108, below) reads Ready and Mode from the board
-before it dispatches, since its dispatch isn't the admin's choice.
+admin and collaborators can set labels. The sweep (#108, below) read Ready and Mode from the board
+before it dispatched; since #619 (admin, 23 Nov 2026) `factory:ready` is the factory's only gate,
+and neither the sweep nor the gate reads Status, Mode or Track.
 
 1. **`switch`** calls `factory-switch.yml`, exactly as its header shows. With the switch off the run
    logs `SWITCH off` and stops; that is how the workflow is tested without turning the factory on.
@@ -1187,7 +1190,9 @@ before it dispatches, since its dispatch isn't the admin's choice.
    branches, and `.github/scripts/factory-gate.sh` refuses (`GATE refused: …`) unless the input is
    an issue number and the issue exists, is open, isn't a PR, was opened by the owner or a
    collaborator (`author_association`: the repo is public, and an issue's author can edit its body
-   after it is labelled), carries `factory:ready`, and has no open PR and no `<n>-` branch yet (one
+   after it is labelled), carries `factory:ready` (or `factory:working`, which the sweep sets just
+   before it dispatches; #619), has no `blocked:*` label and no open native blocker (read from
+   `GET …/issues/{n}/dependencies/blocked_by`), and has no open PR and no `<n>-` branch yet (one
    factory branch per issue).
 3. **`factory`** (`timeout-minutes: 60`; environment `claude-seat`, which holds only
    `CLAUDE_CODE_OAUTH_TOKEN`) checks out `main` and installs. It runs the gate again on a fresh
@@ -1209,7 +1214,12 @@ before it dispatches, since its dispatch isn't the admin's choice.
    (`contents: write` to push and to send `open-pr`'s dispatch, `pull-requests: read`), push the
    branch with hooks off, and run `scripts/open-pr.sh`, so `open-pr.yml` opens the PR as
    `sunny-factory[bot]`. The PR's author and every commit's author and committer are the App.
-5. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
+5. **`labels`** (`if: !cancelled()`, #619; a run the admin cancels leaves its label for the sweep's
+   reconcile) moves the issue's `factory:*` label (below, "The factory sweep, built") on a fresh
+   runner in environment `factory`, with an App token minted with `issues: write` only:
+   `factory:review` when publish opened a PR or a fix round ran, `factory:failed` and one comment
+   when the run opened none.
+6. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
    rounds each job up) and their sum, and the PR.
 
 **Caps.** `--max-turns` doesn't count the turns of `Task` subagents, so the 55-minute step timeout
@@ -1233,9 +1243,11 @@ dispatches (it would hold the Project token and `actions: write` together).
   behind it sees that run.
 - **Credentials (admin, 22 Nov 2026; #102 closed as moot):** `select` enters environment `board`
   (main only) for `BOARD_PROJECT_TOKEN`, used on the Project's calls only (`PROJECT_GH_TOKEN`, as
-  `board.yml`'s `move` does), REST only; the read-only `GITHUB_TOKEN` reads the runs, issues, PRs
-  and branches. `dispatch` alone has `actions: write`, and `GITHUB_TOKEN` dispatches `factory.yml`
-  on `main`: a `workflow_dispatch` is one of the two events a `GITHUB_TOKEN` may start a run with
+  `board.yml`'s `move` does), REST only, for Priority and board order; the read-only `GITHUB_TOKEN`
+  reads the runs, issues, PRs and branches. `labels` (#619) enters environment `factory` and mints
+  the App's token with `issues: write` alone, to write the label moves before `dispatch` runs.
+  `dispatch` alone has `actions: write`, and `GITHUB_TOKEN` dispatches `factory.yml` on `main`: a
+  `workflow_dispatch` is one of the two events a `GITHUB_TOKEN` may start a run with
   ([triggering a workflow from a workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)).
   That makes the factory run's actor `github-actions[bot]`, so `factory.yml`'s Claude step names
   exactly `github-actions` in `allowed_bots` (#582: run 45075597193 failed at the action's actor
@@ -1249,21 +1261,51 @@ dispatches (it would hold the Project token and `actions: write` together).
   (default 4 when unset; a value that isn't a whole number dispatches nothing). It is backpressure
   on the review queue, and works the same before and after auto-merge: a PR that merges lowers the
   count and the chain goes on (admin, 22 Nov 2026, replacing a per-day run cap). Then the eligible
-  issues: on the board in this repo, Status Ready, Mode Factory or not set, open, carrying
-  `factory:ready`, opened by the owner or a collaborator, with no open PR from a `<n>-` branch and
-  no `<n>-` branch (the gate's rules, so the sweep doesn't dispatch what the gate would refuse).
-- **A run that opens no PR** doesn't raise the count, so the loop could re-dispatch one issue for
-  ever. The sweep skips an issue whose newest factory run (by its `run-name`, `factory #<n>`)
-  finished after the issue's `updated_at`, and only if that run ran Claude: its `factory` job's
-  "Claude ran" step succeeded, which needs an execution file or the action's prompt file, written
-  once its checks pass. A run that failed before Claude ran (an actor check, a runner or install
-  failure) did no work and doesn't count (#582). Updating the issue retries it (admin, 22 Nov 2026).
-  It compares with the run's finish, so an update while the run is going doesn't retry it, and a
-  comment by anyone but the owner or a collaborator doesn't count (the repo is public, and any
-  comment moves `updated_at`), read from the comments updated since the oldest run it lists.
+  issues (admin, 23 Nov 2026, #619: `factory:ready` is the only gate): open, at `factory:ready`
+  after the reconcile (below), opened by the owner or a collaborator, with no `blocked:*` label, no
+  open native blocker (`GET …/issues/{n}/dependencies/blocked_by`), no open PR from a `<n>-` branch
+  and no `<n>-` branch (the gate's rules, so the sweep doesn't dispatch what the gate would refuse).
+  Status, Mode and Track aren't read: Backlog, Ready, In progress or In review all qualify, so the
+  admin can label a whole chain at once and the factory walks it in blocker order.
+- **The `factory:*` states (#619).** An issue carries at most one: `factory:ready` (the admin's
+  "take this"; only the admin sets it), `factory:working` (a run is going), `factory:review` (a PR
+  is waiting), `factory:failed` (the last run ended without a PR, or its PR closed unmerged). Each
+  transition is written with the App's token by one script, `.github/scripts/factory-label.sh`,
+  which removes the other `factory:*` labels before adding the new one: `sweep.yml`'s `labels` job
+  sets `factory:working` on what it dispatches (a fix round's issue too, read from its PR's `<n>-`
+  branch), before the dispatch; `factory.yml`'s `labels` job (`factory-outcome.sh`) sets
+  `factory:review` once publish opened the PR or a fix round ran, and `factory:failed` with one
+  comment when a run that passed the gate opened none: the run's link and the factory job's last
+  `RESULT claude=`, `RESULT handoff=` and `RESULT factory=` lines (Claude's `FACTORY …` reason,
+  #615), read from that job's log, backticks dropped, in a code block so the model's words can't
+  format, link or mention. A gate refusal moves only an issue at `factory:working` to
+  `factory:failed`, with the gate's reason; an issue the admin dispatched keeps its label. Retry is
+  the admin replacing `factory:failed` with `factory:ready`. `review:admin` stays on PRs only. This
+  replaces the rule that skipped an issue whose last run ran Claude and opened no PR until the issue
+  was edited (`claude_ran`, #582): a run that opens no PR can't loop, since its issue leaves
+  `factory:ready`. Pattern: a state machine kept in labels, with one transition function shared by
+  both workflows, and drift repaired by a reconcile, as a controller reconciles desired with
+  observed state. Alternatives considered: deriving the state from runs and PRs on every sweep with
+  no labels (stateless like the fix-round guard, but invisible on the issue and the board, which is
+  the point of the labels); writing each label inline in each job (four copies of the
+  one-label-at-a-time rule to drift apart); `GITHUB_TOKEN` with `issues: write` (a second writing
+  identity, which "The factory App's permissions" rules out).
+- **The reconcile (#619)**, in `factory-sweep.mjs` before any choice, from what the gather read
+  (every issue under each `factory:*` label, open or closed, the newest 100 factory runs, the open
+  PRs, and the newest 100 closed PRs by `sunny-factory[bot]`): a closed issue loses every
+  `factory:*` label; an issue with several keeps the most advanced (`failed` over `review` over
+  `working` over `ready`); `factory:working` with no live run (`factory #<n>`, or a fix round on its
+  `<n>-` PR) goes to `factory:review` when an open `<n>-` PR exists, else to `factory:failed` ("run
+  vanished"); `factory:review` with no open `<n>-` PR goes to `factory:failed` ("PR #x closed
+  unmerged") when its newest closed one there closed unmerged; with none found it is left alone,
+  since a merged PR past the newest 100 isn't read. The choice reads the labels as reconciled; the
+  moves are written by the same `labels` job. A move into `factory:failed` comments its reason, as a
+  run's does. Each move is one `LABELS #<n> <from> -> <to> (<why>)` line in `select`'s log and the
+  job summary, and one `LABEL #<n>: …` line where it is written.
 - **Order:** Priority (P0 first, unset last), then board order, read as the order the REST items
-  list returns. `/today`'s agreed order isn't wired to the sweep yet: the sweep has no input for it,
-  and the admin steers by Priority and by what is Ready with `factory:ready`.
+  list returns; an issue not on the board comes last, by number. `/today`'s agreed order isn't wired
+  to the sweep yet: the sweep has no input for it, and the admin steers by Priority, by which issues
+  carry `factory:ready` and by their blockers.
 - **The chaining limit:** `workflow_run` doesn't chain more than three levels of workflows. Whether
   a `workflow_dispatch` between the sweep and the factory resets that count is **unproven**: not
   tested here, and the docs say nothing on it. A factory run that the sweep's `GITHUB_TOKEN`
