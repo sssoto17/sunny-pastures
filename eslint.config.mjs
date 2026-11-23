@@ -337,6 +337,24 @@ export default defineConfig(
 		},
 	},
 	{
+		// Inside `db.transaction(async (tx) => …)` every query goes through `tx` (#28): a query on the
+		// outer client runs on another connection, outside the transaction, and postgres.js 3.x
+		// raised UNSAFE_TRANSACTION under a saturated pool (#327). A later block's options replace an
+		// earlier block's, so the floor's selectors are repeated.
+		files: ["apps/web/src/server/**/*.ts"],
+		rules: {
+			"no-restricted-syntax": [
+				"error",
+				...FLOOR_SYNTAX,
+				{
+					selector: `CallExpression[callee.property.name='transaction'] :function Identifier[name=/^(db|\\$client)$/]:not(MemberExpression[computed=false] > Identifier.property, Property[computed=false] > Identifier.key)`,
+					message:
+						"Inside a transaction, query through the transaction handle, never the outer db or $client (#28, #327).",
+				},
+			],
+		},
+	},
+	{
 		// React components are PascalCase functions (ADR-0005, C9; #342). A later block's options
 		// replace an earlier block's, so the list is repeated with that one entry added.
 		files: ["apps/web/src/**/*.tsx"],
