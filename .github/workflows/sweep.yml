@@ -39,7 +39,9 @@
 # - labels: environment `factory` (main only), for the App's key: the App's token, minted with
 #   issues: write and nothing else, writes each label move through factory-label.sh (the reconcile,
 #   and factory:working on the issue it dispatches, a fix round's too) before the dispatch, so the
-#   factory's gate sees factory:working. GITHUB_TOKEN only checks out the scripts. A failed write
+#   factory's gate sees factory:working. Each move happens only while the issue still carries a
+#   label select read (FROM), so an admin's relabel since isn't overwritten. GITHUB_TOKEN only
+#   checks out the scripts. A failed write
 #   fails the job, and nothing is dispatched.
 # - dispatch: `actions: write` on this job only, and nothing else: GITHUB_TOKEN dispatches
 #   factory.yml on main with the one issue (or the fix round's `pr` and `head`), then waits until
@@ -164,14 +166,17 @@ jobs:
           jq -e 'type == "array"' <<<"$LABELS" >/dev/null
           mapfile -t moves < <(jq -c '.[]' <<<"$LABELS")
           for m in "${moves[@]}"; do
+            # FROM: the labels select read, so a label the admin changed since is left alone.
             ISSUE=$(jq -r '.issue' <<<"$m") TO=$(jq -r '.to // "none"' <<<"$m") WHY=$(jq -r '.why' <<<"$m") \
-              bash .github/scripts/factory-label.sh
+              FROM=$(jq -r '.from' <<<"$m") bash .github/scripts/factory-label.sh
           done
 
   dispatch:
     needs: [select, labels]
+    # The labels job is skipped when there is no move (a fix round whose PR's branch names no issue).
     if: >-
-      needs.labels.result == 'success' &&
+      always() && needs.select.result == 'success' &&
+      (needs.labels.result == 'success' || needs.labels.result == 'skipped') &&
       (needs.select.outputs.issue != '' || needs.select.outputs.pr != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 4

@@ -62,7 +62,7 @@ author=$(jq -r '.author_association // "NONE"' "$ISSUE_JSON")
 [[ $author =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]] ||
   refuse "#$issue was opened by a $author, not the owner or a collaborator"
 label=$(jq -r '[.labels[]?.name | select(. == "factory:ready" or . == "factory:working")] | first // ""' "$ISSUE_JSON")
-[[ -n $label ]] || refuse "#$issue doesn't carry factory:ready"
+[[ -n $label ]] || refuse "#$issue doesn't carry factory:ready or factory:working"
 blocked=$(jq -r '[.labels[]?.name | select(startswith("blocked:"))] | first // ""' "$ISSUE_JSON")
 [[ -z $blocked ]] || refuse "#$issue carries $blocked"
 blockers=$(jq -er 'map("#\(.)") | join(", ")' "$BLOCKERS_JSON")

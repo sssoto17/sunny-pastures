@@ -41,7 +41,8 @@
 // most advanced (failed > review > working > ready); factory:working with no live factory run
 // (`factory #<n>`, or a fix round on its `<n>-` PR) goes to factory:review when the issue has an
 // open PR from a `<n>-` branch, else to factory:failed ("run vanished"); factory:review with no
-// open `<n>-` PR goes to factory:failed unless its newest closed one merged. The choice reads the
+// open `<n>-` PR goes to factory:failed when its newest closed one (of the newest 100 the gather
+// reads) closed unmerged. The choice reads the
 // labels as reconciled. Each move, and factory:working on what is dispatched (a fix round's issue
 // is its PR branch's number), is one `LABELS` line and one entry of the `labels` output, which
 // sweep.yml's `labels` job writes through factory-label.sh before the dispatch.
@@ -146,7 +147,7 @@ function branchIssue(ref) {
  * `to` the one it keeps, or null).
  */
 export function reconcile({ issues, runs, pulls, closed }) {
-	const seen = { live: liveIssues(runs, pulls), pulls, closed };
+	const observed = { live: liveIssues(runs, pulls), pulls, closed };
 	const moves = [];
 	const states = new Map();
 	for (const issue of issues.filter((i) => !i.pull_request)) {
@@ -154,7 +155,7 @@ export function reconcile({ issues, runs, pulls, closed }) {
 		if (from.length === 0) continue;
 		const kept = from.at(-1);
 		const several = from.length > 1 ? [`several factory:* labels: kept factory:${kept}`] : [];
-		const { to, why } = settle(issue, kept, seen);
+		const { to, why } = settle(issue, kept, observed);
 		states.set(issue.number, { from, to });
 		if (from.length !== 1 || from[0] !== to) {
 			moves.push({ issue: issue.number, from, to, why: [...several, ...why].join("; ") });
@@ -173,10 +174,11 @@ function settle(issue, kept, { live, pulls, closed }) {
 		return { to: "failed", why: ["run vanished"] };
 	}
 	if (kept !== "review" || openPull(pulls, n)) return { to: kept, why: [] };
+	// Only a closed PR it can see moves it: one past the newest 100 closed isn't read, so a merged
+	// one there mustn't read as a failure.
 	const last = newestClosed(closed, n);
-	if (last?.merged_at) return { to: kept, why: [] };
-	const why = last ? `PR #${last.number} closed unmerged` : `no open PR from a ${n}- branch`;
-	return { to: "failed", why: [why] };
+	if (!last || last.merged_at) return { to: kept, why: [] };
+	return { to: "failed", why: [`PR #${last.number} closed unmerged`] };
 }
 
 // The issues a factory run is working on now: `factory #<n>`, or a fix round on a `<n>-` PR.
@@ -281,7 +283,7 @@ function refusal(issue, { pulls, refs }) {
 	const blockers = issue.blocked_by;
 	if (!Array.isArray(blockers)) return "its blockers weren't read";
 	if (blockers.length) return `blocked by ${blockers.map((b) => `#${b}`).join(", ")}`;
-	const pr = pulls.find((p) => p.head?.ref?.startsWith(`${n}-`));
+	const pr = openPull(pulls, n);
 	if (pr) return `has PR #${pr.number} from a ${n}- branch`;
 	const ref = refs.find((r) => r.ref?.startsWith(`refs/heads/${n}-`));
 	if (ref) return `has the branch ${ref.ref.slice("refs/heads/".length)}`;
@@ -357,7 +359,9 @@ const main = () => {
 // What the labels and dispatch jobs read: at most one of the issue and the fix round is set, and
 // the label moves as one line of JSON.
 function outputs({ dispatch, fix, moves }) {
-	const labels = JSON.stringify(moves.map(({ issue, to, why }) => ({ issue, to, why })));
+	const labels = JSON.stringify(
+		moves.map(({ issue, from, to, why }) => ({ issue, from: from.join(" "), to, why })),
+	);
 	return `issue=${dispatch ?? ""}\npr=${fix?.pr ?? ""}\nhead=${fix?.head ?? ""}\nlabels=${labels}\n`;
 }
 

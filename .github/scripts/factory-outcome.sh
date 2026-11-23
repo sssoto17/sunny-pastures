@@ -10,6 +10,8 @@
 #   code block;
 # - an issue run the gate refused: factory:failed with the gate's reason, but only when the issue
 #   is at factory:working (the sweep dispatched it); an issue the admin dispatched keeps its label.
+# Each move happens only from the states that run could have left (ready or working; a fix round's
+# working or review), so an admin's relabel during the run isn't overwritten.
 # A run whose gate wrote no issue (the switch was off, or a fix round the gate refused) moves
 # nothing: the sweep's reconcile settles a factory:working left behind.
 #
@@ -31,9 +33,9 @@ label() { ISSUE=$ISSUE TO=$1 WHY=$2 FROM=${3-} DETAIL=${4-} bash "$here/factory-
 
 [[ -n ${ISSUE-} ]] || { echo "LABEL none: the gate checked no issue"; exit 0; }
 if [[ -n ${FIX-} ]]; then
-  label review "fix round on PR #$FIX ended ($url)"
+  label review "fix round on PR #$FIX ended ($url)" "working review"
 elif [[ -n ${PR-} ]]; then
-  label review "run $url opened PR #$PR"
+  label review "run $url opened PR #$PR" "ready working"
 elif [[ ${GATE_RUN-} == true ]]; then
   detail="$RUNNER_TEMP/factory-detail.md"
   lines=""
@@ -56,7 +58,7 @@ elif [[ ${GATE_RUN-} == true ]]; then
       printf 'No `RESULT` lines could be read from the factory job'"'"'s log: see the run.\n'
     fi
   } >"$detail"
-  label failed "run $url opened no PR" "" "$detail"
+  label failed "run $url opened no PR" "ready working" "$detail"
 else
   label failed "run $url: the gate refused: ${GATE_WHY:-no reason given}" working
 fi

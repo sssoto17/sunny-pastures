@@ -273,7 +273,6 @@ describe("decideSweep", () => {
 			});
 			expect(d.moves).toEqual([
 				{ issue: 75, from: ["review"], to: "failed", why: "PR #601 closed unmerged" },
-				{ issue: 78, from: ["review"], to: "failed", why: "no open PR from a 78- branch" },
 			]);
 		});
 
@@ -293,7 +292,7 @@ describe("decideSweep", () => {
 			});
 			expect(d.dispatch).toBe(81);
 			expect(d.moves.map((m) => [m.issue, m.to])).toEqual([
-				[80, "failed"],
+				[80, "review"],
 				[81, "working"],
 			]);
 		});
@@ -409,10 +408,13 @@ describe("the contract with factory.yml (#588)", () => {
 		expect(labels).not.toMatch(/permission-(contents|pull-requests|actions)/);
 		expect(labels).toContain("LABELS: ${{ needs.select.outputs.labels }}");
 		expect(labels).toContain("bash .github/scripts/factory-label.sh");
+		expect(labels).toContain(`FROM=$(jq -r '.from' <<<"$m")`);
 		expect(job("select")).toContain("labels: ${{ steps.decide.outputs.labels }}");
 		const dispatch = job("dispatch");
 		expect(dispatch).toMatch(/^ {4}needs: \[select, labels\]\n/m);
-		expect(dispatch).toContain("needs.labels.result == 'success'");
+		expect(dispatch).toContain(
+			"needs.labels.result == 'success' || needs.labels.result == 'skipped'",
+		);
 		expect(dispatch).not.toMatch(/environment:|FACTORY_APP_PRIVATE_KEY/);
 		expect(sweepYml.match(/FACTORY_APP_PRIVATE_KEY/g)).toHaveLength(1);
 	});
@@ -465,7 +467,7 @@ describe("factory-sweep.mjs", () => {
 		const r = cli({ FACTORY_ENABLED: "true" }, { pulls: [pull(7, "7-x", BOT)] });
 		expect(r.code).toBe(0);
 		expect(r.out).toBe(
-			'issue=60\npr=\nhead=\nlabels=[{"issue":60,"to":"working","why":"dispatched"}]\n',
+			'issue=60\npr=\nhead=\nlabels=[{"issue":60,"from":"ready","to":"working","why":"dispatched"}]\n',
 		);
 		expect(r.log).toMatch(/^LABELS #60 factory:ready -> factory:working \(dispatched\)$/m);
 		expect(r.log).toMatch(/^SWEEP dispatch #60 \(P2\) open=1 cap=4$/m);
@@ -479,7 +481,9 @@ describe("factory-sweep.mjs", () => {
 	it("writes a reconcile move to none as a null, and logs it", () => {
 		const issues = [issue(61, { state: "closed", labels: ["factory:working"] })];
 		const r = cli({ FACTORY_ENABLED: "true" }, { items: [], issues });
-		expect(r.out).toMatch(/^labels=\[\{"issue":61,"to":null,"why":"the issue is closed"\}\]$/m);
+		expect(r.out).toMatch(
+			/^labels=\[\{"issue":61,"from":"working","to":null,"why":"the issue is closed"\}\]$/m,
+		);
 		expect(r.log).toMatch(/^LABELS #61 factory:working -> none \(the issue is closed\)$/m);
 	});
 
@@ -497,7 +501,7 @@ describe("factory-sweep.mjs", () => {
 		const r = cli({ FACTORY_ENABLED: "true" }, { pulls, reviews, runs: [fixRun(586, HEAD)] });
 		expect(r.code).toBe(0);
 		expect(r.out).toBe(
-			`issue=\npr=587\nhead=${HEAD}\nlabels=[{"issue":587,"to":"working","why":"fix round on PR #587"}]\n`,
+			`issue=\npr=587\nhead=${HEAD}\nlabels=[{"issue":587,"from":"","to":"working","why":"fix round on PR #587"}]\n`,
 		);
 		expect(r.log).toMatch(
 			/^SWEEP fix round 1 of 2 on PR #587 at f6cd23e open=2 cap=4; skipped PR #586: a fix round already ran at f6cd23e$/m,

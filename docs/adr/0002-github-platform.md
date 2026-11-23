@@ -1294,11 +1294,11 @@ dispatches (it would hold the Project token and `actions: write` together).
   `working` over `ready`); `factory:working` with no live run (`factory #<n>`, or a fix round on its
   `<n>-` PR) goes to `factory:review` when an open `<n>-` PR exists, else to `factory:failed` ("run
   vanished"); `factory:review` with no open `<n>-` PR goes to `factory:failed` ("PR #x closed
-  unmerged", or "no open PR from a `<n>-` branch"), unless its newest closed one merged. The choice
-  reads the labels as reconciled; the moves are written by the same `labels` job. A move into
-  `factory:failed` comments its reason, as a run's does. Each move is one
-  `LABELS #<n> <from> -> <to> (<why>)` line in `select`'s log and the job summary, and one
-  `LABEL #<n>: …` line where it is written.
+  unmerged") when its newest closed one there closed unmerged; with none found it is left alone,
+  since a merged PR past the newest 100 isn't read. The choice reads the labels as reconciled; the
+  moves are written by the same `labels` job. A move into `factory:failed` comments its reason, as a
+  run's does. Each move is one `LABELS #<n> <from> -> <to> (<why>)` line in `select`'s log and the
+  job summary, and one `LABEL #<n>: …` line where it is written.
 - **Order:** Priority (P0 first, unset last), then board order, read as the order the REST items
   list returns; an issue not on the board comes last, by number. `/today`'s agreed order isn't wired
   to the sweep yet: the sweep has no input for it, and the admin steers by Priority, by which issues

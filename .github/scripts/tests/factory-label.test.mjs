@@ -190,6 +190,14 @@ describe("factory-outcome.sh", () => {
 		expect(ready.comment).toBeNull();
 	});
 
+	it("leaves a label the admin changed during the run", () => {
+		const r = outcome({ HAVE: "failed", PR: "700", GATE_RUN: "true" });
+		expect(r.calls).toHaveLength(1);
+		expect(r.log).toMatch(/^LABEL #42: left at failed, not one of: ready working /m);
+		const none = outcome({ HAVE: "", GATE_RUN: "true" });
+		expect(none.comment).toBeNull();
+	});
+
 	it("moves nothing when the gate checked no issue", () => {
 		const r = outcome({ ISSUE: "", GATE_RUN: "false" });
 		expect(r.code).toBe(0);
