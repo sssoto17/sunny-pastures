@@ -32,6 +32,7 @@ const fromRoot = (path: string) => decodeURIComponent(new URL(path, import.meta.
 // in the projects, not at the root. `ci / test` picks `--project unit --project ui` when a PR can't
 // reach the database (ci.yml).
 const dbTests = "{apps,packages}/*/src/**/*.db.test.ts";
+// `.test.tsx` is the only UI test suffix: no `.spec` (ADR-0005, section 5).
 const uiTests = "apps/web/src/**/*.test.tsx";
 
 export default defineConfig({

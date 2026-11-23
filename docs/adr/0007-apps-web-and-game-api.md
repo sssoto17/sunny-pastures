@@ -506,16 +506,16 @@ anywhere); the first store test against the local stack proves it. If it fails, 
 - `ci / test` starts a stack (`supabase start`, `supabase db reset`, `pnpm db:env`) **only when the
   PR touches `apps/web/src/server/**`, `supabase/**`, `.github/actions/supabase-stack/**` or
   `vitest.config.mts`** (the last two added by the admin, 21 Nov; #439 review: what runs the `db`
-  tests is checked on the PR too). Otherwise it runs `--project unit`, and the gate runs
-  `--skip-ratchet`, because untested store files would read 0% (as `check:task` already does for
-  partial runs).
+  tests is checked on the PR too). Otherwise it runs `--project unit --project ui` (`ui`, the
+  component tests in jsdom, needs no stack; ADR-0010, #594), and the gate runs `--skip-ratchet`,
+  because untested store files would read 0% (as `check:task` already does for partial runs).
 - **The ratchet runs in full on `main`** (admin, 19 Nov, an addendum to the test-architecture
-  resolution). Every push to `main` always starts the stack and runs both projects with the full
-  gate, ratchet included. A drop that merges through a PR without the stack turns `main` red on that
-  merge, so nothing drifts unseen. PRs that touch `apps/web/src/server/**`, `supabase/**`,
-  `.github/actions/supabase-stack/**` or `vitest.config.mts` (admin, 21 Nov; #439 review) still
-  check the ratchet before merging, and the changed-line floors (90%/80%) apply to every PR as
-  before.
+  resolution). Every push to `main` always starts the stack and runs every project (`unit`, `ui` and
+  `db` since #594) with the full gate, ratchet included. A drop that merges through a PR without the
+  stack turns `main` red on that merge, so nothing drifts unseen. PRs that touch
+  `apps/web/src/server/**`, `supabase/**`, `.github/actions/supabase-stack/**` or
+  `vitest.config.mts` (admin, 21 Nov; #439 review) still check the ratchet before merging, and the
+  changed-line floors (90%/80%) apply to every PR as before.
 - **No conditional skips.** A `db` test without a stack **fails** with "run `pnpm db:start`"; it
   never `skipIf`s, because a runtime skip is a silent pass the floor guard can't see. The only
   switch is the project selection in `ci.yml`, from the changed paths, where a reviewer sees it.
