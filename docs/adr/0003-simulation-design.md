@@ -684,6 +684,28 @@ validation (a list of rule functions, run in turn); a least fixed point for prod
 - **A top-level `contentCheck/` module.** ADR-0005 (section 3) keeps content one module, and the
   check belongs with the types it reads.
 
+## 18. The owned list (#541)
+
+Facilities and pens each keep one entry per content item, null until bought. The lookup, the
+refusals ("isn't bought", "already bought"), buy-once and replace live in `owned/`, which both call.
+A farm with no entry for a content item is a broken farm, a programmer error, and throws a
+RangeError (D15) in both: `buyPen` on a short `pens` array used to charge the price and then drop
+the new pen, and now throws before it charges. Replacing an entry past the list throws too, rather
+than dropping it. The words a player reads for an index that names no item stay with each feature
+(`describeNone`), since "facility 0" and "no such pen" are pinned by their tests.
+
+Pattern: shared module for a repeated rule, as `storage/` is (section 12), generic over the rule and
+entry types.
+
+Alternatives considered:
+
+- A generic `OwnedList<Rule, Owned>` object holding rules and entries: one more wrapper to build per
+  call for no gain, since the farm already holds the entries.
+- Keeping a copy in each module, fixed in place: the copies had already drifted, and the style guide
+  moves logic to a shared module at its second occurrence.
+- One `Catalogue` type shared by `FacilityRules` and `PenRules`: couples their rule shapes, which
+  share only an `id`.
+
 ## Vocabulary (D11)
 
 **Automated step** (`GLOSSARY.md`): a change the farm makes by itself at a server time, with no
@@ -710,6 +732,7 @@ action behind it. Code and tickets say _automated step_, never "event", "tick" o
 | Queue with stored end times | a facility's jobs | Jobs run in start order, and work in flight keeps its end time (section 12). |
 | Strategy | `StepSource` | Each feature adds its automated steps without changing `advance` (section 12). |
 | Shared module for a repeated rule | `storage/` | Put and take are written once for harvests, jobs, feeding, collecting from pens and delivering orders (sections 12, 13, 15). |
+| Shared module for a repeated rule, generic over the entry | `owned/` | Facilities and pens share one owned list: lookup, the broken-farm RangeError, buy-once and replace are written once (section 18). |
 | Discriminated union per animal, stored end time | a pen's animals | Each animal eats and produces on its own, and work in flight keeps its end time (section 13). |
 | Level-triggered automated steps | the Collector, the Loop | Once waiting goods fit, the Collector acts a ms after the farm's last step or action, a ms later for each step that runs before it at that ms (of any kind, another facility's move included), and the Loop whenever a slot and the inputs are there, so a slot or room freed by any step or action is used at once or a ms or more later, never behind a step already run; the queue alone limits a Loop (section 16). |
 | Table-driven rules | a facility's tier rows | Each tier's price, slots and job time is a row of content, so tuning or adding a tier changes no code (section 14). |

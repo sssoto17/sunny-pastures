@@ -209,3 +209,12 @@ describe("collecting from a pen", () => {
 		expect(sim.apply(farm, { type: "collectProducts", pen }, 0)).toEqual({ ok: false, reason });
 	});
 });
+
+describe("buyPen on a farm whose pens don't match the content", () => {
+	it("throws a RangeError and charges nothing, a programmer error (D15)", () => {
+		const broken = { ...sim.newFarm("farm-1"), xp: level2, coins: 30, pens: [] };
+
+		expect(() => sim.apply(broken, buy, 0)).toThrow(RangeError);
+		expect(broken.coins).toBe(30);
+	});
+});

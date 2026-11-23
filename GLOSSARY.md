@@ -68,6 +68,9 @@ tile, slot, field (for one patch)
 **Trough**: An animal pen's store of feed. The animals eat from it on their own and keep producing
 until it is empty. _Avoid_: feeder, food bowl
 
+**Owned list**: One entry per content item of a kind (facilities, pens), in content order and null
+until the farm buys it. _Avoid_: inventory, collection
+
 **Facility**: A building that turns goods into other goods by recipe: the feed mill, the bakery and
 the dairy. _Avoid_: building (for these), machine, factory, workshop
 
