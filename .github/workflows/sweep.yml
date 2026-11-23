@@ -18,20 +18,29 @@
 #   FACTORY_ENABLED=true and nothing is read or dispatched.
 # - skipped: with the switch off, or after a cancelled factory run, writes the job summary that
 #   says so. No permissions.
-# - select: environment `board` (main only), for BOARD_PROJECT_TOKEN, which reads the Project
-#   (REST, on the Project's calls only, as board.yml's `move` does); the read-only GITHUB_TOKEN reads
-#   the factory's runs, the issues, PRs (with the commits and the reviewer's reviews of the App's
-#   PRs) and branches. factory-sweep-gather.sh reads, then
-#   factory-sweep.mjs decides, logs one SWEEP line and writes the job summary: the switch, the open
-#   factory PRs against the cap, the eligible issues in order, the skipped ones and why, and the one
-#   dispatched or why none. It dispatches nothing while a factory run is queued, waiting or in
-#   progress. Next comes a fix round (#588): a factory PR whose reviewer's newest verdict on its head
-#   asks for fixes, at most 2 rounds a PR and never twice on one head (the header of
-#   factory-sweep.mjs); the cap doesn't hold it back. It dispatches no new issue while the open PRs
-#   by sunny-factory[bot] (drafts included) reach the repo variable
-#   FACTORY_MAX_OPEN_PRS (default 4 when unset; admin, 22 Nov 2026), and skips an issue whose last
-#   factory run ran Claude (its "Claude ran" step) and opened no PR until the issue is edited after
-#   that run; a run that failed before Claude ran doesn't count (#582).
+# - select: environment `board` (main only), for BOARD_PROJECT_TOKEN, which reads the Project's
+#   Priority (REST, on the Project's calls only, as board.yml's `move` does); the read-only
+#   GITHUB_TOKEN reads the factory's runs, the issues carrying a factory:* label (with the open
+#   native blockers of the factory:ready ones), PRs (with the commits and the reviewer's reviews of
+#   the App's PRs, and the App's closed PRs) and branches. factory-sweep-gather.sh reads, then
+#   factory-sweep.mjs decides, logs one LABELS line per label move and one SWEEP line, and writes
+#   the job summary: the switch, the open factory PRs against the cap, the eligible issues in
+#   order, the skipped ones and why, the label moves, and the one dispatched or why none. First the
+#   reconcile (#619, the header of factory-sweep.mjs): a closed issue loses its factory:* labels,
+#   several keep the most advanced, factory:working with no live run and factory:review with no
+#   open PR move on. It dispatches nothing while a factory run is queued, waiting or in progress.
+#   Next comes a fix round (#588): a factory PR whose reviewer's newest verdict on its head asks for
+#   fixes, at most 2 rounds a PR and never twice on one head; the cap doesn't hold it back. It
+#   dispatches no new issue while the open PRs by sunny-factory[bot] (drafts included) reach the
+#   repo variable FACTORY_MAX_OPEN_PRS (default 4 when unset; admin, 22 Nov 2026). An eligible
+#   issue is open, at factory:ready, opened by the owner or a collaborator, with no blocked:* label,
+#   no open native blocker and no PR or branch yet; Status, Mode and Track aren't read (admin, 23
+#   Nov 2026, #619).
+# - labels: environment `factory` (main only), for the App's key: the App's token, minted with
+#   issues: write and nothing else, writes each label move through factory-label.sh (the reconcile,
+#   and factory:working on the issue it dispatches, a fix round's too) before the dispatch, so the
+#   factory's gate sees factory:working. GITHUB_TOKEN only checks out the scripts. A failed write
+#   fails the job, and nothing is dispatched.
 # - dispatch: `actions: write` on this job only, and nothing else: GITHUB_TOKEN dispatches
 #   factory.yml on main with the one issue (or the fix round's `pr` and `head`), then waits until
 #   the new run is listed, so a sweep
@@ -39,7 +48,9 @@
 #   GITHUB_TOKEN may start a run with ("Triggering a workflow from a workflow",
 #   https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
 #   The run's actor is github-actions[bot], which factory.yml's claude-code-action step names in
-#   allowed_bots (#582). The factory's own switch and gate check the issue again.
+#   allowed_bots (#582). The factory's own switch and gate check the issue again. A dispatch that
+#   fails leaves the issue at factory:working with no run: the next sweep's reconcile moves it to
+#   factory:failed ("run vanished").
 # Every event runs the default branch's copy of this file. Event values reach the shell only
 # through env:. Actions are GitHub-owned and pinned to a full SHA, main's pins (ADR-0002, area 8).
 name: sweep
@@ -92,12 +103,13 @@ jobs:
     permissions:
       actions: read # the factory workflow's runs
       contents: read # main's checkout of the scripts, and the branches
-      issues: read # the open factory:ready issues
+      issues: read # the issues carrying a factory:* label, and their blockers
       pull-requests: read # the open PRs
     outputs:
       issue: ${{ steps.decide.outputs.issue }}
       pr: ${{ steps.decide.outputs.pr }}
       head: ${{ steps.decide.outputs.head }}
+      labels: ${{ steps.decide.outputs.labels }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,7 +118,7 @@ jobs:
             .github/scripts
             scripts/lib
 
-      - name: Read the runs, issues, PRs, branches and board
+      - name: Read the runs, labelled issues, PRs, branches and board
         env:
           FACTORY_ENABLED: ${{ vars.FACTORY_ENABLED }}
           GH_TOKEN: ${{ github.token }}
@@ -122,9 +134,45 @@ jobs:
           SWEEP_DIR: ${{ runner.temp }}/sweep
         run: node .github/scripts/factory-sweep.mjs
 
-  dispatch:
+  labels:
     needs: select
-    if: needs.select.outputs.issue != '' || needs.select.outputs.pr != ''
+    if: needs.select.outputs.labels != '' && needs.select.outputs.labels != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    environment: factory
+    permissions:
+      contents: read # main's checkout of the scripts; every write goes through the App's token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          permission-issues: write
+
+      - name: Write the label moves as sunny-factory
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          LABELS: ${{ needs.select.outputs.labels }}
+        run: |
+          set -euo pipefail
+          jq -e 'type == "array"' <<<"$LABELS" >/dev/null
+          mapfile -t moves < <(jq -c '.[]' <<<"$LABELS")
+          for m in "${moves[@]}"; do
+            ISSUE=$(jq -r '.issue' <<<"$m") TO=$(jq -r '.to // "none"' <<<"$m") WHY=$(jq -r '.why' <<<"$m") \
+              bash .github/scripts/factory-label.sh
+          done
+
+  dispatch:
+    needs: [select, labels]
+    if: >-
+      needs.labels.result == 'success' &&
+      (needs.select.outputs.issue != '' || needs.select.outputs.pr != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 4
     permissions:

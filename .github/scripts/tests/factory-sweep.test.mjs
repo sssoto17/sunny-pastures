@@ -16,15 +16,9 @@ const OLD = "0123456789abcdef0123456789abcdef01234567";
 const FIXES =
 	"merge after fixes: PR #586 at f6cd23e, full\n\nFindings\n1. [Required, confirmed] x\n";
 
-// A factory run as factory-sweep-gather.sh trims `GET …/actions/workflows/factory.yml/runs`, with
-// `claude_ran` from its jobs (#582).
-const run = (
-	issue,
-	started,
-	{ status = "completed", conclusion = "failure", id = 1, claudeRan = true } = {},
-) => ({
+// A factory run as factory-sweep-gather.sh trims `GET …/actions/workflows/factory.yml/runs`.
+const run = (issue, started, { status = "completed", conclusion = "failure", id = 1 } = {}) => ({
 	id,
-	claude_ran: claudeRan,
 	display_title: `factory #${issue}`,
 	status,
 	conclusion,
@@ -32,32 +26,24 @@ const run = (
 	created_at: started,
 	updated_at: started.replace(/T(\d\d)/, (_, h) => `T${String(Number(h) + 1).padStart(2, "0")}`),
 });
-// A board item as the gather step shapes it from the REST Projects API.
-const item = (
-	number,
-	{ status = "Ready", mode = "Factory", priority = "P2", repo = REPO } = {},
-) => ({
+// A board item as the gather step shapes it from the REST Projects API (Priority only, #619).
+const item = (number, { priority = "P2", repo = REPO } = {}) => ({
 	number,
 	repository_url: repo,
-	status,
-	mode,
 	priority,
 });
-// An open issue as `GET …/issues?labels=factory:ready` returns it, trimmed.
+// An issue carrying a factory:* label as `GET …/issues?state=all&labels=factory:<state>` returns it,
+// trimmed, with the open native blockers the gather reads for an open factory:ready one.
 const issue = (
 	number,
-	{
-		author = "OWNER",
-		labels = ["factory:ready"],
-		pr = false,
-		updated = "2026-11-22T10:00:00Z",
-	} = {},
+	{ author = "OWNER", labels = ["factory:ready"], pr = false, state = "open", blockedBy = [] } = {},
 ) => ({
 	number,
+	state,
 	author_association: author,
 	labels: labels.map((name) => ({ name })),
-	updated_at: updated,
 	...(pr ? { pull_request: { url: "x" } } : {}),
+	...(blockedBy ? { blocked_by: blockedBy } : {}),
 });
 // An open PR, trimmed, with `factory` as the gather sets it (every commit the App's bot user's).
 const pull = (number, ref, login = "sssoto17", { sha = HEAD, factory = false } = {}) => ({
@@ -91,8 +77,8 @@ const decide = (over = {}) =>
 		items: [item(10), item(11)],
 		issues: [issue(10), issue(11)],
 		pulls: [],
+		closed: [],
 		refs: [],
-		comments: [],
 		reviews: [],
 		...over,
 	});
@@ -155,93 +141,162 @@ describe("decideSweep", () => {
 		expect(d.reason).toBe("dispatch #23 (P0)");
 	});
 
-	it("takes an issue whose Mode isn't set, and skips one whose Mode is Manual", () => {
-		const items = [item(30, { mode: "Manual" }), item(31, { mode: null })];
-		const d = decide({ items, issues: [issue(30), issue(31)] });
-		expect(d.dispatch).toBe(31);
-		expect(d.skipped).toContainEqual({ number: 30, why: "Mode is Manual" });
+	// #619: factory:ready is the only gate; Status, Mode and Track aren't read.
+	it("takes a factory:ready issue whatever its column, and one not on the board last", () => {
+		const items = [
+			{ ...item(30, { priority: "P3" }), status: "Backlog", mode: "Manual" },
+			{ ...item(31, { priority: "P3" }), status: "In review" },
+		];
+		const d = decide({ items, issues: [issue(32), issue(31), issue(30)] });
+		expect(d.eligible.map((e) => e.number)).toEqual([30, 31, 32]);
+		expect(d.dispatch).toBe(30);
 	});
 
 	it("skips what the gate would refuse, and says why", () => {
-		const items = [40, 41, 42, 43, 44, 45, 47].map((n) => item(n));
-		items.push(item(48, { status: "In progress" }), item(49, { repo: `${REPO}-other` }));
 		const issues = [
 			issue(41, { labels: ["chore"] }),
 			issue(42, { author: "CONTRIBUTOR" }),
 			issue(43, { pr: true }),
 			issue(44),
 			issue(45),
+			issue(46, { labels: ["factory:ready", "blocked:admin"] }),
 			issue(47),
-			issue(48),
-			issue(49),
+			issue(48, { blockedBy: [594, 600] }),
+			issue(49, { blockedBy: null }),
 		];
 		const d = decide({
-			items,
+			items: issues.map((i) => item(i.number)),
 			issues,
 			pulls: [pull(500, "44-thing")],
 			refs: [{ ref: "refs/heads/45-thing" }, { ref: "refs/heads/470-other" }],
 		});
 		expect(d.skipped).toEqual([
-			{ number: 40, why: "not an open issue carrying factory:ready" },
-			{ number: 41, why: "not an open issue carrying factory:ready" },
 			{ number: 42, why: "opened by a CONTRIBUTOR, not the owner or a collaborator" },
-			{ number: 43, why: "a pull request" },
 			{ number: 44, why: "has PR #500 from a 44- branch" },
 			{ number: 45, why: "has the branch 45-thing" },
+			{ number: 46, why: "carries blocked:admin" },
+			{ number: 48, why: "blocked by #594, #600" },
+			{ number: 49, why: "its blockers weren't read" },
 		]);
 		expect(d.eligible.map((e) => e.number)).toEqual([47]);
 		expect(d.dispatch).toBe(47);
 	});
 
-	// Each fixture run finishes an hour after it starts.
-	it("skips an issue whose last factory run opened no PR, until the issue is updated after it finished", () => {
-		const runs = [
-			run(60, "2026-11-22T06:00:00Z", { id: 1, conclusion: "success" }),
-			run(60, "2026-11-22T09:00:00Z", { id: 2 }),
-			run(61, "2026-11-22T09:00:00Z", { id: 3 }),
-			run(62, "2026-11-22T09:00:00Z", { id: 4, conclusion: "cancelled" }),
-		];
-		const issues = [
-			issue(60, { updated: "2026-11-22T08:00:00Z" }), // before its last run: skipped
-			issue(61, { updated: "2026-11-22T09:30:00Z" }), // during the run: skipped
-			issue(62, { updated: "2026-11-22T10:30:00Z" }), // after it finished: retried
-		];
-		const items = [item(60, { priority: "P0" }), item(61, { priority: "P0" }), item(62)];
-		const d = decide({ items, issues, runs });
-		expect(d.skipped).toEqual([
-			{ number: 60, why: "last run failed: run 2 (failure) opened no PR; edit the issue to retry" },
-			{ number: 61, why: "last run failed: run 3 (failure) opened no PR; edit the issue to retry" },
-		]);
-		expect(d.dispatch).toBe(62);
-	});
-
-	it("doesn't retry an issue when the update after its run is a stranger's comment", () => {
-		const runs = [run(63, "2026-11-22T09:00:00Z", { id: 5 })];
-		const issues = [issue(63, { updated: "2026-11-22T11:00:00Z" })];
-		const comment = (author_association) => ({
-			issue: 63,
-			author_association,
-			updated_at: "2026-11-22T11:00:00Z",
+	// #619: the claude_ran edited-since rule is gone; factory:failed keeps a failed issue out.
+	it("never picks an issue at factory:working, factory:review or factory:failed", () => {
+		const issues = ["working", "review", "failed"].map((s, i) =>
+			issue(60 + i, { labels: [`factory:${s}`] }),
+		);
+		const runs = [run(60, "2026-11-22T09:00:00Z", { status: "in_progress", conclusion: null })];
+		const pulls = [pull(501, "61-x", BOT)];
+		const d = decide({ items: [], issues, runs, pulls });
+		expect(d.eligible).toEqual([]);
+		const idle = decide({
+			items: [],
+			issues: [issues[2]],
+			runs: [run(62, "2026-11-22T09:00:00Z")],
 		});
-		const stranger = decide({ items: [item(63)], issues, runs, comments: [comment("NONE")] });
-		expect(stranger.dispatch).toBeNull();
-		expect(stranger.skipped[0].why).toMatch(/^last run failed: run 5/);
-		const owner = decide({ items: [item(63)], issues, runs, comments: [comment("OWNER")] });
-		expect(owner.dispatch).toBe(63);
+		expect(idle).toMatchObject({ dispatch: null, reason: "no eligible issue" });
 	});
 
-	// #582: run 45075597193 failed at claude-code-action's actor check, before Claude started.
-	it("doesn't skip an issue whose last run failed before Claude ran (no claude_ran)", () => {
-		const issues = [issue(64, { updated: "2026-11-22T08:00:00Z" })];
-		const last = (claudeRan) => [run(64, "2026-11-22T09:00:00Z", { id: 6, claudeRan })];
-		const unread = last(true);
-		delete unread[0].claude_ran;
-		for (const runs of [last(false), unread]) {
-			expect(decide({ items: [item(64)], issues, runs }).dispatch).toBe(64);
-		}
-		const ran = decide({ items: [item(64)], issues, runs: last(true) });
-		expect(ran.dispatch).toBeNull();
-		expect(ran.skipped[0].why).toMatch(/^last run failed: run 6/);
+	it("moves the issue it dispatches to factory:working, and writes that move", () => {
+		const d = decide();
+		expect(d.dispatch).toBe(10);
+		expect(d.moves).toEqual([{ issue: 10, from: ["ready"], to: "working", why: "dispatched" }]);
+	});
+
+	describe("the reconcile (#619)", () => {
+		const live = (n) => run(n, "2026-11-22T09:00:00Z", { status: "in_progress", conclusion: null });
+
+		it("strips every factory:* label from a closed issue", () => {
+			const d = decide({
+				issues: [issue(70, { state: "closed", labels: ["factory:review", "area:ci"] })],
+			});
+			expect(d.moves).toEqual([
+				{ issue: 70, from: ["review"], to: null, why: "the issue is closed" },
+			]);
+		});
+
+		it("keeps the most advanced of several factory:* labels, and says so", () => {
+			const d = decide({
+				issues: [issue(71, { labels: ["factory:failed", "factory:ready"] })],
+			});
+			expect(d.dispatch).toBeNull();
+			expect(d.moves).toEqual([
+				{
+					issue: 71,
+					from: ["ready", "failed"],
+					to: "failed",
+					why: "several factory:* labels: kept factory:failed",
+				},
+			]);
+		});
+
+		it("moves factory:working with no live run to factory:failed: the run vanished", () => {
+			const d = decide({
+				issues: [
+					issue(72, { labels: ["factory:working"] }),
+					issue(73, { labels: ["factory:working"] }),
+				],
+				runs: [run(72, "2026-11-22T08:00:00Z"), live(73)],
+			});
+			expect(d.moves).toEqual([
+				{ issue: 72, from: ["working"], to: "failed", why: "run vanished" },
+			]);
+		});
+
+		it("counts a live fix round on the issue's PR as its run, and moves a vanished one with an open PR to factory:review", () => {
+			const fix = {
+				...live(0),
+				display_title: `factory fix #586 at ${HEAD}`,
+			};
+			const issues = [issue(74, { labels: ["factory:working"] })];
+			const running = decide({ issues, runs: [fix], pulls: [pull(586, "74-x", BOT)] });
+			expect(running.moves).toEqual([]);
+			const gone = decide({ issues, pulls: [pull(586, "74-x", BOT)] });
+			expect(gone.moves).toEqual([
+				{ issue: 74, from: ["working"], to: "review", why: "run vanished; PR #586 is open" },
+			]);
+		});
+
+		it("moves factory:review whose PR closed unmerged to factory:failed, and leaves a merged or open one", () => {
+			const at = (n) => issue(n, { labels: ["factory:review"] });
+			const closed = [
+				{ number: 601, head: { ref: "75-x" }, merged_at: null },
+				{ number: 590, head: { ref: "75-x" }, merged_at: "2026-11-20T10:00:00Z" },
+				{ number: 602, head: { ref: "76-x" }, merged_at: "2026-11-22T10:00:00Z" },
+			];
+			const d = decide({
+				issues: [at(75), at(76), at(77), at(78)],
+				pulls: [pull(603, "77-x", BOT)],
+				closed,
+			});
+			expect(d.moves).toEqual([
+				{ issue: 75, from: ["review"], to: "failed", why: "PR #601 closed unmerged" },
+				{ issue: 78, from: ["review"], to: "failed", why: "no open PR from a 78- branch" },
+			]);
+		});
+
+		it("reconciles while a factory run is going, and with the switch off writes nothing", () => {
+			const issues = [issue(79, { state: "closed" })];
+			const busy = decide({ issues, runs: [live(9)] });
+			expect(busy.dispatch).toBeNull();
+			expect(busy.moves).toHaveLength(1);
+			expect(decide({ enabled: "false", issues }).moves).toEqual([]);
+		});
+
+		it("chooses from the labels as reconciled", () => {
+			const d = decide({
+				items: [item(80, { priority: "P0" }), item(81)],
+				issues: [issue(80, { labels: ["factory:ready", "factory:review"] }), issue(81)],
+				pulls: [],
+			});
+			expect(d.dispatch).toBe(81);
+			expect(d.moves.map((m) => [m.issue, m.to])).toEqual([
+				[80, "failed"],
+				[81, "working"],
+			]);
+		});
 	});
 
 	describe("fix rounds (#588)", () => {
@@ -250,6 +305,14 @@ describe("decideSweep", () => {
 			const d = decide({ pulls, reviews: [review(586)] });
 			expect(d).toMatchObject({ fix: { pr: 586, head: HEAD, round: 1 }, dispatch: null, open: 4 });
 			expect(d.reason).toBe("fix round 1 of 2 on PR #586 at f6cd23e");
+		});
+
+		it("moves the PR's issue (its branch's number) to factory:working", () => {
+			const issues = [issue(586, { labels: ["factory:review"] })];
+			const d = decide({ issues, pulls: [factoryPull(586)], reviews: [review(586)] });
+			expect(d.moves).toEqual([
+				{ issue: 586, from: ["review"], to: "working", why: "fix round on PR #586" },
+			]);
 		});
 
 		it("reads a 'merge after fixes' verdict left as a comment, and takes the lowest PR first", () => {
@@ -318,7 +381,7 @@ describe("decideSweep", () => {
 	});
 
 	it("dispatches nothing when no issue is eligible", () => {
-		const d = decide({ items: [item(50, { status: "Backlog" })], issues: [issue(50)] });
+		const d = decide({ items: [item(50)], issues: [issue(50, { blockedBy: [49] })] });
 		expect(d).toMatchObject({ dispatch: null, eligible: [], reason: "no eligible issue" });
 	});
 });
@@ -333,6 +396,25 @@ describe("the contract with factory.yml (#588)", () => {
 	it("names fix runs 'factory fix #<pr> at <head>' in the run-name and the dispatch's wait", () => {
 		expect(yml).toContain("format('factory fix #{0} at {1}', inputs.pr, inputs.head)");
 		expect(sweepYml).toContain('title="factory fix #$PR at $HEAD"');
+	});
+
+	// #619: the moves are written before the dispatch, with an App token that can write issues only.
+	it("writes the label moves in their own job, before the dispatch, with an issues-only App token", () => {
+		const job = (name) =>
+			sweepYml.match(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  \\S|(?![\\s\\S]))`, "m"))[0];
+		const labels = job("labels");
+		expect(labels).toMatch(/^ {4}needs: select\n/m);
+		expect(labels).toMatch(/^ {4}environment: factory$/m);
+		expect(labels).toMatch(/permission-issues: write\n/);
+		expect(labels).not.toMatch(/permission-(contents|pull-requests|actions)/);
+		expect(labels).toContain("LABELS: ${{ needs.select.outputs.labels }}");
+		expect(labels).toContain("bash .github/scripts/factory-label.sh");
+		expect(job("select")).toContain("labels: ${{ steps.decide.outputs.labels }}");
+		const dispatch = job("dispatch");
+		expect(dispatch).toMatch(/^ {4}needs: \[select, labels\]\n/m);
+		expect(dispatch).toContain("needs.labels.result == 'success'");
+		expect(dispatch).not.toMatch(/environment:|FACTORY_APP_PRIVATE_KEY/);
+		expect(sweepYml.match(/FACTORY_APP_PRIVATE_KEY/g)).toHaveLength(1);
 	});
 
 	it("pins the same bot user id as factory.yml", () => {
@@ -352,8 +434,8 @@ describe("factory-sweep.mjs", () => {
 			items: [item(60)],
 			issues: [issue(60)],
 			pulls: [],
+			closed: [],
 			refs: [],
-			comments: [],
 			reviews: [],
 			...files,
 		};
@@ -382,18 +464,29 @@ describe("factory-sweep.mjs", () => {
 	it("writes the issue to dispatch, a SWEEP line and the job summary", () => {
 		const r = cli({ FACTORY_ENABLED: "true" }, { pulls: [pull(7, "7-x", BOT)] });
 		expect(r.code).toBe(0);
-		expect(r.out).toBe("issue=60\npr=\nhead=\n");
+		expect(r.out).toBe(
+			'issue=60\npr=\nhead=\nlabels=[{"issue":60,"to":"working","why":"dispatched"}]\n',
+		);
+		expect(r.log).toMatch(/^LABELS #60 factory:ready -> factory:working \(dispatched\)$/m);
 		expect(r.log).toMatch(/^SWEEP dispatch #60 \(P2\) open=1 cap=4$/m);
 		expect(r.summary).toContain("- Switch: on");
 		expect(r.summary).toContain("- Open factory PRs: 1 of 4");
 		expect(r.summary).toContain("1. #60 (P2)");
 		expect(r.summary).toContain("Chosen: #60 (the dispatch job sends it)");
+		expect(r.summary).toContain("- #60 factory:ready -> factory:working (dispatched)");
+	});
+
+	it("writes a reconcile move to none as a null, and logs it", () => {
+		const issues = [issue(61, { state: "closed", labels: ["factory:working"] })];
+		const r = cli({ FACTORY_ENABLED: "true" }, { items: [], issues });
+		expect(r.out).toMatch(/^labels=\[\{"issue":61,"to":null,"why":"the issue is closed"\}\]$/m);
+		expect(r.log).toMatch(/^LABELS #61 factory:working -> none \(the issue is closed\)$/m);
 	});
 
 	it("writes an empty issue and says why when the switch is off, without reading the files", () => {
 		const r = cli({ FACTORY_ENABLED: "false", SWEEP_DIR: "/nonexistent" });
 		expect(r.code).toBe(0);
-		expect(r.out).toBe("issue=\npr=\nhead=\n");
+		expect(r.out).toBe("issue=\npr=\nhead=\nlabels=[]\n");
 		expect(r.log).toMatch(/^SWEEP none: switch off: FACTORY_ENABLED is "false"$/m);
 		expect(r.summary).toContain("- Switch: off");
 	});
@@ -403,7 +496,9 @@ describe("factory-sweep.mjs", () => {
 		const reviews = [review(586), review(587)];
 		const r = cli({ FACTORY_ENABLED: "true" }, { pulls, reviews, runs: [fixRun(586, HEAD)] });
 		expect(r.code).toBe(0);
-		expect(r.out).toBe(`issue=\npr=587\nhead=${HEAD}\n`);
+		expect(r.out).toBe(
+			`issue=\npr=587\nhead=${HEAD}\nlabels=[{"issue":587,"to":"working","why":"fix round on PR #587"}]\n`,
+		);
 		expect(r.log).toMatch(
 			/^SWEEP fix round 1 of 2 on PR #587 at f6cd23e open=2 cap=4; skipped PR #586: a fix round already ran at f6cd23e$/m,
 		);
@@ -422,9 +517,11 @@ describe("factory-sweep-gather.sh", () => {
 	let dir;
 	afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
-	// A fake gh on PATH that logs each call's path and token: the fields give three ids, the runs
-	// FAKE_RUNS (default []), the factory:ready issues FAKE_ISSUES, a run's jobs read `true` for run 5
-	// alone, and each other paginated `--jq '.[] | …'` read prints nothing, as gh does for an empty page.
+	// A fake gh on PATH that logs each call's path and token, and answers as gh would after its
+	// --jq: the fields give the Priority id, the runs FAKE_RUNS (default []), the factory:<state>
+	// issues FAKE_<STATE> (each default empty), #70's blocked_by the open #594, the closed PRs
+	// FAKE_CLOSED (default []), and each other paginated `--jq '.[] | …'` read prints nothing, as gh
+	// does for an empty page.
 	const gather = (env) => {
 		dir = mkdtempSync(join(tmpdir(), "factory-sweep-gather-"));
 		mkdirSync(join(dir, "bin"));
@@ -435,11 +532,14 @@ describe("factory-sweep-gather.sh", () => {
 for a; do case $a in repos/* | users/*) url=$a ;; esac; done
 echo "$url token=\${GH_TOKEN}" >>"${join(dir, "calls")}"
 case "$*" in
-  *"/fields?"*) echo "1,2,3" ;;
+  *"/fields?"*) echo "1" ;;
   *"/runs?"*) echo "\${FAKE_RUNS:-[]}" ;;
-  *"labels=factory:ready"*) echo "\${FAKE_ISSUES-}" ;;
-  *"/runs/5/jobs"*) echo true ;;
-  *"/jobs"*) echo false ;;
+  *"labels=factory:ready"*) echo "\${FAKE_READY-}" ;;
+  *"labels=factory:working"*) echo "\${FAKE_WORKING-}" ;;
+  *"labels=factory:review"*) echo "\${FAKE_REVIEW-}" ;;
+  *"labels=factory:failed"*) echo "\${FAKE_FAILED-}" ;;
+  *"/issues/70/dependencies/blocked_by"*) echo 594 ;;
+  *"pulls?state=closed"*) echo "\${FAKE_CLOSED:-[]}" ;;
   *"pulls?state=open"*) echo "\${FAKE_PULLS-}" ;;
   *"/pulls/7/commits"*) echo true ;;
   *"/commits"*) echo false ;;
@@ -480,51 +580,60 @@ esac
 		expect(g.calls).toContain(
 			"repos/sssoto17/sunny-pastures/actions/workflows/factory.yml/runs?per_page=100",
 		);
-		expect(g.calls).toContain("users/sssoto17/projectsV2/3/items?per_page=100&fields=1,2,3");
+		expect(g.calls).toContain("users/sssoto17/projectsV2/3/items?per_page=100&fields=1");
 		expect(g.log).toMatch(
-			/^SWEEP gather: runs=0 issues=0 pulls=0 branches=0 comments=0 reviews=0 items=0$/m,
+			/^SWEEP gather: runs=0 issues=0 pulls=0 closed=0 branches=0 reviews=0 items=0$/m,
 		);
 		const calls = g.calls.trim().split("\n");
-		expect(calls).toHaveLength(6);
+		expect(calls).toHaveLength(10);
 		for (const c of calls) {
 			expect(c).toMatch(c.includes("projectsV2") ? /token=board-token$/ : /token=repo-token$/);
 		}
 		expect(g.log).not.toMatch(/repo-token|board-token/);
+		expect(g.calls).not.toMatch(/\/jobs|issues\/comments/);
 	});
 
-	// #582: the sweep counts a run against its issue only when the factory job's "Claude ran" step
-	// succeeded, so the gather reads the jobs of the open factory:ready issues' completed runs.
-	it("marks each completed run of an open factory:ready issue with claude_ran, from its jobs", () => {
-		const r = (id, title, status = "completed") => ({
-			id,
-			display_title: title,
-			status,
-			created_at: "2026-11-22T09:00:00Z",
-		});
-		const runs = [
-			r(5, "factory #70"),
-			r(6, "factory #70"),
-			r(7, "factory #71", "in_progress"),
-			r(8, "factory #99"),
-		];
+	// #619: every issue carrying a factory:* label, open or closed, once each, and the open native
+	// blockers of the open factory:ready ones.
+	it("reads the issues under each factory:* label, and the blockers of the open factory:ready ones", () => {
+		const i = (number, labels, state = "open") =>
+			JSON.stringify({
+				number,
+				state,
+				labels: labels.map((name) => ({ name })),
+				pull_request: null,
+			});
 		const g = gather({
 			FACTORY_ENABLED: "true",
-			FAKE_RUNS: JSON.stringify(runs),
-			FAKE_ISSUES: JSON.stringify({ number: 70 }) + "\n" + JSON.stringify({ number: 71 }),
+			FAKE_READY: [
+				i(70, ["factory:ready"]),
+				i(71, ["factory:ready"], "closed"),
+				i(72, ["factory:ready", "factory:failed"]),
+			].join("\n"),
+			FAKE_FAILED: i(72, ["factory:ready", "factory:failed"]),
+			FAKE_WORKING: i(73, ["factory:working"]),
+			FAKE_CLOSED: JSON.stringify([{ number: 601, head: { ref: "75-x" }, merged_at: null }]),
 		});
 		expect(g.code).toBe(0);
-		const jobs = g.calls.split("\n").filter((c) => c.includes("/jobs"));
-		expect(jobs).toEqual([
-			"repos/sssoto17/sunny-pastures/actions/runs/5/jobs?per_page=100 token=repo-token",
-			"repos/sssoto17/sunny-pastures/actions/runs/6/jobs?per_page=100 token=repo-token",
+		for (const state of ["ready", "working", "review", "failed"]) {
+			expect(g.calls).toContain(
+				`repos/sssoto17/sunny-pastures/issues?state=all&labels=factory:${state}&per_page=100 token=repo-token`,
+			);
+		}
+		const blockers = g.calls.split("\n").filter((c) => c.includes("blocked_by"));
+		expect(blockers).toEqual([
+			"repos/sssoto17/sunny-pastures/issues/70/dependencies/blocked_by?per_page=100 token=repo-token",
+			"repos/sssoto17/sunny-pastures/issues/72/dependencies/blocked_by?per_page=100 token=repo-token",
 		]);
-		const out = JSON.parse(readFileSync(join(dir, "sweep", "runs.json"), "utf8"));
-		expect(out.map((x) => [x.id, x.claude_ran])).toEqual([
-			[5, true],
-			[6, false],
-			[7, false],
-			[8, false],
+		const issues = JSON.parse(readFileSync(join(dir, "sweep", "issues.json"), "utf8"));
+		expect(issues.map((x) => [x.number, x.blocked_by])).toEqual([
+			[70, [594]],
+			[71, undefined],
+			[72, []],
+			[73, undefined],
 		]);
+		const closed = JSON.parse(readFileSync(join(dir, "sweep", "closed.json"), "utf8"));
+		expect(closed).toEqual([{ number: 601, head: { ref: "75-x" }, merged_at: null }]);
 	});
 
 	// #588: lanes open PRs as sunny-factory[bot] too, so the factory's own are those whose every

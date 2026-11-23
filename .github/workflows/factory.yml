@@ -11,7 +11,8 @@
 #   FACTORY_ENABLED=true logs `SWITCH off` and every later job is skipped.
 # - gate: .github/scripts/factory-gate.sh, with the read-only GITHUB_TOKEN and no environment. It
 #   refuses unless the issue is open, opened by the owner or a collaborator, carries factory:ready
-#   (the Mode signal) and has no open PR or <n>- branch yet.
+#   or factory:working (the sweep's move before it dispatches; #619), has no blocked:* label and no
+#   open native blocker, and has no open PR or <n>- branch yet.
 # - factory: claude-code-action runs /implement on the issue with .github/factory-prompt.md, on the
 #   setup-token and the read-only GITHUB_TOKEN only. Claude commits locally and writes the branch
 #   name, PR body and labels to files; a plain step packs them with a git bundle into the job's
@@ -20,6 +21,13 @@
 #   hand-off (branch name, labels, body, no workflow or acceptance-test paths); only then does it
 #   mint the App's token, push the branch and open the PR with scripts/open-pr.sh, so open-pr.yml
 #   opens it as sunny-factory[bot].
+# - labels (#619): a fresh runner in environment `factory` that never ran the model, whatever
+#   happened: .github/scripts/factory-outcome.sh moves the issue through factory-label.sh (the
+#   sweep's transition code too) with the App's token, minted with issues: write and nothing else.
+#   A PR opened, or a fix round done: factory:review. No PR: factory:failed and one comment with
+#   the run's link and the factory job's `RESULT` lines (its GITHUB_TOKEN reads that log,
+#   actions: read). The gate refused: factory:failed with its reason, only for an issue the sweep
+#   moved to factory:working.
 # - report: total_cost_usd, turns, each job's billed minutes and the PR, whatever happened.
 #
 # Fix mode (#588; ADR-0002, area 2, "Fix rounds (#588)"): with `pr` and `head` instead of `issue`
@@ -93,10 +101,11 @@ jobs:
     timeout-minutes: 3
     permissions:
       contents: read # the checkout of .github/scripts, and the branch lookup
-      issues: read # the issue, its author and labels
+      issues: read # the issue, its author, labels and blockers
       pull-requests: read # the open PRs, for the duplicate guard
     outputs:
       run: ${{ steps.gate.outputs.run }}
+      why: ${{ steps.gate.outputs.why }} # a refusal's reason, for the labels job
       issue: ${{ steps.gate.outputs.issue }}
       turns: ${{ steps.gate.outputs.turns }}
       pr: ${{ steps.gate.outputs.pr }} # fix mode only, as are branch and head
@@ -326,28 +335,19 @@ jobs:
         run: |
           set -uo pipefail
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
-          # Whether Claude ran (#582), for the "Claude ran" step below: an execution file, or the
-          # prompt file the action writes once its checks pass (src/modes/agent/index.ts at the
+          # Whether Claude ran (#582), logged as `RESULT claude_ran=true`: an execution file, or
+          # the prompt file the action writes once its checks pass (src/modes/agent/index.ts at the
           # pinned SHA, after checkHumanActor), before it installs the CLI and starts Claude. The
-          # prompt file covers a Claude step that timed out, which writes no execution file; it
-          # also counts a CLI install failure as a run, the safe side (the issue waits for an
-          # edit). Re-check this path when the pin moves.
+          # prompt file covers a Claude step that timed out, which writes no execution file. Since
+          # #619 nothing gates on it: a run without a PR moves its issue to factory:failed.
           if [ -f "$f" ] || [ -f "$RUNNER_TEMP/claude-prompts/claude-prompt.txt" ]; then
-            echo "ran=true" >>"$GITHUB_OUTPUT"
+            echo "RESULT claude_ran=true"
           fi
           [ -f "$f" ] || { echo "RESULT claude=$OUTCOME execution_file=missing"; exit 0; }
           line=$(jq -r '.[] | select(.type == "result") | "subtype=\(.subtype) is_error=\(.is_error)"
             + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" | tail -n1)
           echo "RESULT claude=$OUTCOME $line"
           echo "cost=$line" | tr -cd '[:alnum:] =._\n-' >>"$GITHUB_OUTPUT"
-
-      # The sweep's evidence (#582): sweep.yml skips an issue whose last run opened no PR only when
-      # this step succeeded in it, read by name from the run's jobs (factory-sweep-gather.sh). A
-      # run that failed before Claude ran skips it, so the sweep tries the issue again. The step's
-      # name is that contract: renaming it means changing factory-sweep-gather.sh too.
-      - name: Claude ran
-        if: always() && steps.result.outputs.ran == 'true'
-        run: echo "RESULT claude_ran=true"
 
   publish:
     needs: [gate, factory]
@@ -452,6 +452,43 @@ jobs:
           fi
           echo "pr=$FIX_PR" >>"$GITHUB_OUTPUT"
           echo "RESULT fix=#$FIX_PR commits=$COMMITS labels=${LABELS:-none} body=${BODY:+replaced}${BODY:-unchanged} comment=${COMMENT:+posted}${COMMENT:-none}"
+
+  # The issue's factory:* label once the run is done (#619): factory-outcome.sh's header. Its own
+  # runner, like publish, and the App's token can write issues only.
+  labels:
+    needs: [gate, factory, publish]
+    if: always() && needs.gate.outputs.issue != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    environment: factory
+    permissions:
+      actions: read # the factory job's log, for the RESULT lines the failed comment quotes
+      contents: read # main's checkout of the scripts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FACTORY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          permission-issues: write
+
+      - name: Label the issue as sunny-factory
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          RUN_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.gate.outputs.issue }}
+          FIX: ${{ needs.gate.outputs.pr }}
+          GATE_RUN: ${{ needs.gate.outputs.run }}
+          GATE_WHY: ${{ needs.gate.outputs.why }}
+          PR: ${{ needs.publish.outputs.pr }}
+          FACTORY_RESULT: ${{ needs.factory.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: bash .github/scripts/factory-outcome.sh
 
   # Report data (ADR-0002, "Caps"): cost and turns, each job's billed minutes (GitHub rounds each
   # job up to a whole minute) and the PR. Non-secret fields only.
