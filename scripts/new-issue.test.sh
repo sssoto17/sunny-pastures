@@ -442,6 +442,17 @@ case_ --title x --type bug --area ci-cd --milestone "M4 Playable slice live" --b
 expect_code 0
 expect_err "is a tooling issue (area:ci-cd)"
 
+# With no Tooling backlog open, the note still names the default, without a move command.
+reset
+jq -n '[{number: 4, title: "M4 Playable slice live", due_on: "2026-11-29T00:00:00Z"}]' \
+  >"$st/get/$R/milestones"
+readback chore,area:tools "M4 Playable slice live" 73 Chore
+case_ --title x --type chore --area tools --milestone "M4 Playable slice live" --body-file body.md \
+  --parent 73 "${three[@]}"
+expect_code 0
+expect_err "go to Tooling backlog unless they block product work in this milestone"
+assert "expected no move command without a Tooling backlog" test "${err/move it/}" == "$err"
+
 # No note in Tooling backlog itself, nor for a product area in a dated milestone.
 reset
 dated_milestones

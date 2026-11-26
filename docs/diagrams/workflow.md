@@ -150,14 +150,16 @@ The project should get harder to break over time. A mistake that happens twice i
 safeguard. Matt's rule decides the kind of safeguard: **mechanical mistakes become checks** (a lint
 rule, a Fallow boundary, a test, a CI step), **judgement calls become standards** (a line in
 `AGENTS.md` or `CONSTRAINTS.md`, a coding standard `code-review` enforces). Add the safeguard as
-early as possible: the cheapest moment is the first repeat.
+early as possible: the cheapest moment is the first repeat, outside an active product milestone
+(below).
 
 **While a product milestone is active** (admin, 22 Nov 2026, #573), a second occurrence is first a
 comment in the Retro inbox (#55) with its evidence: both occurrences, with links. It becomes an
 issue only when the retro or the admin decides, and that issue goes to the **Tooling backlog**
-milestone (`docs/agents/issue-tracker.md`, "Tooling backlog"). A repeat that blocks product work is
-filed at once, into the milestone it blocks. Example (26 Nov): #654, #566's follow-ups, waits in
-Tooling backlog; #646 and #659, factory bugs that stopped the M4 frontend chain, went into M4.
+milestone by default (`docs/agents/issue-tracker.md`, "Tooling backlog"). A repeat that blocks
+product work is filed at once, into the milestone it blocks. Example (26 Nov): #654, #566's
+follow-ups, waits in Tooling backlog; #646 and #659, factory bugs that stopped the M4 frontend
+chain, went into M4.
 
 <!-- prettier-ignore -->
 | Loop | Output of | Feeds |
@@ -176,8 +178,9 @@ Tooling backlog; #646 and #659, factory bugs that stopped the M4 frontend chain,
 2. Which manual steps did I repeat? Note each one with its count toward the 3-repetition rule.
 3. Which tool output isn't feeding anything yet? Propose the loop that would use it.
 
-Each answer becomes an issue or a direct change in the same week, never only a note. A CI, tooling
-or workflow issue goes to Tooling backlog unless it blocks product work.
+Each answer becomes an issue or a direct change in the same week, never only a note; the exception
+is a repeat the retro leaves in the Retro inbox while a product milestone is active (above). A CI,
+tooling or workflow issue goes to Tooling backlog unless it blocks product work.
 
 During the week, notes for the retro go to the **Retro inbox** (#55) as comments; the retro handles
 each one (#79 closed, retro 2026-11-15, Outcomes 8). The retro itself is to become a module of the

@@ -85,7 +85,8 @@ IFS=$'\t' read -r state due_on title <<<"$row"
 [[ $state == open ]] || die 2 "milestone \"$title\" is $state; nothing was filed"
 # An undated milestone (Tooling backlog) is where work waits, not a phase that ends: no review.
 if [[ $due_on == - ]]; then
-  echo "milestone-review: \"$title\" has no due date, so it gets no review (#573). Nothing was filed."
+  echo "milestone-review: \"$title\" has no due date, so it gets no review (#573)." \
+    "Nothing was filed."
   exit 0
 fi
 

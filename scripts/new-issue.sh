@@ -17,6 +17,7 @@ OWNER=sssoto17
 REPO=sunny-pastures
 # The areas of CI, tooling and workflow issues, which go to Tooling backlog by default (#573).
 TOOLING_AREAS=(area:tools area:ci-cd)
+TOOLING_MILESTONE="Tooling backlog"
 here="$(cd "$(dirname "$0")" && pwd)"
 # TYPE_LABELS, native_type and check_native_types: the type label -> native type mapping.
 # shellcheck source=scripts/lib/issue-types.sh
@@ -306,9 +307,11 @@ fi
 # A CI or tooling issue in an active milestone: say what the default is (#573). Only a note: it may
 # block product work there, or the admin may have pulled it in.
 if [[ " ${TOOLING_AREAS[*]} " == *" $area "* && $milestone_due != - ]]; then
-  backlog=$(awk -F'\t' '$3 == "Tooling backlog" { print $1; exit }' <<<"$milestones")
-  printf 'new-issue: note: #%s is a tooling issue (%s) in "%s", which has a due date. CI, tooling and workflow issues go to Tooling backlog unless they block product work in this milestone or the admin pulled them in (docs/agents/issue-tracker.md, "Tooling backlog").' \
-    "$number" "$area" "$milestone" >&2
+  backlog=$(awk -F'\t' -v t="$TOOLING_MILESTONE" '$3 == t { print $1; exit }' <<<"$milestones")
+  printf '%s' "new-issue: note: #$number is a tooling issue ($area) in \"$milestone\", which has a" \
+    " due date. CI, tooling and workflow issues go to $TOOLING_MILESTONE unless they block product" \
+    " work in this milestone or the admin pulled them in (docs/agents/issue-tracker.md," \
+    " \"Tooling backlog\")." >&2
   [[ -n $backlog ]] &&
     printf ' If neither holds, move it: gh api -X PATCH repos/%s/%s/issues/%s -F milestone=%s --silent' \
       "$OWNER" "$REPO" "$number" "$backlog" >&2
