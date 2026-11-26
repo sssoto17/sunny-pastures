@@ -171,19 +171,30 @@ expect_arg --priority P2
 expect_err "no Week iteration contains"
 expect_err "triage"
 
-reset
-milestone 4 open null "M4 Playable slice live"
-case_ 4
-expect_code 0
-expect_no_arg --week
-expect_err "has no due date"
-assert "expected no Project call without a due date" test -z "$(grep "$P" <<<"$tokens")"
-
 # In a workflow run the note is an annotation on stdout.
 reset
-milestone 4 open null "M4 Playable slice live"
+milestone 4 open '"2027-01-03T00:00:00Z"' "M4 Playable slice live"
 ACTIONS=true case_ 4
 expect_out "::warning::milestone-review:"
+
+# --- a milestone with no due date gets no review (#573) -------------------------------------------
+# An undated milestone is a parking lot such as Tooling backlog, not a phase of the plan: #572 was
+# filed for Tooling backlog before this rule. Nothing is filed and nothing else is read.
+reset
+milestone 10 open null "Tooling backlog"
+case_ 10
+expect_code 0
+expect_not_filed
+expect_out "\"Tooling backlog\" has no due date"
+assert "expected no read of the milestone's issues" test -z "$(grep 'issues' <<<"$calls")"
+assert "expected no Project call without a due date" test -z "$(grep "$P" <<<"$tokens")"
+
+# The same in a workflow run: still exit 0, so the run is green.
+reset
+milestone 10 open null "Tooling backlog"
+ACTIONS=true case_ 10
+expect_code 0
+expect_not_filed
 
 # The Project refused (the cloud proxy): still filed, without Week; new-issue.sh's code passes on.
 reset

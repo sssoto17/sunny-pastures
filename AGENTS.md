@@ -65,7 +65,11 @@ Folders appear at the milestone that needs them; don't create them ahead of time
   Review a results PR against every step of the rule or criteria it reports on.
 - A mistake that happens twice is a missing safeguard: mechanical mistakes become checks (lint rule,
   Fallow boundary, test, CI step), judgement calls become standards (this file or `CONSTRAINTS.md`).
-  The weekly retro looks for them; see `docs/diagrams/workflow.md`, "Self-improving loops".
+  The weekly retro looks for them; see `docs/diagrams/workflow.md`, "Self-improving loops". While a
+  product milestone is active, a second occurrence is first noted in the Retro inbox (#55) with its
+  evidence, and becomes an issue when the retro or the admin decides, or at once if it blocks
+  product work. New CI, tooling and workflow issues go to the Tooling backlog milestone unless they
+  block product work (`docs/agents/issue-tracker.md`, "Tooling backlog").
 - Every review follows `REVIEW.md`, read from `origin/main`: a reviewer the coordinator dispatches,
   a lane's own review when `/implement` reaches `code-review` (a self-review), and the CI reviewer
   App. Its mechanism (approvals, `review:admin`, merges) is ADR-0002 (area 2). Agents never merge a

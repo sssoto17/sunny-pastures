@@ -5,7 +5,9 @@
 # missed three weeks running (#290, #407, retro 2026-11-22). Run by .github/workflows/
 # milestone-review.yml on `milestone: created`, and by hand for a backfill. A milestone that
 # already has an issue titled "Architecture review, …" (open or closed) is left alone, so a re-run
-# never files a second. REST only (`gh api`; docs/agents/github-rest.md).
+# never files a second, and so is a milestone with no due date (#573): an undated milestone such as
+# Tooling backlog is a parking lot, not a phase of the plan. REST only (`gh api`;
+# docs/agents/github-rest.md).
 # Tests: scripts/milestone-review.test.sh.
 # Needs bash 4.4+, an authenticated gh that can write issues, and for Week the `project` scope or
 # PROJECT_GH_TOKEN (gh uses it for the Project's calls only, as issue-fields.sh does).
@@ -33,15 +35,16 @@ usage: scripts/milestone-review.sh <milestone-number>
 Files "Architecture review, <milestone title>" into the open milestone of that number (the number
 in the milestone's URL), as a sub-issue of #73, with: type chore (native Chore), area:tools,
 Priority P2, Size M, and Week set to the board iteration that contains the milestone's due date.
-With no due date, or no iteration containing it yet, Week is left unset and the issue carries
-`triage` (scripts/new-issue.sh adds it); the log says so.
+With no iteration containing the due date yet, Week is left unset and the issue carries `triage`
+(scripts/new-issue.sh adds it); the log says so.
 
-Does nothing, and exits 0, when the milestone already has an issue whose title starts with
-"Architecture review, " (open or closed): a milestone gets one review.
+Does nothing, and exits 0, when the milestone has no due date (an undated milestone such as
+Tooling backlog is a parking lot, not a phase of the plan, #573), or when it already has an issue
+whose title starts with "Architecture review, " (open or closed): a milestone gets one review.
 
-Exit codes: 0 filed or already there, 2 bad arguments or a closed milestone (nothing filed),
-3 GitHub couldn't be read before filing (nothing filed); otherwise scripts/new-issue.sh's code
-(1 a write failed, 4 filed but the Project step skipped).
+Exit codes: 0 filed, already there or no due date, 2 bad arguments or a closed milestone (nothing
+filed), 3 GitHub couldn't be read before filing (nothing filed); otherwise scripts/new-issue.sh's
+code (1 a write failed, 4 filed but the Project step skipped).
 
 example: scripts/milestone-review.sh 4
 EOF
@@ -80,6 +83,11 @@ row=$(gh api "repos/$OWNER/$REPO/milestones/$number" --jq '[.state, (.due_on // 
 IFS=$'\t' read -r state due_on title <<<"$row"
 [[ -n $title ]] || die 3 "milestone $number has no title in GitHub's answer; nothing was filed"
 [[ $state == open ]] || die 2 "milestone \"$title\" is $state; nothing was filed"
+# An undated milestone (Tooling backlog) is where work waits, not a phase that ends: no review.
+if [[ $due_on == - ]]; then
+  echo "milestone-review: \"$title\" has no due date, so it gets no review (#573). Nothing was filed."
+  exit 0
+fi
 
 # Every issue of the milestone, closed ones too, so a review already done counts. REST lists PRs
 # as issues, hence the select. The comma matters: #517 itself ("Architecture review per
@@ -97,9 +105,7 @@ fi
 # UTC, so its first ten characters are the day.
 week=""
 due=${due_on:0:10}
-if [[ $due_on == - ]]; then
-  warn "\"$title\" has no due date, so Week is left unset and the review carries \`triage\`"
-elif ! [[ $due =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+if ! [[ $due =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
   die 3 "unexpected due date \"$due_on\" for \"$title\"; nothing was filed"
 else
   WEEK_FILTER="$PROJECT_JQ_DEFS"'

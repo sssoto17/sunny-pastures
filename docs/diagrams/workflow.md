@@ -152,6 +152,13 @@ rule, a Fallow boundary, a test, a CI step), **judgement calls become standards*
 `AGENTS.md` or `CONSTRAINTS.md`, a coding standard `code-review` enforces). Add the safeguard as
 early as possible: the cheapest moment is the first repeat.
 
+**While a product milestone is active** (admin, 22 Nov 2026, #573), a second occurrence is first a
+comment in the Retro inbox (#55) with its evidence: both occurrences, with links. It becomes an
+issue only when the retro or the admin decides, and that issue goes to the **Tooling backlog**
+milestone (`docs/agents/issue-tracker.md`, "Tooling backlog"). A repeat that blocks product work is
+filed at once, into the milestone it blocks. Example (26 Nov): #654, #566's follow-ups, waits in
+Tooling backlog; #646 and #659, factory bugs that stopped the M4 frontend chain, went into M4.
+
 <!-- prettier-ignore -->
 | Loop | Output of | Feeds |
 |---|---|---|
@@ -169,7 +176,8 @@ early as possible: the cheapest moment is the first repeat.
 2. Which manual steps did I repeat? Note each one with its count toward the 3-repetition rule.
 3. Which tool output isn't feeding anything yet? Propose the loop that would use it.
 
-Each answer becomes an issue or a direct change in the same week, never only a note.
+Each answer becomes an issue or a direct change in the same week, never only a note. A CI, tooling
+or workflow issue goes to Tooling backlog unless it blocks product work.
 
 During the week, notes for the retro go to the **Retro inbox** (#55) as comments; the retro handles
 each one (#79 closed, retro 2026-11-15, Outcomes 8). The retro itself is to become a module of the
@@ -197,6 +205,8 @@ Morning, about 10 minutes:
    Extra skills: <the ↳ rows of "When to use what" that fit, or "none">.
    Decided: <settled points, with links>.
    Things to know: <code-owned paths, review:admin rows, area label, other lanes on the same files>.
+   Filing: a follow-up CI, tooling or workflow issue goes to Tooling backlog unless it blocks
+   <milestone>.
    Deliverable: <one PR or a stack; the checks to run; PR number, head SHA, "close #N?">.
    ```
 

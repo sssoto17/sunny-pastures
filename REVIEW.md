@@ -189,3 +189,6 @@ Follow-ups: <one line each, or none>
 - Findings are ranked most severe first, then confirmed before unverified.
 - Word cap: about 300 for a full review, 150 to 250 for a delta.
 - What happens to the confirmed criteria is in `docs/agents/issue-tracker.md`, "Checkboxes".
+- Follow-ups: a follow-up issue you suggest is filed in the **Tooling backlog** milestone unless it
+  blocks the PR's own milestone; say which for each (`docs/agents/issue-tracker.md`, "Tooling
+  backlog"). Example: #566's follow-ups became #654 in Tooling backlog.
