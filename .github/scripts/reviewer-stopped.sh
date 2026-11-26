@@ -60,7 +60,8 @@ issues=$({
 } | sort -t$'\t' -k2,2r -k1,1n)
 
 # The run ids those issues already link: from their bodies and this workflow's own comments only, so
-# a comment someone else posts can't mark a run as reported.
+# a comment someone else posts can't mark a run as reported. Each text comes out as JSON (tojson), so
+# a terminal escape sequence in it stays escaped: the runner's gh refuses to print one raw (#668).
 seen=""
 while IFS=$'\t' read -r n _; do
   [[ -n $n ]] || continue
@@ -70,8 +71,8 @@ while IFS=$'\t' read -r n _; do
   }
   seen+=$(
     {
-      gh api "repos/$repo/issues/$n" --jq '.body // ""'
-      gh api --paginate "repos/$repo/issues/$n/comments" --jq ".[] | select(.user.login == \"$BOT\") | .body"
+      gh api "repos/$repo/issues/$n" --jq '.body // "" | tojson'
+      gh api --paginate "repos/$repo/issues/$n/comments" --jq ".[] | select(.user.login == \"$BOT\") | .body | tojson"
     } | grep -oE "$repo/actions/runs/[0-9]+" || true
   )$'\n'
 done <<<"$issues"

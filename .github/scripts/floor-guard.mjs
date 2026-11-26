@@ -228,6 +228,90 @@ const isTest = (f) => /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests)\//.t
 const isProse = (f) => /\.(md|mdx|txt)$/i.test(f);
 const isConstraints = (f) => f === "CONSTRAINTS.md";
 
+// Vendored skill folders (#665; CONSTRAINTS.md, Floor): a third-party skill, kept as its upstream
+// wrote it, so a TODO in it is the upstream author's, and rewording it would come back with the
+// next update. What counts is a record its installer wrote, never a glob: a skill named in
+// skills-lock.json (the `skills` CLI's), in both folders that installer writes, or a skill folder
+// holding Impeccable's engine pin, which its installer writes in place of a lock entry (#609). Both
+// are code-owned (CODEOWNERS). The record is read from the checkout, the PR's head, since the PR
+// that vendors a skill adds it; but a record the PR adds covers only a folder the merge base didn't
+// have, so recording a folder we already keep can't skip the edits made to it in the same PR. Only
+// the floor guard skips them; every other check still reads them.
+const SKILLS_LOCK = "skills-lock.json";
+const SKILL_DIRS = [".agents/skills/", ".claude/skills/"];
+const ENGINE_PIN = ["scripts/VERSION", "scripts/engine-checksums.txt"];
+// One path segment: the record names folders. A `..` couldn't widen the skip anyway, since git's
+// paths are normalized and a prefix holding one matches none of them.
+const SKILL_NAME = /^[a-z0-9][a-z0-9._-]*$/;
+const lockedSkills = (text) => {
+	if (text === null) return new Set();
+	try {
+		const skills = JSON.parse(text)?.skills;
+		return new Set(
+			Object.entries(skills && typeof skills === "object" ? skills : {})
+				.filter(([name]) => SKILL_NAME.test(name))
+				.filter(([, e]) => typeof e?.source === "string" && e.source.trim() !== "")
+				.map(([name]) => name),
+		);
+	} catch {
+		return null;
+	}
+};
+// The skill folders a diff touches, by prefix (`.claude/skills/<name>/`) and name.
+const touchedSkills = (changes) =>
+	new Map(
+		changes.flatMap((f) =>
+			[f.path, f.oldPath].flatMap((path) => {
+				const dir = SKILL_DIRS.find((d) => path?.startsWith(d));
+				const name = dir && path.slice(dir.length).split("/")[0];
+				return name && SKILL_NAME.test(name) && path !== `${dir}${name}`
+					? [[`${dir}${name}/`, name]]
+					: [];
+			}),
+		),
+	);
+// The skills skills-lock.json records as [prefix, name, record, recorded at the merge base].
+const lockRecords = (mergeBase, notices) => {
+	const now = lockedSkills(existsSync(SKILLS_LOCK) ? readFileSync(SKILLS_LOCK, "utf8") : null);
+	const atBase = lockedSkills(oldContent(mergeBase, SKILLS_LOCK)?.join("\n") ?? null) ?? new Set();
+	if (now === null)
+		notices.push(`${SKILLS_LOCK} doesn't parse, so it records no skill as vendored`);
+	return [...(now ?? [])].flatMap((name) =>
+		SKILL_DIRS.map((dir) => [`${dir}${name}/`, name, SKILLS_LOCK, atBase.has(name)]),
+	);
+};
+// The touched skill folders holding the engine pin, in the same shape.
+const pinRecords = (changes, mergeBase) => {
+	const pinned = (prefix, atBase) =>
+		ENGINE_PIN.every((p) =>
+			atBase
+				? git(["cat-file", "-e", `${mergeBase}:${prefix}${p}`]) !== null
+				: existsSync(`${prefix}${p}`),
+		);
+	return [...touchedSkills(changes)]
+		.filter(([prefix]) => pinned(prefix, false))
+		.map(([prefix, name]) => [prefix, name, ENGINE_PIN[0], pinned(prefix, true)]);
+};
+const vendoredFolders = (changes, mergeBase) => {
+	const notices = [];
+	// A git error reads as "in the merge base", so it never frees a folder.
+	const inBase = (prefix) =>
+		git(["ls-tree", "--name-only", mergeBase, "--", prefix.slice(0, -1)])?.trim() !== "";
+	const folders = new Map(); // folder prefix -> { name, record }
+	for (const [prefix, name, record, recordedAtBase] of [
+		...lockRecords(mergeBase, notices),
+		...pinRecords(changes, mergeBase),
+	]) {
+		if (folders.has(prefix)) continue;
+		if (recordedAtBase || !inBase(prefix)) folders.set(prefix, { name, record });
+		else
+			notices.push(
+				`${prefix} is newly recorded as vendored (${record}), but the merge base has it, so it is still scanned`,
+			);
+	}
+	return { folders, notices };
+};
+
 // The key of the array a line sits in (`exclude: [`, `"exclude": [`), or null.
 export const enclosingKey = (lines, n) => {
 	const keyBefore = (s) => /["']?(\w+)["']?\s*:\s*$/.exec(s)?.[1] ?? null;
@@ -1562,8 +1646,19 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 	const required = checks.length ? new Set(checks) : null;
 	if (!required && changes.some((f) => WORKFLOW.test(f.path)))
 		notices.push(`no check-name table in ${CHECK_TABLE}, so every workflow job counts as required`);
+	const vendored = vendoredFolders(changes, mergeBase);
+	notices.push(...vendored.notices);
+	const vendorOf = (path) =>
+		[...vendored.folders].find(([prefix]) => path.startsWith(prefix))?.[1] ?? null;
+	const skipped = new Map(); // vendored folder -> files skipped
 
 	for (const f of changes) {
+		// A file in a vendored skill folder, before and after a move: one moved in or out still counts.
+		const vendor = vendorOf(f.path);
+		if (vendor && vendorOf(f.oldPath ?? f.path) === vendor) {
+			skipped.set(vendor, (skipped.get(vendor) ?? 0) + 1);
+			continue;
+		}
 		if (f.status === "deleted") {
 			if (isTest(f.path)) weak("test-deleted", f.path, "file");
 			else if (PRETTIER_CONFIG.test(basename(f.path))) weak("config-loosened", f.path, "file");
@@ -1823,6 +1918,9 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 		if (e.expires === null) always("exception-invalid", "CONSTRAINTS.md", r.line, e.id);
 		else if (e.expires < today) always("exception-expired", "CONSTRAINTS.md", r.line, e.id);
 	}
+	// Named on every run, so a skip is never silent (loosening is loud).
+	for (const [{ name, record }, n] of skipped)
+		notices.push(`skipped ${n} changed file(s) of the vendored skill "${name}" (${record})`);
 	const blocking = [];
 	for (const f of findings) {
 		const w = f.waivable && waivers.find((x) => x.re.test(f.file) && x.rules.includes(f.rule));

@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { GH_ESCAPE_REFUSAL } from "./workflow-step.mjs";
+
 const SCRIPT = fileURLToPath(new URL("../reviewer-stopped.sh", import.meta.url));
 const TITLE = "Reviewer stopped: startup_failure on review.yml";
 const SINCE = "2026-11-22T10:00:00Z";
@@ -20,7 +22,9 @@ const SINCE = "2026-11-22T10:00:00Z";
 // A fake gh: logs each call on one line and answers reads from fixtures in its folder. The
 // `--jq` filters are run with the real jq over the fixture, so the script's filters are tested
 // too: runs.json (the runs list), open.json and closed.json (the issues lists), issue-<n>.json
-// and comments-<n>.json. A write logs its body file's text after the call.
+// and comments-<n>.json. A write logs its body file's text after the call. Like the runner's gh
+// (#668), it refuses output that holds an ESC byte unless the call passes
+// --allow-escape-sequences: a raw string out of --jq can hold one, JSON never does.
 const FAKE_GH = `#!/usr/bin/env bash
 d=$(dirname "$0")
 s="$*"
@@ -42,8 +46,9 @@ case "$*" in
   *) echo "fake gh: unexpected call: $*" >&2; exit 98 ;;
 esac
 [[ -f $d/$f ]] || f=empty.json
-jq -r "$jqf" "$d/$f"
-`;
+out="$d/response"
+jq -r "$jqf" "$d/$f" >"$out"
+${GH_ESCAPE_REFUSAL}`;
 
 const run = (id, created = "2026-11-22T11:00:00Z") => ({
 	id,
@@ -158,12 +163,17 @@ describe("reviewer-stopped.sh", () => {
 		expect(a.writes).toHaveLength(1);
 	});
 
-	it("writes nothing when every run is already linked, from the body or a comment", () => {
+	// The second case: an issue's text can hold a terminal escape sequence (someone edits the
+	// body), which the runner's gh refuses to print raw, so its runs would be filed again (#668).
+	it.each([
+		["", ""],
+		[" when the text holds escape sequences", "\x1b[31m"],
+	])("writes nothing when every run is already linked, from the body or a comment%s", (_, esc) => {
 		const a = alert({
 			runs: [run(1), run(2)],
 			open: [issue(40, "open")],
-			bodies: { 40: "- [1](https://github.com/o/r/actions/runs/1)" },
-			comments: { 40: ["- [2](https://github.com/o/r/actions/runs/2)"] },
+			bodies: { 40: `${esc}- [1](https://github.com/o/r/actions/runs/1)${esc}` },
+			comments: { 40: [`${esc}- [2](https://github.com/o/r/actions/runs/2)`] },
 		});
 		expect(a.code).toBe(0);
 		expect(a.log).toMatch(/^ALERT none: every startup_failure since .* is already reported$/m);

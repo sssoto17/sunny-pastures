@@ -257,6 +257,72 @@ describe("factory.yml, Claude's last turns (#646)", () => {
 		expect(r.lines.join("\n")).not.toMatch(/SECRET FILE TEXT|Switched to|long prompt/);
 	});
 
+	// #659: run 45883747890 (#597) had its `git commit` refused 7 times, and the digest showed only
+	// the Fallow gate's hook command, cut at 200 characters, never the gate's reason. The error as
+	// Claude Code reports a hook's exit 2: `PreToolUse:Bash hook error: [<command>]: <stderr>`, with
+	// the command from .claude/settings.json. The gate's lines are its block message's format
+	// (fallow-gate.sh, print_block_message and the clone check); the finding itself is illustrative,
+	// since the run's log never showed it.
+	const settings = JSON.parse(
+		readFileSync(fileURLToPath(new URL("../../../.claude/settings.json", import.meta.url)), "utf8"),
+	);
+	const gate = settings.hooks.PreToolUse.flatMap((m) => m.hooks).find((h) =>
+		h.command.includes("fallow-gate.sh"),
+	).command;
+	const refusal = [
+		`PreToolUse:Bash hook error: [${gate}]: fallow-gate: fallow's verdict is pass, but a clone group in this change fails CONSTRAINTS.md's Duplication row:`,
+		"  apps/web/src/client/store/tests/store.test.ts:120-141, apps/web/src/client/store/tests/store.test.ts:160-181",
+		"fallow-gate: blocked by fallow 2.90.1 at node_modules/.bin/fallow",
+		"fallow-gate: verdict fail. Read the full report for the findings.",
+		"fallow-gate: full report: .fallow/gate-report.json",
+	].join("\n");
+
+	it("gives a denied call's reason: the hook's message, not its command (run 45883747890)", () => {
+		const commit =
+			'git add apps/web/src/client/store && git commit -q -m "feat(web): farm store (#597)"';
+		const r = turns([
+			call("t1", "Bash", { command: commit }),
+			answer("t1", refusal, true),
+			call("t2", "Bash", { command: "git push origin x" }),
+			answer("t2", "Permission to use Bash with command git push origin x has been denied.", true),
+			result("Both reviewers are running in the background.", [
+				{ tool_name: "Bash", tool_use_id: "t1", tool_input: { command: commit } },
+				{ tool_name: "Bash", tool_use_id: "t2", tool_input: { command: "git push origin x" } },
+			]),
+		]);
+		expect(r.code).toBe(0);
+		expect(r.lines).toEqual([
+			`TURNS call Bash ${commit} -> error: ${"PreToolUse:Bash hook error: fallow-gate: fallow's verdict is pass, but a clone group in this change fails CONSTRAINTS.md's Duplication row:".slice(0, 200)}`,
+			"TURNS call Bash git push origin x -> error: Permission to use Bash with command git push origin x has been denied.",
+			`TURNS denied Bash ${commit}`,
+			"TURNS reason PreToolUse:Bash hook error: fallow-gate: fallow's verdict is pass, but a clone group in this change fails CONSTRAINTS.md's Duplication row:",
+			"TURNS reason   apps/web/src/client/store/tests/store.test.ts:120-141, apps/web/src/client/store/tests/store.test.ts:160-181",
+			"TURNS reason fallow-gate: blocked by fallow 2.90.1 at node_modules/.bin/fallow",
+			"TURNS reason fallow-gate: verdict fail. Read the full report for the findings.",
+			"TURNS reason fallow-gate: full report: .fallow/gate-report.json",
+			"TURNS denied Bash git push origin x",
+			"TURNS reason Permission to use Bash with command git push origin x has been denied.",
+			"TURNS said Both reviewers are running in the background.",
+		]);
+		expect(r.lines.join("\n")).not.toContain("until [ -f");
+	});
+
+	it("keeps a denial's reason to 6 lines, each cleaned and redacted like the rest", () => {
+		const long = Array.from(
+			{ length: 9 },
+			(_, i) => `line ${i} ghp_abcdefghijklmnopqrstuvwxyz0123`,
+		);
+		const r = turns([
+			call("t1", "Bash", { command: "git commit" }),
+			answer("t1", `PreToolUse:Bash hook error: [x]: ::error::${long.join("\n")}`, true),
+			result("", [{ tool_name: "Bash", tool_use_id: "t1", tool_input: { command: "git commit" } }]),
+		]);
+		const reasons = r.lines.filter((l) => l.startsWith("TURNS reason"));
+		expect(reasons).toHaveLength(6);
+		expect(reasons[0]).toBe("TURNS reason PreToolUse:Bash hook error: :error:line 0 [redacted]");
+		expect(reasons.at(-1)).toBe("TURNS reason line 5 [redacted]");
+	});
+
 	it("keeps only the last 25 calls", () => {
 		const calls = Array.from({ length: 30 }, (_, i) =>
 			call(`t${i}`, "Read", { file_path: `/f${i}` }),
