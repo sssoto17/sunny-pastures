@@ -1300,12 +1300,21 @@ and neither the sweep nor the gate reads Status, Mode or Track.
    or filter) runs after Claude on that runner. A last step, `Claude's last turns` (`if: always()`),
    logs a digest of the execution file as `TURNS` lines: the last 25 tool calls with only their gist
    (a command, a path, a description), the first line of each failed call's error, the denied calls
-   and the last 10 lines of the final message, each piece cleaned as the `RESULT factory=` line is,
-   cut to 200 characters and with token shapes redacted. Tool output is never logged otherwise,
-   since the log is public. _Alternative:_ the execution file as a short-lived artifact was
-   rejected: a public repo's artifacts are readable by any signed-in user, they hold every tool
-   output (any file Claude read), and `actions/upload-artifact` is a new action (as for the
-   reviewer's transcript, above).
+   each with up to 6 `TURNS reason` lines (the message the hook or permission rule sent back, with a
+   hook's `[<command>]: ` prefix cut; #659) and the last 10 lines of the final message, each piece
+   cleaned as the `RESULT factory=` line is, cut to 200 characters and with token shapes redacted.
+   Tool output is never logged otherwise, since the log is public. _Alternative:_ the execution file
+   as a short-lived artifact was rejected: a public repo's artifacts are readable by any signed-in
+   user, they hold every tool output (any file Claude read), and `actions/upload-artifact` is a new
+   action (as for the reviewer's transcript, above). The Claude step sets
+   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` (#659): the run ends with Claude's turn, and run
+   45883747890 (#597) ended "waiting" on two background reviews with nothing handed off, so the
+   Agent and Bash tools lose `run_in_background`, and `factory-prompt.md` says reviews run in the
+   foreground or not at all. The prompt also tells Claude that a refused `git commit` carries the
+   Fallow gate's (or a permission rule's) reason, to fix what it names or stop with
+   `FACTORY stopped: <reason>`, and to end every run with a `FACTORY` line. _Alternative:_ the
+   prompt alone, rejected because a rule the model can miss once is worth a setting that removes the
+   option; the gate itself is unchanged and still applies to the factory.
 4. **`publish`** runs on a fresh runner that never ran the model, with `main`'s checkout.
    `.github/scripts/factory-publish.sh` refuses (`PUBLISH refused: …`, a failed job) a hand-off with
    any entry but the four files, a branch that isn't `<n>-<slug>`, a body without `Closes #<n>`, a
@@ -1319,7 +1328,12 @@ and neither the sweep nor the gate reads Status, Mode or Track.
    reconcile) moves the issue's `factory:*` label (below, "The factory sweep, built") on a fresh
    runner in environment `factory`, with an App token minted with `issues: write` only:
    `factory:review` when publish opened a PR or a fix round ran, `factory:failed` and one comment
-   when the run opened none.
+   when the run opened none. The comment quotes the factory job's `RESULT` lines, read from its log
+   with `gh api --allow-escape-sequences` (the log echoes each script in ANSI colour, and the
+   runner's `gh` refuses such a response without the flag; a `gh` that lacks the flag is asked again
+   without it), with escape sequences and control characters dropped before matching (#659; run
+   45883747890's comment read none). Dropped, not marked as #648 does for the reviewer: only the
+   workflow's own `RESULT` lines are quoted, and those hold no escape the admin needs to see.
 6. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
    rounds each job up) and their sum, and the PR.
 

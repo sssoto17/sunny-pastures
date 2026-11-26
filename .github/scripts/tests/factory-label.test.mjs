@@ -11,6 +11,10 @@ const RUN = "https://github.com/o/r/actions/runs/77";
 // The tail of factory run 45249182872's factory job log (#594), as the jobs/{id}/logs endpoint
 // returned it: a byte-order mark, a timestamp on every line and the run scripts echoed in colour.
 const FIXTURE = fileURLToPath(new URL("fixtures/factory-job-594.txt", import.meta.url));
+// The tail of factory run 45883747890's factory job log (#597, #659), as the endpoint returned it:
+// the `result` step's RESULT lines after its script, echoed with ANSI colour codes. The runner's gh
+// refused this log without --allow-escape-sequences, so the comment read no RESULT lines.
+const FIXTURE_597 = fileURLToPath(new URL("fixtures/factory-job-597.txt", import.meta.url));
 
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
@@ -18,14 +22,18 @@ afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 // A fake gh on PATH that logs each call (method, path and token) and answers as gh would after its
 // --jq: the issue's factory:* states are HAVE ("ready", "ready failed", or "" for none), the run's
 // jobs give the factory job id 5, and its log is LOG. A comment's body file is copied to `comment`.
+// GH_ESC picks the gh the log meets: "refuses" is a gh that refuses a response holding an escape
+// sequence unless --allow-escape-sequences is passed (the runner's, #659), "old" one that has no
+// such flag (2.89); unset, the flag is ignored.
 function run(script, env) {
 	dir = mkdtempSync(join(tmpdir(), "factory-label-"));
 	mkdirSync(join(dir, "bin"));
 	writeFileSync(
 		join(dir, "bin", "gh"),
 		`#!/usr/bin/env bash
-m=GET; path=""
-for a; do case $a in -X) ;; GET|POST|DELETE|PATCH) m=$a ;; repos/*) path=$a ;; body=@*) cp "\${a#body=@}" "${dir}/comment" ;; esac; done
+m=GET; path=""; esc=""
+for a; do case $a in -X) ;; GET|POST|DELETE|PATCH) m=$a ;; repos/*) path=$a ;; body=@*) cp "\${a#body=@}" "${dir}/comment" ;; --allow-escape-sequences) esc=1 ;; esac; done
+if [[ \${GH_ESC-} == old && -n $esc ]]; then echo "unknown flag: --allow-escape-sequences" >&2; exit 1; fi
 echo "$m $path token=$GH_TOKEN" >>"${dir}/calls"
 case "$m $path" in
   "GET repos/o/r/issues/42") echo "$HAVE" ;;
@@ -33,6 +41,9 @@ case "$m $path" in
   "GET repos/o/r/actions/jobs/5/logs")
     n=$(($(cat "${dir}/fetches" 2>/dev/null || echo 0) + 1)); echo "$n" >"${dir}/fetches"
     if ((n <= \${FAILS:-0})); then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    if [[ \${GH_ESC-} == refuses && -z $esc ]] && { [[ -n \${LOG_FILE-} ]] && grep -q $'\\e' "$LOG_FILE" || [[ \${LOG-} == *$'\\e'* ]]; }; then
+      echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2; exit 1
+    fi
     if [[ -n \${LOG_FILE-} ]]; then cat "$LOG_FILE"; else printf '%s' "$LOG"; fi ;;
 esac
 `,
@@ -187,6 +198,27 @@ describe("factory-outcome.sh", () => {
 		const r = outcome({ HAVE: "working", GATE_RUN: "true", LOG_FILE: FIXTURE });
 		expect(r.comment).toContain(
 			"```text\nRESULT claude=success subtype=success is_error=false num_turns=10 total_cost_usd=0.29726440000000004 duration_ms=29674\nRESULT handoff=none: Claude wrote no branch\nRESULT factory=FACTORY stopped: sandbox mounts node_modules and pnpm-lock.yaml read-only, so the pinned dependencies can't be installed or locked\n```",
+		);
+	});
+
+	it.each([
+		["a gh that refuses escape sequences without the flag (the runner's)", "refuses"],
+		["a gh without --allow-escape-sequences (2.89)", "old"],
+	])("quotes run 45883747890's RESULT lines (#597) from %s", (_name, GH_ESC) => {
+		const r = outcome({ HAVE: "working", GATE_RUN: "true", LOG_FILE: FIXTURE_597, GH_ESC });
+		expect(r.log).not.toMatch(/^LOG attempt/m);
+		expect(r.comment).toContain(
+			"```text\nRESULT claude=success subtype=success is_error=false num_turns=36 total_cost_usd=0.8006315999999998 duration_ms=320351\nRESULT handoff=none: Claude wrote no branch\nRESULT factory=none\n```",
+		);
+		expect(r.comment).not.toContain("\u001b");
+	});
+
+	it("drops escape sequences and control characters from a quoted line", () => {
+		const log =
+			"2026-11-26T19:33:39.1Z RESULT claude=success \u001b[31mred\u001b[0m\u0007 end\u001b[K\n2026-11-26T19:33:39.2Z \u001b[2KRESULT factory=FACTORY stopped: x\n";
+		const r = outcome({ HAVE: "working", GATE_RUN: "true", LOG: log, GH_ESC: "refuses" });
+		expect(r.comment).toContain(
+			"```text\nRESULT claude=success red end\nRESULT factory=FACTORY stopped: x\n```",
 		);
 	});
 

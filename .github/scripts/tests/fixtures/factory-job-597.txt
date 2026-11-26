@@ -1,0 +1,59 @@
+﻿2026-11-26T19:27:38.2966228Z Current runner version: '2.338.2'
+2026-11-26T19:33:39.2098359Z env:
+2026-11-26T19:33:39.2098568Z   FACTORY_APP: sunny-factory
+2026-11-26T19:33:39.2098830Z   FACTORY_BOT_ID: 355564973
+2026-11-26T19:33:39.2099055Z   ISSUE: 597
+2026-11-26T19:33:39.2099251Z   FIX_PR: 
+2026-11-26T19:33:39.2099430Z   FIX_BRANCH: 
+2026-11-26T19:33:39.2099617Z   FIX_HEAD: 
+2026-11-26T19:33:39.2099912Z   OUT: /home/runner/work/sunny-pastures/sunny-pastures/../factory-out
+2026-11-26T19:33:39.2100280Z   ANTHROPIC_API_KEY: 
+2026-11-26T19:33:39.2100499Z ##[endgroup]
+2026-11-26T19:33:39.2160104Z RESULT handoff=none: Claude wrote no branch
+2026-11-26T19:33:39.2187157Z ##[group]Run set -uo pipefail
+2026-11-26T19:33:39.2187508Z [36;1mset -uo pipefail[0m
+2026-11-26T19:33:39.2188043Z [36;1mf=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}[0m
+2026-11-26T19:33:39.2188574Z [36;1m# Whether Claude ran (#582), logged as `RESULT claude_ran=true`: an execution file, or[0m
+2026-11-26T19:33:39.2189188Z [36;1m# the prompt file the action writes once its checks pass (src/modes/agent/index.ts at the[0m
+2026-11-26T19:33:39.2189831Z [36;1m# pinned SHA, after checkHumanActor), before it installs the CLI and starts Claude. The[0m
+2026-11-26T19:33:39.2190458Z [36;1m# prompt file covers a Claude step that timed out, which writes no execution file. Since[0m
+2026-11-26T19:33:39.2191052Z [36;1m# #619 nothing gates on it: a run without a PR moves its issue to factory:failed.[0m
+2026-11-26T19:33:39.2191835Z [36;1mif [ -f "$f" ] || [ -f "$RUNNER_TEMP/claude-prompts/claude-prompt.txt" ]; then[0m
+2026-11-26T19:33:39.2192287Z [36;1m  echo "RESULT claude_ran=true"[0m
+2026-11-26T19:33:39.2192562Z [36;1mfi[0m
+2026-11-26T19:33:39.2192984Z [36;1m[ -f "$f" ] || { echo "RESULT claude=$OUTCOME execution_file=missing"; echo "RESULT factory=none"; exit 0; }[0m
+2026-11-26T19:33:39.2193650Z [36;1mline=$(jq -r '.[] | select(.type == "result") | "subtype=\(.subtype) is_error=\(.is_error)"[0m
+2026-11-26T19:33:39.2194346Z [36;1m  + " num_turns=\(.num_turns) total_cost_usd=\(.total_cost_usd) duration_ms=\(.duration_ms)"' "$f" | tail -n1) || line=[0m
+2026-11-26T19:33:39.2194900Z [36;1mecho "RESULT claude=$OUTCOME $line"[0m
+2026-11-26T19:33:39.2195284Z [36;1mecho "cost=$line" | tr -cd '[:alnum:] =._\n-' >>"$GITHUB_OUTPUT"[0m
+2026-11-26T19:33:39.2195801Z [36;1m# Why the run ended, in Claude's words (#615): the last line of the final result that[0m
+2026-11-26T19:33:39.2196387Z [36;1m# starts with `FACTORY ` (ready:, stopped:, fixed:), as .github/factory-prompt.md has[0m
+2026-11-26T19:33:39.2196995Z [36;1m# Claude end. The model wrote it, so jq makes it one line: it splits on every line break[0m
+2026-11-26T19:33:39.2197597Z [36;1m# (\r, \n, NEL, U+2028/9), strips control and format characters (\p{Cc}, \p{Cf}: escapes,[0m
+2026-11-26T19:33:39.2198197Z [36;1m# NUL, bidi overrides), collapses each run of colons to one and drops the #s before a [[0m
+2026-11-26T19:33:39.2198777Z [36;1m# (the runner reads `::` at a line's start and the legacy `##[` anywhere in it as a[0m
+2026-11-26T19:33:39.2199365Z [36;1m# workflow command), and keeps 300 characters. The shell runs with -e (GitHub's default[0m
+2026-11-26T19:33:39.2199908Z [36;1m# `bash -e {0}`), so a jq failure, a file that isn't JSON, reads as none.[0m
+2026-11-26T19:33:39.2200358Z [36;1m# Tests: .github/scripts/tests/factory-gate.test.mjs.[0m
+2026-11-26T19:33:39.2200810Z [36;1mfactory=$(jq -r '[.[] | select(.type == "result")] | last | .result | strings[0m
+2026-11-26T19:33:39.2201590Z [36;1m  | [splits("\r\n|[\n\r\u0085\u2028\u2029]") | select(startswith("FACTORY "))] | last // empty[0m
+2026-11-26T19:33:39.2202211Z [36;1m  | gsub("[\\p{Cc}\\p{Cf}]"; "") | gsub(":{2,}"; ":") | gsub("#+\\["; "[") | .[:300]' "$f" 2>/dev/null) || factory=[0m
+2026-11-26T19:33:39.2202681Z [36;1mecho "RESULT factory=${factory:-none}"[0m
+2026-11-26T19:33:39.2239194Z shell: /usr/bin/bash -e {0}
+2026-11-26T19:33:39.2239443Z env:
+2026-11-26T19:33:39.2239653Z   FACTORY_APP: sunny-factory
+2026-11-26T19:33:39.2239900Z   FACTORY_BOT_ID: 355564973
+2026-11-26T19:33:39.2240122Z   ISSUE: 597
+2026-11-26T19:33:39.2240314Z   FIX_PR: 
+2026-11-26T19:33:39.2240498Z   FIX_BRANCH: 
+2026-11-26T19:33:39.2240693Z   FIX_HEAD: 
+2026-11-26T19:33:39.2240993Z   OUT: /home/runner/work/sunny-pastures/sunny-pastures/../factory-out
+2026-11-26T19:33:39.2241515Z   ANTHROPIC_API_KEY: 
+2026-11-26T19:33:39.2241829Z   EXEC_FILE: /home/runner/work/_temp/claude-execution-output.json
+2026-11-26T19:33:39.2242177Z   OUTCOME: success
+2026-11-26T19:33:39.2242385Z ##[endgroup]
+2026-11-26T19:33:39.2298601Z RESULT claude_ran=true
+2026-11-26T19:33:39.2391071Z RESULT claude=success subtype=success is_error=false num_turns=36 total_cost_usd=0.8006315999999998 duration_ms=320351
+2026-11-26T19:33:39.2498496Z RESULT factory=none
+2026-11-26T19:33:39.2527306Z ##[group]Run set -uo pipefail
+2026-11-26T19:33:39.2527641Z [36;1mset -uo pipefail[0m

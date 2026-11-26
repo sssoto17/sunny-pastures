@@ -58,6 +58,23 @@ runner checks it and, only if it passes, pushes the branch and opens the PR as `
   can't write `/srv/factory-deps`, where it keeps its copies. Then commit `<dir>/package.json` and
   `pnpm-lock.yaml` with your work. A version younger than `minimumReleaseAge` fails there: that is a
   stop, not something to work around.
+- **A refused commit has a reason: read it.** `.claude/settings.json` runs hooks before every Bash
+  call. The Fallow gate (`.claude/hooks/fallow-gate.sh`) refuses a `git commit` or `git push` when
+  `fallow audit` fails on your change, for example a clone group your change adds (`CONSTRAINTS.md`,
+  Duplication) or a complexity finding; a permission rule can refuse a command too. The refusal
+  comes back as the command's error, with the hook's message after
+  `hook error: [<the hook's command>]: `: the findings, their files and lines, and the full report's
+  path (`.fallow/gate-report.json`). Read the reason, fix what it names in the code, run the checks
+  again, then commit. Never retry the same commit unchanged, and never bypass a gate (`--no-verify`,
+  a suppression, an ignore, an edited config or hook). If you can't fix what it names, or it refuses
+  the same finding three times, stop: end with `FACTORY stopped: <reason>`, naming the hook or rule
+  and its finding.
+- **Nothing runs in the background.** Never run an agent, a subagent or a command in the background:
+  never pass `run_in_background`, and never send a Bash command to the background with a trailing
+  `&`, `nohup` or `setsid`. The run ends when your turn ends, so a background agent's report never
+  arrives, and work it was doing is lost. Never end your turn while waiting for anything. Reviews
+  run in the foreground or not at all: the `code-review` skill's two sub-agents are two foreground
+  `Agent` calls in one message, and you read their reports before you go on.
 - **No local Supabase stack.** Run `pnpm check:fast` and `pnpm test --project unit --project ui`,
   plus each test file you touch. The `db` and acceptance tests run in CI on the PR; say so under
   "How it was verified".
@@ -68,8 +85,9 @@ The task message names the hand-off folder (`OUT` below).
 
 1. Follow `/implement` for issue #N: read the issue, work test-first where it applies (the `tdd`
    skill), commit in Conventional Commits with the issue number in the subject, then run the
-   `code-review` skill on your branch against `origin/main` and fix what it finds. Skip
-   `/implement`'s last step (push, then `scripts/open-pr.sh`): the publish job does both.
+   `code-review` skill on your branch against `origin/main` (in the foreground, above) and fix what
+   it finds. Skip `/implement`'s last step (push, then `scripts/open-pr.sh`): the publish job does
+   both.
 2. Leave every change committed on `<N>-<slug>`; uncommitted work is lost.
 3. Write the hand-off, three files in `OUT`:
    - `branch`: the branch name, one line.
@@ -80,9 +98,12 @@ The task message names the hand-off folder (`OUT` below).
    - `labels`: one per line, only `review:admin` (when the PR meets a row of `CONSTRAINTS.md`,
      "Admin review", or carries a decision under "Decisions to approve") and the `area:*` labels it
      touches. Anything else makes the publish job refuse.
-4. End with one line: `FACTORY ready: <N>-<slug>`, or `FACTORY stopped: <reason>`. The workflow logs
-   this line (`RESULT factory=…`, one line, up to 300 characters), so make the reason short and
-   specific, and never put a secret in it.
+4. End with one line: `FACTORY ready: <N>-<slug>`, or `FACTORY stopped: <reason>`. Every run ends
+   with a `FACTORY` line, as the last line of your last message: a run that ends without one (a turn
+   that ends "waiting", a hand-off left unwritten) reads as `RESULT factory=none` and tells the
+   admin nothing. Write `FACTORY ready` only once `git log origin/main..<N>-<slug>` shows your
+   commits and the three files are written. The workflow logs this line (`RESULT factory=…`, one
+   line, up to 300 characters), so make the reason short and specific, and never put a secret in it.
 
 ## Admin decisions
 
@@ -113,11 +134,12 @@ to stop. For each one:
 
 Stop only for what no PR can carry. Write no `branch` file and end with `FACTORY stopped: <reason>`
 when the work needs a change to `tests/acceptance/**` or `.github/workflows/**` (the publish job
-refuses those), a package's install or build script to be allowed, or access you don't have; or when
-the checks stay red and you can't tell why. Nothing else is a stop: a new package and every other
-code-owned path go in a PR held for the admin ("Admin decisions", above). Running out of turns or
-time ends the run with nothing published, so keep the work small and write the hand-off as soon as
-it passes.
+refuses those), a package's install or build script to be allowed, or access you don't have; when
+the checks stay red and you can't tell why; or when a commit gate keeps refusing your commit and you
+can't fix what it names ("A refused commit has a reason", above). Nothing else is a stop: a new
+package and every other code-owned path go in a PR held for the admin ("Admin decisions", above).
+Running out of turns or time ends the run with nothing published, so keep the work small and write
+the hand-off as soon as it passes.
 
 ## Fix mode (#588)
 
