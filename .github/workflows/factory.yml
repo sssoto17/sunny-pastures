@@ -327,7 +327,31 @@ jobs:
         if: steps.claude.outcome == 'success'
         run: |
           set -euo pipefail
+          # A hand-off that names a branch the checkout lacks, or one with nothing on it, contradicts
+          # the FACTORY line Claude ended with (#646: run 45279925105 crashed in `git bundle` on
+          # one). The step fails with its reason as a `RESULT handoff=none:` line, which the labels
+          # job quotes on the issue, plus HEAD and up to 5 other local branches, each with its
+          # commit count past main (a branch name is Claude's, so only [A-Za-z0-9._/+ -] is kept).
+          # A deliberate stop (no `branch` file) still ends green. Git reads the checkout only
+          # through commands that run no config hook, fsmonitor or filter Claude could have set
+          # (rev-parse, rev-list, for-each-ref, symbolic-ref and bundle), and nothing from the
+          # checkout runs: this script is the workflow's own.
+          refuse() {
+            local head others
+            head=$(git symbolic-ref -q --short HEAD) || head="detached at $(git rev-parse --short HEAD)"
+            head+="+$(git rev-list --count "$GITHUB_SHA..HEAD")"
+            others=$(git for-each-ref --format='%(refname:short)' refs/heads | grep -vxF -e "$2" |
+              head -n5 | while read -r o; do printf '%s+%s ' "$o" "$(git rev-list --count "$GITHUB_SHA..refs/heads/$o")"; done) || others=
+            others=$(printf '%s' "${others% }" | LC_ALL=C tr -cd 'A-Za-z0-9._/+ -')
+            head=$(printf '%s' "$head" | LC_ALL=C tr -cd 'A-Za-z0-9._/+ -')
+            echo "RESULT handoff=none: $1 (HEAD: $head; other branches: ${others:-none})"
+            echo "::error title=Factory hand-off::$1"
+            exit 1
+          }
+          # The branch must exist; $1 is a name the gate or the regex below has checked.
+          need() { git rev-parse -q --verify "refs/heads/$1^{commit}" >/dev/null || refuse "branch $1 doesn't exist" "$1"; }
           if [[ -n $FIX_PR ]]; then
+            need "$FIX_BRANCH"
             h=$RUNNER_TEMP/handoff
             mkdir -p "$h"
             printf '%s\n' "$FIX_BRANCH" >"$h/branch"
@@ -353,6 +377,10 @@ jobs:
           [ -s "$OUT/branch" ] || { echo "RESULT handoff=none: Claude wrote no branch"; exit 0; }
           b=$(head -n1 "$OUT/branch")
           [[ $b =~ ^$ISSUE-[a-z0-9-]+$ ]] || { echo "RESULT handoff=none: bad branch name"; exit 0; }
+          need "$b"
+          n=$(git rev-list --count "$GITHUB_SHA..refs/heads/$b")
+          ((n > 0)) || refuse "branch $b has no commits" "$b"
+          [ -s "$OUT/pr-body.md" ] || refuse "Claude wrote no PR body for $b" "$b"
           h=$RUNNER_TEMP/handoff
           mkdir -p "$h"
           printf '%s\n' "$b" >"$h/branch"
@@ -362,7 +390,7 @@ jobs:
           data=$(tar -C "$h" -czf - branch commits.bundle labels pr-body.md | base64 -w0)
           ((${#data} < 900000)) || { echo "RESULT handoff=none: ${#data} bytes, over the 900 kB cap"; exit 0; }
           echo "handoff=$data" >>"$GITHUB_OUTPUT"
-          echo "RESULT handoff=$b bytes=${#data}"
+          echo "RESULT handoff=$b commits=$n bytes=${#data}"
 
       - id: result
         name: Claude's result
@@ -399,6 +427,43 @@ jobs:
             | [splits("\r\n|[\n\r\u0085\u2028\u2029]") | select(startswith("FACTORY "))] | last // empty
             | gsub("[\\p{Cc}\\p{Cf}]"; "") | gsub(":{2,}"; ":") | gsub("#+\\["; "[") | .[:300]' "$f" 2>/dev/null) || factory=
           echo "RESULT factory=${factory:-none}"
+
+      # Claude's last turns (#646), so a run that ends without a PR can be explained from its log:
+      # the transcript stays on this runner, and the log is public (the repo is). From the
+      # execution file, the last 25 tool calls (main session and subagents) with only their input's
+      # gist: a Bash command, a file path, a subagent's description, a skill's name; a call that
+      # failed adds the first line of its error (a hook's, a permission rule's or git's refusal);
+      # tool output is never printed otherwise. Then the calls a permission rule denied, and the
+      # last 10 lines of Claude's final message. Each piece is the model's words, so jq cleans it as
+      # the `result` step does (control, format and line-separator characters out, no `::` or
+      # `##[`), drops anything shaped like a GitHub or Anthropic token (GitHub masks the run's own
+      # secrets as well) and keeps its first 200 characters; each line starts `TURNS `. A malformed
+      # entry is skipped, not fatal. The labels job quotes none of it: it is for whoever reads the
+      # run. A file that isn't JSON prints one line, and the step stays green.
+      # Tests: .github/scripts/tests/factory-handoff.test.mjs.
+      - name: Claude's last turns
+        if: always()
+        env:
+          EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+          f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
+          [ -f "$f" ] || { echo "TURNS none: no execution file"; exit 0; }
+          jq -r '
+            def clean: tostring | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; " ") | gsub(":{2,}"; ":") | gsub("#+\\["; "[")
+              | gsub("(gh[opsur]_|github_pat_|sk-ant-)[A-Za-z0-9_-]*"; "[redacted]") | .[:200];
+            def text: if type == "string" then . elif type == "array" then map(.text? // "") | join(" ") else tostring end;
+            def gist: (.input | objects // {}) as $i | if .name == "Bash" then ($i.command // "")
+              else ($i.file_path // $i.path // $i.description // $i.skill // $i.pattern // "") end;
+            (map(objects | select(.type == "user") | .message.content | arrays | .[] | objects | select(.type == "tool_result")
+              | select(.tool_use_id | strings) | {key: .tool_use_id, value: .}) | from_entries) as $res
+            | (map(objects | select(.type == "assistant") | .message.content | arrays | .[] | objects | select(.type == "tool_use"))
+                | .[-25:][] | "TURNS call \(.name) \(gist | clean)"
+                + ($res[.id | strings // ""] | if . == null then " -> no result" elif .is_error then " -> error: \(.content | text | split("\n") | map(select(test("\\S"))) | first // "" | clean)" else "" end)),
+              (map(objects | select(.type == "result")) | last | (.permission_denials | arrays)[] | objects
+                | "TURNS denied \(.tool_name) \((.tool_input | objects // {}) | .command // .file_path // "" | clean)"),
+              (map(objects | select(.type == "result")) | last | .result | strings | split("\n") | .[-10:][]
+                | "TURNS said \(clean)")' "$f" 2>/dev/null || echo "TURNS none: the execution file isn't readable JSON"
 
   publish:
     needs: [gate, factory]
