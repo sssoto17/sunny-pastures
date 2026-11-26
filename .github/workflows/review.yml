@@ -1,8 +1,9 @@
 # The reviewer App, sunny-reviewer (ADR-0002, area 2; #68). It reviews every non-draft PR to main,
 # and every part of a native stack whatever its base (#404), by REVIEW.md and posts as
 # sunny-reviewer[bot]: Required findings become line comments plus Request changes, Optional and
-# Nit go in the review's summary, and a clean PR gets Approve. A PR that meets a CONSTRAINTS.md
-# escalation row, or carries review:admin, never gets Approve.
+# Nit go in the review's summary, and a clean PR gets Approve, escalated or not (#566). A PR that
+# meets a CONSTRAINTS.md escalation row gets review:admin and a plain `escalated:` comment; the
+# label and `guard / code-owned` hold it for the admin, never a withheld approval.
 #
 # Why pull_request_target: the run takes this file and its checkout from main, so a PR can't
 # change how it is reviewed. On github.com that holds whatever the PR's base: GitHub's docs give
@@ -42,8 +43,8 @@ name: review
 
 on:
   pull_request_target:
-    # labeled: adding review:admin after an approval re-runs the review, which then holds it
-    # (ADR-0002, test (e)), and adding it while the App's Request changes stands on the head re-runs
+    # labeled: adding review:admin after an approval re-runs the review (ADR-0002, test (e); since
+    # #566 that run approves again, as the label no longer holds the approval), and adding it while the App's Request changes stands on the head re-runs
     # it too, so a finding the label answers is cleared (#641). Other labels are filtered out by
     # the job's `if:`.
     types: [opened, synchronize, reopened, ready_for_review, labeled]

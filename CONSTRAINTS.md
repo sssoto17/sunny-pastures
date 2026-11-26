@@ -215,23 +215,28 @@ are pinned by commit SHA. `vitest bench` is built into Vitest, so the benchmark 
 ## Admin review (escalation and split size)
 
 ADR-0002 (area 2) owns the mechanism: the reviewer bot approves a PR, which then auto-merges, or
-requests changes, and the label `review:admin` holds a PR for the admin. The bot never approves a PR
-that carries it, and only the admin removes it. Removing it on the PR's current head is the admin's
-sign-off: `guard / code-owned` holds a PR that is code-owned or has ever carried the label until the
-admin's own account removes it on the head, and a push or a removal by anyone else puts it back
-(ADR-0002, area 2, "Solo-admin approvals"; #565). This file owns when a PR gets the label and when
-the bot asks for a split. Auto-merge stays off until this section is merged (ADR-0002, Q16).
+requests changes, and the label `review:admin` holds a PR for the admin. The bot reviews and
+approves on the code alone, label or not (#566): the label and `guard / code-owned` are the hold,
+never a withheld approval, and only the admin removes the label. Removing it on the PR's current
+head is the admin's sign-off: `guard / code-owned` holds a PR that is code-owned or has ever carried
+the label until the admin's own account removes it on the head, and a push or a removal by anyone
+else puts it back (ADR-0002, area 2, "Solo-admin approvals"; #565). This file owns when a PR gets
+the label and when the bot asks for a split. Auto-merge stays off until this section is merged
+(ADR-0002, Q16).
 
 ### Escalation criteria
 
 A PR that meets any row carries `review:admin`. An agent that knows it adds the label at
 `gh pr create --label review:admin`. The reviewer bot checks every row on each review and adds the
-label when it's missing. For the Code-owned path row, the check `guard / code-owned` adds it from
-the diff as well, on the PR's first run: it runs when the PR opens, on each push and on each label
-change (#337, #565). Whoever adds it also posts a one-line comment that names every row the PR
-meets, for example "escalated: interface (sim exports)". Those comments are the tuning data (below).
-The bot checks these rows before the [split size](#split-size), so on a PR it escalates, the size is
-only a note.
+label when it's missing, before it posts its review, with one plain PR comment that names every row
+the PR meets, for example "escalated: Interface change, Code-owned path" (#566). That is all a
+missed row does: it is never a finding, never a review thread, never a Request changes and never a
+withheld approval. For the Code-owned path row, the check `guard / code-owned` adds the label from
+the diff as well, with a comment of the same shape, on the PR's first run: it runs when the PR
+opens, on each push and on each label change (#337, #565). A lane that adds the label when it opens
+the PR writes no comment; the bot's review names the rows. Those comments and reviews are the tuning
+data (below). The bot checks these rows before the [split size](#split-size), so on a PR it
+escalates, the size is only a note.
 
 <!-- prettier-ignore -->
 | Criterion | Applies when | Who adds the label | Why |
@@ -248,12 +253,13 @@ only a note.
 The bot may still escalate on its own judgement beyond these rows (ADR-0002). It names its reason
 the same way.
 
-**Agents never resolve review threads** (admin, 15 Nov 2026, #264). An open review thread, the bot's
-escalation thread above all, holds the merge until the admin resolves it. A standard plus a check:
-the `deny` rule on the GitHub MCP resolve-thread tool and the hook
-`.claude/hooks/block-thread-resolve.sh`, which runs in cloud sessions too, stop it in Claude Code.
-Neither is the boundary: until agent PRs come from the factory App (#107), GitHub sees the admin's
-account either way.
+**Agents never resolve review threads** (admin, 15 Nov 2026, #264). The bot reads its own finding
+threads: while one is open it withholds its approval, so a thread an agent resolved would let it
+approve over a finding nobody fixed. Since #566 it posts no escalation thread and reads none, and
+the escalation threads from before are the admin's to resolve. A standard plus a check: the `deny`
+rule on the GitHub MCP resolve-thread tool and the hook `.claude/hooks/block-thread-resolve.sh`,
+which runs in cloud sessions too, stop it in Claude Code. Neither is the boundary: until agent PRs
+come from the factory App (#107), GitHub sees the admin's account either way.
 
 **Agents never submit a PR review or reply on a review thread** (admin, 22 Nov 2026, #497). They
 answer a finding with a plain PR comment (`gh pr comment`), which creates no review. A review from a
@@ -438,10 +444,6 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 <!-- prettier-ignore -->
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
-| E22 | config-loosened | vitest.config.mts | The `unit` project's include stops matching `*.test.tsx` because those tests move to the new `ui` project, in jsdom (#594's criteria; ADR-0010, section 3): every test file still runs in the one coverage run, so no test is dropped. Remove this row once the PR has merged | Soto | 2026-12-14 |
-| E23 | check-removed | .github/workflows/ci.yml | `ci / test`'s stackless lane runs `pnpm test --project unit --project ui` instead of `--project unit` (#594), so the new `ui` project runs on every PR; it adds a project and removes none. Remove this row once the PR has merged | Soto | 2026-12-14 |
-| E24 | rule-narrowed | CONSTRAINTS.md | Interface change row: `ErrorCode`, `ErrorBody`, `FarmEnvelope` and `Answer` move to `apps/web/src/contract/**` (#594's criteria; ADR-0010, section 5), so the row names that path instead of their old files in `server/http`, `server/game` and `server/store`; it still covers all four types and `server/http/**`. Remove this row once the PR has merged | Soto | 2026-12-14 |
-| E25 | config-loosened | .fallowrc.jsonc | `ignoreDependencies` lists `react-aria-components`, `zustand` and `lucide-react`: #594 adds the admin-approved frontend libraries (ADR-0010, section 3) before any code imports them, so the structure tickets that use them add no dependency. Each entry goes with the PR that first imports its package. Remove this row once the PR has merged | Soto | 2026-12-14 |
 
 ## Interview record
 
@@ -526,4 +528,5 @@ merged PRs needed the admin:
 - **Same rows for every author:** a factory PR meets the same rows. The only difference stays #37's:
   on a factory PR, the bot also requests the admin's review when it escalates.
 - **The signal:** as #37 planned, the review workflow adds `review:admin` and posts the escalation
-  thread; #104 retires the label.
+  thread; #104 retires the label. (**Amended 26 Nov 2026, #566:** the label stays as the admin's
+  gate (#495, #104 superseded), and the bot posts a plain `escalated: <rows>` comment, no thread.)

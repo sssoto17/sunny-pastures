@@ -83,7 +83,10 @@ Each item names where its rule lives. Read the rule there.
    it.
 4. **The split size** (`CONSTRAINTS.md`, "Split size": the cap and what counts toward it).
 5. **`review:admin`** is on the PR when any row of `CONSTRAINTS.md`, "Escalation criteria" applies.
-   Code-owned paths are those in `.github/CODEOWNERS`. The PR template's Review lines match.
+   Code-owned paths are those in `.github/CODEOWNERS`. The PR template's Review lines match. The CI
+   reviewer App never makes a missing label a finding: it names the rows in its verdict's
+   `escalation_rows`, and `post-review.sh` adds the label and a plain comment, then reviews the code
+   alone (#566). Other reviewers report it as Required.
 6. **Code style** for TypeScript in `packages/` and `apps/`: `docs/agents/code-style.md`.
 7. **Decisions**: the ADRs in `docs/adr/` that cover the touched area, and the requirement IDs in
    `docs/requirements/spec.md` the issue names.
@@ -104,7 +107,8 @@ Every finding gets one severity and one status.
 
 - **Required**: the PR shouldn't merge until it's fixed. A criterion not met; a rule from Always
   check broken; a bug that changes behaviour; a test that wouldn't catch the bug it exists for; a
-  missing `review:admin`; a body that contradicts the diff; a secret.
+  missing `review:admin` (never from the CI reviewer App: Always check 5); a body that contradicts
+  the diff; a secret.
 - **Optional**: worth doing, but the PR is correct without it. A clearer design, an edge case the
   criteria don't name, a follow-up issue.
 - **Nit**: wording, naming or layout no tool checks.

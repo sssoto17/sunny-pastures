@@ -63,6 +63,9 @@ Return the structured output, nothing else:
 
 The workflow, not you, turns this into GitHub writes. It also works out the Code-owned path and
 Content change rows from the changed paths and adds them to yours, so name them when they apply but
-don't rely on leaving them out. It approves only when `findings` and `escalation_rows` are empty and
-the PR doesn't carry `review:admin`. Your approval never stands in for the code owner's: GitHub
-still requires the admin's review on code-owned paths.
+don't rely on leaving them out. An escalation is never a finding (#566): a missing `review:admin` is
+not a Required finding from you, whatever REVIEW.md says for other reviewers. Put the rows in
+`escalation_rows`; the workflow adds the label and a plain comment naming them. It approves when
+`findings` is empty and none of your earlier finding threads is still open, escalated or not: your
+approval says the code review passed, never that the admin agreed. `guard / code-owned` holds a PR
+that carries `review:admin` until the admin signs off.
