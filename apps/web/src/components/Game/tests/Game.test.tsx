@@ -85,4 +85,10 @@ describe("Game", () => {
 
 		expect(screen.getByRole("alert").textContent).toBe("Nothing is ready to harvest.");
 	});
+
+	it("shows the Orders button over the map once the farm is ready", async () => {
+		setup(farm);
+
+		expect(await screen.findByRole("button", { name: /^Orders/ })).toBeTruthy();
+	});
 });

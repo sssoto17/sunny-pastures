@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
@@ -11,16 +11,20 @@ import { Button, ToastRegion } from "@/components/ui";
 
 import { Hud } from "../hud";
 import { FarmMap } from "../map";
+import { OrderBoard } from "../orderBoard";
 
 /**
  * The game's client root (ADR-0010): it owns loading the farm through `src/client/` and shows the
  * loading and error states; once the farm is ready, the map fills the screen with the HUD over it
- * (#600), and the toast region the HUD's refusals show in. The order board mounts here later. A
- * test passes its own `store`; the app builds the real one.
+ * (#600), the order board's button (#606) and the toast region the HUD's refusals show in. A test
+ * passes its own `store`; the app builds the real one.
  */
 export interface GameProps {
 	readonly store?: StoreApi<FarmStore>;
 }
+
+/** Top right, over the map like the HUD at the top left (#600), until a HUD row hosts it. */
+const ordersStyle: CSSProperties = { position: "fixed", top: 16, right: 16, zIndex: 1000 };
 
 export default function Game({ store }: GameProps) {
 	const [farmStore] = useState(() => store ?? createBrowserStore());
@@ -56,6 +60,9 @@ export default function Game({ store }: GameProps) {
 			<FarmMap farm={predicted} />
 			<Hud store={farmStore} />
 			<ToastRegion />
+			<div style={ordersStyle}>
+				<OrderBoard store={farmStore} />
+			</div>
 		</>
 	);
 }
