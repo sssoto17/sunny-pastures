@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { runBlock } from "./workflow-step.mjs";
+
 const SCRIPT = fileURLToPath(new URL("../factory-gate.sh", import.meta.url));
 const GATHER = fileURLToPath(new URL("../factory-gather.sh", import.meta.url));
 const WORKFLOW = fileURLToPath(new URL("../../workflows/factory.yml", import.meta.url));
@@ -551,16 +553,7 @@ describe("factory.yml", () => {
 // nothing still says why. The step's own run block is executed, as the workflow has it, against an
 // execution file shaped like claude-code-action's (a JSON array of messages, the `result` last).
 describe("factory.yml, Claude's result (#615)", () => {
-	const yml = readFileSync(WORKFLOW, "utf8");
-	const step = yml.slice(yml.indexOf("name: Claude's result"));
-	const script = step
-		.slice(step.indexOf("run: |\n") + "run: |\n".length)
-		.split("\n")
-		.filter((l, i, all) =>
-			all.slice(0, i + 1).every((x) => x === "" || x.startsWith(" ".repeat(10))),
-		)
-		.map((l) => l.slice(10))
-		.join("\n");
+	const script = runBlock(readFileSync(WORKFLOW, "utf8"), "Claude's result");
 
 	const execution = (...results) => [
 		{ type: "system", subtype: "init" },
