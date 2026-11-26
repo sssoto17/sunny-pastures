@@ -1222,7 +1222,21 @@ and neither the sweep nor the gate reads Status, Mode or Track.
    The prompt is `/implement #N` plus `.github/factory-prompt.md`. Claude commits locally and writes
    the branch name, PR body and labels to files, and a plain step packs them with a git bundle of
    the new commits into the job's output (the hand-off, under 900 kB). The project's settings load,
-   so an `ask` rule denies (no one can answer it) and the hooks run; web tools are off.
+   so an `ask` rule denies (no one can answer it) and the hooks run; web tools are off. A hand-off
+   whose branch the checkout lacks, or that has no commits past `main` or no PR body, fails that
+   step with `RESULT handoff=none: branch <b> doesn't exist` (or `has no commits`, or
+   `Claude wrote no PR body`), plus where `HEAD` and the other local branches are, instead of
+   crashing in `git bundle` (#646; run 45279925105 crashed there and logged no reason). The step
+   stays inline in the workflow and reads the checkout with git plumbing only, so nothing Claude
+   could edit (a script in the checkout, a config hook or filter) runs after Claude on that runner.
+   A last step, `Claude's last turns` (`if: always()`), logs a digest of the execution file as
+   `TURNS` lines: the last 25 tool calls with only their gist (a command, a path, a description),
+   the first 200 characters of each failed call's error, the denied calls and the last 10 lines of
+   the final message, cleaned as the `RESULT factory=` line is, with token shapes redacted. Tool
+   output is never logged otherwise, since the log is public. _Alternative:_ the execution file as a
+   short-lived artifact was rejected: a public repo's artifacts are readable by any signed-in user,
+   they hold every tool output (any file Claude read), and `actions/upload-artifact` is a new action
+   (as for the reviewer's transcript, above).
 4. **`publish`** runs on a fresh runner that never ran the model, with `main`'s checkout.
    `.github/scripts/factory-publish.sh` refuses (`PUBLISH refused: …`, a failed job) a hand-off with
    any entry but the four files, a branch that isn't `<n>-<slug>`, a body without `Closes #<n>`, a
