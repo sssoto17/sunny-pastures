@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { createSim, sliceContent } from "@sunny-pastures/sim";
 
-import type { Api, LoadResult } from "@/client/api";
+import { createApi, type Api, type LoadResult } from "@/client/api";
 import { createFarmStore } from "@/client/store";
 
 import Game from "../index";
@@ -51,6 +51,23 @@ describe("Game", () => {
 			"The server could not load your farm.",
 		);
 		expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+	});
+
+	it("shows Try again, not loading for good, when the session throws during sign-in (#684)", async () => {
+		const signInError = "The game isn't configured: the Supabase URL is missing.";
+		const throwing = () => Promise.reject(new Error(signInError));
+		const store = createFarmStore({
+			api: createApi({
+				fetch: () => Promise.reject(new Error("The test sends no request.")),
+				session: { getAccessToken: throwing, refreshAccessToken: throwing },
+			}),
+		});
+		render(<Game store={store} />);
+
+		expect((await screen.findByRole("alert")).textContent).toBe(signInError);
+		expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+		expect(store.getState()).toMatchObject({ status: "error", error: signInError });
+		await expect(store.getState().load()).resolves.toBeUndefined();
 	});
 
 	it("loads again when the player presses Try again, and shows the farm if it works", async () => {

@@ -13,7 +13,7 @@ import {
 
 import type { FarmEnvelope } from "@/contract";
 
-import type { Api } from "../api";
+import type { Api, LoadResult } from "../api";
 import { withoutAction, type PendingAction } from "./pending";
 import { predict } from "./predict";
 import { sendPending } from "./sync";
@@ -63,6 +63,7 @@ export interface FarmStoreDeps {
  */
 const rulesVersion = 1;
 const reloadMessage = "The game has been updated. Please reload to update.";
+const loadFailedMessage = "Your farm could not be loaded.";
 const tickMs = 1000;
 
 export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
@@ -122,7 +123,16 @@ export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
 			lastRefusal: null,
 			load: async () => {
 				stop();
-				const result = await deps.api.loadFarm();
+				// Anything thrown on the way, a sign-in that throws included, ends the load as an error
+				// the player can retry, never as a rejection nobody handles (#684).
+				let result: LoadResult;
+				try {
+					result = await deps.api.loadFarm();
+				} catch (thrown) {
+					set({ status: "error", error: readThrownMessage(thrown) });
+					return;
+				}
+
 				if (!result.ok) {
 					set({ status: "error", error: result.message });
 					return;
@@ -261,6 +271,11 @@ const noOrders: readonly OrderSlot[] = [];
 /** The order board's slots; empty before the farm loads. */
 export const selectOrders = (store: FarmStore): readonly OrderSlot[] =>
 	store.predicted?.board ?? noOrders;
+
+/** The thrown error's message, written as a sentence by whoever threw it; ours when it has none. */
+function readThrownMessage(thrown: unknown): string {
+	return thrown instanceof Error && thrown.message !== "" ? thrown.message : loadFailedMessage;
+}
 
 /**
  * The Level for `xp`: the Levels whose XP it has reached (MUST-05.3). The sim's `levelOf` holds

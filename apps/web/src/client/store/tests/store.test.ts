@@ -95,6 +95,27 @@ describe("load", () => {
 		expect(state()).toMatchObject({ status: "error", error: "The server said network." });
 	});
 
+	it("resolves with the error status and the thrown message when loading throws (#684)", async () => {
+		const thrown = createFarmStore({
+			api: { ...fake.api, loadFarm: () => Promise.reject(new Error("Sign-in broke.")) },
+		});
+
+		await expect(thrown.getState().load()).resolves.toBeUndefined();
+		expect(thrown.getState()).toMatchObject({ status: "error", error: "Sign-in broke." });
+	});
+
+	it("gives a sentence of its own when what loading throws has no message (#684)", async () => {
+		const thrown = createFarmStore({
+			api: { ...fake.api, loadFarm: () => Promise.reject(new Error("")) },
+		});
+
+		await thrown.getState().load();
+		expect(thrown.getState()).toMatchObject({
+			status: "error",
+			error: "Your farm could not be loaded.",
+		});
+	});
+
 	it("asks for a reload when the rules version differs", async () => {
 		await loadReady(newEnvelope(start, 2));
 		expect(state().status).toBe("error");

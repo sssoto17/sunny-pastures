@@ -36,13 +36,30 @@ export function createSession(auth: AuthClient): Session {
 
 let browserSession: Session | null = null;
 
-/** The one session of this tab, built on first use from the public Supabase variables. */
+/**
+ * The one session of this tab, built on first use from the public Supabase variables. Throws when
+ * one is missing, with a sentence that names it and no value (#684): a deploy without them is a
+ * setup mistake, not a player's, and the store shows the sentence with "Try again".
+ */
 export function getBrowserSession(): Session {
-	browserSession ??= createSession(
-		createClient(
-			process.env["NEXT_PUBLIC_SUPABASE_URL"] ?? "",
-			process.env["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] ?? "",
-		).auth,
-	);
+	if (browserSession !== null) return browserSession;
+
+	// Each variable is read by its full name, so Next inlines it into the client bundle.
+	const url = process.env["NEXT_PUBLIC_SUPABASE_URL"]?.trim() ?? "";
+	const key = process.env["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"]?.trim() ?? "";
+	const missing = describeMissing(url === "", key === "");
+	if (missing !== null) throw new Error(`The game isn't configured: ${missing}.`);
+
+	browserSession = createSession(createClient(url, key).auth);
 	return browserSession;
+}
+
+/** What is missing, as the end of a sentence; null when nothing is. */
+function describeMissing(isUrlMissing: boolean, isKeyMissing: boolean): string | null {
+	const urlName = "URL (NEXT_PUBLIC_SUPABASE_URL)";
+	const keyName = "publishable key (NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)";
+	if (isUrlMissing && isKeyMissing) return `the Supabase ${urlName} and ${keyName} are missing`;
+	if (isUrlMissing) return `the Supabase ${urlName} is missing`;
+	if (isKeyMissing) return `the Supabase ${keyName} is missing`;
+	return null;
 }
