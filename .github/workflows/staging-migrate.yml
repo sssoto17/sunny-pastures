@@ -1,0 +1,102 @@
+# `staging / migrate` (#51): every push to main applies main's new migrations to the hosted
+# staging Supabase project with `supabase db push`, as #64 decided (resolution, decisions 2, 3 and
+# 7). Production runs the same command from a `v*` tag in M7 (#590), so every merge rehearses it.
+# Vercel's Git integration deploys main in parallel and isn't touched here (#562, 23 Nov): staging
+# may briefly run new code on the old schema, which #64 accepts because migrations are additive
+# (expand/contract, decision 6).
+# The job runs in the `staging` GitHub environment, whose deployment branch is main only, and reads
+# its one secret, SUPABASE_DB_URL (the postgres URL through the IPv4 session pooler), from there,
+# never from a repo secret (ADR-0002, A3). CI holds no SUPABASE_ACCESS_TOKEN: it is account-wide and
+# reaches production (#64, decision 3). GitHub masks the secret itself; the `Mask` step also masks
+# the parts the CLI prints on its own (its connection errors name the host and the user, which
+# carries the project ref), so no step shows the URL or anything taken from it.
+# No PR preview: `db push --dry-run` reads the remote migration history, so it needs the secret,
+# and PRs can't reach the staging environment. The acceptance run on the throwaway stack is the
+# gate for schema and code together (MUST-17.1).
+# Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
+# The CLI comes from the local supabase-cli action, a release download checked against a hash
+# written there, not supabase/setup-cli, which installs from npm with no hash check and isn't an
+# allowed action (admin, 26 Nov 2026, on #51).
+name: staging
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One staging migration at a time, and a running one is never cancelled: a migration stopped half
+# way is worse than one that waits. GitHub keeps only the newest pending run of a group, which is
+# fine here: db push applies every migration staging lacks, so the newest main covers the ones
+# before it.
+concurrency:
+  group: staging-migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: staging / migrate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      # db push reads supabase/config.toml and supabase/migrations/ only; the CLI's action is local.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            supabase
+            .github/actions/supabase-cli
+      # CLI 2.122.0, checked against its SHA-256; the action fails if the binary reports another
+      # version.
+      - uses: ./.github/actions/supabase-cli
+      # Masks the password (as written and percent-decoded), the user, the host and the project ref
+      # before any step can print them. Prints nothing itself: the runner hides ::add-mask:: lines.
+      # ::add-mask:: masks one line, so a value with a line break is masked line by line. A password
+      # with a literal backslash isn't decoded, since printf %b would read it as an escape.
+      - name: Mask the staging database URL's parts
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [[ -z $SUPABASE_DB_URL ]]; then
+            echo "::error title=No staging database URL::the staging environment has no SUPABASE_DB_URL secret. Set it as an environment secret of 'staging' (never a repo secret), then re-run this job."
+            exit 1
+          fi
+          rest=${SUPABASE_DB_URL#*://}
+          userinfo=${rest%@*}
+          hostpart=${rest##*@}
+          user=${userinfo%%:*}
+          password=${userinfo#*:}
+          host=${hostpart%%[:/?]*}
+          ref=""
+          if [[ $user == *.* ]]; then
+            ref=${user#*.}
+          elif [[ $host =~ ^db\.([a-z0-9]+)\.supabase\.co$ ]]; then
+            ref=${BASH_REMATCH[1]}
+          fi
+          decoded=""
+          if [[ $password != *\\* ]]; then
+            decoded=$(printf '%b' "${password//%/\\x}")
+          fi
+          for value in "$password" "$decoded" "$user" "$host" "$ref"; do
+            while IFS= read -r line; do
+              line=${line%$'\r'}
+              if [[ -n $line && $line != postgres ]]; then
+                echo "::add-mask::$line"
+              fi
+            done <<<"$value"
+          done
+      # --yes answers db push's "push these migrations?" prompt. No --include-all: a migration
+      # older than staging's newest applied one is an error to look at, not something to apply.
+      # No --include-seed: supabase/seed.sql is for the local stack only.
+      - name: Migrate staging
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if ! supabase --yes db push --db-url "$SUPABASE_DB_URL"; then
+            echo "::error title=Staging migration failed::supabase db push failed. The staging Supabase project may be paused (the free plan pauses a project after a week without activity): resume it in the Supabase dashboard, then re-run this job. If it isn't paused, read the error above."
+            exit 1
+          fi
