@@ -208,13 +208,13 @@ jobs:
           else
             # A base git can't read fails the step: only an empty list means nothing was touched.
             changed=$(git diff --name-only "$SINCE...HEAD" -- apps/web/src/server supabase \
-              .github/actions/supabase-stack vitest.config.mts)
+              .github/actions/supabase-stack .github/actions/supabase-cli vitest.config.mts)
             if [[ -n $changed ]]; then
               stack=true
-              why="the change touches apps/web/src/server/, supabase/, .github/actions/supabase-stack/ or vitest.config.mts"
+              why="the change touches apps/web/src/server/, supabase/, .github/actions/supabase-stack/, .github/actions/supabase-cli/ or vitest.config.mts"
             else
               stack=false
-              why="the change touches none of apps/web/src/server/, supabase/, .github/actions/supabase-stack/ or vitest.config.mts"
+              why="the change touches none of apps/web/src/server/, supabase/, .github/actions/supabase-stack/, .github/actions/supabase-cli/ or vitest.config.mts"
             fi
           fi
           if [[ $stack == true ]]; then
@@ -286,13 +286,13 @@ jobs:
             changed=$(git diff --name-only "$SINCE...HEAD" -- apps packages supabase \
               tests/acceptance package.json pnpm-lock.yaml pnpm-workspace.yaml 'tsconfig*.json' \
               .github/workflows/ci.yml \
-              .github/actions/setup .github/actions/supabase-stack)
+              .github/actions/setup .github/actions/supabase-stack .github/actions/supabase-cli)
             if [[ -n $changed ]]; then
               run=true
               why="the change touches what the acceptance tests cover"
             else
               run=false
-              why="the change touches none of apps/, packages/, supabase/, tests/acceptance/, package.json, pnpm-lock.yaml, pnpm-workspace.yaml, the root tsconfig*.json, ci.yml or the setup and supabase-stack actions"
+              why="the change touches none of apps/, packages/, supabase/, tests/acceptance/, package.json, pnpm-lock.yaml, pnpm-workspace.yaml, the root tsconfig*.json, ci.yml or the setup, supabase-stack and supabase-cli actions"
             fi
           fi
           if [[ $run == true ]]; then

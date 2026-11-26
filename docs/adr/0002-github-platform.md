@@ -2402,9 +2402,11 @@ the gap: `guard / secrets` and `ci / audit` below.
     ([Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)).
   - Allowed actions: **"Allow sssoto17, and select non-sssoto17, actions and reusable workflows"**,
     with GitHub-created actions allowed and an explicit list for the rest (for example
-    `supabase/setup-cli@*`, `pnpm/action-setup@*`) as the CI/CD step adds them. Today it's "local
-    only", which blocks GitHub-authored actions such as `actions/checkout` and `actions/labeler`, so
-    this must change before the first workflow runs.
+    `pnpm/action-setup@*`) as the CI/CD step adds them. The Supabase CLI needs no entry: CI installs
+    it with the local `supabase-cli` action, a release download checked against a hash written
+    there, not `supabase/setup-cli` (admin, 26 Nov 2026, on #51). Today it's "local only", which
+    blocks GitHub-authored actions such as `actions/checkout` and `actions/labeler`, so this must
+    change before the first workflow runs.
   - **Every action pinned to a full commit SHA with a version comment**, as above. Turn on "Require
     actions to be pinned to a full-length commit SHA". The setting exists (the REST field
     `sha_pinning_required`, off today;

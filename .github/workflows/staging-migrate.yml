@@ -13,8 +13,10 @@
 # No PR preview: `db push --dry-run` reads the remote migration history, so it needs the secret,
 # and PRs can't reach the staging environment. The acceptance run on the throwaway stack is the
 # gate for schema and code together (MUST-17.1).
-# Actions are pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
-# supabase/setup-cli is third-party, as #64 decided, and needs an "Allowed actions" entry.
+# Actions are GitHub-owned and pinned to a full commit SHA at least 7 days old (ADR-0002, area 8).
+# The CLI comes from the local supabase-cli action, a release download checked against a hash
+# written there, not supabase/setup-cli, which installs from npm with no hash check and isn't an
+# allowed action (admin, 26 Nov 2026, on #51).
 name: staging
 
 on:
@@ -40,27 +42,17 @@ jobs:
     environment: staging
     permissions:
       contents: read
-    env:
-      # The CLI version .github/actions/supabase-stack and `pnpm supabase:check` pin.
-      SUPABASE_VERSION: 2.122.0
     steps:
-      # db push reads supabase/config.toml and supabase/migrations/ only.
+      # db push reads supabase/config.toml and supabase/migrations/ only; the CLI's action is local.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: supabase
-      # v3.2.0, published 2 Nov 2026. The next step fails if it installs another CLI version.
-      - uses: supabase/setup-cli@689adcfb80d947100a1eab127289b97d1fb07b13 # v3.2.0
-        with:
-          version: ${{ env.SUPABASE_VERSION }}
-      - name: Check the Supabase CLI's version
-        run: |
-          version=$(supabase --version)
-          echo "Supabase CLI $version"
-          if [[ $version != "$SUPABASE_VERSION" ]]; then
-            echo "::error title=Wrong Supabase CLI::expected $SUPABASE_VERSION, got $version"
-            exit 1
-          fi
+          sparse-checkout: |
+            supabase
+            .github/actions/supabase-cli
+      # CLI 2.122.0, checked against its SHA-256; the action fails if the binary reports another
+      # version.
+      - uses: ./.github/actions/supabase-cli
       # Masks the password (as written and percent-decoded), the user, the host and the project ref
       # before any step can print them. Prints nothing itself: the runner hides ::add-mask:: lines.
       # ::add-mask:: masks one line, so a value with a line break is masked line by line. A password
