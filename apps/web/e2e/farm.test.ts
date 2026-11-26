@@ -20,14 +20,15 @@ test.describe("the farm page", () => {
 		// lands on Plot 5 (found by this spec, #673).
 		const plot = page.getByRole("button", { name: "Plot 6: empty" });
 		await expect(plot).toBeVisible();
-		await expect(plot).not.toBeFocused();
+		const popover = page.getByRole("dialog", { name: "Plot 6" });
+		await expect(popover).toBeHidden();
 
 		// A trusted touch on the phone projects; a mouse click at desktop width, which has no touch.
 		if (hasTouch) await plot.tap();
 		else await plot.click();
 
-		// The farm map's lot button (#599) takes focus on press; its plot popover (#683) isn't on
-		// main yet. Once it is, the tap opens it, and this expects the popover instead.
-		await expect(plot).toBeFocused();
+		// The plot's popover (#683) opens with its status.
+		await expect(popover).toBeVisible();
+		await expect(popover.getByText("Plot 6 is empty.")).toBeVisible();
 	});
 });
