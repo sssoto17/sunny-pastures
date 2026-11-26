@@ -30,6 +30,8 @@ supabase/.temp/
 .claude/settings.local.json
 .claude/worktrees/
 .claude/.cc-writes
+# Impeccable's launcher looks for a locally built engine here (its comments call it gitignored).
+.claude/skills/impeccable/scripts/bin/
 .scratch/
 # Fallow's cache and the commit gate's report (.claude/hooks/fallow-gate.sh, #504). Fallow ignores the
 # folder with a nested .gitignore, which Prettier doesn't read.
