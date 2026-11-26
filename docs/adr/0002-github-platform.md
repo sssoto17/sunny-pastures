@@ -341,12 +341,13 @@ deployment events. A PR that Vercel doesn't build would then never report, and a
 never reports blocks the merge. So each preview check also runs on the PR itself. When no preview
 exists for the head commit (nothing deployable changed, or Vercel skipped the build), it reports
 success and says "no preview, nothing to measure". The signal Vercel sends for a skipped build is
-unverified until Vercel is connected (Q10). A PR that adds a file under `supabase/migrations/`
-passes the same way, saying "migration pending on staging, nothing to measure" (#64, decision 5):
-staging's schema follows `main`, so that PR's preview runs on the old schema and can't be trusted
-for database paths. The acceptance run on the throwaway stack (MUST-17.1) is the gate for schema and
-code together. Previews sit behind Vercel's Deployment Protection, so the checks send Vercel's
-automation bypass secret in the `x-vercel-protection-bypass` header
+unverified until Vercel is connected (Q10). A PR that adds a file under `supabase/migrations/` will
+pass the same way (#64, decision 5; built with the preview checks, #43), saying "migration pending
+on staging, nothing to measure": staging's schema follows `main`, so that PR's preview runs on the
+old schema and can't be trusted for database paths. The acceptance run on the throwaway stack
+(MUST-17.1) is the gate for schema and code together. Previews sit behind Vercel's Deployment
+Protection, so the checks send Vercel's automation bypass secret in the `x-vercel-protection-bypass`
+header
 ([Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation),
 checked 7 Nov). It's an Actions secret, set without echoing it (area 4). The preview checks become
 required together with "Require deployments to succeed", at M4 (ruleset table above).
@@ -2068,10 +2069,11 @@ Vercel's docs on 21 Nov. Built for staging in #51 (PR #663); the first staging m
 staging URL's API passed on 26 Nov 2026 (#662).
 
 - **Projects.** The admin creates both in the Supabase dashboard, on the **free plan**: staging when
-  Vercel is connected (done, #591), production before the first `v*` tag. The free plan pauses a
-  project after a week without activity and keeps no backups. Open for later: move production to Pro
-  (about $25/month, 7 days of daily backups) before players' data lives there, if losing it would
-  cost more than that.
+  Vercel is connected (done, #591), production at M4, before the first `v*` tag (#64). #562 moved
+  that tag to M7 (#590); until the admin says otherwise, production is still created at M4. The free
+  plan pauses a project after a week without activity and keeps no backups. Open for later: move
+  production to Pro (about $25/month, 7 days of daily backups) before players' data lives there, if
+  losing it would cost more than that.
 - **One applier: `supabase db push --db-url`.** The job `staging / migrate`
   (`.github/workflows/staging-migrate.yml`) runs it on every push to `main`, in the `staging`
   environment, against staging. Production's `deploy` job runs the same command from a tag (#590,
@@ -2908,8 +2910,9 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     `CHANGELOG.md`. (#562 moved the tag deploy to M7, with #590: M4 goes live on staging only, area
     4.)
 16. **Hosted Supabase, per project** (area 4, "Hosted Supabase migrations"; #64). Staging: when
-    Vercel is connected, _done 26 Nov 2026 (#591, #662)_. Production: before the first `v*` tag,
-    with step 15. Never paste a value back into a session: names and on/off states only.
+    Vercel is connected, _done 26 Nov 2026 (#591, #662)_. Production: at M4, with step 15 (#64; the
+    tag itself moved to M7 with #562 and #590). Never paste a value back into a session: names and
+    on/off states only.
     - **Create the project** in the Supabase dashboard, on the free plan.
     - **The GitHub environment and its secret.** `staging`'s deployment branch is `main` only;
       `production`'s policy is step 15's. Unlock Bitwarden into `BW_SESSION` without showing it,
