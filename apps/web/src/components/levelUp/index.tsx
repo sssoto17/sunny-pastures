@@ -14,7 +14,10 @@ import { readShownLevel, writeShownLevel } from "./shown";
  * The level-up dialog (#607; ADR-0010: "levelling up is the one dialog that opens by itself"): when
  * the confirmed Level rises above the one last shown, after an action or on load, it names each
  * Level reached with what it unlocks and its level-up coins (MUST-05.3, 05.4). It reads the
- * confirmed farm, not the prediction, so a refused action never opens it.
+ * confirmed farm, not the prediction, so a refused action never opens it; a Level the farm reaches
+ * by itself (a Collector's goods) shows with the next answer or load. The stored Level is the
+ * browser's, not the farm's: the client knows no farm id, and a player plays one farm in one
+ * browser (PRODUCT.md, "Users").
  */
 export interface LevelUpProps {
 	readonly store: StoreApi<FarmStore>;
@@ -36,7 +39,7 @@ export function LevelUp({ store }: LevelUpProps) {
 			) : (
 				rewards.map((reward) => (
 					<section key={reward.level} aria-labelledby={`level-up-${String(reward.level)}`}>
-						<h3 id={`level-up-${String(reward.level)}`}>Level {reward.level}</h3>
+						<h4 id={`level-up-${String(reward.level)}`}>Level {reward.level}</h4>
 						<RewardDetails reward={reward} />
 					</section>
 				))
@@ -77,7 +80,7 @@ function RewardDetails({ reward }: RewardDetailsProps) {
  */
 function useLevelUps(store: StoreApi<FarmStore>) {
 	const [rewards, setRewards] = useState<readonly LevelReward[]>([]);
-	// The Level last shown, in memory too, so a browser that blocks storage still shows each once.
+	// The Level last shown, in memory too, so a browser that blocks storage shows each once a visit.
 	const shown = useRef<number | null>(null);
 
 	useEffect(() => {

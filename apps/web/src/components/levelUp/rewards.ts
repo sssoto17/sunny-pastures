@@ -25,20 +25,20 @@ const addOnNames = {
 } as const satisfies Record<AddOn, string>;
 
 /** The slice's facilities and pens (`sliceContent`), by id. */
-const buildingNames: Readonly<Record<string, string>> = {
+const buildingNames = {
 	feedMill: "Feed mill",
 	bakery: "Bakery",
 	chickenPen: "Chicken pen",
-};
+} as const satisfies Record<string, string>;
 
 /** The slice's goods (`sliceContent`) as a list names them, in lower case. */
-const goodNames: Readonly<Record<string, string>> = {
+const goodNames = {
 	wheat: "wheat",
 	chickenFeed: "chicken feed",
 	egg: "eggs",
 	bread: "bread",
 	cookies: "cookies",
-};
+} as const satisfies Record<string, string>;
 
 const listFormat = new Intl.ListFormat("en", { type: "conjunction" });
 
@@ -64,12 +64,16 @@ function describeLevel(level: number, row: LevelRow): LevelReward {
 
 /** A facility's or pen's name; an id with no name reads as itself, so new content still shows. */
 function nameBuilding(id: string): string {
-	return buildingNames[id] ?? id;
+	return findName(buildingNames, id);
 }
 
 /** A good's name in a list; an id with no name reads as itself. */
 function nameGood(id: string): string {
-	return goodNames[id] ?? id;
+	return findName(goodNames, id);
+}
+
+function findName(names: Readonly<Record<string, string>>, id: string): string {
+	return Object.hasOwn(names, id) ? (names[id] ?? id) : id;
 }
 
 /** "2 more plots to buy"; nothing for 0. */
