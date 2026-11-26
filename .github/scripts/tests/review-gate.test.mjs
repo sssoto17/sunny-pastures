@@ -345,7 +345,7 @@ describe("review.yml", () => {
 		expect(at('"$CTX/pr.json"')).toBeLessThan(gate);
 		expect(at("submitted_at, body, commit_id}")).toBeLessThan(gate);
 		expect(at("if grep -qx 'run=false' \"$GITHUB_OUTPUT\"; then exit 0; fi")).toBeGreaterThan(gate);
-		expect(at("gh pr diff")).toBeGreaterThan(gate);
+		expect(at('gh api -H "Accept: application/vnd.github.diff"')).toBeGreaterThan(gate);
 		expect(at("gh api graphql")).toBeGreaterThan(gate);
 		expect(at("- id: claude\n        if: steps.gather.outputs.run == 'true'\n")).toBeGreaterThan(
 			gate,

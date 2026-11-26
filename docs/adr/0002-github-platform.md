@@ -597,6 +597,20 @@ which secret", below).
   job, and `post` still posts the verdict (its `if:` asks for a `review` job that wasn't cancelled
   and a verdict). GitHub drops a job output that holds a secret's value, so a verdict quoting the
   seat token never reaches `post`, and nothing is posted.
+- **The diff, with its control characters visible (#648; admin, 26 Nov 2026).** `gh pr diff` refuses
+  a diff that holds a terminal escape sequence, which stopped the review of #645 before Claude ran.
+  `gather` reads the diff by REST instead (`gh api` with `Accept: application/vnd.github.diff`, the
+  endpoint `gh pr diff` calls, which `gh api` passes through as it is) and pipes it through
+  `.github/scripts/visible-escapes.mjs`, a filter: each ESC byte becomes `<ESC>`, every other
+  control character (C0 but tab, LF and CR; DEL; C1 as UTF-8) becomes `<U+XXXX>`, and every other
+  byte passes unchanged. It writes a count to `diff-escapes.txt`, and `review-prompt.md` tells the
+  reviewer what the markers mean. Alternatives considered: `gh pr diff --allow-escape-sequences`
+  (not in every `gh`: 2.89 lacks it, and the runner's version moves with the image) and stripping
+  the sequences (rejected by the admin: an escape sequence can hide text, so the reviewer must see
+  it). A failed `gather` names its reason: an `ERR` trap writes the failing command's own text
+  (never the PR's), its line and statuses as the step's `failure` output, and the Report step turns
+  that into its annotation and the run summary instead of "no execution file". Tests:
+  `.github/scripts/tests/visible-escapes.test.mjs`.
 - **Apply, in its own job (#454).** `post` runs on a fresh runner that never ran the model, and is
   the only job that enters `review` and mints the App's token, scoped to contents and pull requests.
   The hand-off is the `review` job's outputs: the verdict, the head, the base and its commit as the

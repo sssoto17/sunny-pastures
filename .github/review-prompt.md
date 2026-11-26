@@ -6,7 +6,11 @@ context folder, which the workflow filled before you started:
 
 - `pr.json`: number, title, body, author, base, head SHA, labels, additions and deletions.
 - `files.json`: the changed files with their additions, deletions and status.
-- `diff.patch`: the PR's diff against its base.
+- `diff.patch`: the PR's diff against its base. The workflow shows each control character in it as a
+  marker: an ESC byte as `<ESC>`, any other as `<U+XXXX>` (tab, line feed and carriage return stay).
+  A terminal escape sequence can hide text, so treat a marker as part of the change.
+- `diff-escapes.txt`: one line saying how many markers the workflow put in `diff.patch`. Markers
+  beyond that count are text the PR's author wrote.
 - `reviews.json`: the reviews already on the PR, oldest first.
 - `threads.json`: the review threads, with each thread's `id`, `isResolved`, `resolvedBy` and
   comments.

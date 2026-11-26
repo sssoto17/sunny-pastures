@@ -119,10 +119,21 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          # A failure names its own command for the Report step (#648), which otherwise only saw
+          # that Claude left no execution file. The command is this script's text, unexpanded, so
+          # nothing the PR wrote reaches the output. In a pipeline bash names the last command, so
+          # the reason gives every status in it.
+          failed() {
+            local cmd=${BASH_COMMAND%%$'\n'*}
+            [[ $3 != *' '* ]] || cmd="a pipeline (statuses $3) ending in $cmd"
+            echo "failure=gather stopped at line $2 (exit $1): ${cmd:0:200}" >>"$GITHUB_OUTPUT"
+          }
+          trap 'failed $? $LINENO "${PIPESTATUS[*]}"' ERR
           # The trigger takes every base (#404), so check the premise the header quotes: this run,
           # and the checkout above, are the default branch's.
           if [[ $GITHUB_REF != "refs/heads/$DEFAULT_BRANCH" ]]; then
             echo "::error::this run's ref is $GITHUB_REF, not $DEFAULT_BRANCH: nothing reviewed"
+            echo "failure=this run's ref is not the default branch: nothing reviewed" >>"$GITHUB_OUTPUT"
             exit 1
           fi
           echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
@@ -151,7 +162,13 @@ jobs:
 
           gh api --paginate "$r/pulls/$PR/files?per_page=100" --jq '.[] | {filename, status,
             additions, deletions, previous_filename}' | jq -s . >"$CTX/files.json"
-          gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" >"$CTX/diff.patch"
+          # The diff by REST, which passes it as it is (#648): `gh pr diff` refuses one that holds a
+          # terminal escape sequence. Then each control character becomes a visible marker, and
+          # diff-escapes.txt says how many (review-prompt.md).
+          gh api -H "Accept: application/vnd.github.diff" "$r/pulls/$PR" >"$RUNNER_TEMP/diff.raw"
+          node .github/scripts/visible-escapes.mjs "$CTX/diff.patch" <"$RUNNER_TEMP/diff.raw" \
+            >"$CTX/diff-escapes.txt"
+          cat "$CTX/diff-escapes.txt"
           gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
             -F pr="$PR" -f query="$THREADS_QUERY" \
             --jq '.data.repository.pullRequest.reviewThreads.nodes' >"$CTX/threads.json"
@@ -219,8 +236,18 @@ jobs:
         env:
           EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
           GATE: ${{ steps.gather.outputs.run }}
+          GATHER: ${{ steps.gather.outcome }}
+          GATHER_FAILURE: ${{ steps.gather.outputs.failure }}
         run: |
           echo "RESULT job_seconds=$(($(date +%s) - ${JOB_START:-$(date +%s)})) reviewed=${GATE:-unknown}"
+          # A failed gather is the reason Claude didn't run (#648): name it, not the missing file.
+          if [ "$GATHER" = failure ]; then
+            why=${GATHER_FAILURE:-gather stopped without a reason of its own; its log says why}
+            echo "RESULT gather=failed"
+            echo "::error title=Gather failed::${why//%/%25}"
+            echo "Review not run: $why" >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           [ "$GATE" != false ] || { echo "RESULT skipped: the gate's GATE line says why"; exit 0; }
           f=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}
           if [ ! -f "$f" ]; then
