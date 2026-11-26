@@ -10,6 +10,7 @@ import { createFarmStore, type FarmStore } from "@/client/store";
 import { Button } from "@/components/ui";
 
 import { FarmMap } from "../map";
+import { PlotPopover } from "../plots";
 
 /**
  * The game's client root (ADR-0010): it owns loading the farm through `src/client/` and shows the
@@ -49,7 +50,18 @@ export default function Game({ store }: GameProps) {
 
 	if (status === "loading" || predicted === null) return <p role="status">Loading your farm…</p>;
 
-	return <FarmMap farm={predicted} />;
+	return (
+		<FarmMap
+			farm={predicted}
+			renderLot={(lot, button) =>
+				lot.kind === "plot" ? (
+					<PlotPopover store={farmStore} index={lot.index} trigger={button} />
+				) : (
+					button
+				)
+			}
+		/>
+	);
 }
 
 /** The real store, over the game API and the browser's session; both are read only once it loads. */
