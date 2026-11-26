@@ -162,8 +162,9 @@ jobs:
       # Markdown (#344; ADR-0005, section 6): Prettier's prose wrap, and every top-level table keeps
       # `<!-- prettier-ignore -->` on the line before it. Not in check:fast, for its 5 s budget.
       - run: pnpm format:md
-      # CONSTRAINTS.md, migrations row (#372): no applied migration edited since the base, and
-      # `drizzle-kit check` plus a generate that writes nothing. No database: the stack is
+      # CONSTRAINTS.md, migrations rows (#372, #477): no applied migration edited since the base,
+      # no statement that commits on its own, and `drizzle-kit check` plus a generate that writes
+      # nothing. No database: the stack is
       # `ci / test`'s (#382), when a change can reach it.
       - run: pnpm db:check "$SINCE"
 
