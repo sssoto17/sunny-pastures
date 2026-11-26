@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import type { FarmState } from "@sunny-pastures/sim";
 
 import type { GameStore, StoreDeps } from "../index";
-import { makeEntry, newFarm, plant, recordReplay, replay, rowsFrom } from "./farms";
+import { listRows, makeEntry, newFarm, plant, recordReplay, replay } from "./farms";
 
 // The store contract (ADR-0001, "Store interface"; ADR-0007 section 6, "Action-handler tests: an
 // in-memory store held to a contract"): one suite that B100 runs as a `db` test and the in-memory
@@ -196,8 +196,8 @@ export function describeGameStore(
 
 		expect(await store.load(farmId)).toStrictEqual({ state: farm, seq: 130, at: 130_000 });
 		expect(recorded.calls).toEqual([
-			{ snapshot: null, rows: rowsFrom(1, 99, 1) },
-			{ snapshot: { seq: 100, rulesVersion: 1 }, rows: rowsFrom(101, 130, 1) },
+			{ snapshot: null, rows: listRows(1, 99, 1) },
+			{ snapshot: { seq: 100, rulesVersion: 1 }, rows: listRows(101, 130, 1) },
 		]);
 	});
 
@@ -261,7 +261,7 @@ function describeRulesVersions(makeStore: MakeStore, makePlayer: MakePlayer): vo
 
 		await makeStore({ replay: recorded.replay, rulesVersion: 2 }).load(farmId);
 
-		expect(recorded.calls).toEqual([{ snapshot: null, rows: rowsFrom(1, 2, 2) }]);
+		expect(recorded.calls).toEqual([{ snapshot: null, rows: listRows(1, 2, 2) }]);
 	});
 
 	it("refuses a commit under a version below the farm's latest, and writes nothing (ADR-0006, section 8)", async () => {

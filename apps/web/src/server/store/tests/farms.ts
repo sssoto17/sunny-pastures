@@ -66,7 +66,7 @@ export function recordReplay(inner: StoreDeps["replay"] = replay): {
 }
 
 /** The rows `from` to `to`, both included, each under `rulesVersion`, as a `ReplayCall` lists. */
-export function rowsFrom(from: number, to: number, rulesVersion: number): Versioned[] {
+export function listRows(from: number, to: number, rulesVersion: number): Versioned[] {
 	return Array.from({ length: to - from + 1 }, (_, i) => ({ seq: from + i, rulesVersion }));
 }
 

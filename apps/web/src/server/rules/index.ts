@@ -53,7 +53,8 @@ export function createRules(registry: Registry): Rules {
 		newFarm: (farmId) => sim.newFarm(farmId),
 		replay(farmId, snapshot, rows) {
 			const replayed = versions.replay(farmId, snapshot === null ? [] : [snapshot], rows);
-			// Step 4: `load` ends at the current version, so the rules only see their own shape.
+			// `load` ends at the current version, so the rules only see their own shape (ADR-0006,
+			// section 5, step 4).
 			return versions.upgradeTo(replayed, current).state;
 		},
 	};

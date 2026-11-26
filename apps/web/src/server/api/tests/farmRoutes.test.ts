@@ -80,6 +80,7 @@ describe("GET /api/farm (getFarm)", () => {
 		const { state } = await newerStore.load(playerId);
 		const planted = newer.sim.apply(state, plantWheat, serverTime);
 		if (!planted.ok) throw new Error(planted.reason);
+
 		await newerStore.commit(playerId, {
 			expectedSeq: 0,
 			action: plantWheat,

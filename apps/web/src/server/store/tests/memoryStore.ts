@@ -103,11 +103,9 @@ export function createMemoryStore({
 			checkUuid(playerId, "playerId");
 			checkUuid(entry.idempotencyKey, "idempotencyKey");
 			const farm = findOrAddFarm(playerId);
-			// B100 checks the version first, in its transaction (ADR-0006, section 8).
-			checkForward(
-				expectedSeq === 0 ? null : (farm.rows[expectedSeq - 1]?.rulesVersion ?? null),
-				rulesVersion,
-			);
+			// The row at expectedSeq: B100 checks its version first, in its transaction (ADR-0006, s. 8).
+			const latest = expectedSeq === 0 ? null : (farm.rows[expectedSeq - 1]?.rulesVersion ?? null);
+			checkForward(latest, rulesVersion);
 			const answer = findAnswer(farm, entry.idempotencyKey);
 			if (answer !== null) return { kind: "duplicate", answer };
 
@@ -117,10 +115,8 @@ export function createMemoryStore({
 			scripted++;
 			if (isScriptedConflict) return { kind: "conflict" };
 
-			const latest = farm.rows.at(-1);
 			// The farm's first action under this version writes its base snapshot (ADR-0006, s. 3).
-			const base =
-				latest !== undefined && latest.rulesVersion < rulesVersion ? readFarm(playerId) : null;
+			const base = latest !== null && latest < rulesVersion ? readFarm(playerId) : null;
 			if (base !== null) {
 				farm.snapshots.push({ seq: base.seq, at: base.at, state: copy(base.state), rulesVersion });
 			}

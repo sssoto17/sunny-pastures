@@ -198,6 +198,18 @@ export function createStore(deps: StoreDeps): GameStore {
 }
 
 /**
+ * Throws the store error for a farm whose latest row is under a higher version than this store's:
+ * an instance older than the farm writes nothing and answers 503 (ADR-0006, section 8).
+ */
+export function checkForward(latest: number | null, rulesVersion: number): void {
+	if (latest !== null && latest > rulesVersion) {
+		throw new Error(
+			`Store error: the farm's latest action is under rules version ${String(latest)}, above this store's ${String(rulesVersion)}.`,
+		);
+	}
+}
+
+/**
  * `load`, read on `handle`: the client, or a commit's transaction, which reads the farm it is
  * about to write a base snapshot of.
  */
@@ -268,18 +280,6 @@ async function findVersion(
 		.from(actions)
 		.where(and(eq(actions.farmId, playerId), eq(actions.seq, seq)));
 	return row?.rulesVersion ?? null;
-}
-
-/**
- * Throws the store error for a farm whose latest row is under a higher version than this store's:
- * an instance older than the farm writes nothing and answers 503 (ADR-0006, section 8).
- */
-export function checkForward(latest: number | null, rulesVersion: number): void {
-	if (latest !== null && latest > rulesVersion) {
-		throw new Error(
-			`Store error: the farm's latest action is under rules version ${String(latest)}, above this store's ${String(rulesVersion)}.`,
-		);
-	}
 }
 
 /** The answer stored with the key on this farm, read on `handle`: the client, or a transaction. */
