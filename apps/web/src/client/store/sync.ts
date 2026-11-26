@@ -1,7 +1,6 @@
 import type { ErrorCode, FarmEnvelope } from "@/contract";
 
 import type { ActionResult, Api, ApiFailure } from "../api";
-import type { FarmStore } from "./index";
 import { withoutAction, type PendingAction } from "./pending";
 
 // The send loop (ADR-0010, section 5; ADR-0007, section 3, "Errors"): one action in flight at a
@@ -10,7 +9,11 @@ import { withoutAction, type PendingAction } from "./pending";
 
 export interface SyncDeps {
 	readonly api: Pick<Api, "sendAction">;
-	readonly get: () => FarmStore;
+	/** The part of the store's state the loop reads, so this module needs no `FarmStore`. */
+	readonly get: () => {
+		readonly pending: readonly PendingAction[];
+		readonly confirmed: FarmEnvelope | null;
+	};
 	/** Takes the server's farm with `pending` still to apply; false when the store stopped. */
 	readonly confirm: (farm: FarmEnvelope, pending: readonly PendingAction[]) => boolean;
 	/** Drops the pending action with `key` and shows `reason`. */

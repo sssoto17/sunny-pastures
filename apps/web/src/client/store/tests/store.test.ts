@@ -200,6 +200,16 @@ describe("act", () => {
 		expect(fake.sends[1]?.request.idempotencyKey).toBe(fake.sends[0]?.request.idempotencyKey);
 	});
 
+	it("retries a rate-limited action with the same key", async () => {
+		await loadReady();
+		state().act(plant0);
+		await fake.sends[0]?.answer(failure("rate_limited", 3_000));
+		await vi.advanceTimersByTimeAsync(3_000);
+		expect(fake.sends).toHaveLength(2);
+		expect(fake.sends[1]?.request.idempotencyKey).toBe(fake.sends[0]?.request.idempotencyKey);
+		expect(state().pending).toHaveLength(1);
+	});
+
 	it("drops the action after 3 retries and says so in a sentence", async () => {
 		await loadReady();
 		state().act(plant0);

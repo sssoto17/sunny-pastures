@@ -87,6 +87,7 @@ export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
 				return false;
 			}
 
+			// `readNow` reads the farm confirmed so far, so the incoming farm's `at` counts here too.
 			const now = Math.max(readNow(), farm.at);
 			set({ confirmed: farm, pending, now, predicted: predict(sim, farm, pending, now) });
 			return true;
