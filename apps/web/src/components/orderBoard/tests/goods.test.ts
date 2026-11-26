@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findShortfall, formatTimeLeft, nameGood } from "../goods";
+import { findShortfall, formatTimeLeft, listNeeds, nameGood } from "../goods";
 
 describe("formatTimeLeft", () => {
 	it("rounds up to the second and drops zero parts", () => {
@@ -39,5 +39,27 @@ describe("nameGood", () => {
 	it("uses the singular for one, and the id for a good with no name", () => {
 		expect(nameGood("egg", 1)).toBe("egg");
 		expect(nameGood("truffle", 2)).toBe("truffle");
+	});
+});
+
+describe("listNeeds", () => {
+	it("counts a crop in the silo and any other good in the barn, as the sim takes them", () => {
+		const order = {
+			goods: [
+				{ good: "wheat", amount: 2 },
+				{ good: "egg", amount: 1 },
+			],
+			coins: 14,
+			xp: 4,
+		};
+		const storage = {
+			silo: { goods: { wheat: 3, egg: 9 }, capacity: 50 },
+			barn: { goods: { wheat: 9 }, capacity: 50 },
+		};
+
+		expect(listNeeds(order, storage)).toEqual([
+			{ good: "wheat", amount: 2, have: 3 },
+			{ good: "egg", amount: 1, have: 0 },
+		]);
 	});
 });

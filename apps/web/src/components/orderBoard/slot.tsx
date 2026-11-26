@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
-import type { Order, OrderSlot } from "@sunny-pastures/sim";
+import type { Order, OrderAction, OrderSlot } from "@sunny-pastures/sim";
 
 import { selectStorage, type FarmStore } from "@/client/store";
 import { Button, Dialog } from "@/components/ui";
@@ -35,16 +35,17 @@ export function OrderSlotView({ store, slot, index }: OrderSlotViewProps) {
 		setIsFocusDue(false);
 	}, [isFocusDue, slot.status]);
 
-	const handleAct = (type: "deliver" | "discard") => {
+	const handleAct = (type: OrderAction["type"]) => {
 		setIsFocusDue(true);
 		store.getState().act({ type, slot: index });
 	};
 
 	return (
 		<li aria-labelledby={headingId}>
-			<h3 id={headingId} ref={heading} tabIndex={-1}>
+			{/* Under the dialog's title, which React Aria's Heading renders as an h3. */}
+			<h4 id={headingId} ref={heading} tabIndex={-1}>
 				Order {number}
-			</h3>
+			</h4>
 			{slot.status === "open" ? (
 				<OpenOrder store={store} order={slot.order} number={number} onAct={handleAct} />
 			) : (
@@ -58,7 +59,7 @@ interface OpenOrderProps {
 	readonly store: StoreApi<FarmStore>;
 	readonly order: Order;
 	readonly number: number;
-	readonly onAct: (type: "deliver" | "discard") => void;
+	readonly onAct: (type: OrderAction["type"]) => void;
 }
 
 function OpenOrder({ store, order, number, onAct }: OpenOrderProps) {
@@ -123,7 +124,10 @@ interface RefillProps {
 	readonly refillAt: number;
 }
 
-/** Only this subscribes to the clock, so the rest of the board doesn't redraw every second. */
+/**
+ * Only this subscribes to the clock, so the rest of the board doesn't redraw every second
+ * (ADR-0010, section 4: components subscribe to the slice they show).
+ */
 function Refill({ store, refillAt }: RefillProps) {
 	const now = useStore(store, (s) => s.now);
 	return <p>New order in {formatTimeLeft(refillAt, now)}</p>;

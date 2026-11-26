@@ -1,4 +1,4 @@
-import type { GoodCount, Order, OrderSlot } from "@sunny-pastures/sim";
+import { sliceContent, type GoodCount, type Order, type OrderSlot } from "@sunny-pastures/sim";
 
 import type { FarmStorage } from "@/client/store";
 
@@ -10,12 +10,15 @@ export interface GoodNeed extends GoodCount {
 	readonly have: number;
 }
 
-/** The order's goods in its own order, each with the farm's count of it. */
+/**
+ * The order's goods in its own order, each with the farm's count of it in the good's own store, as
+ * the sim's `take` reads it: a crop from the silo, any other good from the barn (MUST-06.4).
+ */
 export function listNeeds(order: Order, storage: FarmStorage): readonly GoodNeed[] {
-	return order.goods.map((good) => ({
-		...good,
-		have: (storage.silo.goods[good.good] ?? 0) + (storage.barn.goods[good.good] ?? 0),
-	}));
+	return order.goods.map((good) => {
+		const store = Object.hasOwn(sliceContent.crops, good.good) ? storage.silo : storage.barn;
+		return { ...good, have: store.goods[good.good] ?? 0 };
+	});
 }
 
 /**
@@ -32,12 +35,10 @@ export function countDeliverable(board: readonly OrderSlot[], storage: FarmStora
 
 /** Why the order can't be delivered, as a sentence a player reads; null when it can. */
 export function findShortfall(needs: readonly GoodNeed[]): string | null {
-	const missing = needs
-		.filter((need) => need.have < need.amount)
-		.map(
-			(need) =>
-				`${String(need.amount - need.have)} more ${nameGood(need.good, need.amount - need.have)}`,
-		);
+	const missing = needs.flatMap((need) => {
+		const short = need.amount - need.have;
+		return short > 0 ? [`${String(short)} more ${nameGood(need.good, short)}`] : [];
+	});
 	if (missing.length === 0) return null;
 
 	return `You need ${joinWords(missing)} to deliver this order.`;
