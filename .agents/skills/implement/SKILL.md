@@ -10,6 +10,8 @@ If the user passes a ticket reference, fetch it from the issue tracker and state
 
 The PR closes its issue, and only that issue: `Closes #N` for the branch's `<N>` (`Part of #N` only on an earlier part of a split, `CONSTRAINTS.md`, "Split size"), no other closing keyword anywhere in the body, and `Also closes #M` on a line of its own only when this PR really completes #M too (`docs/agents/issue-tracker.md`, "Closing issues"; `guard / pr-body`). If a criterion turns out to need the admin after the merge (a live demo, a repo setting, a workflow that only runs from `main`), file it as a verify issue as that doc's "Verify issues" says, leave it unticked, and name the verify issue in the PR's Concerns. Never leave the original issue open for it.
 
+A follow-up issue you file for CI, tooling or workflow work goes to the **Tooling backlog** milestone unless it blocks product work in this issue's milestone (`docs/agents/issue-tracker.md`, "Tooling backlog").
+
 Call the Skill tool with "tdd" where possible, at pre-agreed seams.
 
 Run typechecking regularly, single test files regularly, and the full test suite once at the end.

@@ -132,8 +132,8 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 ## Project board and milestones
 
 Every issue belongs to the **Sunny Pastures** Project (user project `3`, owner `sssoto17`) and to
-one repo milestone (`M1 Persistence spike` … `M9 Hand-in`; list them with
-`gh api repos/sssoto17/sunny-pastures/milestones --jq '.[].title'`).
+one repo milestone (`M1 Persistence spike` … `M9 Hand-in`, plus **Tooling backlog**, which has no
+due date; list them with `gh api repos/sssoto17/sunny-pastures/milestones --jq '.[].title'`).
 
 - **Create with a milestone**: `gh issue create --milestone "<milestone title>" ...`
 - **Add to the Project and set its fields**: one command, with names, not ids:
@@ -189,6 +189,25 @@ and Week (all with `scripts/issue-fields.sh`), and add one type and one area lab
 fields**). Status is always `Backlog`: only the admin moves an issue to `Ready` (see **Status
 rules**). A skill never adds `factory:ready`: only the admin does (**Status rules**,
 "`factory:ready`").
+
+## Tooling backlog
+
+A new CI, tooling or workflow issue (most `area:ci-cd` and `area:tools` issues) goes to the
+**Tooling backlog** milestone by default (admin, 22 Nov 2026, #573). It enters an active milestone
+only when it blocks product work there, or when the admin pulls it in. On 22 Nov about 45 such
+issues were filed and 18 closed, while M4's UI had no tickets at all; the parked work waits here
+instead of crowding the dated milestones.
+
+- **Example** (26 Nov): #654, the follow-ups to #566, went to Tooling backlog. #646 and #659,
+  factory bugs that stopped the M4 frontend chain, went into M4.
+- **Follow-ups from a review** land here too, unless they block the PR's own milestone (`REVIEW.md`,
+  Report).
+- **A repeated mistake** is first a note in the Retro inbox while a product milestone is active
+  (`docs/diagrams/workflow.md`, "Self-improving loops").
+- `scripts/new-issue.sh` prints a note when an `area:ci-cd` or `area:tools` issue is filed into a
+  milestone with a due date, and the command that moves it. It still files the issue there.
+- Tooling backlog gets no architecture review: `scripts/milestone-review.sh` skips a milestone with
+  no due date.
 
 ## Issue fields
 

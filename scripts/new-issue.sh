@@ -15,6 +15,9 @@ fi
 
 OWNER=sssoto17
 REPO=sunny-pastures
+# The areas of CI, tooling and workflow issues, which go to Tooling backlog by default (#573).
+TOOLING_AREAS=(area:tools area:ci-cd)
+TOOLING_MILESTONE="Tooling backlog"
 here="$(cd "$(dirname "$0")" && pwd)"
 # TYPE_LABELS, native_type and check_native_types: the type label -> native type mapping.
 # shellcheck source=scripts/lib/issue-types.sh
@@ -38,7 +41,11 @@ takes the form --size=M.
               The script stops if the repo's types (Chore, Bug, Feature, Design) and that
               mapping disagree, whatever --type is.
   --area      "tools" or "area:tools"; must be an existing area:* label
-  --milestone the exact title of an open milestone
+  --milestone the exact title of an open milestone. A new CI, tooling or workflow issue goes to
+              "Tooling backlog" (no due date) unless it blocks product work in an active
+              milestone (docs/agents/issue-tracker.md, "Tooling backlog"). Filing area:tools
+              or area:ci-cd into a milestone with a due date prints a note saying so; the
+              issue is still filed there.
   --parent    the workstream parent's number ("73" or "#73"), an open issue. Required, except
               for an idea, which has none (docs/agents/issue-tracker.md, "Grouping"). Framing a
               new workstream parent is the Kickoff, not this script.
@@ -203,12 +210,15 @@ types=$(gh api "repos/$OWNER/$REPO/issue-types" --jq '.[] | select(.is_enabled) 
 # The whole mapping is checked, not only this --type, so a rename is caught on the next filing.
 why=$(check_native_types "$types") || die 2 "$why. Nothing was created."
 
-# "number<TAB>title" per open milestone: REST creates an issue in a milestone by its number.
-milestones=$(gh api "repos/$OWNER/$REPO/milestones?state=open&per_page=100" --jq '.[] | [.number, .title] | @tsv') ||
+# "number<TAB>due date or -<TAB>title" per open milestone: REST creates an issue in a milestone by
+# its number; the due date tells an active milestone from Tooling backlog.
+milestones=$(gh api "repos/$OWNER/$REPO/milestones?state=open&per_page=100" \
+  --jq '.[] | [.number, (.due_on // "-"), .title] | @tsv') ||
   die 3 "could not read the open milestones; nothing was created"
-milestone_number=$(awk -F'\t' -v t="$milestone" '$2 == t { print $1; exit }' <<<"$milestones")
+IFS=$'\t' read -r milestone_number milestone_due < <(
+  awk -F'\t' -v t="$milestone" '$3 == t { print $1 "\t" $2; exit }' <<<"$milestones") || true
 if [[ -z $milestone_number ]]; then
-  mapfile -t open_milestones < <(cut -f2- <<<"$milestones")
+  mapfile -t open_milestones < <(cut -f3- <<<"$milestones")
   die 2 "unknown milestone \"$milestone\". Open milestones: $(join "${open_milestones[@]}"). Nothing was created."
 fi
 
@@ -292,6 +302,19 @@ if ((${#missing[@]})); then
   printf 'new-issue: warning: #%s has no %s, so it carries `triage`. Finish with: scripts/issue-fields.sh %s' \
     "$number" "$(join "${missing[@]}")" "$number" >&2
   for f in "${missing[@]}"; do printf ' --%s <%s>' "${f,,}" "$f" >&2; done
+  printf '\n' >&2
+fi
+# A CI or tooling issue in an active milestone: say what the default is (#573). Only a note: it may
+# block product work there, or the admin may have pulled it in.
+if [[ " ${TOOLING_AREAS[*]} " == *" $area "* && $milestone_due != - ]]; then
+  backlog=$(awk -F'\t' -v t="$TOOLING_MILESTONE" '$3 == t { print $1; exit }' <<<"$milestones")
+  printf '%s' "new-issue: note: #$number is a tooling issue ($area) in \"$milestone\", which has a" \
+    " due date. CI, tooling and workflow issues go to $TOOLING_MILESTONE unless they block product" \
+    " work in this milestone or the admin pulled them in (docs/agents/issue-tracker.md," \
+    " \"Tooling backlog\")." >&2
+  [[ -n $backlog ]] &&
+    printf ' If neither holds, move it: gh api -X PATCH repos/%s/%s/issues/%s -F milestone=%s --silent' \
+      "$OWNER" "$REPO" "$number" "$backlog" >&2
   printf '\n' >&2
 fi
 if ((fields_code == 4)); then

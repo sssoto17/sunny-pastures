@@ -413,6 +413,68 @@ expect_code 1
 expect_err "#200 was created (https://github.com/sssoto17/sunny-pastures/issues/200) and its Project step skipped, but \`triage\` couldn't be added"
 expect_err "gh api -X POST repos/sssoto17/sunny-pastures/issues/200/labels -f 'labels[]=triage'"
 
+# --- the Tooling backlog default (#573) -----------------------------------------------------------
+# A CI or tooling issue (area:tools or area:ci-cd) filed into a milestone with a due date gets a
+# note naming the default: Tooling backlog, unless it blocks product work there. Only a note: the
+# issue is filed as asked and the exit code stays 0, since the admin can always pull work in.
+dated_milestones() {
+  jq -n '[{number: 4, title: "M4 Playable slice live", due_on: "2026-11-29T00:00:00Z"},
+    {number: 10, title: "Tooling backlog", due_on: null}]' >"$st/get/$R/milestones"
+}
+reset
+dated_milestones
+readback chore,area:tools "M4 Playable slice live" 73 Chore
+case_ --title x --type chore --area tools --milestone "M4 Playable slice live" --body-file body.md \
+  --parent 73 "${three[@]}"
+expect_code 0
+expect_created .milestone 4
+expect_err 'new-issue: note: #200 is a tooling issue (area:tools) in "M4 Playable slice live"'
+expect_err "Tooling backlog"
+expect_err "block product work in this milestone"
+expect_err "move it: gh api -X PATCH repos/sssoto17/sunny-pastures/issues/200 -F milestone=10 --silent"
+
+reset
+dated_milestones
+labels bug feature chore spike design idea area:sim area:tools area:ci-cd area:docs triage
+readback bug,area:ci-cd "M4 Playable slice live" 73 Bug
+case_ --title x --type bug --area ci-cd --milestone "M4 Playable slice live" --body-file body.md \
+  --parent 73 "${three[@]}"
+expect_code 0
+expect_err "is a tooling issue (area:ci-cd)"
+
+# With no Tooling backlog open, the note still names the default, without a move command.
+reset
+jq -n '[{number: 4, title: "M4 Playable slice live", due_on: "2026-11-29T00:00:00Z"}]' \
+  >"$st/get/$R/milestones"
+readback chore,area:tools "M4 Playable slice live" 73 Chore
+case_ --title x --type chore --area tools --milestone "M4 Playable slice live" --body-file body.md \
+  --parent 73 "${three[@]}"
+expect_code 0
+expect_err "go to Tooling backlog unless they block product work in this milestone"
+assert "expected no move command without a Tooling backlog" test "${err/move it/}" == "$err"
+
+# No note in Tooling backlog itself, nor for a product area in a dated milestone.
+reset
+dated_milestones
+readback chore,area:tools "Tooling backlog" 73 Chore
+case_ --title x --type chore --area tools --milestone "Tooling backlog" --body-file body.md \
+  --parent 73 "${three[@]}"
+expect_code 0
+expect_created .milestone 10
+assert "expected no note in Tooling backlog" test -z "$err"
+
+reset
+dated_milestones
+readback chore,area:sim "M4 Playable slice live" 73 Chore
+case_ --title x --type chore --area sim --milestone "M4 Playable slice live" --body-file body.md \
+  --parent 73 "${three[@]}"
+expect_code 0
+assert "expected no note for a product area" test -z "$err"
+
+# --help names the default.
+case_ --help
+assert "expected --help to name Tooling backlog" grep -q "Tooling backlog" "$work/err"
+
 # --- the native issue type ----------------------------------------------------------------------
 # Each type label maps to a native type (triage-labels.md, Types), passed to issue-fields.sh and
 # read back.

@@ -2231,12 +2231,13 @@ linked issue, Backlog included, and can't see checks or drafts.
   milestone. Rotating or revoking the token now stops both workflows. Patterns: an event-driven
   filer that is idempotent by a check-then-act guard (a milestone that already has an issue titled
   "Architecture review, …", open or closed, gets no second; not atomic, so the workflow's
-  concurrency group keeps one run per milestone), reusing `new-issue.sh` for the filing rather than
-  a second copy of it. Alternatives considered: the coordinator filing the review by hand each week
-  or milestone (rejected: it was missed in Wk 1, 2 and 3, #290, #407); a schedule that files the
-  next milestone's review (rejected: a run whether or not a milestone was made, and lag); a
-  token-free job with Week left to triage every time (rejected: every review would land in Triage,
-  the manual step this removes).
+  concurrency group keeps one run per milestone; a milestone with no due date, such as Tooling
+  backlog, gets none at all, #573), reusing `new-issue.sh` for the filing rather than a second copy
+  of it. Alternatives considered: the coordinator filing the review by hand each week or milestone
+  (rejected: it was missed in Wk 1, 2 and 3, #290, #407); a schedule that files the next milestone's
+  review (rejected: a run whether or not a milestone was made, and lag); a token-free job with Week
+  left to triage every time (rejected: every review would land in Triage, the manual step this
+  removes).
 
 Patterns: a pipeline of a pure decision and a guarded command (the decide job computes, the move job
 applies), and the guarded transition itself (a check-then-set on Status: move only from the listed
@@ -2293,10 +2294,11 @@ filters differ from the table above, and one view is unchanged:
 
 ### Milestones and Project fields
 
-The milestone is the repo-native grouping (`M1` … `M9`, due dates set; M1 closed). The Project's
-built-in Milestone field shows it, so it never becomes a custom field. Week is the iteration that
-plans inside a milestone. Keeping them in sync is a check, not a sync job: the weekly retro (or
-#32's script) lists open issues whose Week ends after their milestone's due date.
+The milestone is the repo-native grouping (`M1` … `M9`, due dates set; M1 closed; plus Tooling
+backlog, with no due date, where CI and tooling work waits unless it blocks product work, #573). The
+Project's built-in Milestone field shows it, so it never becomes a custom field. Week is the
+iteration that plans inside a milestone. Keeping them in sync is a check, not a sync job: the weekly
+retro (or #32's script) lists open issues whose Week ends after their milestone's due date.
 
 **Alternatives considered.**
 
