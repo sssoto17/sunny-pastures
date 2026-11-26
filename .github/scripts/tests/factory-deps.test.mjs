@@ -6,6 +6,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,6 +65,8 @@ exit \${PNPM_EXIT:-0}
 			FACTORY_DEPS: join(dir, "requests"),
 			FACTORY_DEPS_OUT: join(dir, "out"),
 			FACTORY_DEPS_POLL: "0.1",
+			FACTORY_DEPS_WAIT: "5",
+			FACTORY_DEPS_BWRAP: join(dir, "bin", "bwrap"),
 		},
 	};
 }
@@ -119,18 +122,17 @@ describe("factory-deps.sh", () => {
 		expect(bwrap).toContain(`--ro-bind\n/\n/\n`);
 		expect(bwrap).toContain(`--bind\n${t.root}\n${t.root}\n`);
 		expect(bwrap).toContain(`--bind\n${join(dir, "store")}\n${join(dir, "store")}\n`);
-		for (const p of [
-			".git",
-			".github",
-			".claude",
-			"scripts",
-			"package.json",
-			"pnpm-workspace.yaml",
-		]) {
+		for (const p of [".git", ".github", ".claude", "scripts"]) {
 			expect(bwrap).toContain(`--ro-bind\n${t.root}/${p}\n${t.root}/${p}\n`);
 		}
+		// The pnpm config as the broker copied it at start-up, never the live file: a change made
+		// after the check can't reach pnpm.
+		for (const p of ["package.json", "pnpm-workspace.yaml", ".npmrc"]) {
+			expect(bwrap).toContain(`--ro-bind\n${join(dir, "out", "config", p)}\n${t.root}/${p}\n`);
+		}
+		expect(read("out/config/pnpm-workspace.yaml")).toBe("minimumReleaseAge: 10080\n");
 		// A protected file the checkout lacks can't be created: an empty read-only one stands in.
-		for (const p of [".npmrc", ".gitmodules", ".env", "yarn.lock"]) {
+		for (const p of [".gitmodules", ".env", "yarn.lock"]) {
 			expect(bwrap).toContain(`--ro-bind\n${join(dir, "out", "empty")}\n${t.root}/${p}\n`);
 		}
 		expect(bwrap.split("\n").filter((l) => l === "--bind")).toHaveLength(2);
@@ -180,7 +182,7 @@ describe("factory-deps.sh", () => {
 		const t = setup();
 		await serve(t);
 		mkdirSync(join(dir, "requests"), { recursive: true });
-		writeFileSync(join(dir, "requests", "req.x1"), "apps/web prod zustand@^5\n");
+		writeFileSync(join(dir, "requests", "req.x1"), "apps/web\nprod\nzustand@^5\n");
 		for (let i = 0; i < 100 && !existsSync(join(dir, "out", "res.x1.status")); i++) {
 			await sleep(50);
 		}
@@ -195,6 +197,16 @@ describe("factory-deps.sh", () => {
 			why: "pnpm-workspace.yaml changed since the run began",
 			after: (root) => writeFileSync(join(root, "pnpm-workspace.yaml"), "minimumReleaseAge: 0\n"),
 			says: /^DEPS refused: pnpm-workspace.yaml changed since the run began/m,
+		},
+		{
+			why: "the workspace package is a link out of the checkout",
+			before: (root) => {
+				mkdirSync(join(dir, "elsewhere"));
+				writeFileSync(join(dir, "elsewhere", "package.json"), "{}\n");
+				rmSync(join(root, "apps", "web"), { recursive: true });
+				symlinkSync(join(dir, "elsewhere"), join(root, "apps", "web"));
+			},
+			says: /^DEPS refused: apps\/web\/package.json isn't a file in the checkout$/m,
 		},
 		{
 			why: "a protected folder is missing, so it can't be created",
@@ -221,6 +233,29 @@ describe("factory-deps.sh", () => {
 		const r = add(t, ["apps/web", "zustand@5.1.0"]);
 		expect(r.code).toBe(2);
 		expect(r.out).toMatch(/^DEPS refused: \.npmrc changed since the run began/m);
+	});
+
+	// Claude's sandbox can write home and /opt, which are on the step's PATH: the broker must never
+	// run a command from there outside its bubblewrap.
+	it("runs only /usr/bin and /bin commands itself, whatever the step's PATH holds", async () => {
+		const t = setup();
+		const planted = join(dir, "planted");
+		mkdirSync(planted);
+		for (const c of ["sleep", "mv", "head", "rm", "cat", "sha256sum", "realpath", "bwrap"]) {
+			writeFileSync(join(planted, c), `#!/bin/sh\necho ${c} >>"${dir}/hijacked"\nexit 1\n`);
+			chmodSync(join(planted, c), 0o755);
+		}
+		await serve(t, { PATH: `${planted}:${t.env.PATH}` });
+		expect(add(t, ["apps/web", "zustand@5.1.0"]).code).toBe(0);
+		expect(read("hijacked")).toBeNull();
+	});
+
+	it("keeps serving after a request it can't read", async () => {
+		const t = setup();
+		await serve(t);
+		mkdirSync(join(dir, "requests", "req.dir1", "x"), { recursive: true });
+		await sleep(300);
+		expect(add(t, ["apps/web", "zustand@5.1.0"]).code).toBe(0);
 	});
 
 	it("passes pnpm's failure on, with its output", async () => {
