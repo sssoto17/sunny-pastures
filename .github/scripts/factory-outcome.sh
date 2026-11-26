@@ -8,7 +8,7 @@
 # - an issue run that passed the gate and opened no PR: factory:failed, and one comment with the
 #   run's link and the last `RESULT claude=`, `RESULT handoff=` and `RESULT factory=` lines of the
 #   factory job's log (the `RESULT factory=` line is Claude's own `FACTORY …` reason, #615), in a
-#   code block;
+#   code block, with ANSI escape sequences and control characters dropped (#659);
 # - an issue run the gate refused: factory:failed with the gate's reason, but only when the issue
 #   is at factory:working (the sweep dispatched it); an issue the admin dispatched keeps its label.
 # Each move happens only from the states that run could have left (ready or working; a fix round's
@@ -55,13 +55,18 @@ elif [[ ${GATE_RUN-} == true ]]; then
     for wait in ${LOG_WAIT-5 10 20 30 30} last; do
       attempt=$((attempt + 1))
       : >"$log"
-      GH_TOKEN=$RUN_TOKEN gh api "$r/actions/jobs/$job/logs" >"$log" 2>"$err" || true
-      # One line per log line: no byte-order mark or carriage return; the runner's timestamp, when
-      # present, dropped.
+      # The log echoes each step's script in ANSI colour, and the runner's gh refuses a response
+      # holding an escape sequence unless --allow-escape-sequences is passed (#659: run 45883747890
+      # read nothing for that). A gh without the flag (2.89) says "unknown flag" and doesn't refuse,
+      # so it asks again without it.
+      GH_TOKEN=$RUN_TOKEN gh api --allow-escape-sequences "$r/actions/jobs/$job/logs" >"$log" 2>"$err" ||
+        { grep -q 'unknown flag' "$err" && GH_TOKEN=$RUN_TOKEN gh api "$r/actions/jobs/$job/logs" >"$log" 2>"$err"; } || true
+      # One line per log line: no byte-order mark or carriage return, no ANSI escape sequence or other
+      # control character; the runner's timestamp, when present, dropped.
       lines=""
       for k in claude handoff factory; do
-        l=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' "$log" | grep -E "^([0-9]{4}-[0-9TZ:.-]+ )?RESULT $k=" |
-          tail -n1 | sed -E 's/^[0-9]{4}-[0-9TZ:.-]+ //' | tr -d '`\r' | cut -c1-300) || l=""
+        l=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' -e 's|\x1b\[[0-9;?]*[ -/]*[@-~]||g' "$log" | tr -d '\000-\010\013-\037\177' |
+          grep -E "^([0-9]{4}-[0-9TZ:.-]+ )?RESULT $k=" | tail -n1 | sed -E 's/^[0-9]{4}-[0-9TZ:.-]+ //' | tr -d '`' | cut -c1-300) || l=""
         [[ -z $l ]] || lines+="$l"$'\n'
       done
       [[ $lines != *"RESULT claude="* ]] || break
