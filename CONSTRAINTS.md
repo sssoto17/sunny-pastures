@@ -128,8 +128,8 @@ thresholds).
 | Page performance | Lighthouse mobile: LCP ≤ 2500 ms, CLS ≤ 0.1, TBT ≤ 200 ms | Core Web Vitals "good". Lab tests can't measure INP, so TBT stands in for it | Lighthouse CI against the Vercel preview; see [Timing checks](#timing-checks) | preview | `preview / lighthouse` | #43 |
 | Accessibility (BASE-03) | 0 critical or serious violations | Moderate and minor findings are often debatable | axe-core, tags `wcag2a,wcag2aa,wcag21a,wcag21aa,wcag22aa`, against the preview | preview | `preview / axe` | #43 |
 | Action latency (BASE-04) | p95 < 300 ms on the deployed stack | Already in the spec | `Server-Timing` totals (MUST-19.1) from a scripted run against the preview; at load, SHOULD-03; see [Timing checks](#timing-checks) | preview, gate | `preview / latency` | #43 |
-| Browsers and widths (BASE-02) | Latest 2 Chrome, Firefox and Safari; desktop and 360 px | Already in the spec | browser tests (tool decided in #44) | CI | `ci / ui` | the follow-up issue #44 creates when it decides |
-| Prediction (BASE-05) | Shows ≤ 100 ms after a tap (MUST-12.1) | Already in the spec | browser timing test (tool decided in #44) | CI | `ci / ui` | the follow-up issue #44 creates when it decides |
+| Browsers and widths (BASE-02) | Chromium, Firefox and WebKit as shipped by the pinned `@playwright/test`, at desktop width and 360 px with touch; Playwright bumped at least monthly; real Safari, branded Chrome and older versions checked by hand (`review`, `playtest`) | Already in the spec (latest 2 Chrome, Firefox and Safari). Each Playwright version ships one current build of each engine, and real Safari can't run on a Linux runner (ADR-0011) | Playwright browser tests in six projects: the three engines, each at desktop width and at 360 px with `hasTouch` and `isMobile` (ADR-0011) | CI | `ci / ui` | #673 |
+| Prediction (BASE-05) | Shows ≤ 100 ms after a tap (MUST-12.1) | Already in the spec | Playwright timing test in the phone-width projects: a probe the test injects times a trusted tap to the painted prediction while the action's answer is held (ADR-0011); see [Timing checks](#timing-checks) | CI | `ci / ui` | #674 |
 
 **What counts for coverage.** Only source files under `apps/` and `packages/`. Tests and test
 helpers (everything in a `tests/` folder, ADR-0005), config files, generated code and `tools/` are
@@ -154,10 +154,11 @@ judge a single measurement:
 | `apply()` bench | 3 runs, discarded | 5 runs, each calling `apply()` at least 1,000 times on varied actions | the median across runs of the mean time per call |
 | Lighthouse | 1 run, discarded (cold start) | 3 runs | each metric's median across the 3 runs |
 | Latency smoke | 5 requests, discarded (cold start of the function and of staging Supabase) | at least 50 actions, never fewer than 20 | the p95 of the measured actions |
+| Prediction (BASE-05) | 3 taps, discarded | 10 taps per 360 px project | the median of the 10 taps, per project |
 
 - **Over budget:** the job re-measures once with a full new set (5 bench runs, 3 Lighthouse runs, a
-  new latency run) and fails only if both sets are over. One automatic retry, never more. Retrying
-  by hand until the check is green counts as weakening the bar.
+  new latency run, 10 new taps) and fails only if both are over. One automatic retry, never more.
+  Retrying by hand until the check is green counts as weakening the bar.
 - **Flaky:** if a timing check fails on unchanged code (a rerun of `main` goes red), fix the
   measurement in its own PR rather than moving the threshold.
 
@@ -468,6 +469,7 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 |---|---|---|---|---|---|
 | E26 | config-loosened | .gitleaksignore | #666: two `generic-api-key` fingerprints for `.claude/skills/modern-web-guidance/guides/security/client-side-encryption.md` lines 187 and 201 (commit 6662be1). Vendored third-party docs; the matches are `SubtleCrypto.supports()` algorithm and method names in example text, not keys. Exact findings only, no folder skipped, vendored files unedited (admin, 26 Nov 2026) | @sssoto17 | 2026-12-20 |
 | E27 | config-loosened | .semgrepignore | #666: `javascript.lang.security.detect-insecure-websocket`, 9 hits in three vendored Modern Web Guidance docs (`.claude/skills/modern-web-guidance/guides/security/local-network-access.md`, `restrict-outbound-connections.md`, `security.md`). Vendored third-party docs; the matches are unencrypted WebSocket (`ws` scheme) example URLs in text, not code that runs. Exact files only, no folder globs, vendored files unedited (admin, 26 Nov 2026) | @sssoto17 | 2026-12-20 |
+| E28 | rule-narrowed | CONSTRAINTS.md | The admin's decision 4 on #44 (ADR-0011, section 4): BASE-02's "Latest 2 Chrome, Firefox and Safari" becomes Chromium, Firefox and WebKit as shipped by the pinned `@playwright/test`, at desktop width and 360 px with touch, bumped at least monthly, with real Safari, branded Chrome and older versions checked by hand, so no browser leaves the rule. The BASE-02 and BASE-05 rows name ADR-0011 and their build tickets (#673, #674) instead of #44 (#672's criteria), so the items naming #44 leave their "Checked by" and "Enforced by" cells. Both rows keep their stage and required check. Remove this row once the PR has merged | Soto | 2026-12-17 |
 
 ## Interview record
 

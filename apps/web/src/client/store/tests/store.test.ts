@@ -7,6 +7,7 @@ import {
 	selectCoins,
 	selectFacility,
 	selectLevel,
+	selectLevelProgress,
 	selectOrders,
 	selectPen,
 	selectPlot,
@@ -299,6 +300,7 @@ describe("selectors", () => {
 		expect(selectCoins(loading)).toBeNull();
 		expect(selectLevel(loading)).toBeNull();
 		expect(selectStorage(loading)).toBeNull();
+		expect(selectLevelProgress(loading)).toBeNull();
 		expect(selectPlot(0)(loading)).toBeNull();
 		expect(selectFacility(0)(loading)).toBeNull();
 		expect(selectPen(0)(loading)).toBeNull();
@@ -310,8 +312,8 @@ describe("selectors", () => {
 		const farm = state().predicted;
 		expect(selectLevel(state())).toBe(1);
 		expect(selectStorage(state())).toEqual({
-			silo: { goods: {}, capacity: 50 },
-			barn: { goods: envelope.state.barn, capacity: 50 },
+			silo: { goods: {}, used: 0, capacity: 50 },
+			barn: { goods: envelope.state.barn, used: 0, capacity: 50 },
 		});
 		expect(selectPlot(99)(state())).toBeNull();
 		expect(selectFacility(0)(state())).toBeNull();
@@ -329,6 +331,38 @@ describe("selectors", () => {
 		const envelope = newEnvelope(start);
 		await loadReady({ ...envelope, state: { ...envelope.state, xp: 10 } });
 		expect(selectLevel(state())).toBe(2);
+	});
+
+	it("read the XP toward the next Level, and give the same object while XP stays", async () => {
+		const envelope = newEnvelope(start);
+		await loadReady({ ...envelope, state: { ...envelope.state, xp: 15 } });
+		// The slice's Level table: Level 2 at 10 XP, Level 3 at 30.
+		expect(selectLevelProgress(state())).toEqual({
+			level: 2,
+			xp: 15,
+			levelXp: 10,
+			nextLevelXp: 30,
+		});
+		expect(selectLevelProgress(state())).toBe(selectLevelProgress({ ...state() }));
+	});
+
+	it("read no next Level at the top Level", async () => {
+		const envelope = newEnvelope(start);
+		await loadReady({ ...envelope, state: { ...envelope.state, xp: 140 } });
+		expect(selectLevelProgress(state())).toEqual({
+			level: 5,
+			xp: 140,
+			levelXp: 100,
+			nextLevelXp: null,
+		});
+	});
+
+	it("count the goods held in the silo and the barn", async () => {
+		const envelope = newEnvelope(start);
+		const farm = { ...envelope.state, silo: { wheat: 12 }, barn: { egg: 3, chickenFeed: 4 } };
+		await loadReady({ ...envelope, state: farm });
+		expect(selectStorage(state())?.silo.used).toBe(12);
+		expect(selectStorage(state())?.barn.used).toBe(7);
 	});
 });
 

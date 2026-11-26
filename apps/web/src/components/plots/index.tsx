@@ -73,7 +73,6 @@ function PlotStatus({ store, index, label }: PlotStatusProps) {
 	const plot = useStore(store, selectPlot(index));
 	const farm = useStore(store, (s) => s.predicted);
 	const now = useStore(store, (s) => s.now);
-	const lastRefusal = useStore(store, (s) => s.lastRefusal);
 	const [hasActed, setHasActed] = useState(false);
 	const statusRef = useRef<HTMLParagraphElement>(null);
 	const status = plot?.status ?? null;
@@ -95,7 +94,6 @@ function PlotStatus({ store, index, label }: PlotStatusProps) {
 			{text}
 		</p>
 	);
-	const refusal = hasActed && lastRefusal !== null && <p role="alert">{lastRefusal}</p>;
 
 	if (plot.status === "empty") {
 		return (
@@ -113,19 +111,13 @@ function PlotStatus({ store, index, label }: PlotStatusProps) {
 						/>
 					))}
 				</ul>
-				{refusal}
 			</>
 		);
 	}
 
 	const crop = formatCrop(plot.crop);
 	if (plot.status === "growing") {
-		return (
-			<>
-				{renderStatus(`${crop} is growing: ${formatTimeLeft(plot.readyAt - now)} left.`)}
-				{refusal}
-			</>
-		);
+		return <>{renderStatus(`${crop} is growing: ${formatTimeLeft(plot.readyAt - now)} left.`)}</>;
 	}
 
 	return (
@@ -139,7 +131,6 @@ function PlotStatus({ store, index, label }: PlotStatusProps) {
 			>
 				Harvest {plot.crop}
 			</Button>
-			{refusal}
 		</>
 	);
 }

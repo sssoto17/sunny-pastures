@@ -7,15 +7,17 @@ import type { StoreApi } from "zustand/vanilla";
 import { createApi } from "@/client/api";
 import { getBrowserSession } from "@/client/session";
 import { createFarmStore, type FarmStore } from "@/client/store";
-import { Button } from "@/components/ui";
+import { Button, ToastRegion } from "@/components/ui";
 
+import { Hud } from "../hud";
 import { FarmMap } from "../map";
 import { PlotPopover } from "../plots";
 
 /**
  * The game's client root (ADR-0010): it owns loading the farm through `src/client/` and shows the
- * loading and error states; once the farm is ready, the map fills the screen. The HUD and the
- * order board mount here later. A test passes its own `store`; the app builds the real one.
+ * loading and error states; once the farm is ready, the map fills the screen with the HUD over it
+ * (#600), and the toast region the HUD's refusals show in. The order board mounts here later. A
+ * test passes its own `store`; the app builds the real one.
  */
 export interface GameProps {
 	readonly store?: StoreApi<FarmStore>;
@@ -51,16 +53,20 @@ export default function Game({ store }: GameProps) {
 	if (status === "loading" || predicted === null) return <p role="status">Loading your farm…</p>;
 
 	return (
-		<FarmMap
-			farm={predicted}
-			renderLot={(lot, button) =>
-				lot.kind === "plot" ? (
-					<PlotPopover store={farmStore} index={lot.index} label={lot.label} trigger={button} />
-				) : (
-					button
-				)
-			}
-		/>
+		<>
+			<FarmMap
+				farm={predicted}
+				renderLot={(lot, button) =>
+					lot.kind === "plot" ? (
+						<PlotPopover store={farmStore} index={lot.index} label={lot.label} trigger={button} />
+					) : (
+						button
+					)
+				}
+			/>
+			<Hud store={farmStore} />
+			<ToastRegion />
+		</>
 	);
 }
 

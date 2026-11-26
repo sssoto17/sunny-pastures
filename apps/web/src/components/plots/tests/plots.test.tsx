@@ -109,17 +109,18 @@ describe("PlotPopover", () => {
 		expect(spriteOf("Plot 1: empty")).toMatch(/plot-empty/);
 	});
 
-	it("shows the server's reason when it refuses a planting, and rolls the plot back", async () => {
+	it("rolls the plot back when the server refuses a planting, and the HUD shows why", async () => {
 		const { user } = await renderFarm();
 		const dialog = await openPlot(user, 2);
 		await user.click(within(dialog).getByRole("button", { name: "Plant wheat" }));
 
 		await act(() => fake.sends[0]?.answer(failure("refused")));
 
-		expect(within(dialog).getByRole("alert").textContent).toBe("The server said refused.");
 		expect(within(dialog).getByRole("button", { name: "Plant wheat" })).toBeTruthy();
 		await user.keyboard("{Escape}");
 		expect(screen.getByRole("button", { name: "Plot 2: empty" })).toBeTruthy();
+		// The HUD is the one reader of `lastRefusal` (#600): it shows the reason as a toast.
+		expect(screen.getByRole("alert").textContent).toBe("The server said refused.");
 	});
 
 	it("disables a crop the farm can't afford, says why, and never sends it", async () => {
