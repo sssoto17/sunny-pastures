@@ -1,233 +1,238 @@
 // Fallow (CONSTRAINTS.md, "Tools are dependencies"). Loosening anything here is a moved threshold
 // that the floor guard reports.
 {
-  "$schema": "./node_modules/fallow/schema.json",
-  // The changed-code gate (CONSTRAINTS.md, the Duplication, Complexity and Dead code rows; #503):
-  // `pnpm audit:changed` in `check:task`, `check:full` and `ci / lint` runs `fallow audit` over the
-  // whole repo against the merge base. `new-only` fails a PR only on what it introduces, so the
-  // inherited backlog (#503: 31 clone groups, 35 functions over the thresholds) passes. A function
-  // already over a threshold that grows gets Fallow's default `worsened` verdict: a warning.
-  "audit": { "gate": "new-only" },
-  // Fallow's own defaults, written out so the Complexity row's numbers live here. CRAP comes from
-  // coverage/coverage-final.json when a test run left one (Fallow reads it on its own; `check:full`
-  // names it), and from Fallow's static estimate of test reachability otherwise, as in `ci / lint`.
-  "health": { "maxCyclomatic": 20, "maxCognitive": 15, "maxCrap": 30 },
-  // Dead code (CONSTRAINTS.md, Dead code row). drizzle-kit reads every export of the store's
-  // schema (apps/web/drizzle.config.json; `game` makes it write `CREATE SCHEMA`), and Fallow's
-  // drizzle plugin doesn't read a drizzle.config.json, so the schema is an entry here.
-  // The load run's seeder is a command run by tools/load/run.sh, not an import (#388).
-  "entry": ["apps/web/src/server/store/schema.ts", "tools/load/seed.mjs"],
-  // The Supabase CLI is a system binary, pinned by `pnpm supabase:check`, not an npm package.
-  "ignoreBinaries": ["supabase"],
-  // The game frontend's libraries (ADR-0010, section 3), added ahead of their first import by the
-  // foundation ticket (#594) so the structure tickets that use them add no dependency. Each entry
-  // goes with the PR that first imports its package.
-  "ignoreDependencies": ["react-aria-components", "zustand", "lucide-react"],
-  // Duplication (CONSTRAINTS.md, duplication row; ADR-0005, section 3): exact copies of 50 tokens
-  // and 5 lines or more. `mild` matches token for token, so two loops of the same shape over
-  // different data aren't clones ("the same rule, not the same shape"). Fallow's built-in
-  // defaults leave out *.test.ts files, and the row covers the sim's tests too, so this config
-  // doesn't use them.
-  "duplicates": {
-    "mode": "mild",
-    "minTokens": 50,
-    "minLines": 5,
-    "ignoreDefaults": false
-  },
-  // apps/web's layers (CONSTRAINTS.md, "Boundaries: server-only"; #329 decision 3, #342). Only a
-  // route imports api/, only api/ wires the server modules together, and client code (pages)
-  // reaches the sim's package entry and nothing in src/server/ (ADR-0006). Zones for modules that
-  // don't exist yet are declared now, so each lands inside its rule. `allowTypeOnly` admits
-  // `import type` only: game/ sees the store's interface, never its code, and auth's `PlayerId`,
-  // never `readPlayer` (#332 decision 4); store/ sees the sim's types, never its values
-  // (ADR-0001). The sim (CONSTRAINTS.md, "Boundaries: sim purity (MUST-10.1)") imports no other
-  // zone, tests included, and calls nothing in `calls.forbidden`.
-  // Fallow sees zones and callees only, so ESLint's sim block (eslint.config.mjs) holds the rest of
-  // the row: no package and no `node:*` import (a rule pack can't glob `node:*`), and no `Date`
-  // outside `new Date(value)`, `Date.UTC` and `Date.parse`, so argument-less `new Date()` too.
-  // `pnpm boundaries` runs this in `check:fast` and `ci / boundaries` (#41).
-  "boundaries": {
-    "zones": [
-      // The route files' tests (#397; ADR-0007 section 6; admin, 21 Nov 2026), before `routes` and
-      // `pages`, so they take the API routes' `*.test.ts` files only, never a helper beside them:
-      // they import the route files to check `runtime` and that each export hands the request to
-      // `getApi()`, which they mock.
-      { "name": "routeTests", "patterns": ["apps/web/src/app/api/**/tests/*.test.ts"] },
-      { "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
-      { "name": "pages", "patterns": ["apps/web/src/app/**"] },
-      // The browser's zones (ADR-0010, sections 5 and 8; #594): the game API's response types,
-      // shared by server and client; the gateway to the server (session, api) and the client
-      // store; and the React components. None of them, nor `pages`, can import src/server/**.
-      { "name": "contract", "patterns": ["apps/web/src/contract/**"] },
-      { "name": "client", "patterns": ["apps/web/src/client/**"] },
-      { "name": "components", "patterns": ["apps/web/src/components/**"] },
-      // The composition root's tests (#470's criteria; ADR-0007 section 6), before `api`,
-      // so they take its `tests/*.test.ts` files only, never a helper beside them: they run the
-      // routes on the in-memory store (store/tests/memoryStore.ts), which the store contract holds
-      // to B100, instead of a fake store of their own.
-      { "name": "apiTests", "patterns": ["apps/web/src/server/api/tests/*.test.ts"] },
-      { "name": "api", "patterns": ["apps/web/src/server/api/**"] },
-      { "name": "config", "patterns": ["apps/web/src/server/config/**"] },
-      // Test-file zones (#382; ADR-0007 section 6, an allowance for test files only): the db
-      // module's tests/ holds the `db` project's global setup, `readStack` and `createPlayer`,
-      // which the store's and auth's stack tests use. Each sits before its module's zone, so it
-      // takes the module's tests/ folder only, and the module's source keeps its own rule.
-      { "name": "dbTests", "patterns": ["apps/web/src/server/db/tests/**"] },
-      // The store gate (#383; ADR-0007 section 6, "The store gate"), one file, before the rest of
-      // the store's tests: it plays the recorded script through B100 with the real rules, so it
-      // alone runs `rules` and the sim's code. The store's other tests keep the type-only sim.
-      { "name": "storeGate", "patterns": ["apps/web/src/server/store/tests/storeGate.db.test.ts"] },
-      { "name": "storeTests", "patterns": ["apps/web/src/server/store/tests/**"] },
-      { "name": "authTests", "patterns": ["apps/web/src/server/auth/tests/**"] },
-      // game/'s tests (#383; ADR-0007 sections 2 and 6): the one test-files-only allowance,
-      // `game/**/tests/**` → `store/tests/**`, so they run on the in-memory store
-      // (store/tests/memoryStore.ts), a helper owned by another module's tests/ (ADR-0005 s. 4).
-      { "name": "gameTests", "patterns": ["apps/web/src/server/game/**/tests/**"] },
-      { "name": "db", "patterns": ["apps/web/src/server/db/**"] },
-      { "name": "rules", "patterns": ["apps/web/src/server/rules/**"] },
-      { "name": "store", "patterns": ["apps/web/src/server/store/**"] },
-      { "name": "auth", "patterns": ["apps/web/src/server/auth/**"] },
-      { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
-      { "name": "http", "patterns": ["apps/web/src/server/http/**"] },
-      { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
-      // The rules versions (ADR-0006, "The client"; #535): the registry and the versioned replay,
-      // the sim package's server-only subpath (`@sunny-pastures/sim/versions`). A zone of its own,
-      // before `sim`, so only the server's `rules` and the composition root reach it, never
-      // `pages` or a client zone; it keeps the sim's purity rule (`calls.forbidden` below).
-      { "name": "simVersions", "patterns": ["packages/sim/src/versions/**"] },
-      { "name": "sim", "patterns": ["packages/sim/src/**"] },
-      // The acceptance suite (#386; ADR-0007 section 6, "Acceptance tests"): black-box over HTTP,
-      // so it imports no zone, and a refactor of the app or the sim can't reshape what it expects.
-      { "name": "acceptance", "patterns": ["tests/acceptance/**"] },
-      // The load run's seeder (#388; ADR-0007, "Load and concurrency"): it reaches the sim and
-      // postgres.js through apps/web's resolution at run time, never an import of a zone.
-      { "name": "load", "patterns": ["tools/load/**"] }
-    ],
-    "rules": [
-      { "from": "routes", "allow": ["api"] },
-      // A test-files-only allowance: the route files, and `api`, which the tests replace with
-      // `vi.mock("@/server/api")` (Fallow reads the mock as an import) and never run.
-      { "from": "routeTests", "allow": ["routes", "api"] },
-      { "from": "pages", "allow": ["sim", "components", "client"] },
-      // Types only (ADR-0010, section 5): FarmEnvelope names the sim's FarmState, never its code.
-      { "from": "contract", "allow": [], "allowTypeOnly": ["sim"] },
-      { "from": "client", "allow": ["contract", "sim"] },
-      { "from": "components", "allow": ["client", "contract", "sim"] },
-      {
-        "from": "api",
-        "allow": [
-          "config",
-          "db",
-          "rules",
-          "store",
-          "auth",
-          "timing",
-          "http",
-          "game",
-          "sim",
-          "simVersions"
-        ]
-      },
-      // A test-files-only allowance: `api`'s own rule, plus `api` itself and the store's test
-      // helpers. Production `api` still reaches only B100, through `store`.
-      {
-        "from": "apiTests",
-        "allow": [
-          "api",
-          "config",
-          "db",
-          "rules",
-          "store",
-          "auth",
-          "timing",
-          "http",
-          "game",
-          "sim",
-          "simVersions",
-          "storeTests"
-        ]
-      },
-      {
-        "from": "game",
-        "allow": ["rules", "timing", "sim"],
-        "allowTypeOnly": ["store", "auth", "contract"]
-      },
-      // `contract` holds the stored `Answer` since #594 (ADR-0010, section 5).
-      { "from": "store", "allow": [], "allowTypeOnly": ["db", "sim", "contract"] },
-      { "from": "rules", "allow": ["sim", "simVersions"] },
-      { "from": "auth", "allow": ["config"] },
-      { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
-      { "from": "config", "allow": [] },
-      { "from": "timing", "allow": [] },
-      // The HTTP contract (#395; admin, 21 Nov): the request checks, the error builder and the
-      // headers. It sees the sim's types, never its code; the timing value is passed in.
-      { "from": "http", "allow": ["contract"], "allowTypeOnly": ["sim"] },
-      { "from": "sim", "allow": [] },
-      // The versions build on the sim's own modules and nothing else (MUST-10.1).
-      { "from": "simVersions", "allow": ["sim"] },
-      // No allowances, type-only included: the suite's expected values are written out literally.
-      { "from": "acceptance", "allow": [] },
-      { "from": "load", "allow": [] },
-      // Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
-      { "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
-      {
-        "from": "storeTests",
-        "allow": ["store", "dbTests"],
-        "allowTypeOnly": ["db", "sim", "contract"]
-      },
-      { "from": "authTests", "allow": ["auth", "config", "dbTests"] },
-      // The store's test zone, plus the rules and the sim's code to play the script with.
-      {
-        "from": "storeGate",
-        "allow": ["store", "dbTests", "rules", "sim", "simVersions"],
-        "allowTypeOnly": ["db"]
-      },
-      // game's own rule, plus game itself and the store's test helpers; `store` stays type-only.
-      {
-        "from": "gameTests",
-        "allow": ["game", "rules", "timing", "sim", "simVersions", "storeTests"],
-        "allowTypeOnly": ["store", "auth", "contract"]
-      }
-    ],
-    // A pattern matches a call and a constructor call, also through an import or a namespace.
-    "calls": {
-      "forbidden": [
-        {
-          "from": "sim",
-          "callee": [
-            "Date.now",
-            "Math.random",
-            "performance.now",
-            "crypto.getRandomValues",
-            "crypto.randomUUID",
-            "fetch",
-            "setTimeout",
-            "setInterval",
-            "setImmediate"
-          ]
-        },
-        // The same calls from the versions' zone, which is part of the sim (MUST-10.1; #535).
-        {
-          "from": "simVersions",
-          "callee": [
-            "Date.now",
-            "Math.random",
-            "performance.now",
-            "crypto.getRandomValues",
-            "crypto.randomUUID",
-            "fetch",
-            "setTimeout",
-            "setInterval",
-            "setImmediate"
-          ]
-        }
-      ]
-    },
-    // Every file in apps/web/src and packages/sim/src is in a zone. The CI scripts and the root
-    // tool configs are not app code; a new folder of code needs a zone, not an entry here.
-    "coverage": {
-      "requireAllFiles": true,
-      "allowUnmatched": [".github/scripts/**", "*.mjs", "*.mts", "*.d.ts"]
-    }
-  }
+	"$schema": "./node_modules/fallow/schema.json",
+	// The changed-code gate (CONSTRAINTS.md, the Duplication, Complexity and Dead code rows; #503):
+	// `pnpm audit:changed` in `check:task`, `check:full` and `ci / lint` runs `fallow audit` over the
+	// whole repo against the merge base. `new-only` fails a PR only on what it introduces, so the
+	// inherited backlog (#503: 31 clone groups, 35 functions over the thresholds) passes. A function
+	// already over a threshold that grows gets Fallow's default `worsened` verdict: a warning.
+	"audit": { "gate": "new-only" },
+	// Fallow's own defaults, written out so the Complexity row's numbers live here. CRAP comes from
+	// coverage/coverage-final.json when a test run left one (Fallow reads it on its own; `check:full`
+	// names it), and from Fallow's static estimate of test reachability otherwise, as in `ci / lint`.
+	"health": { "maxCyclomatic": 20, "maxCognitive": 15, "maxCrap": 30 },
+	// Dead code (CONSTRAINTS.md, Dead code row). drizzle-kit reads every export of the store's
+	// schema (apps/web/drizzle.config.json; `game` makes it write `CREATE SCHEMA`), and Fallow's
+	// drizzle plugin doesn't read a drizzle.config.json, so the schema is an entry here.
+	// The load run's seeder is a command run by tools/load/run.sh, not an import (#388).
+	"entry": ["apps/web/src/server/store/schema.ts", "tools/load/seed.mjs"],
+	// The Supabase CLI is a system binary, pinned by `pnpm supabase:check`, not an npm package.
+	"ignoreBinaries": ["supabase"],
+	// Packages added ahead of their first import, each approved with the ticket that adds it. Each
+	// entry goes with the PR that first imports its package. The frontend's libraries (#594) are all
+	// imported now. axe's Playwright binding (ADR-0011, section 6) was added with Playwright (#673),
+	// on the same pin, and is first imported by `preview / axe` (#43).
+	"ignoreDependencies": ["@axe-core/playwright"],
+	// Duplication (CONSTRAINTS.md, duplication row; ADR-0005, section 3): exact copies of 50 tokens
+	// and 5 lines or more. `mild` matches token for token, so two loops of the same shape over
+	// different data aren't clones ("the same rule, not the same shape"). Fallow's built-in
+	// defaults leave out *.test.ts files, and the row covers the sim's tests too, so this config
+	// doesn't use them.
+	"duplicates": {
+		"mode": "mild",
+		"minTokens": 50,
+		"minLines": 5,
+		"ignoreDefaults": false,
+	},
+	// apps/web's layers (CONSTRAINTS.md, "Boundaries: server-only"; #329 decision 3, #342). Only a
+	// route imports api/, only api/ wires the server modules together, and client code (pages)
+	// reaches the sim's package entry and nothing in src/server/ (ADR-0006). Zones for modules that
+	// don't exist yet are declared now, so each lands inside its rule. `allowTypeOnly` admits
+	// `import type` only: game/ sees the store's interface, never its code, and auth's `PlayerId`,
+	// never `readPlayer` (#332 decision 4); store/ sees the sim's types, never its values
+	// (ADR-0001). The sim (CONSTRAINTS.md, "Boundaries: sim purity (MUST-10.1)") imports no other
+	// zone, tests included, and calls nothing in `calls.forbidden`.
+	// Fallow sees zones and callees only, so ESLint's sim block (eslint.config.mjs) holds the rest of
+	// the row: no package and no `node:*` import (a rule pack can't glob `node:*`), and no `Date`
+	// outside `new Date(value)`, `Date.UTC` and `Date.parse`, so argument-less `new Date()` too.
+	// `pnpm boundaries` runs this in `check:fast` and `ci / boundaries` (#41).
+	"boundaries": {
+		"zones": [
+			// The route files' tests (#397; ADR-0007 section 6; admin, 21 Nov 2026), before `routes` and
+			// `pages`, so they take the API routes' `*.test.ts` files only, never a helper beside them:
+			// they import the route files to check `runtime` and that each export hands the request to
+			// `getApi()`, which they mock.
+			{ "name": "routeTests", "patterns": ["apps/web/src/app/api/**/tests/*.test.ts"] },
+			{ "name": "routes", "patterns": ["apps/web/src/app/**/route.ts"] },
+			{ "name": "pages", "patterns": ["apps/web/src/app/**"] },
+			// The browser's zones (ADR-0010, sections 5 and 8; #594): the game API's response types,
+			// shared by server and client; the gateway to the server (session, api) and the client
+			// store; and the React components. None of them, nor `pages`, can import src/server/**.
+			{ "name": "contract", "patterns": ["apps/web/src/contract/**"] },
+			{ "name": "client", "patterns": ["apps/web/src/client/**"] },
+			{ "name": "components", "patterns": ["apps/web/src/components/**"] },
+			// The composition root's tests (#470's criteria; ADR-0007 section 6), before `api`,
+			// so they take its `tests/*.test.ts` files only, never a helper beside them: they run the
+			// routes on the in-memory store (store/tests/memoryStore.ts), which the store contract holds
+			// to B100, instead of a fake store of their own.
+			{ "name": "apiTests", "patterns": ["apps/web/src/server/api/tests/*.test.ts"] },
+			{ "name": "api", "patterns": ["apps/web/src/server/api/**"] },
+			{ "name": "config", "patterns": ["apps/web/src/server/config/**"] },
+			// Test-file zones (#382; ADR-0007 section 6, an allowance for test files only): the db
+			// module's tests/ holds the `db` project's global setup, `readStack` and `createPlayer`,
+			// which the store's and auth's stack tests use. Each sits before its module's zone, so it
+			// takes the module's tests/ folder only, and the module's source keeps its own rule.
+			{ "name": "dbTests", "patterns": ["apps/web/src/server/db/tests/**"] },
+			// The store gate (#383; ADR-0007 section 6, "The store gate"), one file, before the rest of
+			// the store's tests: it plays the recorded script through B100 with the real rules, so it
+			// alone runs `rules` and the sim's code. The store's other tests keep the type-only sim.
+			{ "name": "storeGate", "patterns": ["apps/web/src/server/store/tests/storeGate.db.test.ts"] },
+			{ "name": "storeTests", "patterns": ["apps/web/src/server/store/tests/**"] },
+			{ "name": "authTests", "patterns": ["apps/web/src/server/auth/tests/**"] },
+			// game/'s tests (#383; ADR-0007 sections 2 and 6): the one test-files-only allowance,
+			// `game/**/tests/**` → `store/tests/**`, so they run on the in-memory store
+			// (store/tests/memoryStore.ts), a helper owned by another module's tests/ (ADR-0005 s. 4).
+			{ "name": "gameTests", "patterns": ["apps/web/src/server/game/**/tests/**"] },
+			{ "name": "db", "patterns": ["apps/web/src/server/db/**"] },
+			{ "name": "rules", "patterns": ["apps/web/src/server/rules/**"] },
+			{ "name": "store", "patterns": ["apps/web/src/server/store/**"] },
+			{ "name": "auth", "patterns": ["apps/web/src/server/auth/**"] },
+			{ "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
+			{ "name": "http", "patterns": ["apps/web/src/server/http/**"] },
+			{ "name": "game", "patterns": ["apps/web/src/server/game/**"] },
+			// The rules versions (ADR-0006, "The client"; #535): the registry and the versioned replay,
+			// the sim package's server-only subpath (`@sunny-pastures/sim/versions`). A zone of its own,
+			// before `sim`, so only the server's `rules` and the composition root reach it, never
+			// `pages` or a client zone; it keeps the sim's purity rule (`calls.forbidden` below).
+			{ "name": "simVersions", "patterns": ["packages/sim/src/versions/**"] },
+			{ "name": "sim", "patterns": ["packages/sim/src/**"] },
+			// The acceptance suite (#386; ADR-0007 section 6, "Acceptance tests"): black-box over HTTP,
+			// so it imports no zone, and a refactor of the app or the sim can't reshape what it expects.
+			{ "name": "acceptance", "patterns": ["tests/acceptance/**"] },
+			// The load run's seeder (#388; ADR-0007, "Load and concurrency"): it reaches the sim and
+			// postgres.js through apps/web's resolution at run time, never an import of a zone.
+			{ "name": "load", "patterns": ["tools/load/**"] },
+			// The browser tests (#673; ADR-0011): black-box through a browser against the built app, like
+			// the acceptance suite over HTTP, so they and their Playwright config import no zone.
+			{ "name": "e2e", "patterns": ["apps/web/e2e/**", "apps/web/playwright.config.mts"] },
+		],
+		"rules": [
+			{ "from": "routes", "allow": ["api"] },
+			// A test-files-only allowance: the route files, and `api`, which the tests replace with
+			// `vi.mock("@/server/api")` (Fallow reads the mock as an import) and never run.
+			{ "from": "routeTests", "allow": ["routes", "api"] },
+			{ "from": "pages", "allow": ["sim", "components", "client"] },
+			// Types only (ADR-0010, section 5): FarmEnvelope names the sim's FarmState, never its code.
+			{ "from": "contract", "allow": [], "allowTypeOnly": ["sim"] },
+			{ "from": "client", "allow": ["contract", "sim"] },
+			{ "from": "components", "allow": ["client", "contract", "sim"] },
+			{
+				"from": "api",
+				"allow": [
+					"config",
+					"db",
+					"rules",
+					"store",
+					"auth",
+					"timing",
+					"http",
+					"game",
+					"sim",
+					"simVersions",
+				],
+			},
+			// A test-files-only allowance: `api`'s own rule, plus `api` itself and the store's test
+			// helpers. Production `api` still reaches only B100, through `store`.
+			{
+				"from": "apiTests",
+				"allow": [
+					"api",
+					"config",
+					"db",
+					"rules",
+					"store",
+					"auth",
+					"timing",
+					"http",
+					"game",
+					"sim",
+					"simVersions",
+					"storeTests",
+				],
+			},
+			{
+				"from": "game",
+				"allow": ["rules", "timing", "sim"],
+				"allowTypeOnly": ["store", "auth", "contract"],
+			},
+			// `contract` holds the stored `Answer` since #594 (ADR-0010, section 5).
+			{ "from": "store", "allow": [], "allowTypeOnly": ["db", "sim", "contract"] },
+			{ "from": "rules", "allow": ["sim", "simVersions"] },
+			{ "from": "auth", "allow": ["config"] },
+			{ "from": "db", "allow": [], "allowTypeOnly": ["config"] },
+			{ "from": "config", "allow": [] },
+			{ "from": "timing", "allow": [] },
+			// The HTTP contract (#395; admin, 21 Nov): the request checks, the error builder and the
+			// headers. It sees the sim's types, never its code; the timing value is passed in.
+			{ "from": "http", "allow": ["contract"], "allowTypeOnly": ["sim"] },
+			{ "from": "sim", "allow": [] },
+			// The versions build on the sim's own modules and nothing else (MUST-10.1).
+			{ "from": "simVersions", "allow": ["sim"] },
+			// No allowances, type-only included: the suite's expected values are written out literally.
+			{ "from": "acceptance", "allow": [] },
+			{ "from": "load", "allow": [] },
+			{ "from": "e2e", "allow": [] },
+			// Each test zone: its module's own rule, plus the module itself and the db tests' helpers.
+			{ "from": "dbTests", "allow": ["db"], "allowTypeOnly": ["config"] },
+			{
+				"from": "storeTests",
+				"allow": ["store", "dbTests"],
+				"allowTypeOnly": ["db", "sim", "contract"],
+			},
+			{ "from": "authTests", "allow": ["auth", "config", "dbTests"] },
+			// The store's test zone, plus the rules and the sim's code to play the script with.
+			{
+				"from": "storeGate",
+				"allow": ["store", "dbTests", "rules", "sim", "simVersions"],
+				"allowTypeOnly": ["db"],
+			},
+			// game's own rule, plus game itself and the store's test helpers; `store` stays type-only.
+			{
+				"from": "gameTests",
+				"allow": ["game", "rules", "timing", "sim", "simVersions", "storeTests"],
+				"allowTypeOnly": ["store", "auth", "contract"],
+			},
+		],
+		// A pattern matches a call and a constructor call, also through an import or a namespace.
+		"calls": {
+			"forbidden": [
+				{
+					"from": "sim",
+					"callee": [
+						"Date.now",
+						"Math.random",
+						"performance.now",
+						"crypto.getRandomValues",
+						"crypto.randomUUID",
+						"fetch",
+						"setTimeout",
+						"setInterval",
+						"setImmediate",
+					],
+				},
+				// The same calls from the versions' zone, which is part of the sim (MUST-10.1; #535).
+				{
+					"from": "simVersions",
+					"callee": [
+						"Date.now",
+						"Math.random",
+						"performance.now",
+						"crypto.getRandomValues",
+						"crypto.randomUUID",
+						"fetch",
+						"setTimeout",
+						"setInterval",
+						"setImmediate",
+					],
+				},
+			],
+		},
+		// Every file in apps/web/src and packages/sim/src is in a zone. The CI scripts and the root
+		// tool configs are not app code; a new folder of code needs a zone, not an entry here.
+		"coverage": {
+			"requireAllFiles": true,
+			"allowUnmatched": [".github/scripts/**", "*.mjs", "*.mts", "*.d.ts"],
+		},
+	},
 }
