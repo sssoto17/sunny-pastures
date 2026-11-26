@@ -43,8 +43,13 @@ custom migration: `pnpm db:generate --custom --name <name>`, then write the SQL.
 
 - **Forward-only.** Never edit, rename or delete a migration once it's on `main`; a fix is a new
   migration (CONSTRAINTS.md, "Migrations").
-- `pnpm db:check` (CI, `ci / lint`) fails on an edited migration, and on drift: a `schema.ts` change
-  with no migration. It needs no database.
+- **Atomic files.** No statement that commits on its own or ends the file's transaction (the list is
+  in CONSTRAINTS.md, "Migrations: atomic files"): `supabase db push` runs each file as one
+  transaction.
+- **Expand/contract.** A migration works with the previous release's code: add in one release, drop
+  or rename in a later one (CONSTRAINTS.md, "Checked by review").
+- `pnpm db:check` (CI, `ci / lint`) fails on an edited migration, on a statement that commits on its
+  own, and on drift: a `schema.ts` change with no migration. It needs no database.
 
 ## Tests against the stack: the `db` project
 

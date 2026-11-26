@@ -341,8 +341,13 @@ deployment events. A PR that Vercel doesn't build would then never report, and a
 never reports blocks the merge. So each preview check also runs on the PR itself. When no preview
 exists for the head commit (nothing deployable changed, or Vercel skipped the build), it reports
 success and says "no preview, nothing to measure". The signal Vercel sends for a skipped build is
-unverified until Vercel is connected (Q10). Previews sit behind Vercel's Deployment Protection, so
-the checks send Vercel's automation bypass secret in the `x-vercel-protection-bypass` header
+unverified until Vercel is connected (Q10). A PR that adds a file under `supabase/migrations/` will
+pass the same way (#64, decision 5; built with the preview checks, #43), saying "migration pending
+on staging, nothing to measure": staging's schema follows `main`, so that PR's preview runs on the
+old schema and can't be trusted for database paths. The acceptance run on the throwaway stack
+(MUST-17.1) is the gate for schema and code together. Previews sit behind Vercel's Deployment
+Protection, so the checks send Vercel's automation bypass secret in the `x-vercel-protection-bypass`
+header
 ([Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation),
 checked 7 Nov). It's an Actions secret, set without echoing it (area 4). The preview checks become
 required together with "Require deployments to succeed", at M4 (ruleset table above).
@@ -1977,6 +1982,13 @@ a later PR (Consequences).
 | `main` | Vercel's Git integration, as a preview branch with its own fixed staging domain | staging Supabase |
 | A `v*` tag on `main` | The `deploy` workflow in Actions | production Supabase |
 
+**For M4 (admin, 23 Nov 2026, #562):** Vercel tracks `main` as its production branch, so its Git
+integration deploys `main` as Vercel's **Production**, and the Production scope holds the
+**staging** variables, `DATABASE_URL` included (#591). That URL is the playtest URL. The
+`staging / migrate` workflow migrates staging on each push to `main` (below). The plan in this
+section, `main` as a preview phase and production from a tag, is M7's, with #562's full answer and
+#590; the Preview-scope wording under "Hosted Supabase migrations" is that plan too.
+
 - **`main` becomes staging.** Vercel lets a branch be a "preview phase" with its own domain and its
   own variables ([Git deployments, "Multiple preview phases"](https://vercel.com/docs/git), checked
   7 Nov). For `main` to deploy as a preview, Vercel's production branch must be another branch:
@@ -1993,7 +2005,8 @@ a later PR (Consequences).
   in the GitHub environment `production`, whose deployment policy admits only tags matching `v*`
   (the REST API takes `"type": "tag"` in a deployment policy, checked 7 Nov). It:
   1. checks out the tag, and fails unless the tagged commit is on `main`;
-  2. runs the production migrations (the tool is settled at M3), so the schema ships with its code;
+  2. runs the production migrations with `supabase db push --db-url`, the command staging runs on
+     every merge ("Hosted Supabase migrations", below), so the schema ships with its code;
   3. runs `vercel pull --environment=production`, `vercel build --prod` and
      `vercel deploy --prebuilt --prod`, Vercel's documented pattern for Actions
      ([Using GitHub Actions with Vercel](https://vercel.com/kb/guide/how-can-i-use-github-actions-with-vercel),
@@ -2004,16 +2017,20 @@ a later PR (Consequences).
   create a `v*` tag, because only the Repository admin role bypasses the tag ruleset (area 2, "The
   factory's identity"), and the cloud GitHub proxy refuses tag pushes (#60).
 - **Rollback** is Vercel's Instant Rollback in the dashboard. A fix ships as a patch tag (`v0.5.1`,
-  area 1).
+  area 1). The database doesn't roll back: migrations follow the rollback rules under "Hosted
+  Supabase migrations" (below), which keep the previous release's code working on the new schema.
 
 **Recommendation.**
 
 - **GitHub environment `production`: adopt at M4**, before the first tag deploys (checklist).
   Deployment policy: tags `v*` only. It holds `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`
-  and the production Supabase credentials. Vercel's guide stores them as repository secrets;
-  environment secrets are stricter (below).
-- **No `staging` GitHub environment** while Vercel deploys staging and holds its variables. Adopt
-  one only if Actions runs staging migrations or deploys (the fallback above).
+  and one Supabase secret, `SUPABASE_DB_URL`, and **no `SUPABASE_ACCESS_TOKEN`** (#64, decision 3:
+  that token is account-wide). Vercel's guide stores them as repository secrets; environment secrets
+  are stricter (below).
+- **GitHub environment `staging`: adopted** (#64, decision 2), because Actions runs staging
+  migrations. Its deployment branch is `main` only, and it holds one secret, `SUPABASE_DB_URL`.
+  Created on 26 Nov 2026 (#591); the `staging / migrate` job (#51, PR #663) is its one user. Vercel
+  still deploys staging and holds its variables.
 - **Required reviewers and wait timers** aren't available on a private repo on Pro (above). When the
   repo goes public (#38), add the admin as required reviewer on `production`, with "prevent
   self-review" off, since the admin pushes the tag that starts the deploy.
@@ -2042,6 +2059,71 @@ a later PR (Consequences).
   Nov). Rejected: a staged build runs with production variables, so it can only be checked against
   production data, and migrations run before anyone has looked.
 - **A `preview` GitHub Environment.** Skipped: Vercel's Preview scope is the preview environment.
+
+### Hosted Supabase migrations (#64, decided 22 Nov 2026; built in #51)
+
+Decided with the admin in
+[Decide how migrations reach hosted Supabase (staging and production)](https://github.com/sssoto17/sunny-pastures/issues/64)
+(its resolution comment), checked against Supabase's docs, the docs for Supabase CLI 2.122.0 and
+Vercel's docs on 21 Nov. Built for staging in #51 (PR #663); the first staging migration and the
+staging URL's API passed on 26 Nov 2026 (#662).
+
+- **Projects.** The admin creates both in the Supabase dashboard, on the **free plan**: staging when
+  Vercel is connected (done, #591), production at **M7**, together with the first `v*` tag deploy
+  (#590; admin, 26 Nov 2026, on #676). #64 planned it for M4, but #562 moved the tag deploy to M7,
+  and on the free plan a production project with nothing to serve would only pause. The free plan
+  pauses a project after a week without activity and keeps no backups. Open for later: move
+  production to Pro (about $25/month, 7 days of daily backups) before players' data lives there, if
+  losing it would cost more than that.
+- **One applier: `supabase db push --db-url`.** The job `staging / migrate`
+  (`.github/workflows/staging-migrate.yml`) runs it on every push to `main`, in the `staging`
+  environment, against staging. Production's `deploy` job runs the same command from a tag (#590,
+  M7), so every merge rehearses the production migration. Vercel deploys `main` in parallel, and a
+  short window of new code on the old schema is accepted on staging. Rejected: Supabase's GitHub
+  integration, a second applier that production would never use, with unverified handling of the
+  `meta/` folder; and migrating staging by hand, which leaves it stale.
+- **The CLI: 2.122.0, from a checksum-checked release download.** The local action
+  `.github/actions/supabase-cli` downloads the release archive, checks it against the SHA-256
+  written there, and fails if the binary reports another version. #64 planned `supabase/setup-cli`;
+  the admin chose the local action instead (26 Nov 2026, #663 decisions 4 and 5), because
+  `setup-cli` isn't on the allowed-actions list (area 8) and installs the CLI from npm with no
+  checksum. The same action serves the local stack in CI.
+- **Credentials (names only).** The GitHub environments `staging` and `production` each hold one
+  secret, `SUPABASE_DB_URL`: that project's `postgres` URL through the IPv4 session pooler (port
+  5432), passed as `db push --db-url`. CI holds **no `SUPABASE_ACCESS_TOKEN`**: it is account-wide,
+  so it reaches production from any job that holds it. Vercel holds `DATABASE_URL` (`game_api`
+  through the pooler, user `game_api.<project-ref>`), `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`
+  per scope: staging's in the Preview scope (PR previews and `main`) and production's in the
+  Production scope, from M7; for M4, the Production scope holds staging's (above). The values come
+  from the admin's Bitwarden and are piped in without being shown (Admin checklist, step 16).
+- **The hosted `game_api` password** is set by hand, once per project after its first `db push`, in
+  the project's SQL editor, never through a migration or `db push`
+  ([ADR-0007](0007-apps-web-and-game-api.md), section 5; Admin checklist, step 16).
+- **Previews of a PR that adds a migration** pass the preview checks with "migration pending on
+  staging, nothing to measure" (area 2, "Preview checks"). Rejected: applying unmerged migrations to
+  staging, which breaks its history; Supabase Branching, which needs Pro. MUST-17.3 doesn't change.
+- **Rollback rules** (#64, decision 6):
+  - **Expand/contract.** Every migration works with the previous release's code: a release only
+    adds, and a drop or a rename takes two releases. That keeps old code safe on a schema migrated
+    ahead of it or part way, and keeps Vercel's Instant Rollback safe. A review rule
+    (`CONSTRAINTS.md`, "Checked by review"; migrations are code-owned, A3).
+  - **No statements that commit on their own** (`CONCURRENTLY`, `VACUUM`, `ALTER SYSTEM`,
+    `CLUSTER`), none that starts or ends a transaction (`BEGIN`, `COMMIT`, `ROLLBACK`,
+    `START TRANSACTION`) and no `CREATE DATABASE` (the last two added by the admin, 26 Nov 2026, on
+    #676), so each file stays atomic: `db push` runs one transaction per file, and such a statement
+    would leave a half-applied file with no history row. Checked by `pnpm db:check`
+    (`CONSTRAINTS.md`, "Migrations: atomic files").
+  - **Fixes go forward only:** a new migration in a patch tag. No down-migrations, and no edits
+    (`CONSTRAINTS.md`, "Migrations").
+  - **A data safety net while production is on the free plan:** before tagging a release that
+    contains a migration, the admin runs `supabase db dump` against production locally and keeps the
+    dump outside the repo, because it holds player data.
+- **Paused projects.** The `staging / migrate` job fails loudly, and its error says the project may
+  be paused: resume it in the Supabase dashboard, then re-run the job. No keep-alive cron, to save
+  Actions minutes; revisit with a weekly ping if pausing bites twice.
+
+Patterns: one migration tool for every environment (staging rehearses production), and
+expand/contract (parallel change) for schema changes. Alternatives are listed with each item above.
 
 ## 5. The Project board and status automation
 
@@ -2793,8 +2875,9 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     gh api -X PATCH repos/sssoto17/sunny-pastures --silent -F allow_auto_merge=true
     ```
 
-13. **M3:** **[.github]** `dependabot.yml` (A7). The `production` environment waits for step 15. A
-    `staging` environment only if Actions runs staging migrations or deploys (area 4).
+13. **M3:** **[.github]** `dependabot.yml` (A7). The `production` environment waits for step 15. The
+    `staging` environment is adopted (area 4, #64) and its setup is step 16; _done 26 Nov 2026,
+    #591._
 14. **Go-public (#38, about M3–M4):** the full-history gitleaks scan first; then the licence (Q7),
     `SECURITY.md` (A5), the visibility switch, secret scanning, push protection, private
     vulnerability reporting, CodeQL default setup, and the admin as required reviewer on
@@ -2806,7 +2889,7 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     gh api -X PUT repos/sssoto17/sunny-pastures/private-vulnerability-reporting --silent
     gh api -X PATCH repos/sssoto17/sunny-pastures/code-scanning/default-setup --silent -f state=configured
     ```
-15. **M4, before the first tag:** the deploy setup (area 4).
+15. **Before the first tag (M7 since #562; planned for M4):** the deploy setup (area 4).
     - In Vercel: the production branch set to `production`, `main` given the staging domain and the
       staging variables. UI: the Vercel project → Settings → Environments.
     - `vercel.json` with `deploymentEnabled` off for `production`, in a PR of the admin's
@@ -2824,9 +2907,47 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
     gh secret set VERCEL_TOKEN --env production            # prompts; the value is never shown
     gh secret set VERCEL_ORG_ID --env production
     gh secret set VERCEL_PROJECT_ID --env production
-    gh secret set SUPABASE_ACCESS_TOKEN --env production
     ```
-    Then the first tag `v0.4.0`, which deploys; its Release; `CHANGELOG.md`.
+    No `SUPABASE_ACCESS_TOKEN`: production's one Supabase secret is `SUPABASE_DB_URL`, set in step
+    16 with the production project. Then the first tag `v0.4.0`, which deploys; its Release;
+    `CHANGELOG.md`. (#562 moved the tag deploy, and so this step and production's project, to M7,
+    with #590: M4 goes live on staging only, area 4.)
+16. **Hosted Supabase, per project** (area 4, "Hosted Supabase migrations"; #64). Staging: when
+    Vercel is connected, _done 26 Nov 2026 (#591, #662)_. Production: at M7, with step 15 and the
+    first `v*` tag deploy (#562, #590; admin, 26 Nov 2026, on #676), not at M4 as #64 planned. Never
+    paste a value back into a session: names and on/off states only.
+    - **Create the project** in the Supabase dashboard, on the free plan.
+    - **The GitHub environment and its secret.** `staging`'s deployment branch is `main` only;
+      `production`'s policy is step 15's. Unlock Bitwarden into `BW_SESSION` without showing it,
+      then pipe the session-pooler URL (`postgres`, port 5432) into the secret. `gh secret set`
+      reads the value from stdin, so it never reaches the screen or the shell history. The Bitwarden
+      item names are examples; use the ones in the vault:
+      ```sh
+      export BW_SESSION=$(bw unlock --raw)
+      bw get password sunny-staging-db-url | gh secret set SUPABASE_DB_URL --env staging
+      ```
+    - **The `game_api` password**, after the project's first `db push` (staging's: the first
+      `staging / migrate` run). Bitwarden generates it and stores it as `sunny-<env>-game-api`. In
+      the project's SQL editor, run `alter role game_api with password '…';` with that value, then
+      delete the statement from the SQL editor's history. Put the pooler URL into Vercel's
+      `DATABASE_URL`; the pooler user for a custom role is `game_api.<project-ref>` (Supabase docs,
+      "Connecting to Postgres"). Redeploy so the variable takes effect. Never through a migration or
+      `db push` (ADR-0007, section 5). Done on staging on 26 Nov 2026, which showed that `postgres`,
+      the role `db push` runs as, may alter `game_api` (#662). A rotation repeats these steps.
+    - **A paused project:** when `staging / migrate` (or production's deploy) fails with "may be
+      paused", resume the project in the Supabase dashboard, then re-run the job.
+    - **Before tagging a release that contains a migration**, while production is on the free plan:
+      dump production's schema and data on your own machine, to a folder outside the repo (the data
+      is players'). The URL comes from Bitwarden through an environment variable, and the CLI's
+      output goes to a log file there, so nothing is shown:
+      ```sh
+      dir=~/sunny-dumps/$(date +%F) && mkdir -p "$dir"
+      url=$(bw get password sunny-production-db-url)
+      supabase db dump --db-url "$url" -f "$dir/schema.sql" >"$dir/dump.log" 2>&1 &&
+        supabase db dump --db-url "$url" --data-only -f "$dir/data.sql" >>"$dir/dump.log" 2>&1 &&
+        echo "dump ok" || echo "dump failed: read $dir/dump.log yourself; don't paste it"
+      unset url
+      ```
 
 ---
 

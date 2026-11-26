@@ -386,8 +386,14 @@ expose it. Only the server reaches it, over `DATABASE_URL`.
 - The migration creates the role with `LOGIN` and **no password**. `pnpm db:env` generates a random
   password, sets it against the local stack without printing it, and writes `game_api`'s
   `DATABASE_URL` to `.env`; `.env.example` keeps a placeholder, and CI runs the same script after
-  `supabase db reset`. Hosted roles stay with
-  [Decide how migrations reach hosted Supabase (staging and production)](https://github.com/sssoto17/sunny-pastures/issues/64).
+  `supabase db reset`. On a hosted project the admin sets the password by hand, once per project
+  after its first `db push`, with `alter role game_api with password …` in the project's SQL editor
+  (a Bitwarden-generated value), and rotates it the same way
+  ([Decide how migrations reach hosted Supabase (staging and production)](https://github.com/sssoto17/sunny-pastures/issues/64),
+  decision 4; the steps are ADR-0002's Admin checklist, step 16). It never goes through a migration
+  or `db push`, because `db push` stores each migration's statements in
+  `supabase_migrations.schema_migrations`, where the password would sit in plain text. Staging's was
+  set on 26 Nov 2026 (#662).
 
 **Q3. No farms table.** `farm_id` is a `uuid` referencing `auth.users(id)` with `on delete cascade`,
 through `authUsers` from `drizzle-orm/supabase`, so drizzle-kit doesn't manage `auth`. A farm with

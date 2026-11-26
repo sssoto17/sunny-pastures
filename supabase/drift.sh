@@ -2,7 +2,14 @@
 # Checks supabase/migrations (CONSTRAINTS.md, "Migrations"; #331 decision 7). No database needed.
 #   1. Forward-only: no migration that exists at the merge base with <since> (default origin/main)
 #      is edited, renamed or deleted. An applied migration is never changed; a fix is a new one.
-#   2. No drift: `drizzle-kit check` validates only drizzle-kit's own snapshots and journal, so this
+#   2. Atomic files: no statement that commits on its own (CONCURRENTLY, VACUUM, ALTER SYSTEM,
+#      CLUSTER), that starts or ends a transaction (BEGIN, COMMIT, ROLLBACK, START TRANSACTION),
+#      and no CREATE DATABASE, in any migration (CONSTRAINTS.md, "Migrations: atomic files"; #64
+#      decision 6; admin, 26 Nov 2026, on #676). `supabase db push` runs each file as one
+#      transaction, so a file is applied whole or not at all; most of these can't run inside a
+#      transaction or end it early, and CLUSTER rewrites a table under a lock. Comments, strings, quoted identifiers and dollar-quoted bodies are blanked first, so a
+#      word there doesn't count.
+#   3. No drift: `drizzle-kit check` validates only drizzle-kit's own snapshots and journal, so this
 #      also runs `drizzle-kit generate` and fails when it wrote anything, a schema.ts change with no
 #      migration. Generate writes into supabase/migrations, so run it on a clean tree: an
 #      uncommitted migration fails it too, and a failure leaves the new files there to commit or
@@ -21,6 +28,50 @@ changed=$(git diff --name-status --diff-filter=MDRT "$since"...HEAD -- 'supabase
 if [[ -n $changed ]]; then
   printf '%s\n' "$changed" >&2
   echo "db:check: migrations are forward-only: an applied migration is never edited, renamed or deleted. Add a new one." >&2
+  exit 1
+fi
+
+# Prints file:line: KEYWORD for each statement that commits on its own; exits 1 if it found any.
+# Every keyword but CONCURRENTLY counts only where a statement starts (`ALTER TABLE … CLUSTER ON`
+# runs in a transaction, and a `DO $$ BEGIN … $$` body is blanked); CONCURRENTLY counts anywhere.
+autocommits() {
+  perl - "$@" <<'PERL'
+use strict;
+use warnings;
+my $found = 0;
+for my $file (@ARGV) {
+  open(my $fh, '<', $file) or do { print STDERR "db:check: can't read $file: $!\n"; exit 2 };
+  my $sql = do { local $/; <$fh> };
+  close $fh;
+  # Blank every character but line breaks, so offsets still give line numbers.
+  # E'…' strings take backslash escapes; a $ inside an identifier (allowed) starts no body.
+  $sql =~ s{(--[^\n]*|/\*.*?\*/|\b[Ee]'(?:[^'\\]|\\.|'')*'|'(?:[^']|'')*'|"(?:[^"]|"")*"|(?<![\w\$])(\$(?:[A-Za-z_]\w*)?\$).*?\2)}
+           {(my $m = $1) =~ tr/\n/ /c; $m}gse;
+  while ($sql =~ /([^;]+)/g) {
+    my ($stmt, $start) = ($1, $-[1]);
+    next unless $stmt =~ /^(\s*)\S/;
+    my $line = 1 + (substr($sql, 0, $start + length $1) =~ tr/\n//);
+    my ($what) = $stmt =~ /^\s*(VACUUM|CLUSTER|ALTER\s+SYSTEM|BEGIN|COMMIT|ROLLBACK|START\s+TRANSACTION|CREATE\s+DATABASE)\b/i;
+    ($what) = $stmt =~ /\b(CONCURRENTLY)\b/i unless defined $what;
+    next unless defined $what;
+    $what = uc $what =~ s/\s+/ /gr;
+    print "$file:$line: $what\n";
+    $found = 1;
+  }
+}
+exit $found;
+PERL
+}
+
+shopt -s nullglob
+migrations=(supabase/migrations/*.sql)
+shopt -u nullglob
+status=0
+if ((${#migrations[@]})); then autocommits "${migrations[@]}" >&2 || status=$?; fi
+if ((status > 1)); then
+  exit "$status"
+elif ((status == 1)); then
+  echo "db:check: a migration holds a statement that breaks its transaction (CONSTRAINTS.md, \"Migrations: atomic files\"): supabase db push runs each file as one transaction, and these can't run inside one, end it early or rewrite a table under a lock (#64 decision 6). Use the form that runs in a transaction (CREATE INDEX without CONCURRENTLY, say), and no BEGIN or COMMIT: db push adds its own." >&2
   exit 1
 fi
 
