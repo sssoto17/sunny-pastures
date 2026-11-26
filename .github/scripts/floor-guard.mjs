@@ -228,6 +228,56 @@ const isTest = (f) => /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests)\//.t
 const isProse = (f) => /\.(md|mdx|txt)$/i.test(f);
 const isConstraints = (f) => f === "CONSTRAINTS.md";
 
+// Vendored skill folders (#665; CONSTRAINTS.md, Floor): a third-party skill, kept as its upstream
+// wrote it, so a TODO in it is the upstream author's, and rewording it would come back with the
+// next update. The record is skills-lock.json, code-owned (CODEOWNERS), never a glob: a skill
+// named there is vendored in both folders its installer writes. The record is read from the
+// checkout, the PR's head, since the PR that vendors a skill adds its entry. A name the PR adds
+// covers only a folder the merge base didn't have, so recording a folder we already keep can't
+// skip the edits made to it in the same PR. Only the floor guard skips them; every other check
+// still reads them.
+const SKILLS_LOCK = "skills-lock.json";
+const SKILL_DIRS = [".agents/skills/", ".claude/skills/"];
+// One path segment: the record names folders. A `..` couldn't widen the skip anyway, since git's
+// paths are normalized and a prefix holding one matches none of them.
+const SKILL_NAME = /^[a-z0-9][a-z0-9._-]*$/i;
+const lockedSkills = (text) => {
+	if (text === null) return new Set();
+	try {
+		const skills = JSON.parse(text)?.skills;
+		return new Set(
+			Object.entries(skills && typeof skills === "object" ? skills : {})
+				.filter(([name]) => SKILL_NAME.test(name))
+				.filter(([, e]) => typeof e?.source === "string" && e.source.trim() !== "")
+				.map(([name]) => name),
+		);
+	} catch {
+		return null;
+	}
+};
+const vendoredFolders = (mergeBase) => {
+	const notices = [];
+	const now = lockedSkills(existsSync(SKILLS_LOCK) ? readFileSync(SKILLS_LOCK, "utf8") : null);
+	const was = lockedSkills(oldContent(mergeBase, SKILLS_LOCK)?.join("\n") ?? null) ?? new Set();
+	const folders = new Map(); // folder prefix -> skill name
+	if (now === null) {
+		notices.push(`${SKILLS_LOCK} doesn't parse, so no skill folder counts as vendored`);
+		return { folders, notices };
+	}
+	const inBase = (dir) =>
+		Boolean(git(["ls-tree", "--name-only", mergeBase, "--", dir.slice(0, -1)])?.trim());
+	for (const name of now)
+		for (const dir of SKILL_DIRS) {
+			const prefix = `${dir}${name}/`;
+			if (was.has(name) || !inBase(prefix)) folders.set(prefix, name);
+			else
+				notices.push(
+					`"${name}" is new in ${SKILLS_LOCK}, but ${prefix} is in the merge base, so it is still scanned`,
+				);
+		}
+	return { folders, notices };
+};
+
 // The key of the array a line sits in (`exclude: [`, `"exclude": [`), or null.
 export const enclosingKey = (lines, n) => {
 	const keyBefore = (s) => /["']?(\w+)["']?\s*:\s*$/.exec(s)?.[1] ?? null;
@@ -1562,8 +1612,19 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 	const required = checks.length ? new Set(checks) : null;
 	if (!required && changes.some((f) => WORKFLOW.test(f.path)))
 		notices.push(`no check-name table in ${CHECK_TABLE}, so every workflow job counts as required`);
+	const vendored = vendoredFolders(mergeBase);
+	notices.push(...vendored.notices);
+	const vendorOf = (path) =>
+		[...vendored.folders].find(([prefix]) => path.startsWith(prefix))?.[1] ?? null;
+	const skipped = new Map(); // skill name -> files skipped
 
 	for (const f of changes) {
+		// A file in a vendored skill folder, before and after a move: one moved in or out still counts.
+		const vendor = vendorOf(f.path);
+		if (vendor && vendorOf(f.oldPath ?? f.path) === vendor) {
+			skipped.set(vendor, (skipped.get(vendor) ?? 0) + 1);
+			continue;
+		}
 		if (f.status === "deleted") {
 			if (isTest(f.path)) weak("test-deleted", f.path, "file");
 			else if (PRETTIER_CONFIG.test(basename(f.path))) weak("config-loosened", f.path, "file");
@@ -1823,6 +1884,9 @@ export const guard = (changes, { mergeBase, today, constraintsNow, dependabot = 
 		if (e.expires === null) always("exception-invalid", "CONSTRAINTS.md", r.line, e.id);
 		else if (e.expires < today) always("exception-expired", "CONSTRAINTS.md", r.line, e.id);
 	}
+	// Named on every run, so a skip is never silent (loosening is loud).
+	for (const [name, n] of skipped)
+		notices.push(`skipped ${n} changed file(s) of the vendored skill "${name}" (${SKILLS_LOCK})`);
 	const blocking = [];
 	for (const f of findings) {
 		const w = f.waivable && waivers.find((x) => x.re.test(f.file) && x.rules.includes(f.rule));
