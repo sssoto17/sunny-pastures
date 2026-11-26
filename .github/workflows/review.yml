@@ -1,8 +1,9 @@
 # The reviewer App, sunny-reviewer (ADR-0002, area 2; #68). It reviews every non-draft PR to main,
 # and every part of a native stack whatever its base (#404), by REVIEW.md and posts as
 # sunny-reviewer[bot]: Required findings become line comments plus Request changes, Optional and
-# Nit go in the review's summary, and a clean PR gets Approve. A PR that meets a CONSTRAINTS.md
-# escalation row, or carries review:admin, never gets Approve.
+# Nit go in the review's summary, and a clean PR gets Approve, escalated or not (#566). A PR that
+# meets a CONSTRAINTS.md escalation row gets review:admin and a plain `escalated:` comment; the
+# label and `guard / code-owned` hold it for the admin, never a withheld approval.
 #
 # Why pull_request_target: the run takes this file and its checkout from main, so a PR can't
 # change how it is reviewed. On github.com that holds whatever the PR's base: GitHub's docs give

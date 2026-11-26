@@ -90,10 +90,12 @@ Production changes only when you push a `v*` tag (ADR-0002, area 4). What every 
 it rates findings and how it reports is `REVIEW.md`, at the repo root, for the bot, the
 coordinator's reviewer and a lane's own review alike.
 
-**Escalation comments.** Lanes no longer write a one-line escalation comment when they add
-`review:admin`; the reviewer bot's escalation is the record (retro 2026-11-15, Outcomes 5).
-`CONSTRAINTS.md`, "Escalation criteria" still asks whoever adds the label to post one until #104
-changes it, so until then each brief tells its lane not to write one.
+**Escalation comments.** Lanes don't write a one-line escalation comment when they add
+`review:admin`; the reviewer bot's escalation is the record (retro 2026-11-15, Outcomes 5;
+`CONSTRAINTS.md`, "Escalation criteria", since #566). When the bot finds a row the label is missing
+for, it adds the label and posts one plain `escalated: <rows>` comment, never a review thread or a
+Request changes, and still approves the PR if the code is clean: `guard / code-owned` holds it until
+you remove the label on its head.
 
 **Until #68, the reviewer bot reviews but doesn't approve.** Since 12 Nov it posts a review on every
 PR, but it neither approves nor turns on auto-merge: ruleset `main` stays at 0 required approvals
