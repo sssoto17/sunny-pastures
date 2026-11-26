@@ -104,6 +104,18 @@ describe("FarmMap camera", () => {
 		expect(readTransform(map)).toBe(start);
 	});
 
+	it("leaves browser shortcuts alone when a modifier key is held", () => {
+		const map = renderMap();
+		const start = readTransform(map);
+
+		for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const) {
+			for (const key of ["-", "+", "0", "ArrowLeft"]) {
+				fireEvent.keyDown(map, { key, [modifier]: true });
+			}
+		}
+		expect(readTransform(map)).toBe(start);
+	});
+
 	it("zooms in on a wheel up and out on a wheel down", () => {
 		const map = renderMap();
 		const start = readScale(map);

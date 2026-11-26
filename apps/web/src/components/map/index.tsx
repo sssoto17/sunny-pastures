@@ -68,6 +68,8 @@ export function FarmMap({ farm }: FarmMapProps) {
 	}, [handleRecentre]);
 
 	const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+		// Leave browser shortcuts (Ctrl/Cmd +, -, 0 zoom; Alt+arrows history) alone.
+		if (event.ctrlKey || event.metaKey || event.altKey) return;
 		const next = keyToView(event.key);
 		if (next === null) return;
 
