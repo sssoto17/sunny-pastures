@@ -10,11 +10,13 @@ import { createFarmStore, type FarmStore } from "@/client/store";
 import { Button } from "@/components/ui";
 
 import { FarmMap } from "../map";
+import { OrderBoard } from "../orderBoard";
 
 /**
  * The game's client root (ADR-0010): it owns loading the farm through `src/client/` and shows the
- * loading and error states; once the farm is ready, the map fills the screen. The HUD and the
- * order board mount here later. A test passes its own `store`; the app builds the real one.
+ * loading and error states; once the farm is ready, the map fills the screen with the order board's
+ * button over it. The HUD mounts here later. A test passes its own `store`; the app builds the
+ * real one.
  */
 export interface GameProps {
 	readonly store?: StoreApi<FarmStore>;
@@ -49,7 +51,15 @@ export default function Game({ store }: GameProps) {
 
 	if (status === "loading" || predicted === null) return <p role="status">Loading your farm…</p>;
 
-	return <FarmMap farm={predicted} />;
+	return (
+		<>
+			<FarmMap farm={predicted} />
+			{/* Above the fixed map until the HUD (#600) hosts the Orders button. */}
+			<div style={{ position: "fixed", top: 16, right: 16 }}>
+				<OrderBoard store={farmStore} />
+			</div>
+		</>
+	);
 }
 
 /** The real store, over the game API and the browser's session; both are read only once it loads. */

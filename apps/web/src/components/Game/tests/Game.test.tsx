@@ -68,4 +68,10 @@ describe("Game", () => {
 		expect(await screen.findByRole("group", { name: "Farm map" })).toBeTruthy();
 		expect(screen.queryByRole("status")).toBeNull();
 	});
+
+	it("shows the Orders button over the map once the farm is ready", async () => {
+		setup(farm);
+
+		expect(await screen.findByRole("button", { name: /^Orders/ })).toBeTruthy();
+	});
 });
