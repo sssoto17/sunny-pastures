@@ -2,7 +2,8 @@
 # Tests for `supabase/drift.sh` (`pnpm db:check`, #372, #477) through its command line, in a
 # throwaway git repo under $TMPDIR. `pnpm` is a fake on PATH that logs its arguments, so
 # drizzle-kit never runs; `generate` writes a migration only when the test asks it to. What's
-# checked: a statement that commits on its own (CONCURRENTLY, VACUUM, ALTER SYSTEM, CLUSTER) in
+# checked: a statement that commits on its own (CONCURRENTLY, VACUUM, ALTER SYSTEM, CLUSTER) or
+# ends or starts a transaction (BEGIN, COMMIT, ROLLBACK, START TRANSACTION), or CREATE DATABASE, in
 # supabase/migrations/*.sql fails, named by file and line, before drizzle-kit runs; the same words
 # in a comment, a string, a quoted identifier or a dollar-quoted body don't; `ALTER TABLE … CLUSTER
 # ON` (which runs in a transaction) doesn't; and the forward-only and drift checks still fail.
@@ -65,7 +66,7 @@ refused() { # $1 name, $2 SQL, $3 line the refusal must name
   check "$1: fails" "$([[ $? == 1 ]] && echo ok)"
   check "$1: names the file and line" \
     "$(grep -q "supabase/migrations/20260102000000_new.sql:$3:" "$work/out" && echo ok)"
-  check "$1: says why" "$(grep -q 'commit on their own' "$work/out" && echo ok)"
+  check "$1: says why" "$(grep -q 'breaks its transaction' "$work/out" && echo ok)"
   check "$1: stops before drizzle-kit" "$([[ ! -s $work/calls ]] && echo ok)"
 }
 
@@ -91,6 +92,16 @@ refused "VACUUM after an E-string with an escaped quote" \
   $'SELECT E\'it\\\'s\';\nVACUUM;\nSELECT \'x\';' 2
 refused "VACUUM after identifiers with a dollar sign" \
   $'ALTER TABLE "game"."base" ADD COLUMN a$q$ text;\nVACUUM;\nALTER TABLE "game"."base" ADD COLUMN b$q$ text;' 2
+
+refused "BEGIN" $'BEGIN;\nCREATE TABLE "game"."t" ("id" uuid);' 1
+refused "COMMIT after a statement" $'CREATE TABLE "game"."t" ("id" uuid);\ncommit;' 2
+refused "ROLLBACK" $'SELECT 1;\nROLLBACK;' 2
+refused "START TRANSACTION across lines" $'START\n  TRANSACTION ISOLATION LEVEL SERIALIZABLE;' 1
+refused "CREATE DATABASE" $'-- a second database\nCREATE DATABASE "other";' 2
+allowed "the transaction words in a comment" \
+  $'-- BEGIN; COMMIT; ROLLBACK; START TRANSACTION; CREATE DATABASE x;\nSELECT 1;'
+allowed "the transaction words in a string" \
+  $'COMMENT ON TABLE "game"."base" IS \'BEGIN; COMMIT; ROLLBACK; START TRANSACTION; CREATE DATABASE x\';'
 
 allowed "the words in comments, strings, identifiers and dollar-quoted bodies" \
   "$(

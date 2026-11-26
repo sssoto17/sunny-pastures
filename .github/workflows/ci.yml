@@ -163,7 +163,7 @@ jobs:
       # `<!-- prettier-ignore -->` on the line before it. Not in check:fast, for its 5 s budget.
       - run: pnpm format:md
       # CONSTRAINTS.md, migrations rows (#372, #477): no applied migration edited since the base,
-      # no statement that commits on its own, and `drizzle-kit check` plus a generate that writes
+      # no statement that breaks a file's transaction, and `drizzle-kit check` plus a generate that writes
       # nothing. No database: the stack is `ci / test`'s (#382), when a change can reach it.
       - run: pnpm db:check "$SINCE"
 
