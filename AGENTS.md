@@ -7,7 +7,7 @@ stays consistent and cheat-resistant, and how does that affect the player experi
 
 ## Layout
 
-Folders appear at the milestone that needs them; don't create them ahead of time.
+Folders appear at the milestone that needs them; don't create them early.
 
 - `packages/sim/`: the game rules as pure TypeScript with zero runtime dependencies: state types,
   content as data, `apply(state, action, at)` and `advance(state, to)`. No I/O, no `Date.now()`, no
