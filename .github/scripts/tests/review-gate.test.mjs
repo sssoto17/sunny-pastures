@@ -131,8 +131,8 @@ describe("review-gate.sh", () => {
 	});
 
 	// #641 (admin, 26 Nov 2026): review:admin added while the App's Request changes stands on this
-	// head answers a finding without a push, so the review runs again; its re-run then approves or
-	// dismisses its own Request changes (ADR-0002, "The bot's earlier Request changes"). Standing:
+	// head may answer a finding without a push, so the review runs again; once the findings are
+	// fixed, its re-run approves or dismisses its own Request changes (ADR-0002, "The bot's earlier Request changes"). Standing:
 	// the App's latest review that isn't a plain comment, as GitHub counts it.
 	describe("review:admin added while the App's Request changes stands (#641)", () => {
 		it.each([

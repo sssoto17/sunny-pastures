@@ -4,11 +4,11 @@
 # Writes run=true|false to GITHUB_OUTPUT and logs one GATE line.
 # Tests: .github/scripts/tests/review-gate.test.mjs.
 #
-# Env: ACTION (github.event.action, for the log), BOT (the App's slug), ADMIN (the admin's login),
-# DEFAULT_BRANCH, PR_JSON and REVIEWS (the PR and its reviews as gather writes them: head_sha,
-# base, stack and labels; author, state, body, commit_id), BASE_FILES (read only when the base
-# isn't DEFAULT_BRANCH: the paths the base's commit changes since DEFAULT_BRANCH, REST compare),
-# GITHUB_OUTPUT. An unreadable file fails the step rather than guess.
+# Env: ACTION (github.event.action: the log, and the #641 exception's `labeled`), BOT (the App's
+# slug), ADMIN (the admin's login), DEFAULT_BRANCH, PR_JSON and REVIEWS (the PR and its reviews as
+# gather writes them: head_sha, base, stack and labels; author, state, body, commit_id), BASE_FILES
+# (read only when the base isn't DEFAULT_BRANCH: the paths the base's commit changes since
+# DEFAULT_BRANCH, REST compare), GITHUB_OUTPUT. An unreadable file fails the step rather than guess.
 set -euo pipefail
 
 skip() {
@@ -61,13 +61,15 @@ head_approved=$(jq --arg bot "${BOT}[bot]" --arg admin "$ADMIN" --arg head "$hea
 # review runs again to dismiss it and turn auto-merge off. Whatever the event: a reopened run at
 # the same head can cancel the labeled one (the job's cancel-in-progress) and must finish its
 # work. A dismissed approval reads DISMISSED, so once a run has withdrawn it, nothing re-runs.
-# Any commit counts, as post-review.sh's dismiss does. Both exceptions win over the two skips below.
+# Any commit counts, as post-review.sh's dismiss does. It, and the exception below, win over the
+# two skips after them.
 approved=$(jq --arg u "${BOT}[bot]" 'any(.[]; .author == $u and .state == "APPROVED")' "$REVIEWS")
 # The second exception (#641; admin, 26 Nov 2026): review:admin added while this App's Request
-# changes stands on this head answers a finding without a push, so the review runs again, and its
-# re-run approves or dismisses its own Request changes (ADR-0002, "The bot's earlier Request
-# changes"). Standing means its latest review that isn't a plain comment: a COMMENTED review
-# doesn't replace a Request changes, and a dismissed one reads DISMISSED, as GitHub counts them.
+# changes stands on this head may answer a finding without a push, so the review runs again. Its
+# re-run approves or dismisses its own Request changes once the findings are fixed, and requests
+# changes again otherwise (ADR-0002, "The bot's earlier Request changes"). Standing means its
+# latest review that isn't a plain comment: a COMMENTED review doesn't replace a Request changes,
+# and a dismissed one reads DISMISSED, as GitHub counts them.
 # Only on `labeled`: once per head holds for every other event.
 changes_requested=false
 if [[ $ACTION == labeled ]]; then
