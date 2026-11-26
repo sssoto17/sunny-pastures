@@ -29,13 +29,12 @@ interface StoredProps {
 }
 
 function FillMeter({ label, stored }: StoredProps) {
-	const total = Object.values(stored.goods).reduce((sum, count) => sum + count, 0);
 	return (
 		<Meter
 			label={label}
-			value={total}
+			value={stored.used}
 			max={stored.capacity}
-			valueLabel={`${String(total)} of ${String(stored.capacity)}`}
+			valueLabel={`${String(stored.used)} of ${String(stored.capacity)}`}
 		/>
 	);
 }

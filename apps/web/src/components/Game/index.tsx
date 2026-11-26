@@ -15,7 +15,8 @@ import { FarmMap } from "../map";
 /**
  * The game's client root (ADR-0010): it owns loading the farm through `src/client/` and shows the
  * loading and error states; once the farm is ready, the map fills the screen with the HUD over it
- * (#600), and the toast region the HUD's refusals show in. The order board mounts here later. A test passes its own `store`; the app builds the real one.
+ * (#600), and the toast region the HUD's refusals show in. The order board mounts here later. A
+ * test passes its own `store`; the app builds the real one.
  */
 export interface GameProps {
 	readonly store?: StoreApi<FarmStore>;

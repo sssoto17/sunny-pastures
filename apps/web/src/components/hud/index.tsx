@@ -5,9 +5,13 @@ import type { CSSProperties } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
-import { sliceContent } from "@sunny-pastures/sim";
-
-import { selectCoins, selectLevel, selectStorage, type FarmStore } from "@/client/store";
+import {
+	selectCoins,
+	selectLevelProgress,
+	selectStorage,
+	type FarmStore,
+	type LevelProgress,
+} from "@/client/store";
 import { Meter, Panel } from "@/components/ui";
 
 import { useRefusalToasts } from "./refusals";
@@ -27,12 +31,11 @@ const hudStyle: CSSProperties = { position: "fixed", top: 16, left: 16, zIndex: 
 
 export function Hud({ store }: HudProps) {
 	const coins = useStore(store, selectCoins);
-	const level = useStore(store, selectLevel);
-	const xp = useStore(store, (s) => s.predicted?.xp ?? null);
+	const progress = useStore(store, selectLevelProgress);
 	const storage = useStore(store, selectStorage);
 	useRefusalToasts(store);
 
-	if (coins === null || level === null || xp === null || storage === null) return null;
+	if (coins === null || progress === null || storage === null) return null;
 
 	return (
 		<div style={hudStyle}>
@@ -40,7 +43,7 @@ export function Hud({ store }: HudProps) {
 				<p>
 					<Coins aria-hidden /> {coins.toLocaleString("en")} coins
 				</p>
-				<LevelMeter level={level} xp={xp} />
+				<LevelMeter progress={progress} />
 				<Storage storage={storage} />
 			</Panel>
 		</div>
@@ -48,21 +51,19 @@ export function Hud({ store }: HudProps) {
 }
 
 interface LevelMeterProps {
-	readonly level: number;
-	readonly xp: number;
+	readonly progress: LevelProgress;
 }
 
 /** The XP gained since this Level's threshold, toward the next one; full at the top Level. */
-function LevelMeter({ level, xp }: LevelMeterProps) {
-	const from = sliceContent.levels[level - 1]?.xp ?? 0;
-	const next = sliceContent.levels[level];
+function LevelMeter({ progress }: LevelMeterProps) {
+	const { level, xp, levelXp, nextLevelXp } = progress;
 	const label = `Level ${String(level)}`;
-	if (next === undefined) {
+	if (nextLevelXp === null) {
 		return <Meter label={label} value={1} max={1} valueLabel={`${String(xp)} XP, the top Level`} />;
 	}
 
-	const gained = xp - from;
-	const needed = next.xp - from;
+	const gained = xp - levelXp;
+	const needed = nextLevelXp - levelXp;
 	return (
 		<Meter
 			label={label}
