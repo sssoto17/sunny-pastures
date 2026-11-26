@@ -47,7 +47,7 @@ const SHOWN = Buffer.concat([
 ]);
 const SUMMARY =
 	"diff.patch: the workflow replaced 2 ESC bytes with <ESC> and 3 other control characters " +
-	"with <U+XXXX>; each marker stands for a byte the PR's diff holds there.";
+	"with <U+XXXX>; each marker stands for the control character the PR's diff holds there.";
 
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
@@ -82,6 +82,12 @@ describe("visible-escapes.mjs", () => {
 		);
 	});
 
+	it("counts a single ESC in the singular", () => {
+		const r = show(Buffer.from(`+${ESC}[0m\n`));
+		expect(r.file().toString()).toBe("+<ESC>[0m\n");
+		expect(r.out).toMatch(/replaced 1 ESC byte with <ESC> and 0 other control characters with/);
+	});
+
 	it("refuses to run without an output file", () => {
 		const res = spawnSync("node", [SCRIPT], { input: DIFF });
 		expect(res.status).toBe(2);
@@ -90,8 +96,8 @@ describe("visible-escapes.mjs", () => {
 });
 
 // The gather step's own shell, run with a fake gh that answers as GitHub did for #645 (#648).
-// Its diff call answers with DIFF, or, with `diffFails`, refuses as `gh pr diff` did on the runner.
-function gather({ diffFails = false } = {}) {
+// Its diff call answers with DIFF; `fails` names the call that fails instead, and `ref` the run's ref.
+function gather({ fails = "", ref = "refs/heads/main" } = {}) {
 	dir = mkdtempSync(join(tmpdir(), "review-gather-"));
 	const bin = join(dir, "bin");
 	const temp = join(dir, "temp");
@@ -119,9 +125,10 @@ echo "gh $*" >>"${dir}/calls"
 case "$*" in
   *graphql*) echo '[]' ;;
   *vnd.github.diff*)
-    ${diffFails ? 'echo "gh: HTTP 406: diff too large" >&2; exit 1' : `cat "${dir}/diff"`} ;;
+    ${fails === "diff" ? 'echo "gh: HTTP 406: diff too large" >&2; exit 1' : `cat "${dir}/diff"`} ;;
   *pulls/7/reviews*) ;;
-  *pulls/7/files*) echo '{"filename":"log.txt","status":"added","additions":1,"deletions":0}' ;;
+  *pulls/7/files*)
+    ${fails === "files" ? 'echo "gh: HTTP 502" >&2; exit 1' : `echo '{"filename":"log.txt","status":"added","additions":1,"deletions":0}'`} ;;
   *"pulls/7 "*) cat "${dir}/pr.json" ;;
   *) echo "fake gh: unexpected call: gh $*" >&2; exit 9 ;;
 esac
@@ -137,7 +144,7 @@ esac
 			GH_TOKEN: "dummy",
 			PR: "7",
 			GITHUB_REPOSITORY: "o/r",
-			GITHUB_REF: "refs/heads/main",
+			GITHUB_REF: ref,
 			DEFAULT_BRANCH: "main",
 			ACTION: "synchronize",
 			BOT: "sunny-reviewer",
@@ -195,11 +202,28 @@ describe("review.yml (#648)", () => {
 	});
 
 	it("records why gather failed, naming the command and its line", () => {
-		const g = gather({ diffFails: true });
+		const g = gather({ fails: "diff" });
 		expect(g.code).toBe(1);
 		const failure = g.output.match(/^failure=(.*)$/m)?.[1];
 		expect(failure).toMatch(
 			/^gather stopped at line \d+ \(exit 1\): gh api -H "Accept: application\/vnd\.github\.diff" /,
+		);
+	});
+
+	// bash names a pipeline's last command, here `jq -s .`, so the reason gives every status.
+	it("names a failed pipeline with each command's status", () => {
+		const g = gather({ fails: "files" });
+		expect(g.code).toBe(1);
+		expect(g.output.match(/^failure=(.*)$/m)?.[1]).toMatch(
+			/^gather stopped at line \d+ \(exit 1\): a pipeline \(statuses 1 0\) ending in jq -s \. > "\$CTX\/files\.json"$/,
+		);
+	});
+
+	it("records why gather stopped on a run that isn't the default branch's", () => {
+		const g = gather({ ref: "refs/heads/other" });
+		expect(g.code).toBe(1);
+		expect(g.output.match(/^failure=(.*)$/m)?.[1]).toBe(
+			"this run's ref is not the default branch: nothing reviewed",
 		);
 	});
 

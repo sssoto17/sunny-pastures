@@ -118,16 +118,19 @@ jobs:
           set -euo pipefail
           # A failure names its own command for the Report step (#648), which otherwise only saw
           # that Claude left no execution file. The command is this script's text, unexpanded, so
-          # nothing the PR wrote reaches the output.
+          # nothing the PR wrote reaches the output. In a pipeline bash names the last command, so
+          # the reason gives every status in it.
           failed() {
             local cmd=${BASH_COMMAND%%$'\n'*}
-            echo "failure=gather stopped at line $2 (exit $1): ${cmd:0:160}" >>"$GITHUB_OUTPUT"
+            [[ $3 != *' '* ]] || cmd="a pipeline (statuses $3) ending in $cmd"
+            echo "failure=gather stopped at line $2 (exit $1): ${cmd:0:200}" >>"$GITHUB_OUTPUT"
           }
-          trap 'failed $? $LINENO' ERR
+          trap 'failed $? $LINENO "${PIPESTATUS[*]}"' ERR
           # The trigger takes every base (#404), so check the premise the header quotes: this run,
           # and the checkout above, are the default branch's.
           if [[ $GITHUB_REF != "refs/heads/$DEFAULT_BRANCH" ]]; then
             echo "::error::this run's ref is $GITHUB_REF, not $DEFAULT_BRANCH: nothing reviewed"
+            echo "failure=this run's ref is not the default branch: nothing reviewed" >>"$GITHUB_OUTPUT"
             exit 1
           fi
           echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
@@ -160,8 +163,9 @@ jobs:
           # terminal escape sequence. Then each control character becomes a visible marker, and
           # diff-escapes.txt says how many (review-prompt.md).
           gh api -H "Accept: application/vnd.github.diff" "$r/pulls/$PR" >"$RUNNER_TEMP/diff.raw"
-          node .github/scripts/visible-escapes.mjs "$CTX/diff.patch" <"$RUNNER_TEMP/diff.raw" |
-            tee "$CTX/diff-escapes.txt"
+          node .github/scripts/visible-escapes.mjs "$CTX/diff.patch" <"$RUNNER_TEMP/diff.raw" \
+            >"$CTX/diff-escapes.txt"
+          cat "$CTX/diff-escapes.txt"
           gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
             -F pr="$PR" -f query="$THREADS_QUERY" \
             --jq '.data.repository.pullRequest.reviewThreads.nodes' >"$CTX/threads.json"

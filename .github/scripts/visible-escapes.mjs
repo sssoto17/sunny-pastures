@@ -59,9 +59,11 @@ export function showEscapes(bytes) {
 export function describeEscapes({ esc, other }) {
 	if (esc + other === 0)
 		return "diff.patch: no control characters; the workflow changed nothing in the PR's diff.";
+	const count = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
 	return (
-		`diff.patch: the workflow replaced ${esc} ESC bytes with <ESC> and ${other} other control ` +
-		"characters with <U+XXXX>; each marker stands for a byte the PR's diff holds there."
+		`diff.patch: the workflow replaced ${count(esc, "ESC byte")} with <ESC> and ` +
+		`${count(other, "other control character")} with <U+XXXX>; each marker stands for the ` +
+		"control character the PR's diff holds there."
 	);
 }
 
