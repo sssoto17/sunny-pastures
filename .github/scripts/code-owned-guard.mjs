@@ -12,6 +12,8 @@
 // through a GitHub App. The run that the `unlabeled` event fires checks that the event's head is
 // still the PR's head, then writes a record on that commit: a check run named
 // `code-owned / sign-off`, conclusion success, its summary naming the removal's event id and actor.
+// It then re-reads the records with backoff until one counts, as the list can lag the write (#638);
+// a token request or write that fails stops the run with a failing verdict that names it.
 //
 // Which records count (#565's throwaway PRs #629 and #630): a check run written through the Checks
 // API with an Actions token lands in the commit's oldest GitHub Actions check suite, whichever
@@ -63,6 +65,11 @@ export const ACTIONS_APP = 15368;
 // The REST events list can lag the webhook: how often a removal run re-reads it, and how far apart.
 const TRIES = 5;
 const WAIT_MS = 2000;
+// The check-runs list can lag a write too (#638): how long a removal run waits before each re-read
+// of the record it just wrote. Six reads over 31 s, well inside the job's five minutes.
+const READ_BACK_MS = [1000, 2000, 4000, 8000, 16000];
+// What the admin does after a run that couldn't write its record: the label is still off.
+const RETRY = " (the admin re-runs this job, or adds review:admin back and removes it again)";
 
 const ESCALATED =
 	"escalated: Code-owned path\n\n`guard / code-owned` added `review:admin`: the diff touches a path " +
@@ -124,10 +131,11 @@ export const isAdminRemoval = (e) =>
 /**
  * The verdict on the PR an event names: `{ ok, owned, head, message }`. On the way it adds the label
  * to a code-owned PR that never carried it (`escalate`), writes the sign-off record on the run an
- * admin removal fired (`writeRecord(sha, output, audience)`), and puts the label back on a held PR
- * with neither the label nor a counted record (`rearm`). `getPull`, `listFiles` and `listEvents`
- * (every page) answer as REST does; `listRecords(sha)` lists the `code-owned / sign-off` check runs
- * on a commit, and `getKeys()` GitHub's OIDC signing keys. Throws CannotRun when it can't judge.
+ * admin removal fired (`writeRecord(sha, output, audience)`, answering the check run it wrote), and
+ * puts the label back on a held PR with neither the label nor a counted record (`rearm`). `getPull`,
+ * `listFiles` and `listEvents` (every page) answer as REST does; `listRecords(sha)` lists the
+ * `code-owned / sign-off` check runs on a commit, and `getKeys(fresh)` GitHub's OIDC signing keys,
+ * asked for again when `fresh`. Throws CannotRun when it can't judge.
  */
 export const checkCodeOwned = async (event, deps) => {
 	const { pull, events, owned, number, repo } = await readPr(event, deps);
@@ -156,14 +164,18 @@ export const checkCodeOwned = async (event, deps) => {
 	// The label's last removal must be the admin's own, so a record from an earlier sign-off on
 	// this head can't carry a later removal by anyone else (the label came back, then went again).
 	const removal = signed ? signed.removal : latestLabelEvent(events);
-	const record = isAdminRemoval(removal) ? await recordFromMain(repo, number, head, deps) : null;
-	if (record)
+	const read = !isAdminRemoval(removal)
+		? null
+		: signed?.written
+			? await readBack(repo, number, head, deps)
+			: await recordFromMain(repo, number, head, deps);
+	if (read?.record)
 		return verdict(
 			true,
-			`signed off: ${SIGN_OFF} ${record.id} from main's code-owned.yml on ${short}`,
+			`signed off: ${SIGN_OFF} ${read.record.id} from main's code-owned.yml on ${short}`,
 		);
 
-	const why = rearmReason(event, signed, removal, short);
+	const why = rearmReason(event, signed, removal, short, read);
 	await deps.rearm(why);
 	return verdict(false, `held: ${why}; review:admin is back`);
 };
@@ -223,7 +235,7 @@ async function signOff(event, pull, events, audience, { listEvents, writeRecord,
 	}
 	const listed = reports(removal, sender);
 	if (!listed || !isAdminRemoval(removal)) return { removal, listed };
-	if (event.pull_request.head.sha !== pull.head.sha) return { removal, listed };
+	if (event.pull_request.head.sha !== pull.head.sha) return { removal, listed, moved: true };
 
 	const at = pull.head.sha.slice(0, 7);
 	const output = {
@@ -232,8 +244,21 @@ async function signOff(event, pull, events, audience, { listEvents, writeRecord,
 			`Sign-off: \`${removal.actor.login}\` (${removal.actor.type}) removed \`review:admin\` on ` +
 			`${pull.head.sha}, the PR's head, in event ${removal.id} (${removal.created_at}).`,
 	};
-	await writeRecord(pull.head.sha, output, audience);
-	return { removal, listed };
+	// A failed token request or write stops the run (exit 2, a failing verdict naming it), so it
+	// never reads as a missing record (#638).
+	let written;
+	try {
+		written = await writeRecord(pull.head.sha, output, audience);
+	} catch (e) {
+		throw new CannotRun(
+			`couldn't write the ${SIGN_OFF} record on ${at}: ${e?.message ?? e}${RETRY}`,
+		);
+	}
+	if (!written?.id)
+		throw new CannotRun(
+			`couldn't write the ${SIGN_OFF} record on ${at}: GitHub's answer has no id${RETRY}`,
+		);
+	return { removal, listed, written };
 }
 
 function hasLabel(pull) {
@@ -264,19 +289,43 @@ async function readPr(event, { rules, getPull, listFiles, listEvents, sleep = de
 	return { pull, events, owned: paths.filter((p) => isOwned(rules, p)), number, repo };
 }
 
-// The newest `code-owned / sign-off` record on `head` that `fromMain` counts, or null.
-async function recordFromMain(repo, number, head, { getKeys, listRecords }) {
-	const keys = await getKeys();
-	const counted = (await listRecords(head)).filter((r) =>
-		fromMain(r, { repo, number, head, keys }),
-	);
-	return counted.sort((a, b) => a.id - b.id).at(-1) ?? null;
+// `{ record, ids }`: the newest `code-owned / sign-off` record on `head` that `fromMain` counts, or
+// null, and the ids of every record listed there. `fresh` asks for GitHub's keys again.
+async function recordFromMain(repo, number, head, { getKeys, listRecords }, fresh = false) {
+	const keys = await getKeys(fresh);
+	const records = await listRecords(head);
+	const counted = records.filter((r) => fromMain(r, { repo, number, head, keys }));
+	return {
+		record: counted.sort((a, b) => a.id - b.id).at(-1) ?? null,
+		ids: records.map((r) => r.id),
+	};
+}
+
+// On the run that wrote a record: `recordFromMain`, re-read with backoff (and GitHub's keys asked
+// for again) while no record counts, as the list and the keys can lag the write (#638). It still
+// counts only what `fromMain` proves; the write's own answer is never taken on trust.
+async function readBack(repo, number, head, deps) {
+	const { sleep = delay } = deps;
+	let read = await recordFromMain(repo, number, head, deps);
+	for (const ms of READ_BACK_MS) {
+		if (read.record) break;
+		await sleep(ms);
+		read = await recordFromMain(repo, number, head, deps, true);
+	}
+	return read;
 }
 
 // Why a held PR with the label off gets it back, in words the admin can act on.
-function rearmReason(event, signed, removal, short) {
+function rearmReason(event, signed, removal, short, read) {
 	if (signed?.listed === false)
 		return `the removal this run reports, by ${event.sender?.login ?? "an unnamed sender"}, isn't listed in the PR's events yet; the admin removes the label again`;
+	if (signed?.moved)
+		return `the removal was made on an older head, ${event.pull_request.head.sha.slice(0, 7)}, and the PR's head is now ${short}; the admin removes the label again on ${short}`;
+	const reads = READ_BACK_MS.length + 1;
+	if (signed?.written && read?.ids.includes(signed.written.id))
+		return `this run wrote ${SIGN_OFF} ${signed.written.id} on ${short}, but its token didn't verify against GitHub's OIDC keys in ${reads} reads; the admin removes the label again`;
+	if (signed?.written)
+		return `this run wrote ${SIGN_OFF} ${signed.written.id} on ${short}, but GitHub's check-runs list didn't show it in ${reads} reads; the admin removes the label again`;
 	if (isAdminRemoval(removal))
 		return `no ${SIGN_OFF} record from main's code-owned.yml on ${short}, the head (pushed after the sign-off, removed on an older head, or the run that would write it was replaced by a newer one; the admin removes the label again)`;
 	return `review:admin was removed by ${who(removal)}, which isn't the admin's sign-off`;
@@ -392,7 +441,10 @@ const oidc = {
 			headers: { authorization: `bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
 		});
 		if (!res.ok) throw new CannotRun(`the OIDC token request answered ${res.status}`);
-		return (await res.json()).value;
+		const { value } = await res.json();
+		if (typeof value !== "string" || !value)
+			throw new CannotRun("the OIDC token request answered without a token");
+		return value;
 	},
 };
 
@@ -419,7 +471,17 @@ const main = async () => {
 		listEvents: () => all(`issues/${number}/events`),
 		listRecords: checksNamed(SIGN_OFF),
 		listChecks: checksNamed(CHECK),
-		getKeys: async () => (keys ??= await oidc.keys()),
+		// A fresh read that fails keeps the keys already held: the read-back still verifies with them.
+		getKeys: async (fresh) => {
+			if (keys && !fresh) return keys;
+			try {
+				keys = await oidc.keys();
+			} catch (e) {
+				if (!keys) throw e;
+				console.error(`code-owned: kept the OIDC keys already read: ${e?.message ?? e}`);
+			}
+			return keys;
+		},
 		escalate: async () => {
 			await addLabel();
 			await comment(ESCALATED);
