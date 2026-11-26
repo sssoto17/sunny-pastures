@@ -156,8 +156,8 @@ judge a single measurement:
 | Prediction (BASE-05) | 3 taps, discarded | 10 taps per 360 px project | the median of the 10 taps, per project |
 
 - **Over budget:** the job re-measures once with a full new set (5 bench runs, 3 Lighthouse runs, a
-  new latency run, 10 new taps) and fails only if both sets are over. One automatic retry, never
-  more. Retrying by hand until the check is green counts as weakening the bar.
+  new latency run, 10 new taps) and fails only if both are over. One automatic retry, never more.
+  Retrying by hand until the check is green counts as weakening the bar.
 - **Flaky:** if a timing check fails on unchanged code (a rerun of `main` goes red), fix the
   measurement in its own PR rather than moving the threshold.
 
