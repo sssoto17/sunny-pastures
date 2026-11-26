@@ -22,7 +22,7 @@
   // The game frontend's libraries (ADR-0010, section 3), added ahead of their first import by the
   // foundation ticket (#594) so the structure tickets that use them add no dependency. Each entry
   // goes with the PR that first imports its package.
-  "ignoreDependencies": ["react-aria-components", "zustand", "lucide-react"],
+  "ignoreDependencies": ["react-aria-components", "lucide-react"],
   // Duplication (CONSTRAINTS.md, duplication row; ADR-0005, section 3): exact copies of 50 tokens
   // and 5 lines or more. `mild` matches token for token, so two loops of the same shape over
   // different data aren't clones ("the same rule, not the same shape"). Fallow's built-in

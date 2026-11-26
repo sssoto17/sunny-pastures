@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { sliceContent } from "../../content/index.js";
+import { levelOf as levelOfFromEntry } from "../../index.js";
 import { createSim } from "../../sim/index.js";
 import { cropLocked, gainXp, levelOf, prepareProgressRules, purchase } from "../index.js";
 
@@ -19,6 +20,18 @@ describe("levelOf", () => {
 	])("puts a farm with %i XP at Level %i (MUST-05.3)", (xp, level) => {
 		expect(levelOf(xp, rules)).toBe(level);
 	});
+
+	it.each([
+		[0, 1],
+		[29, 2],
+		[30, 3],
+		[1_000_000, 5],
+	])(
+		"reads the Level table from content too, as the client does (#667): %i XP is Level %i",
+		(xp, level) => {
+			expect(levelOfFromEntry(xp, sliceContent)).toBe(level);
+		},
+	);
 });
 
 describe("gainXp", () => {

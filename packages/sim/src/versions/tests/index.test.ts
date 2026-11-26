@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { createSim, sliceContent, stateHash } from "../../index.js";
+import { createSim, currentRulesVersion, sliceContent, stateHash } from "../../index.js";
 import type { Action, FarmState } from "../../index.js";
-import { createVersions, registry } from "../index.js";
+import { createVersions, listVersions, registry } from "../index.js";
 import type { LoggedRow } from "../index.js";
 import { tunedContent, twoVersions } from "./twoVersions.js";
 
@@ -23,6 +23,11 @@ describe("registry", () => {
 	it("holds version 1, unreleased, with the content the client imports from the package entry", () => {
 		expect(registry.first).toEqual({ content: sliceContent, contentHash: null });
 		expect(createVersions(registry).current).toBe(1);
+	});
+
+	it("has the current version the package entry exports for the client (#667)", () => {
+		expect(createVersions(registry).current).toBe(currentRulesVersion);
+		expect(listVersions(registry).at(-1)?.content).toBe(sliceContent);
 	});
 });
 

@@ -1584,6 +1584,46 @@ describe("floor guard, end to end", () => {
 		expect(guard().out).toContain("[config-loosened]");
 	});
 
+	// #667: an entry dropped from one of Fallow's `ignore*` lists makes Fallow check more, so the
+	// line it leaves behind tightens the config. Anything else on that line still counts.
+	describe("Fallow's ignore lists", () => {
+		const RC =
+			'{\n  "ignoreBinaries": ["supabase"],\n  "ignoreDependencies": ["a", "b", "c"],\n  "audit": { "gate": "new-only" }\n}\n';
+		const run = (after) => {
+			repo = makeRepo({ ...BASE, ".fallowrc.jsonc": RC });
+			repo.write({ ".fallowrc.jsonc": RC.replace('["a", "b", "c"]', after) });
+			return guard();
+		};
+
+		it.each([
+			["one entry dropped", '["a", "c"]'],
+			["every entry but one dropped", '["b"]'],
+			["every entry dropped", "[]"],
+		])("passes %s", (_, after) => {
+			expect(run(after)).toMatchObject({ code: 0 });
+		});
+
+		it.each([
+			["an entry added", '["a", "b", "c", "d"]'],
+			["an entry swapped for another", '["a", "b", "d"]'],
+			["an entry dropped beside another key on the line", '["a", "c"], "ignorePatterns": ["x"]'],
+			["an entry dropped with a comment after it", '["a", "c"], // ignore'],
+		])("blocks %s", (_, after) => {
+			expect(run(after).out).toContain("[config-loosened] .fallowrc.jsonc");
+		});
+
+		it("blocks an entry dropped from one list and added to another", () => {
+			repo = makeRepo({ ...BASE, ".fallowrc.jsonc": RC });
+			repo.write({
+				".fallowrc.jsonc": RC.replace('["a", "b", "c"]', '["a", "c"]').replace(
+					'"ignoreBinaries": ["supabase"]',
+					'"ignoreBinaries": ["supabase", "b"]',
+				),
+			});
+			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc:2");
+		});
+	});
+
 	// #125: Prettier's ignore list and settings decide what the formatting check covers, so a widened
 	// ignore list or a loosened setting is a moved threshold too (admin, 9 Nov).
 	describe("Prettier's config", () => {

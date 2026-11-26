@@ -267,6 +267,11 @@ doesn't grow with each tuning. Every game API answer carries the rules version, 
 a different version reloads instead of predicting under the wrong rules (MUST-12). The version
 upgrade runs only on the server: the client receives farms after it.
 
+The client learns the current version from the package entry, which exports `currentRulesVersion`
+beside `sliceContent` (#667), not from the registry. The registry's tests hold its highest version
+equal to `currentRulesVersion`, with `sliceContent` as that version's content, so the two can't
+drift.
+
 **Pattern:** version negotiation by tag: the answer names its rules version, and a mismatch means
 reload.
 

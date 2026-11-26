@@ -585,6 +585,25 @@ const commentedOut = (f) => {
 		})
 		.map(([first, last]) => (added.has(first) ? first : last));
 };
+// #667: a line that holds one of Fallow's `ignore*` lists and nothing else, `"ignoreX": ["a", "b"],`.
+const IGNORE_LIST = /^\s*"(ignore\w*)"\s*:\s*\[((?:\s*"[^"\\]*"\s*,?)*)\s*\]\s*,?\s*$/;
+const readIgnoreList = (text) => {
+	const m = IGNORE_LIST.exec(text);
+	return m ? { key: m[1], entries: [...m[2].matchAll(/"([^"\\]*)"/g)].map((e) => e[1]) } : null;
+};
+// An added Fallow line that only drops entries from an `ignore*` list a removed line held: Fallow
+// then checks more, so the line tightens the config rather than loosening it (#667). Any other
+// change on the line (an entry added or swapped, another key, a comment) still counts.
+const narrowedIgnores = (removed) => {
+	const before = removed.map((r) => readIgnoreList(r.text)).filter(Boolean);
+	return (text) => {
+		const now = readIgnoreList(text);
+		if (now === null) return false;
+		return before.some(
+			(was) => was.key === now.key && now.entries.every((e) => was.entries.includes(e)),
+		);
+	};
+};
 const configLoosening = (f, mergeBase) => {
 	const name = basename(f.path);
 	const hits = [];
@@ -619,8 +638,12 @@ const configLoosening = (f, mergeBase) => {
 			name,
 		)
 	) {
+		const narrowed = /fallow/.test(name) ? narrowedIgnores(f.removed) : () => false;
 		for (const a of f.added)
-			if (/allowlist|ignore|exclude|disable|skip|\boff\b|["']warn["']/i.test(a.text))
+			if (
+				/allowlist|ignore|exclude|disable|skip|\boff\b|["']warn["']/i.test(a.text) &&
+				!narrowed(a.text)
+			)
 				hits.push(a.line);
 	} else if (/^vitest\.config\./.test(name)) {
 		if (f.status !== "added") {
