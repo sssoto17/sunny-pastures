@@ -725,7 +725,15 @@ same as a plain comment in the timeline (admin, 22 Nov, while merging #487), and
    that has ever carried it, and fails; even without that run, the new head has no record, so it
    can't pass. A held PR is a code-owned one (the guard adds the label from the diff, as today) or
    one the bot escalated (the bot adds it); from then on the guard reads the label, not the reason.
-   #494's Comment-review rule goes, and
+   **Read back (#638, 26 Nov 2026; admin to approve in #638's PR):** the check-runs list can lag the
+   write by seconds (PR #586's first sign-off was re-armed with its record already written), so the
+   run that wrote a record re-reads the records with exponential backoff (1, 2, 4, 8, 16 s: six
+   reads, 31 s) until one counts, asking for GitHub's OIDC keys again on each re-read. It still
+   counts only a record the list shows and the token proves, never the write's own answer. A failed
+   token request or record write stops the run with a failing verdict that names it, and a record
+   that never shows or never verifies re-arms with a message that says which. Rejected: counting the
+   write's answer (a second path to a pass, not read from the live state), and one longer fixed wait
+   (slower on every sign-off, and still a guess). #494's Comment-review rule goes, and
    [#104](https://github.com/sssoto17/sunny-pastures/issues/104), "Retire review:admin", is
    superseded: the label is the gate, and the escalation thread is the bot's explanation. Rejected:
    a Comment review (ambiguous in the timeline), resolving the thread (fires no workflow), and both

@@ -97,11 +97,15 @@ const github = ({
 	records = [],
 	lag = 0,
 	labelLag = 0,
+	recordLag = 0,
+	keyLag = 0,
 }) => {
 	const log = [];
-	const state = { labels: [...labels], records: [...records], slept: 0 };
+	const state = { labels: [...labels], records: [...records], slept: 0, keyReads: [], waits: [] };
 	let reads = 0;
 	let pulls = 0;
+	let recordReads = 0;
+	let keyReads = 0;
 	const deps = {
 		rules: RULES,
 		// The first `labelLag` reads still list review:admin, as REST can just after a removal.
@@ -115,8 +119,17 @@ const github = ({
 		listFiles: async () => files.map((f) => (typeof f === "string" ? { filename: f } : f)),
 		// The first `lag` reads miss the last event, as a lagging REST list would.
 		listEvents: async () => (reads++ < lag ? events.slice(0, -1) : events),
-		listRecords: async (sha) => state.records.filter((r) => r.head_sha === sha),
-		getKeys: async () => KEYS,
+		// The first `recordLag` reads miss the record this run wrote (id 900), as the check-runs
+		// list can just after the write (#638, run 45268665252).
+		listRecords: async (sha) => {
+			const lagging = recordReads++ < recordLag;
+			return state.records.filter((r) => r.head_sha === sha && !(lagging && r.id === 900));
+		},
+		// The first `keyLag` reads answer stale keys, without the one the record's token names.
+		getKeys: async (fresh) => {
+			state.keyReads.push(fresh === true);
+			return keyReads++ < keyLag ? [] : KEYS;
+		},
 		escalate: async () => {
 			state.labels.push("review:admin");
 			log.push("escalate");
@@ -127,11 +140,14 @@ const github = ({
 		},
 		// What main's run writes: its summary, and a token GitHub signed for main's workflow.
 		writeRecord: async (sha, output, audience) => {
-			state.records.push(record(900, { sha, token: jwt(mainClaims(sha, { aud: audience })) }));
+			const written = record(900, { sha, token: jwt(mainClaims(sha, { aud: audience })) });
+			state.records.push(written);
 			log.push(`record on ${sha.slice(0, 7)}: ${output.summary}`);
+			return written;
 		},
-		sleep: async () => {
+		sleep: async (ms) => {
 			state.slept += 1;
+			state.waits.push(ms);
 		},
 	};
 	return { log, state, deps };
@@ -335,7 +351,9 @@ describe("checkCodeOwned", () => {
 		const gh = github({ events: [added(), removed(ADMIN)] });
 		const r = await refused(gh, unlabeled(ADMIN, OLD));
 		expect(gh.state.labels).toEqual(["review:admin"]);
-		expect(r.message).toContain("older head");
+		expect(r.message).toContain(
+			"the removal was made on an older head, aaaaaaa, and the PR's head is now bbbbbbb",
+		);
 	});
 
 	it.each([
@@ -412,6 +430,66 @@ describe("checkCodeOwned", () => {
 		const gh = github({ events: [added(), removed(ADMIN)] });
 		const ev = event({ action: "unlabeled", label: { name: "area:ci-cd" }, sender: ADMIN });
 		expect((await refused(gh, ev)).message).toContain("held");
+	});
+
+	// #638, run 45268665252 on PR #586: the run wrote its record (138022483037), but the check-runs
+	// list it read straight after didn't show it yet, so it re-armed a valid sign-off.
+	it("re-reads the records until the one this run wrote is listed, then passes", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)], recordLag: 2 });
+		const r = await check(gh, unlabeled());
+		expect(r.ok).toBe(true);
+		expect(r.message).toContain("signed off: code-owned / sign-off 900");
+		expect(gh.state.labels).toEqual([]);
+		expect(gh.state.waits).toEqual([1000, 2000]);
+	});
+
+	it("says the record it wrote isn't listed when it never shows, and puts the label back", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)], recordLag: 99 });
+		const r = await rearmed(gh, unlabeled());
+		expect(r.message).toContain(
+			"this run wrote code-owned / sign-off 900 on bbbbbbb, but GitHub's check-runs list didn't show it in 6 reads",
+		);
+		expect(r.message).not.toContain("pushed after the sign-off");
+		expect(gh.state.waits).toEqual([1000, 2000, 4000, 8000, 16000]);
+	});
+
+	// The log can't rule out stale keys: the record was listed but its token's key wasn't yet.
+	it("asks for GitHub's keys again while the record it wrote doesn't verify", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)], keyLag: 1 });
+		expect((await check(gh, unlabeled())).ok).toBe(true);
+		expect(gh.state.keyReads).toEqual([false, true]);
+	});
+
+	it("says the record it wrote didn't verify when the keys never name its key", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)], keyLag: 99 });
+		const r = await rearmed(gh, unlabeled());
+		expect(r.message).toContain(
+			"this run wrote code-owned / sign-off 900 on bbbbbbb, but its token didn't verify against GitHub's OIDC keys in 6 reads",
+		);
+	});
+
+	// Only the run that wrote a record waits for it: any other run reads the records once.
+	it("reads the records once on a run that wrote none", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)] });
+		await rearmed(gh, event());
+		expect(gh.state.waits).toEqual([]);
+	});
+
+	it("can't run, and says so, when the record write fails", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)] });
+		gh.deps.writeRecord = async () => {
+			throw new Error("the OIDC token request answered 500");
+		};
+		await expect(check(gh, unlabeled())).rejects.toThrow(
+			"couldn't write the code-owned / sign-off record on bbbbbbb: the OIDC token request answered 500",
+		);
+		expect(gh.state.labels).toEqual([]);
+	});
+
+	it("can't run when GitHub's answer to the record write has no id", async () => {
+		const gh = github({ events: [added(), removed(ADMIN)] });
+		gh.deps.writeRecord = async () => ({});
+		await expect(check(gh, unlabeled())).rejects.toThrow("GitHub's answer has no id");
 	});
 
 	it("re-reads the events while REST hasn't listed the removal yet", async () => {
@@ -563,7 +641,7 @@ describe("code-owned-guard.mjs", () => {
 		return { seen, url: `http://127.0.0.1:${server.address().port}` };
 	};
 	const P = "/repos/sssoto17/sunny-pastures";
-	const routes = (files, { labels = [], events = [] } = {}) => ({
+	const routes = (files, { labels = [], events = [], records = [] } = {}) => ({
 		[`GET ${P}/pulls/337`]: {
 			head: { sha: HEAD },
 			changed_files: files.length,
@@ -571,7 +649,7 @@ describe("code-owned-guard.mjs", () => {
 		},
 		[`GET ${P}/pulls/337/files`]: files.map((filename) => ({ filename })),
 		[`GET ${P}/issues/337/events`]: events,
-		[`GET ${P}/commits/${HEAD}/check-runs`]: { total_count: 0, check_runs: [] },
+		[`GET ${P}/commits/${HEAD}/check-runs`]: { total_count: records.length, check_runs: records },
 		[`POST ${P}/issues/337/labels`]: [],
 		[`POST ${P}/issues/337/comments`]: {},
 		[`POST ${P}/check-runs`]: { id: 1 },
@@ -634,9 +712,12 @@ describe("code-owned-guard.mjs", () => {
 		});
 	});
 
+	// The list answers the record the write made, as GitHub lists it once it has caught up.
 	it("writes the sign-off record on the admin's removal of the label on the head", async () => {
-		const api = await serve(routes(["CONSTRAINTS.md"], { events: [added(), removed(ADMIN)] }));
-		await run(unlabeled(), api.url);
+		const api = await serve(
+			routes(["CONSTRAINTS.md"], { events: [added(), removed(ADMIN)], records: [record(1)] }),
+		);
+		const r = await run(unlabeled(), api.url);
 		const posts = api.seen.filter((s) => s.startsWith(`POST ${P}/check-runs `));
 		expect(posts[0]).toContain('"name":"code-owned / sign-off"');
 		expect(posts[0]).toContain('"conclusion":"success"');
@@ -644,6 +725,34 @@ describe("code-owned-guard.mjs", () => {
 		expect(api.seen).toContain(
 			`GET /token?x=1&audience=${encodeURIComponent(audienceOf(REPO, PR, HEAD))}`,
 		);
+		expect(r.out).toContain("code-owned: pass (signed off: code-owned / sign-off 1");
+	});
+
+	// #638: a failed token request fails the run loudly and names the record it couldn't write,
+	// never the generic "no record" text, and puts nothing back.
+	it.each([
+		[
+			"the token request fails",
+			{ [`GET /token`]: undefined },
+			"the OIDC token request answered 404",
+		],
+		["the token answer has no token", { [`GET /token`]: {} }, "answered without a token"],
+		["the record write fails", { [`POST ${P}/check-runs`]: undefined }, "check-runs answered 404"],
+	])("exits 2 and says why when %s", async (_, broken, why) => {
+		const api = await serve({
+			...routes(["CONSTRAINTS.md"], { events: [added(), removed(ADMIN)] }),
+			...broken,
+		});
+		const r = await run(unlabeled(), api.url);
+		expect(r.status).toBe(2);
+		expect(r.out).toContain(
+			"cannot run: couldn't write the code-owned / sign-off record on bbbbbbb",
+		);
+		expect(r.out).toContain(why);
+		const status = api.seen.find((x) => x.startsWith(`POST ${P}/statuses/${HEAD}`));
+		expect(status).toContain('"state":"failure"');
+		expect(status).toContain("couldn't write the code-owned / sign-off record");
+		expect(api.seen).not.toContain(`POST ${P}/issues/337/labels {"labels":["review:admin"]}`);
 	});
 
 	it("exits 2, never a pass, and writes a failing check run when GitHub can't be read", async () => {
