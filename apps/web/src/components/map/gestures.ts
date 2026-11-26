@@ -10,6 +10,9 @@ type SetView = (update: (view: View) => View) => void;
 /** How much a wheel notch zooms: the scale multiplies by `exp(-deltaY * wheelSensitivity)`. */
 const wheelSensitivity = 0.0015;
 
+/** Firefox reports wheel notches in lines; this converts them to px. */
+const lineHeight = 16;
+
 export interface Gestures {
 	onPointerDown(event: PointerEvent<HTMLElement>): void;
 	onPointerMove(event: PointerEvent<HTMLElement>): void;
@@ -29,7 +32,9 @@ export function useGestures(container: RefObject<HTMLElement | null>, setView: S
 		const handleWheel = (event: WheelEvent) => {
 			event.preventDefault();
 			const around = relativeTo(element, event);
-			setView((view) => zoomAt(view, Math.exp(-event.deltaY * wheelSensitivity), around));
+			const pixels =
+				event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? lineHeight : 1);
+			setView((view) => zoomAt(view, Math.exp(-pixels * wheelSensitivity), around));
 		};
 		element.addEventListener("wheel", handleWheel, { passive: false });
 		return () => {

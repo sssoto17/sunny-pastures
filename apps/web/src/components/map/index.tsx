@@ -82,6 +82,8 @@ export function FarmMap({ farm }: FarmMapProps) {
 			ref={container}
 			role="group"
 			aria-label="Farm map"
+			// Focusable, so the keys work before the player has tabbed to a lot (ADR-0010, accessibility bar).
+			tabIndex={0}
 			style={containerStyle}
 			onKeyDown={handleKeyDown}
 			{...gestures}

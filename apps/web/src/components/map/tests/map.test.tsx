@@ -38,6 +38,8 @@ describe("FarmMap lots", () => {
 		expect(buttons).toHaveLength(lots.length);
 
 		await userEvent.tab();
+		expect(document.activeElement).toBe(screen.getByRole("group", { name: "Farm map" }));
+		await userEvent.tab();
 		expect(document.activeElement).toBe(buttons[0]);
 		for (const button of buttons) {
 			expect(button.querySelector("img")?.getAttribute("alt")).toMatch(/\S/);
