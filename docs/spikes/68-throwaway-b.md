@@ -1,4 +1,4 @@
 # Throwaway note for #68, test (b)
 
-This file exists only on a throwaway PR for #68 (ADR-0002, checklist step 12, test (b)).
-It is held by `review:admin` and closed unmerged, so this file never reaches `main`.
+Only on a throwaway PR for #68, step-12 test (b).
+Held by `review:admin`, closed unmerged: never on `main`.
