@@ -6,152 +6,139 @@ status: proposed
 
 The spec's `ui` checks need a real browser, and `CONSTRAINTS.md` hangs two blocking rows on them:
 BASE-02 (browsers and widths) and BASE-05 (a prediction shows within 100 ms of a tap, MUST-12.1).
-Both run as the required check `ci / ui` (ADR-0002). This ADR records which tool runs them, what it
-covers in CI and what is left to a person, how BASE-05 is timed without flaking, and how the tool is
-pinned. It closes `spec.md` Open question 1.
+Both run as the required check `ci / ui` (ADR-0002). This ADR records which tool runs them, what CI
+covers and what a person checks, how BASE-05 is timed without flaking, where axe runs, and how the
+tool is pinned. It closes `spec.md` Open question 1.
 
 ## How this was decided
 
-The question was
-[Design: browser-test tool for the ui checks (BASE-02, BASE-05)](https://github.com/sssoto17/sunny-pastures/issues/44),
-decided by the admin there. The research behind it is
+Grilled with the admin on 26 Nov 2026 in
+[Design: browser-test tool for the ui checks (BASE-02, BASE-05)](https://github.com/sssoto17/sunny-pastures/issues/44);
+its
+[resolution comment](https://github.com/sssoto17/sunny-pastures/issues/44#issuecomment-7204127741)
+is the source for every decision below, and sections 1–7 follow its decisions 1–7. The research
+behind it is
 [Research: browser-test tools for BASE-02 and BASE-05 in CI](https://github.com/sssoto17/sunny-pastures/issues/61)
-(findings in its comments and in `docs/spikes/research-browser-test-tools.md` on the unmerged branch
-`research/browser-test-tools`); facts cited from it below keep its marks (Documented, Inference).
-
-**Source caveat (26 Nov 2026).** When this ADR was written, #44's resolution comment with decisions
-1–7 could not be found: #44 held one comment (its proposed fields). Every decision below is taken
-from what the admin wrote in the tickets filed from that resolution:
-[Record the browser-test decision in ADR-0011](https://github.com/sssoto17/sunny-pastures/issues/672),
-[CI: ci / ui with Playwright in Chromium, Firefox and WebKit (BASE-02)](https://github.com/sssoto17/sunny-pastures/issues/673)
-and
-[Test: BASE-05 prediction shows within 100 ms of a tap](https://github.com/sssoto17/sunny-pastures/issues/674).
-The sections are grouped by topic and are not numbered to match decisions 1–7. Where those tickets
-don't say something, this ADR says so instead of filling the gap; the admin's review checks it
-against the resolution comment.
-
-## 1. Pattern: black-box tests against the built app, with a probe for timing
+(findings in its comments, and `docs/spikes/research-browser-test-tools.md` on the unmerged branch
+`research/browser-test-tools`). Facts cited from it keep its marks: Documented or Inference. Where
+the resolution comment is silent, this ADR says so rather than filling the gap.
 
 **Pattern:** **black-box browser tests against the built app**, with a **probe injected by the
-test** for timing (#672).
+test** for timing. The tests drive the page a player loads, through the browser only; the app
+carries no test code.
 
-- The tests drive the production build (`next build`, then `next start` as Playwright's `webServer`)
-  in a real browser, through the page only. Specs find elements by role and name (#673), as the
-  component tests already do (ADR-0010, section 3).
-- Timing needs a clock inside the page, so the test injects one (section 4). The app carries **no
-  instrumentation** for it (#674).
-- The specs live in `apps/web/e2e/`, next to `apps/web/playwright.config.ts` (#673).
+## 1. Safari (BASE-02): WebKit in CI, real Safari by hand
 
-## 2. Tool: Playwright, with its axe adapter
+**Decision.** WebKit, Playwright's build, stands in for Safari in CI. Real Safari is checked by
+hand, in `review` or `playtest`.
 
-**Decision.** `@playwright/test` **1.65.1** and `@axe-core/playwright` **4.14.0**, dev dependencies
-of `apps/web`, each pinned exactly (approved in #44, as #673 records). `pnpm install` needs no
-`allowBuilds` entry: none of Playwright's npm packages has an install script (Documented, #61).
+- **Why:** no CI setup can test "latest 2 Safari". `safaridriver` on a macOS runner tests only the
+  runner image's one Safari version, and it brings WebdriverIO's `postinstall` scripts and an axe
+  peer-range gap (decision 1). Playwright "doesn't work with the branded version of Safari"
+  (Documented, #61).
+- **Rejected:** real Safari in CI through WebdriverIO on a macOS runner, for the reasons above.
 
-- **Why:** of the tools #61 compared, only Playwright covers Chromium, Firefox and WebKit on a Linux
-  runner with real touch at 360 px (`hasTouch`, `isMobile`), holds a server answer until the test
-  lets it go (`page.route`: matching requests "stall unless continued, fulfilled or aborted"), has
-  an axe adapter whose peer range takes any Playwright version, and has no npm install scripts
-  (Documented, #61's summary and resolution).
-- **axe:** `@axe-core/playwright` runs axe inside the same tool. The axe gate itself is
-  `preview / axe` ([Preview gates](https://github.com/sssoto17/sunny-pastures/issues/43)), not this
-  ADR; #673 leaves axe to it. The tickets don't say whether `preview / axe` runs through this
-  adapter or another runner.
+## 2. Tool: Playwright's own runner, against the built app
 
-**Rejected** (the facts are #61's; where the tickets record no reason of the admin's, that is said):
+**Decision.** `@playwright/test` as its own runner, against the built app: `next build`, then
+`next start` on the local Supabase stack. Specs go in `apps/web/e2e/`. The jsdom Vitest `ui` project
+from ADR-0010 stays, for component tests.
 
-- **WebdriverIO:** the only tool that drives real Safari, but only on a macOS runner, at $0.062 a
-  minute against $0.006 for Linux in a private repo, about 10 times the cost (Documented, #61). Its
-  axe adapter's peer range stops at v9, while v10 is current; its transitive `geckodriver` and
-  `edgedriver` have `postinstall` scripts, which need an `allowBuilds` decision; and its `mock()`
-  documents no way to hold an answer (Documented, #61).
-- **Cypress:** WebKit is experimental (it needs `playwright-webkit`, which has an install script);
-  there is "no native or mobile events support", so no real touch at 360 px; `.trigger()` events are
-  untrusted; `cypress` itself has a `postinstall` script; and `cypress-axe` is a community adapter
-  whose peer range stops at v15, while v16 is current (Documented, #61).
-- **The Chrome DevTools MCP:** #44 listed it for manual checks only. It isn't a CI test runner, so
-  it can't be the required check `ci / ui`. The tickets record no further decision on it.
-- **Vitest Browser Mode** (components in a browser inside `ci / test`, the alternative ADR-0010 left
-  to #44 when it chose `jsdom` for the `ui` Vitest project): the tickets choose tests against the
-  built app instead (section 1) and record no reason for rejecting it. #61 didn't research it.
+**Rejected** (decision 2):
 
-## 3. BASE-02: the engines Playwright ships, plus checks by hand
+- **Vitest Browser Mode:** it renders components rather than the page a player loads, and holding
+  server answers would need MSW.
+- **WebdriverIO:** see section 1.
+- **Cypress:** its WebKit support is experimental, it has no touch events, and it has a
+  `postinstall` script.
+- **The Chrome DevTools MCP:** for manual checks only. The resolution says no more about it.
 
-**Decision.** `ci / ui` runs every spec in six Playwright projects: Chromium, Firefox and WebKit
-**as shipped by the pinned `@playwright/test`**, each at desktop width and at 360 px with touch
-(`hasTouch` and `isMobile`) (#672, #673). Playwright is bumped **at least monthly**, so the engines
-stay current. **Real Safari, branded Chrome and older versions are checked by hand** (#672).
+## 3. BASE-05: a probe injected by the test
 
-- **Why not "latest 2" in CI:** each Playwright version ships one Chromium (one ahead of Chrome
-  stable), one patched Firefox and one WebKit built from WebKit's main branch, and it "doesn't work
-  with the branded version of Safari" (Documented, #61). Neither "latest minus one" nor real Safari
-  is reachable on a Linux runner (Inference, #61).
-- **The CI job** (#673): on CI `forbidOnly`, no retries, trace `retain-on-failure` and 2 workers;
-  the app's path filters plus the Playwright config; the local stack through the `supabase-stack`
-  action; `playwright install --with-deps chromium firefox webkit` with `~/.cache/ms-playwright`
-  cached by the Playwright version; traces and screenshots kept 7 days on failure.
-- **Not said in the tickets:** what does the monthly bump (Dependabot, which already groups dev
-  dependencies, or a person), and when the checks by hand run (each milestone gate, a release, or
-  another stage). `CONSTRAINTS.md` records the rule; the trigger is left to the admin.
+**Decision.** The test injects a probe with `page.addInitScript`; the app has no instrumentation.
 
-## 4. BASE-05: timing a tap to the painted prediction
-
-**Decision** (#674). A timing spec runs only in the three 360 px projects, serially (`workers: 1` or
-a serial `describe` in a dedicated project):
-
-1. The test injects the probe with `page.addInitScript`; the app's code is unchanged.
-2. The probe reads the trusted tap's `event.timeStamp` as the start.
-3. A `MutationObserver` sees the prediction appear in the DOM.
-4. The probe then waits for the next `requestAnimationFrame`, then a `setTimeout(0)`, and records
-   the time elapsed since the tap.
-5. `page.route` holds the game API's action answer until the time is read, and the spec asserts that
-   the prediction showed while the answer was still held, so the time measured is the prediction's
-   and never the server's.
+1. The probe reads the trusted tap's `event.timeStamp` as the start.
+2. A `MutationObserver` sees the prediction appear.
+3. The probe then waits for the next `requestAnimationFrame` + `setTimeout(0)` and records the time
+   elapsed since the tap.
+4. `page.route` holds the game API's answer until the time is read, so the time measured is the
+   prediction's, never the server's.
 
 **Inference: the after-paint step.** A `requestAnimationFrame` callback runs before the frame that
-paints the prediction is produced, not after its pixels are on screen (Documented, MDN, #61). A
-follow-up task queued from that callback, here `setTimeout(0)`, is a common approximation of "after
-that frame's paint", but #61 found **no primary source** that defines it. The step can still land
-before the pixels are on screen, or a frame later; headless browsers may not paint on a display's
-vsync either (Inference, #61). The number it gives is a close bound, not a measured paint.
+paints the prediction is produced, not after its pixels are on screen (Documented, MDN, #61). A task
+queued from it, here `setTimeout(0)`, is a common approximation of "after that frame's paint", but
+#61 found **no primary source** that defines the pattern. The step may land before the pixels are on
+screen, or a frame late; and headless browsers may not paint on a display's vsync (Inference, #61).
+The number is a close bound, not a measured paint.
 
-**Sampling** follows `CONSTRAINTS.md`, "Timing checks", Prediction (BASE-05): 3 taps discarded, then
-10 measured taps per 360 px project, and their median is compared with 100 ms. If the median is
-over, the spec re-measures once with 10 new taps and fails only if both medians are over. Each run's
-samples and median go in the test output. The spec counts as part of `ci / ui` only after it runs
-green on `main` three times in a row (#674).
+**Sampling** is a new `CONSTRAINTS.md` "Timing checks" row, **Prediction (BASE-05)**: 3 taps
+discarded, then 10 measured taps per 360 px project, with the **median** compared with 100 ms. The
+existing one-automatic-retry rule applies: an over-budget median is re-measured once with 10 new
+taps, and the check fails only if both are over.
 
-**Rejected** (facts from #61):
+**Rejected** (decision 3):
 
-- **The Event Timing API:** its `duration` is rounded to 8 ms (8% of the budget), entries start at
-  16 ms at the lowest threshold, untrusted events produce none, and it ends at the next paint after
-  the handlers, which may not be the one that shows the prediction (Documented and Inference, #61).
-- **Timing from the test runner** (a timestamp before the tap and after an assertion sees the
-  prediction): it adds protocol round trips and the assertion's polling interval to the number
-  (Inference, #61).
-- **Marks in the app's code** (`performance.mark` in the tap handler): #674 rules out
-  instrumentation in the app; the tickets give no reason beyond that.
-- **Playwright's fake clock (`page.clock`):** it replaces `performance`, `requestAnimationFrame`,
-  `Event.timeStamp` and the timers, the very clock being measured (Documented and Inference, #61).
-- **Real-Safari timing in CI:** checked by hand (#674, "Out of scope"), as BASE-02's real Safari is.
+- **An app-side `performance.mark`:** test code in the app.
+- **A clock read on the test side:** protocol overhead between the runner and the browser.
 
-## 5. The pin, and the gap it covers
+The resolution doesn't mention the Event Timing API. #61 found that its duration is rounded to 8 ms
+and that untrusted events produce no entry (Documented); it isn't used here.
 
-`minimumReleaseAge` in `pnpm-workspace.yaml` (7 days) covers npm packages only. Playwright's
-browsers (about 180–280 MB each, Documented, #61) are downloaded by `playwright install` from
-Microsoft's CDN, **outside `minimumReleaseAge`**. That gap is covered by the **exact
-`@playwright/test` pin**: each Playwright version downloads the specific browser builds it was
-released with ("Each version of Playwright needs specific versions of browser binaries to operate",
-Documented, #61), so the browsers change only when a reviewed PR moves the pin, and that pin passes
-the 7-day rule like any npm package. `CONSTRAINTS.md`, "Tools are dependencies", already names any
-browser-test tool as a dependency that needs the admin's approval and an exact pin.
+## 4. Versions: BASE-02's wording
+
+**Decision.** "Latest 2 Chrome, Firefox and Safari" becomes: Chromium, Firefox and WebKit as shipped
+by the pinned `@playwright/test`, at desktop width and 360 px with touch, with Playwright bumped at
+least monthly. Each bump still waits for `minimumReleaseAge` and the admin's approval. Branded
+Chrome, older versions and real Safari get the manual check (section 1).
+
+- **Why:** each Playwright version ships one Chromium (one ahead of Chrome stable), one patched
+  Firefox and one WebKit (Documented, #61), so no CI run of a single pin reaches "latest minus one".
+- **Not said in the resolution:** who or what proposes the monthly bump (Dependabot already raises
+  weekly development-dependency updates, `.github/dependabot.yml`). `CONSTRAINTS.md` records the
+  rule.
+
+## 5. CI: one `ci / ui` job, six projects
+
+**Decision.** A single `ci / ui` job in the CI workflow, with the app tests' path filters, the
+`supabase-stack` action, and `next build` + `next start`.
+
+- **Six projects:** {chromium, firefox, webkit} × {desktop, 360 px + touch}.
+- **The timing spec** runs only in the 360 px projects, serially (`workers: 1`).
+- **Browsers:** `playwright install --with-deps`, with `~/.cache/ms-playwright` cached by the
+  Playwright version.
+- **On failure:** traces and screenshots are uploaded and kept 7 days.
+- **Required:** `ci / ui` is a required check on `main` from the PR that adds it.
+- **Rejected:** a matrix job per browser (3× the Supabase setup minutes).
+
+**The browser downloads sit outside `minimumReleaseAge`.** `minimumReleaseAge` in
+`pnpm-workspace.yaml` covers npm packages only. Playwright's browsers (about 180–280 MB each,
+Documented, #61) come from `playwright install`, not from the npm registry, so the 7-day rule never
+sees them. The gap is covered by the **exact `@playwright/test` pin** (section 7): each Playwright
+version downloads the browser builds it was released with ("Each version of Playwright needs
+specific versions of browser binaries to operate", Documented, #61), so the browsers change only
+when a reviewed PR moves the pin, and the pin itself passes `minimumReleaseAge`.
+
+## 6. axe: one home, in `preview / axe`
+
+**Decision.** `preview / axe`
+([Preview gates](https://github.com/sssoto17/sunny-pastures/issues/43)) uses `@axe-core/playwright`
+on the same Playwright pin, and `ci / ui` runs no axe, so BASE-03 has one home.
+
+## 7. Pins
+
+**Decision.** `@playwright/test` **1.65.1** and `@axe-core/playwright` **4.14.0** (peer
+`playwright-core >= 1.0.0`), the newest releases at least 7 days old on 26 Nov, with no install
+scripts. Approved by the admin in the grill. The resolution doesn't name the package they go in; the
+build ticket #673 puts both in `apps/web` as dev dependencies.
 
 ## Consequences
 
-- `CONSTRAINTS.md`: the BASE-02 row reads as section 3, and the BASE-02 and BASE-05 rows name this
-  ADR and their build tickets (#673, #674) instead of #44. "Timing checks" gains the row Prediction
-  (BASE-05), and its over-budget bullet names "10 new taps".
+- `CONSTRAINTS.md`: the BASE-02 row takes section 4's wording, and the BASE-02 and BASE-05 rows name
+  this ADR and their build tickets instead of #44. "Timing checks" gains Prediction (BASE-05), and
+  its over-budget bullet names "10 new taps".
 - `spec.md`: Open question 1 is closed with a link here, and the `ui` row names Playwright.
 - ADR-0002's `ci / ui` row and ADR-0010's `jsdom` row point here instead of #44.
-- The builds are #673 (`ci / ui`, the six projects and the smoke spec) and #674 (the BASE-05 timing
-  spec). The admin adds `ci / ui` to the `main` ruleset when #673 lands.
+- The builds are
+  [CI: ci / ui with Playwright in Chromium, Firefox and WebKit (BASE-02)](https://github.com/sssoto17/sunny-pastures/issues/673)
+  and
+  [Test: BASE-05 prediction shows within 100 ms of a tap](https://github.com/sssoto17/sunny-pastures/issues/674).

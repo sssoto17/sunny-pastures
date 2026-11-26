@@ -458,8 +458,8 @@ The grill checked three more and kept them independent of the log:
 
 ## Open questions
 
-1. ~~**The browser-test tool**~~ Settled in #44: Playwright, `@playwright/test` pinned exactly, in
-   Chromium, Firefox and WebKit ([ADR-0011](../adr/0011-browser-tests.md)).
+1. ~~**The browser-test tool**~~ Settled 26 Nov (#44): Playwright, `@playwright/test` pinned
+   exactly, in Chromium, Firefox and WebKit ([ADR-0011](../adr/0011-browser-tests.md)).
 2. **The rate limit for T7** (actions per farm per second), and whether it lives in config or in
    content.
 3. **The OWASP 2025 mapping** in MUST-16: check it against the published list before the report
