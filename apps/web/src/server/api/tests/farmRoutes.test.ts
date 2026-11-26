@@ -1,16 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { sliceContent, stateHash, type Action } from "@sunny-pastures/sim";
+import { registry, type Registry } from "@sunny-pastures/sim/versions";
 
 import type { PlayerId, PlayerResult } from "@/server/auth";
-import { createRules } from "@/server/rules";
+import { createRules, type Rules } from "@/server/rules";
 import type { GameStore } from "@/server/store";
 
-import { createMemoryStore } from "../../store/tests/memoryStore";
+import { createMemoryFarms, createMemoryStore } from "../../store/tests/memoryStore";
 import { createFarmRoutes, type Connection, type FarmRouteDeps } from "../farmRoutes";
 import { expectContract500 } from "./helpers";
 
-const rules = createRules(sliceContent);
+const rules = createRules(registry);
 const plantWheat: Action = { type: "plant", plot: 0, crop: "wheat" };
 // The farm the routes' clock starts at: 1 s after the epoch, as in game/'s tests.
 const serverTime = 1_000;
@@ -68,6 +69,44 @@ describe("GET /api/farm (getFarm)", () => {
 		});
 		expectContractHeaders(response, ["load", "total"]);
 		expect(logged).toEqual([error]);
+	});
+
+	it("answers 503 busy for a farm a newer deploy moved to a rules version this one doesn't know (ADR-0006, section 8)", async () => {
+		const farms = createMemoryFarms();
+		const playerId = crypto.randomUUID() as PlayerId;
+		// A deploy one version ahead commits first, as in the overlap of a deploy.
+		const newer = createRules(nextVersion);
+		const newerStore = createMemoryStore({ ...pickStoreRules(newer), farms });
+		const { state } = await newerStore.load(playerId);
+		const planted = newer.sim.apply(state, plantWheat, serverTime);
+		if (!planted.ok) throw new Error(planted.reason);
+		await newerStore.commit(playerId, {
+			expectedSeq: 0,
+			action: plantWheat,
+			at: serverTime,
+			idempotencyKey: crypto.randomUUID(),
+			next: planted.state,
+			answer: { seq: 1, hash: stateHash(planted.state), rebased: false, retries: 0 },
+		});
+		const store = createMemoryStore({ ...pickStoreRules(rules), farms });
+		const { routes, logged } = setUp({
+			player: { ok: true, playerId },
+			connect: () => ({ readPlayer: () => Promise.resolve({ ok: true, playerId }), store }),
+		});
+
+		const [farm, action] = [
+			await routes.getFarm(buildGetRequest()),
+			await routes.postAction(buildPostRequest({ action: plantWheat, expectedSeq: 0 })),
+		];
+
+		expect([farm.status, action.status]).toEqual([503, 503]);
+		expect(await farm.json()).toMatchObject({ error: "busy" });
+		expect(farm.headers.get("Rules-Version")).toBe("1");
+		// Logged once per request: the load's store error, naming the version it doesn't know.
+		expect(logged.map(String)).toEqual([
+			expect.stringContaining("rules version 2 is unknown here"),
+			expect.stringContaining("rules version 2 is unknown here"),
+		]);
 	});
 
 	it("answers 500 with a fixed message, and logs the error, when something throws", async () => {
@@ -318,6 +357,17 @@ function setUp(options: SetUpOptions = {}): {
 
 function buildGetRequest(query = ""): Request {
 	return new Request(`http://app.test/api/farm${query}`, { headers: buildTokenHeaders() });
+}
+
+/** The game's registry with a next version, as the deploy after this one would hold it. */
+const nextVersion: Registry = {
+	first: registry.first,
+	later: [{ content: sliceContent, contentHash: null, upgrade: (farm) => farm, changes: [] }],
+};
+
+/** What a store takes from the rules, as the composition root hands it (`connectFromEnv`). */
+function pickStoreRules({ newFarm, replay, rulesVersion }: Rules) {
+	return { newFarm, replay, rulesVersion };
 }
 
 interface PostOptions {

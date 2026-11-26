@@ -2,13 +2,21 @@ import type { Action, FarmState } from "@sunny-pastures/sim";
 
 import type { Answer } from "@/contract";
 
+import { checkForward } from "../index";
 import type { CommitResult, FarmRecord, GameStore, StoreDeps } from "../index";
 
 /**
- * What the in-memory store is built from: the rules' `newFarm` and `replay`, as B100 takes them,
- * and an optional script of injected conflicts. It stores no rules version, so it isn't handed one.
+ * What the in-memory store is built from: the rules' `newFarm`, `replay` and `rulesVersion`, as
+ * B100 takes them, the farms it keeps, and an optional script of injected conflicts.
  */
 export interface MemoryStoreDeps extends Omit<StoreDeps, "db" | "rulesVersion"> {
+	/** Stamped on every row and snapshot it writes; 1, the game's one version, by default. */
+	readonly rulesVersion?: number;
+	/**
+	 * The farms it reads and writes; a new set by default. Hand two stores the same `MemoryFarms`
+	 * to share them, as two deploys at different rules versions share B100's tables (ADR-0006).
+	 */
+	readonly farms?: MemoryFarms;
 	/**
 	 * Entry i scripts the i-th commit that would write, counted across the store's farms: `true`
 	 * makes it a `conflict` that writes nothing, as if another commit had just taken the seq
@@ -27,37 +35,52 @@ export interface MemoryStoreDeps extends Omit<StoreDeps, "db" | "rulesVersion"> 
  * own object doesn't reach the store. Past its first `await`, each method runs to the end without
  * yielding, so of two concurrent commits one sees the other's row, as with B100's transactions.
  */
-export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemoryStoreDeps): GameStore {
-	const farms = new Map<string, MemoryFarm>();
+export function createMemoryStore({
+	newFarm,
+	replay,
+	rulesVersion = 1,
+	farms = createMemoryFarms(),
+	conflicts = [],
+}: MemoryStoreDeps): GameStore {
 	let scripted = 0;
 
 	function findOrAddFarm(playerId: string): MemoryFarm {
 		const found = farms.get(playerId);
 		if (found !== undefined) return found;
 
-		const farm: MemoryFarm = { rows: [], snapshots: new Map() };
+		const farm: MemoryFarm = { rows: [], snapshots: [] };
 		farms.set(playerId, farm);
 		return farm;
+	}
+
+	/** B100's `load`: the newest snapshot, the higher version at one seq, then the rows after it. */
+	function readFarm(playerId: string): FarmRecord {
+		const { rows, snapshots } = findOrAddFarm(playerId);
+		const snapshot = findNewest(snapshots);
+		if (snapshot === null && rows.length === 0) return { state: newFarm(playerId), seq: 0, at: 0 };
+
+		const from = snapshot ?? { seq: 0, at: 0 };
+		const after = rows.slice(from.seq).map((row) => ({
+			seq: row.seq,
+			at: row.at,
+			action: copy(row.action),
+			rulesVersion: row.rulesVersion,
+		}));
+		const versioned =
+			snapshot === null
+				? null
+				: { seq: snapshot.seq, state: copy(snapshot.state), rulesVersion: snapshot.rulesVersion };
+		const state = replay(playerId, versioned, after);
+		// Unadvanced: at the last row, or at the snapshot when no row follows it.
+		const { seq, at } = after.at(-1) ?? from;
+		return { state, seq, at };
 	}
 
 	return {
 		async load(playerId) {
 			await Promise.resolve();
 			checkUuid(playerId, "playerId");
-			const { rows, snapshots } = findOrAddFarm(playerId);
-			const snapshotSeq = Math.floor(rows.length / snapshotEvery) * snapshotEvery;
-			const snapshot = snapshots.get(snapshotSeq);
-			const from: FarmRecord =
-				snapshot === undefined
-					? { state: newFarm(playerId), seq: 0, at: 0 }
-					: { state: copy(snapshot.state), seq: snapshotSeq, at: snapshot.at };
-
-			const after = rows.slice(from.seq);
-			const last = after.at(-1);
-			if (last === undefined) return from;
-
-			const logged = after.map(({ seq, at, action }) => ({ seq, at, action: copy(action) }));
-			return { state: replay(from.state, logged, last.at), seq: last.seq, at: last.at };
+			return readFarm(playerId);
 		},
 
 		async processed(playerId, idempotencyKey) {
@@ -80,6 +103,11 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 			checkUuid(playerId, "playerId");
 			checkUuid(entry.idempotencyKey, "idempotencyKey");
 			const farm = findOrAddFarm(playerId);
+			// B100 checks the version first, in its transaction (ADR-0006, section 8).
+			checkForward(
+				expectedSeq === 0 ? null : (farm.rows[expectedSeq - 1]?.rulesVersion ?? null),
+				rulesVersion,
+			);
 			const answer = findAnswer(farm, entry.idempotencyKey);
 			if (answer !== null) return { kind: "duplicate", answer };
 
@@ -89,6 +117,14 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 			scripted++;
 			if (isScriptedConflict) return { kind: "conflict" };
 
+			const latest = farm.rows.at(-1);
+			// The farm's first action under this version writes its base snapshot (ADR-0006, s. 3).
+			const base =
+				latest !== undefined && latest.rulesVersion < rulesVersion ? readFarm(playerId) : null;
+			if (base !== null) {
+				farm.snapshots.push({ seq: base.seq, at: base.at, state: copy(base.state), rulesVersion });
+			}
+
 			const seq = expectedSeq + 1;
 			farm.rows.push({
 				seq,
@@ -96,9 +132,10 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 				action: copy(entry.action),
 				idempotencyKey: entry.idempotencyKey,
 				answer: copy(entry.answer),
+				rulesVersion,
 			});
 			if (seq % snapshotEvery === 0) {
-				farm.snapshots.set(seq, { at: entry.at, state: copy(entry.next) });
+				farm.snapshots.push({ seq, at: entry.at, state: copy(entry.next), rulesVersion });
 			}
 
 			return { kind: "committed", seq };
@@ -106,10 +143,25 @@ export function createMemoryStore({ newFarm, replay, conflicts = [] }: MemorySto
 	};
 }
 
-/** One farm's rows: `rows[i]` is seq `i + 1`, and the snapshots are keyed by seq. */
+/** The farms an in-memory store keeps, by farm id. */
+export type MemoryFarms = Map<string, MemoryFarm>;
+
+/** An empty set of farms, for stores that share them. */
+export function createMemoryFarms(): MemoryFarms {
+	return new Map();
+}
+
+/** One farm's rows (`rows[i]` is seq `i + 1`) and snapshots, each under its rules version. */
 interface MemoryFarm {
 	readonly rows: MemoryRow[];
-	readonly snapshots: Map<number, { readonly at: number; readonly state: FarmState }>;
+	readonly snapshots: MemorySnapshot[];
+}
+
+interface MemorySnapshot {
+	readonly seq: number;
+	readonly at: number;
+	readonly state: FarmState;
+	readonly rulesVersion: number;
 }
 
 interface MemoryRow {
@@ -118,6 +170,20 @@ interface MemoryRow {
 	readonly action: Action;
 	readonly idempotencyKey: string;
 	readonly answer: Answer;
+	readonly rulesVersion: number;
+}
+
+/** The newest snapshot: the highest seq, and at one seq the higher version (ADR-0006, s. 5). */
+function findNewest(snapshots: readonly MemorySnapshot[]): MemorySnapshot | null {
+	return snapshots.reduce<MemorySnapshot | null>(
+		(newest, snapshot) =>
+			newest === null ||
+			snapshot.seq > newest.seq ||
+			(snapshot.seq === newest.seq && snapshot.rulesVersion > newest.rulesVersion)
+				? snapshot
+				: newest,
+		null,
+	);
 }
 
 /** B100's snapshot interval (ADR-0001), which the contract's seq-100 case pins. */
