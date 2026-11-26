@@ -1357,17 +1357,28 @@ dispatches (it would hold the Project token and `actions: write` together).
   call.
 - **The decision**, in order, the first that holds deciding: the kill switch (`FACTORY_ENABLED`,
   read before anything else, so nothing is read with it off); a factory run that is queued, waiting,
-  pending, requested or in progress (strictly serial); the **open-PR cap**: open PRs by
-  `sunny-factory[bot]`, drafts included, at or above the repo variable `FACTORY_MAX_OPEN_PRS`
-  (default 4 when unset; a value that isn't a whole number dispatches nothing). It is backpressure
-  on the review queue, and works the same before and after auto-merge: a PR that merges lowers the
-  count and the chain goes on (admin, 22 Nov 2026, replacing a per-day run cap). Then the eligible
-  issues (admin, 23 Nov 2026, #619: `factory:ready` is the only gate): open, at `factory:ready`
-  after the reconcile (below), opened by the owner or a collaborator, with no `blocked:*` label, no
-  open native blocker (`GET …/issues/{n}/dependencies/blocked_by`), no open PR from a `<n>-` branch
-  and no `<n>-` branch (the gate's rules, so the sweep doesn't dispatch what the gate would refuse).
-  Status, Mode and Track aren't read: Backlog, Ready, In progress or In review all qualify, so the
-  admin can label a whole chain at once and the factory walks it in blocker order.
+  pending, requested or in progress (strictly serial); the **open-PR cap**: open PRs the factory
+  made, drafts included, at or above the repo variable `FACTORY_MAX_OPEN_PRS` (default 4 when unset;
+  a value that isn't a whole number dispatches nothing). It is backpressure on the review queue, and
+  works the same before and after auto-merge: a PR that merges lowers the count and the chain goes
+  on (admin, 22 Nov 2026, replacing a per-day run cap). The factory made a PR when
+  `sunny-factory[bot]` opened it and its bot user authored at least one of its commits
+  (`factory_authored`, read by the gather), so a factory PR that a lane or the admin pushed a fix to
+  still counts. Lane PRs, which `sunny-factory[bot]` opens too ("Lanes open PRs as sunny-factory",
+  below) but whose commits are the lane's own, aren't counted: four of them held the factory back on
+  26 Nov 2026 (sweep run 45876382967; admin, 26 Nov 2026, #657). The `SWEEP` line
+  (`factory=<n> cap=<n> lanes=<n> (not counted)`) and the job summary show both counts. Pattern: the
+  same provenance test fix rounds use (below), widened from "every commit" to "any commit".
+  Alternatives considered: counting by branch name (`<n>-` versus `claude/…`; a local lane pushes a
+  `<n>-` branch, and the commits are what the factory alone writes as its bot user); "every commit"
+  as for fix rounds (a lane's or the admin's fix commit would drop a factory PR out of the queue it
+  still waits in). Then the eligible issues (admin, 23 Nov 2026, #619: `factory:ready` is the only
+  gate): open, at `factory:ready` after the reconcile (below), opened by the owner or a
+  collaborator, with no `blocked:*` label, no open native blocker
+  (`GET …/issues/{n}/dependencies/blocked_by`), no open PR from a `<n>-` branch and no `<n>-` branch
+  (the gate's rules, so the sweep doesn't dispatch what the gate would refuse). Status, Mode and
+  Track aren't read: Backlog, Ready, In progress or In review all qualify, so the admin can label a
+  whole chain at once and the factory walks it in blocker order.
 - **The `factory:*` states (#619).** An issue carries at most one: `factory:ready` (the admin's
   "take this"; only the admin sets it), `factory:working` (a run is going), `factory:review` (a PR
   is waiting), `factory:failed` (the last run ended without a PR, or its PR closed unmerged). Each
@@ -1415,7 +1426,8 @@ dispatches (it would hold the Project token and `actions: write` together).
   no new runs, `workflow_dispatch` and `repository_dispatch` excepted, reads. So the hourly schedule
   is the loop, at worst one issue an hour, until a dispatch with another token.
 - **Logs:** one `SWEEP` line and a job summary per run: the switch, the open factory PRs against the
-  cap, the eligible issues in order, the skipped ones and why, and the one dispatched or why none.
+  cap and the uncounted lane PRs, the eligible issues in order, the skipped ones and why, and the
+  one dispatched or why none.
 
 **Fix rounds (#588; admin, 22 Nov 2026).** Step 4 of the review flow ("the factory fixes them and
 pushes", above), built: when `sunny-reviewer[bot]` sends a factory PR back, the sweep dispatches the
