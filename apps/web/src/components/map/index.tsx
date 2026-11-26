@@ -8,6 +8,8 @@ import {
 	useState,
 	type CSSProperties,
 	type KeyboardEvent,
+	type ReactElement,
+	type ReactNode,
 } from "react";
 
 import type { FarmState } from "@sunny-pastures/sim";
@@ -28,6 +30,11 @@ import { panBy, panStep, recentre, toTransform, zoomAt, zoomStep, type View } fr
  */
 export interface FarmMapProps {
 	readonly farm: FarmState;
+	/**
+	 * Wraps a lot's `Button`, so a screen can open its own UI from it (a plot's popover, #601);
+	 * by default the button stands alone.
+	 */
+	readonly renderLot?: (lot: Lot, button: ReactElement) => ReactNode;
 }
 
 const containerStyle: CSSProperties = {
@@ -45,7 +52,7 @@ const contentStyle: CSSProperties = {
 	transformOrigin: "0 0",
 };
 
-export function FarmMap({ farm }: FarmMapProps) {
+export function FarmMap({ farm, renderLot = showButton }: FarmMapProps) {
 	const container = useRef<HTMLDivElement>(null);
 	const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 });
 	const gestures = useGestures(container, setView);
@@ -92,7 +99,12 @@ export function FarmMap({ farm }: FarmMapProps) {
 		>
 			<div style={{ ...contentStyle, transform: toTransform(view) }}>
 				{lots.map((lot) => (
-					<LotButton key={`${lot.kind}-${String(lot.index)}`} lot={lot} farm={farm} />
+					<LotButton
+						key={`${lot.kind}-${String(lot.index)}`}
+						lot={lot}
+						farm={farm}
+						renderLot={renderLot}
+					/>
 				))}
 			</div>
 			<div style={{ position: "absolute", right: 16, bottom: 16, zIndex: 1000 }}>
@@ -151,10 +163,15 @@ function keyToView(key: string): KeyMove | null {
 interface LotButtonProps {
 	readonly lot: Lot;
 	readonly farm: FarmState;
+	readonly renderLot: NonNullable<FarmMapProps["renderLot"]>;
+}
+
+function showButton(_lot: Lot, button: ReactElement): ReactNode {
+	return button;
 }
 
 /** One lot: its sprite in a `Button` named for what stands there, stacked back to front. */
-function LotButton({ lot, farm }: LotButtonProps) {
+function LotButton({ lot, farm, renderLot }: LotButtonProps) {
 	const { name, sprite } = describeLot(lot, farm);
 	const { x, y } = lotPosition(lot);
 	return (
@@ -167,9 +184,12 @@ function LotButton({ lot, farm }: LotButtonProps) {
 				zIndex: lotDepth(lot),
 			}}
 		>
-			<Button variant="quiet">
-				<img src={spriteUrl(sprite)} alt={name} width={tileSize.width} draggable={false} />
-			</Button>
+			{renderLot(
+				lot,
+				<Button variant="quiet">
+					<img src={spriteUrl(sprite)} alt={name} width={tileSize.width} draggable={false} />
+				</Button>,
+			)}
 		</div>
 	);
 }
