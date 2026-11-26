@@ -176,6 +176,13 @@ export const selectCoins = (store: FarmStore): number | null => store.predicted?
 export const selectLevel = (store: FarmStore): number | null =>
 	store.predicted === null ? null : countLevels(store.predicted.xp);
 
+/**
+ * The Level of the last confirmed farm (MUST-05.3): what the server accepted, so a prediction that
+ * rolls back never raises it (#607). Null until the farm loads.
+ */
+export const selectConfirmedLevel = (store: FarmStore): number | null =>
+	store.confirmed === null ? null : countLevels(store.confirmed.state.xp);
+
 export interface LevelProgress {
 	/** From 1 (MUST-05.3). */
 	readonly level: number;
