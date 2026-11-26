@@ -425,6 +425,22 @@ describe("factory.yml", () => {
 		expect(yml).not.toMatch(/CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '?0/);
 	});
 
+	// #635: the broker does the one write the admin allowed (pnpm-lock.yaml, node_modules), started
+	// after bubblewrap and before Claude, holding nothing secret, its answers where Claude can't write.
+	it("starts the dependency broker before Claude, with no secret, answering from /srv", () => {
+		const start = factory.indexOf("name: Start the dependency broker");
+		expect(start).toBeGreaterThan(factory.indexOf("name: Install bubblewrap for the env scrub"));
+		expect(start).toBeLessThan(factory.indexOf("id: claude"));
+		const step = factory.slice(start, factory.indexOf("id: claude"));
+		expect(step).toContain("bash .github/scripts/factory-deps.sh serve");
+		expect(step).toContain("FACTORY_DEPS_OUT: /srv/factory-deps");
+		expect(step).not.toMatch(/secrets\.|github\.token|GH_TOKEN|uses:/);
+		expect(step).toMatch(/::error::the dependency broker didn't start"; exit 1/);
+		const claude = factory.slice(factory.indexOf("id: claude"), factory.indexOf("id: handoff"));
+		expect(claude).toContain("FACTORY_DEPS: ${{ runner.temp }}/factory-deps");
+		expect(claude).toContain("FACTORY_DEPS_OUT: /srv/factory-deps");
+	});
+
 	it("pins the App's bot user id once, for Claude's commits and for publish's identity check", () => {
 		expect(yml).toMatch(/^ {2}FACTORY_BOT_ID: '355564973'$/m);
 		expect(factory).toContain("bot_id: ${{ env.FACTORY_BOT_ID }}");

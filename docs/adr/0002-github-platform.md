@@ -1426,6 +1426,38 @@ the job before Claude starts, and `RESULT bwrap=ok via=…` records which fix wa
 user has sudo either way, so the sysctl takes no boundary away from Claude's runner.
 `sandbox.bwrapPath` in managed settings isn't needed: `apt-get` puts `bwrap` on the `PATH`.
 
+**What the scrub's sandbox protects, and the dependency broker (#635; admin, 23 Nov 2026).** The
+scrub runs each of Claude's Bash commands in bubblewrap with a filesystem policy built into Claude
+Code (2.1.325 in the factory; read from 2.1.332's bundle, 26 Nov 2026): writable under `/home`,
+`/root`, `/tmp`, `/var`, `/opt`, `/run` and `/mnt`, but read-only over these paths of the launch
+folder (the checkout): `package.json`, `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`,
+`bunfig.toml`, `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.gitmodules`, the `.env` files,
+`node_modules/.bin`, `scripts/`, `.claude/`, `.github/`, `.git/hooks`, `.git/config`,
+`.git/modules`, `.git/worktrees`, `.git/info/exclude` and `.git/commondir`; and over the shell rc
+files, `.ssh`, `.netrc`, git, gh and package-manager config in home, the runner's own folders and
+the action's. These are added to whatever `sandbox.filesystem` says, and a project setting can't
+widen the sandbox, so no setting gives the run `pnpm-lock.yaml`. Run 45249182872 (#594) stopped on
+exactly that. The admin decided a run may write `node_modules` and `pnpm-lock.yaml` and nothing else
+newly; `minimumReleaseAge` holds, install and build scripts stay off, and the PR is held
+(`package.json` and the lockfile are code-owned). So the factory job starts
+`.github/scripts/factory-deps.sh serve` before the Claude step, outside Claude's sandbox: Claude
+asks it for `add <dir> [--dev] <name@x.y.z>…`, and it checks the request (a workspace package, exact
+versions, `pnpm-workspace.yaml`, the root `package.json` and `.npmrc` unchanged since it started),
+then runs `pnpm add --save-exact --ignore-scripts --ignore-pnpmfile` in a bubblewrap of its own:
+everything read-only, then the checkout and the pnpm store writable, then `.git`, `.github`,
+`.claude`, `scripts`, `pnpm-workspace.yaml` and the protected files above read-only again (an empty
+read-only file where one is missing), with no environment carried in and its own `/tmp` and PID
+namespace. Its answers go to `/srv/factory-deps`, outside every folder Claude's sandbox can write,
+so it never writes through a link Claude planted. Against the sandbox Claude already has, the new
+writes are `pnpm-lock.yaml` and `node_modules/.bin`; `.git/hooks`, `.git/config` and the rest stay
+read-only. Alternatives considered: `sandbox.excludedCommands` for `pnpm add` (it would run with
+none of the scrub's protections, and whether the scrub honours it isn't documented); managed
+settings (`allowWriteWithinDeny` lifts a folder inside a denied one, not a denied file); launching
+Claude from another folder (it moves every protection with it); `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0`
+(ruled out above). The broker's pnpm is the runner's, which Claude's sandbox can reach in `/opt` and
+home; a pnpm changed there would still run inside the broker's bubblewrap, and its lockfile reaches
+`main` only through the held PR.
+
 **Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
 environment, but the runner user has sudo, so a prompt injection could still read it from the
 action's own process. It reaches Claude's model calls only, and rotates with `claude setup-token`.
