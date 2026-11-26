@@ -89,11 +89,13 @@ export interface MeterProps {
 	label: string;
 	value: number;
 	max: number;
+	/** The value as words, shown and announced in place of the default percentage. */
+	valueLabel?: string;
 }
 
-export function Meter({ label, value, max }: MeterProps) {
+export function Meter({ label, value, max, valueLabel }: MeterProps) {
 	return (
-		<AriaMeter value={value} minValue={0} maxValue={max}>
+		<AriaMeter value={value} minValue={0} maxValue={max} valueLabel={valueLabel}>
 			{({ valueText }) => (
 				<>
 					<Label>{label}</Label>
