@@ -11,12 +11,14 @@
 #   contents: read);
 # - closed.json: the newest 100 closed PRs opened by sunny-factory[bot], with merged_at, so the
 #   reconcile can tell a factory:review issue whose PR closed unmerged (pull-requests: read);
-# - for the fix rounds (#588; pull-requests: read): each open PR by sunny-factory[bot] gets
-#   `factory`, true only when every one of its commits is authored and committed by the App's bot
-#   user, as factory-publish.sh makes the factory's own (lanes open their PRs as sunny-factory[bot]
-#   too, #336, but commit as themselves); and reviews.json holds sunny-reviewer[bot]'s reviews of
-#   those factory PRs, each with its PR's number. The rounds already run are factory runs in
-#   runs.json ("factory fix #<pr> at <sha>"), so nothing else is read for them;
+# - for the fix rounds (#588) and the open-PR cap (#657; pull-requests: read): each open PR by
+#   sunny-factory[bot] gets `factory`, true only when every one of its commits is authored and
+#   committed by the App's bot user, as factory-publish.sh makes the factory's own, and
+#   `factory_authored`, true when any of its commits is authored by that bot user (a factory PR a
+#   lane or the admin pushed a fix to). Lanes open their PRs as sunny-factory[bot] too, #336, but
+#   commit as themselves, so both are false on theirs. reviews.json holds sunny-reviewer[bot]'s
+#   reviews of the `factory` PRs, each with its PR's number. The rounds already run are factory
+#   runs in runs.json ("factory fix #<pr> at <sha>"), so nothing else is read for them;
 # - items.json: the board's issue items with Priority, in the order the REST Projects API lists
 #   them, through scripts/lib/project-rest.sh with BOARD_PROJECT_TOKEN in PROJECT_GH_TOKEN, used on
 #   the Project's calls only. Status, Mode and Track aren't read (#619).
@@ -66,23 +68,32 @@ jq --argjson b "$blocked" 'map(if $b[.number | tostring] then .blocked_by = $b[.
 mv "$dir/issues.tmp" "$dir/issues.json"
 gh api --paginate "$r/pulls?state=open&per_page=100" --jq '.[]
   | {number, head: {ref: .head.ref, sha: .head.sha}, user: {login: .user.login}}' | jq -s . >"$dir/pulls.json"
-# Which of the App's open PRs the factory made (every commit its bot user's: factory.yml's
-# FACTORY_BOT_ID), and the reviewer's reviews of those, one read each.
+# Which of the App's open PRs are factory PRs and the factory's own (its bot user's commits: factory.yml's
+# FACTORY_BOT_ID), and the reviewer's reviews of those whose every commit is its own, one read each.
+# Each page of commits answers `own` (every commit authored and committed by the bot user), `mixed`
+# (some authored by it) or `lane` (none, or no commits): `authored` takes any page that isn't
+# `lane` (the cap, #657), `factory` only all `own` (fix rounds, #588).
 bot_email='355564973+sunny-factory[bot]@users.noreply.github.com'
 factory='[]'
+authored='[]'
 : >"$dir/reviews.ndjson"
 for n in $(jq -r '.[] | select(.user.login == "sunny-factory[bot]") | .number' "$dir/pulls.json"); do
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "::error::unexpected PR number: $n"; exit 1; }
-  pages=$(gh api --paginate "$r/pulls/$n/commits?per_page=100" --jq "[.[] | .commit.author.email,
-    .commit.committer.email] | length > 0 and all(. == \"$bot_email\")")
-  if [[ -z $pages ]] || grep -qvx true <<<"$pages"; then continue; fi
+  pages=$(gh api --paginate "$r/pulls/$n/commits?per_page=100" --jq "if length > 0 and all(.[];
+    .commit.author.email == \"$bot_email\" and .commit.committer.email == \"$bot_email\") then \"own\"
+    elif any(.[]; .commit.author.email == \"$bot_email\") then \"mixed\" else \"lane\" end")
+  if [[ -z $pages ]] || ! grep -qvx lane <<<"$pages"; then continue; fi
+  authored=$(jq -c --argjson n "$n" '. + [$n]' <<<"$authored")
+  if grep -qvx own <<<"$pages"; then continue; fi
   factory=$(jq -c --argjson n "$n" '. + [$n]' <<<"$factory")
   gh api --paginate "$r/pulls/$n/reviews?per_page=100" --jq ".[] | select(.user.login == \"sunny-reviewer[bot]\")
     | {pr: $n, user: {login: .user.login}, state, commit_id, submitted_at, body}" >>"$dir/reviews.ndjson"
 done
 jq -s . "$dir/reviews.ndjson" >"$dir/reviews.json"
 rm "$dir/reviews.ndjson"
-jq --argjson f "$factory" 'map(.factory = (.number | IN($f[])))' "$dir/pulls.json" >"$dir/pulls.tmp"
+jq --argjson f "$factory" --argjson a "$authored" \
+  'map(.factory = (.number | IN($f[])) | .factory_authored = (.number | IN($a[])))' \
+  "$dir/pulls.json" >"$dir/pulls.tmp"
 mv "$dir/pulls.tmp" "$dir/pulls.json"
 gh api --paginate "$r/git/matching-refs/heads/" --jq '.[] | {ref}' | jq -s . >"$dir/refs.json"
 gh api "$r/pulls?state=closed&sort=updated&direction=desc&per_page=100" --jq '[.[]

@@ -45,16 +45,27 @@ const issue = (
 	...(pr ? { pull_request: { url: "x" } } : {}),
 	...(blockedBy ? { blocked_by: blockedBy } : {}),
 });
-// An open PR, trimmed, with `factory` as the gather sets it (every commit the App's bot user's).
-const pull = (number, ref, login = "sssoto17", { sha = HEAD, factory = false } = {}) => ({
+// An open PR, trimmed, with `factory` (every commit the App's bot user's) and `factory_authored`
+// (any commit authored by it) as the gather sets them.
+const pull = (
+	number,
+	ref,
+	login = "sssoto17",
+	{ sha = HEAD, factory = false, authored = factory } = {},
+) => ({
 	number,
 	head: { ref, sha },
 	user: { login },
 	factory,
+	factory_authored: authored,
 });
 // A factory PR, and a review of it by sunny-reviewer[bot] as the gather trims it (#588).
 const factoryPull = (number, sha = HEAD) =>
 	pull(number, `${number}-x`, BOT, { sha, factory: true });
+// A lane's PR (#336): opened as the App from a `claude/` branch, with commits of its own (#657).
+const lanePull = (number) => pull(number, `claude/lane-${number}`, BOT);
+// A factory PR a lane or the admin pushed a fix commit to: some commits the bot user's, not all.
+const mixedPull = (number) => pull(number, `${number}-x`, BOT, { authored: true });
 const review = (pr, { state = "CHANGES_REQUESTED", commit = HEAD, body = FIXES } = {}) => ({
 	pr,
 	user: { login: "sunny-reviewer[bot]" },
@@ -105,16 +116,36 @@ describe("decideSweep", () => {
 	);
 
 	it("dispatches nothing once the factory's open PRs, drafts included, reach the default cap of 4", () => {
-		const mine = [1, 2, 3].map((n) => pull(100 + n, `${200 + n}-x`, BOT));
+		const mine = [1, 2, 3].map((n) => factoryPull(100 + n));
 		const theirs = [pull(110, "110-y"), pull(111, "111-z")];
 		expect(decide({ pulls: [...mine, ...theirs] })).toMatchObject({
 			dispatch: 10,
 			open: 3,
+			lanes: 0,
 			cap: 4,
 		});
-		const d = decide({ pulls: [...mine, pull(104, "204-x", BOT), ...theirs] });
-		expect(d).toMatchObject({ dispatch: null, open: 4, cap: 4 });
-		expect(d.reason).toBe("open-PR cap reached: 4 open PRs by sunny-factory[bot], cap 4");
+		const d = decide({ pulls: [...mine, factoryPull(104), ...theirs] });
+		expect(d).toMatchObject({ dispatch: null, open: 4, lanes: 0, cap: 4 });
+		expect(d.reason).toBe("open-PR cap reached: 4 open factory PRs, cap 4");
+	});
+
+	// #657: lanes open their PRs as sunny-factory[bot] too (#336), but commit as themselves.
+	it("dispatches past 4 open lane PRs, which it doesn't count against the cap", () => {
+		const lanes = [645, 647, 649, 651].map(lanePull);
+		const d = decide({ pulls: lanes });
+		expect(d).toMatchObject({ dispatch: 10, open: 0, lanes: 4, cap: 4 });
+		const full = decide({ pulls: [...lanes, ...[1, 2, 3, 4].map((n) => factoryPull(600 + n))] });
+		expect(full).toMatchObject({ dispatch: null, open: 4, lanes: 4, cap: 4 });
+		expect(full.reason).toBe("open-PR cap reached: 4 open factory PRs, cap 4");
+	});
+
+	// #657: a factory run made it, so it still waits in the review queue as the factory's.
+	it("counts a factory PR with a lane's or the admin's fix commit on it against the cap", () => {
+		const pulls = [mixedPull(601), factoryPull(602), factoryPull(603), lanePull(645)];
+		expect(decide({ pulls })).toMatchObject({ dispatch: 10, open: 3, lanes: 1 });
+		const d = decide({ pulls: [...pulls, mixedPull(604)] });
+		expect(d).toMatchObject({ dispatch: null, open: 4, lanes: 1 });
+		expect(d.reason).toMatch(/^open-PR cap reached: 4 open factory PRs/);
 	});
 
 	it("reads FACTORY_MAX_OPEN_PRS, and dispatches nothing on a value that isn't a whole number", () => {
@@ -481,18 +512,34 @@ describe("factory-sweep.mjs", () => {
 	};
 
 	it("writes the issue to dispatch, a SWEEP line and the job summary", () => {
-		const r = cli({ FACTORY_ENABLED: "true" }, { pulls: [pull(7, "7-x", BOT)] });
+		const pulls = [factoryPull(7), lanePull(8), lanePull(9)];
+		const r = cli({ FACTORY_ENABLED: "true" }, { pulls });
 		expect(r.code).toBe(0);
 		expect(r.out).toBe(
 			'issue=60\npr=\nhead=\nlabels=[{"issue":60,"from":"ready","to":"working","why":"dispatched"}]\n',
 		);
 		expect(r.log).toMatch(/^LABELS #60 factory:ready -> factory:working \(dispatched\)$/m);
-		expect(r.log).toMatch(/^SWEEP dispatch #60 \(P2\) open=1 cap=4$/m);
+		expect(r.log).toMatch(/^SWEEP dispatch #60 \(P2\) factory=1 cap=4 lanes=2 \(not counted\)$/m);
 		expect(r.summary).toContain("- Switch: on");
 		expect(r.summary).toContain("- Open factory PRs: 1 of 4");
+		expect(r.summary).toContain("- Open lane PRs, not counted against the cap: 2");
 		expect(r.summary).toContain("1. #60 (P2)");
 		expect(r.summary).toContain("Chosen: #60 (the dispatch job sends it)");
 		expect(r.summary).toContain("- #60 factory:ready -> factory:working (dispatched)");
+	});
+
+	it("says in the SWEEP line and the summary why the cap holds a new issue back", () => {
+		const pulls = [...[1, 2, 3, 4].map((n) => factoryPull(600 + n)), lanePull(645)];
+		const r = cli({ FACTORY_ENABLED: "true" }, { pulls });
+		expect([r.code, r.out]).toEqual([0, "issue=\npr=\nhead=\nlabels=[]\n"]);
+		expect(r.log).toMatch(
+			/^SWEEP none: open-PR cap reached: 4 open factory PRs, cap 4 factory=4 cap=4 lanes=1 \(not counted\)$/m,
+		);
+		expect(r.summary).toContain("- Open factory PRs: 4 of 4");
+		expect(r.summary).toContain("- Open lane PRs, not counted against the cap: 1");
+		expect(r.summary).toContain(
+			"Dispatched: none (open-PR cap reached: 4 open factory PRs, cap 4)",
+		);
 	});
 
 	it("writes a reconcile move to none as a null, and logs it", () => {
@@ -519,7 +566,7 @@ describe("factory-sweep.mjs", () => {
 		expect(r.code).toBe(0);
 		expect(r.out).toBe(`issue=\npr=587\nhead=${HEAD}\nlabels=[]\n`);
 		expect(r.log).toMatch(
-			/^SWEEP fix round 1 of 2 on PR #587 at f6cd23e open=2 cap=4; skipped PR #586: a fix round already ran at f6cd23e$/m,
+			/^SWEEP fix round 1 of 2 on PR #587 at f6cd23e factory=2 cap=4 lanes=0 \(not counted\); skipped PR #586: a fix round already ran at f6cd23e$/m,
 		);
 		expect(r.summary).toContain("- PR #586: a fix round already ran at f6cd23e");
 		expect(r.summary).toContain("Chosen: a fix round 1 of 2 on PR #587 at f6cd23e");
@@ -548,7 +595,12 @@ describe("factory-sweep-gather.sh", () => {
 		writeFileSync(
 			gh,
 			`#!/usr/bin/env bash
-for a; do case $a in repos/* | users/*) url=$a ;; esac; done
+prev=
+for a; do
+  case $a in repos/* | users/*) url=$a ;; esac
+  [[ $prev == --jq ]] && q=$a
+  prev=$a
+done
 echo "$url token=\${GH_TOKEN}" >>"${join(dir, "calls")}"
 case "$*" in
   *"/fields?"*) echo "1" ;;
@@ -560,8 +612,7 @@ case "$*" in
   *"/issues/70/dependencies/blocked_by"*) echo 594 ;;
   *"pulls?state=closed"*) echo "\${FAKE_CLOSED:-[]}" ;;
   *"pulls?state=open"*) echo "\${FAKE_PULLS-}" ;;
-  *"/pulls/7/commits"*) echo true ;;
-  *"/commits"*) echo false ;;
+  *"/commits"*) n=\${url#*/pulls/}; v=FAKE_COMMITS_\${n%%/*}; jq -c '.[]' <<<"\${!v:-[[]]}" | while read -r page; do jq -r "$q" <<<"$page"; done ;;
   *"/reviews"*) echo '{"pr":7,"state":"CHANGES_REQUESTED"}' ;;
 esac
 `,
@@ -655,29 +706,63 @@ esac
 		expect(closed).toEqual([{ number: 601, head: { ref: "75-x" }, merged_at: null }]);
 	});
 
-	// #588: lanes open PRs as sunny-factory[bot] too, so the factory's own are those whose every
-	// commit is its bot user's, and only their reviews are read.
-	it("marks the App's PRs whose commits are all its bot user's as factory, and reads their reviews", () => {
-		const p = (number, login) =>
-			JSON.stringify({ number, head: { ref: "x", sha: "s" }, user: { login } });
+	// An open PR as `GET …/pulls?state=open` returns it, trimmed, and a commit of it with its
+	// author's and committer's emails, as `GET …/pulls/{n}/commits` lists it.
+	const openPr = (number, login = BOT) =>
+		JSON.stringify({ number, head: { ref: "x", sha: "s" }, user: { login } });
+	const commit = (author, committer = author) => ({
+		commit: { author: { email: author }, committer: { email: committer } },
+	});
+	const BOT_EMAIL = "355564973+sunny-factory[bot]@users.noreply.github.com";
+
+	// #588, #657: lanes open PRs as sunny-factory[bot] too, so the factory's own are those whose
+	// every commit is its bot user's (`factory`, for fix rounds, and only their reviews are read),
+	// and the cap counts those with any commit its bot user authored (`factory_authored`).
+	it("marks the App's PRs by their commits' authors, and reads the reviews of the factory's own", () => {
+		const lane = "noreply@anthropic.com";
 		const g = gather({
 			FACTORY_ENABLED: "true",
-			FAKE_PULLS: [p(7, BOT), p(8, BOT), p(9, "sssoto17")].join("\n"),
+			FAKE_PULLS: [openPr(7), openPr(8), openPr(9), openPr(10), openPr(11, "sssoto17")].join("\n"),
+			FAKE_COMMITS_7: JSON.stringify([[commit(BOT_EMAIL), commit(BOT_EMAIL)]]),
+			FAKE_COMMITS_8: JSON.stringify([[commit(BOT_EMAIL), commit(lane)]]),
+			FAKE_COMMITS_9: JSON.stringify([[commit(BOT_EMAIL, lane)]]),
+			FAKE_COMMITS_10: JSON.stringify([[commit(lane), commit(lane)]]),
 		});
 		expect(g.code).toBe(0);
-		const reads = g.calls.split("\n").filter((c) => /\/(commits|reviews)\?/.test(c));
+		const reads = g.calls.split("\n").filter((x) => /\/(commits|reviews)\?/.test(x));
 		expect(reads).toEqual([
 			"repos/sssoto17/sunny-pastures/pulls/7/commits?per_page=100 token=repo-token",
 			"repos/sssoto17/sunny-pastures/pulls/7/reviews?per_page=100 token=repo-token",
 			"repos/sssoto17/sunny-pastures/pulls/8/commits?per_page=100 token=repo-token",
+			"repos/sssoto17/sunny-pastures/pulls/9/commits?per_page=100 token=repo-token",
+			"repos/sssoto17/sunny-pastures/pulls/10/commits?per_page=100 token=repo-token",
 		]);
 		const pulls = JSON.parse(readFileSync(join(dir, "sweep", "pulls.json"), "utf8"));
-		expect(pulls.map((x) => [x.number, x.factory])).toEqual([
-			[7, true],
-			[8, false],
-			[9, false],
+		expect(pulls.map((x) => [x.number, x.factory, x.factory_authored])).toEqual([
+			[7, true, true],
+			[8, false, true],
+			[9, false, true],
+			[10, false, false],
+			[11, false, false],
 		]);
 		const reviews = JSON.parse(readFileSync(join(dir, "sweep", "reviews.json"), "utf8"));
 		expect(reviews).toEqual([{ pr: 7, state: "CHANGES_REQUESTED" }]);
+	});
+
+	// gh --paginate applies --jq to each page: the pages' answers are combined.
+	it("reads every page of a PR's commits, and marks one with none as neither", () => {
+		const g = gather({
+			FACTORY_ENABLED: "true",
+			FAKE_PULLS: [openPr(12), openPr(13), openPr(14)].join("\n"),
+			FAKE_COMMITS_12: JSON.stringify([[commit(BOT_EMAIL)], [commit(BOT_EMAIL)]]),
+			FAKE_COMMITS_13: JSON.stringify([[commit("a@b.c")], [commit(BOT_EMAIL)]]),
+		});
+		expect(g.code).toBe(0);
+		const pulls = JSON.parse(readFileSync(join(dir, "sweep", "pulls.json"), "utf8"));
+		expect(pulls.map((x) => [x.number, x.factory, x.factory_authored])).toEqual([
+			[12, true, true],
+			[13, false, true],
+			[14, false, false],
+		]);
 	});
 });

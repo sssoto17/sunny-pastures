@@ -13,18 +13,23 @@
 //    dispatches nothing (factory.yml's concurrency group would make a new run wait, and a third
 //    would cancel the waiting one);
 // 4. a fix round (#588), before any new issue and whatever the cap, since it adds no PR: the open
-//    PR the factory made with the lowest number whose newest verdict from sunny-reviewer[bot]
-//    (factory-review.mjs: not dismissed, not an empty-bodied line-comment review) is on the PR's
-//    current head and is Request changes or starts "merge after fixes". The factory made a PR when
-//    sunny-factory[bot] opened it and every commit on it is that bot user's (`factory`, read by the
-//    gather): lanes open their PRs as sunny-factory[bot] too (#336) but commit as themselves, so a
-//    lane PR is never picked. The loop guard, stateless like the rest: the fix runs are the factory runs
-//    titled "factory fix #<pr> at <head SHA>" (factory.yml's run-name), so a PR with a run at its
-//    current head, or with 2 fix runs already (whatever they did, pushed nothing included), is
-//    skipped, and the SWEEP line says why. Only the newest 100 factory runs are read;
-// 5. backpressure on the review queue: as many open PRs (drafts included) opened by
-//    sunny-factory[bot] as the cap, or more, dispatches no new issue. A PR that merges or closes
-//    lowers the count, and the next sweep goes on;
+//    PR that is the factory's own with the lowest number whose newest verdict from
+//    sunny-reviewer[bot] (factory-review.mjs: not dismissed, not an empty-bodied line-comment
+//    review) is on the PR's current head and is Request changes or starts "merge after fixes". The
+//    factory's own PR is one sunny-factory[bot] opened whose every commit is that bot user's
+//    (`factory`, read by the gather): lanes open their PRs as sunny-factory[bot] too (#336) but
+//    commit as themselves, so a lane PR is never picked, nor one a lane or the admin pushed a fix
+//    to. The loop guard, stateless like the rest: the fix runs are the factory runs titled "factory
+//    fix #<pr> at <head SHA>" (factory.yml's run-name), so a PR with a run at its current head, or
+//    with 2 fix runs already (whatever they did, pushed nothing included), is skipped, and the SWEEP
+//    line says why. Only the newest 100 factory runs are read;
+// 5. backpressure on the review queue: as many open factory PRs (drafts included) as the cap, or
+//    more, dispatches no new issue. A PR that merges or closes lowers the count, and the next sweep
+//    goes on. A factory PR, the same signal as 4 widened to mixed commits (#657): opened by
+//    sunny-factory[bot] with any commit its bot user authored (`factory_authored`, read by the
+//    gather), so a factory PR a lane or the admin pushed a fix to still counts, since a factory run
+//    made it. Lane PRs, opened as sunny-factory[bot] with none of its commits, aren't counted: the
+//    SWEEP line and the summary show both numbers;
 // 6. the eligible issues (admin, 23 Nov 2026, #619): `factory:ready` is the only gate. An open
 //    issue (not a PR) whose one factory:* label, after the reconcile, is factory:ready, opened by
 //    the owner or a collaborator, with no `blocked:*` label, no open native blocker
@@ -72,9 +77,11 @@ const FILES = ["runs", "items", "issues", "pulls", "closed", "refs", "reviews"];
 const STATES = ["ready", "working", "review", "failed"];
 
 /**
- * The sweep's decision: `{ dispatch, fix, reason, open, cap, eligible, skipped, fixSkipped, moves }`.
+ * The sweep's decision:
+ * `{ dispatch, fix, reason, open, lanes, cap, eligible, skipped, fixSkipped, moves }`.
  * `dispatch` is an issue number or null; `fix` a fix round `{ pr, head, round }` or null (at most
- * one of the two is set); `open` the factory's open PRs; `moves` the label moves to write,
+ * one of the two is set); `open` the factory's open PRs, counted against the cap; `lanes` the other
+ * open PRs opened as sunny-factory[bot], not counted (#657); `moves` the label moves to write,
  * `{ issue, from, to, why }` with `to` a state or null (no factory:* label). `enabled` and
  * `maxOpenPrs` are the raw variables; the arrays are the gathered files (only read once the switch
  * is on).
@@ -84,6 +91,7 @@ export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 		dispatch: null,
 		fix: null,
 		open: null,
+		lanes: null,
 		cap: null,
 		eligible: [],
 		skipped: [],
@@ -103,14 +111,14 @@ export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 			reason: `FACTORY_MAX_OPEN_PRS ${shown} isn't a whole number: nothing dispatched`,
 		};
 	}
-	const open = data.pulls.filter((p) => p.user?.login === BOT).length;
+	const { open, lanes } = countOpen(data.pulls);
 	const active = data.runs.find((r) => r.status !== "completed");
 	if (active) {
 		const reason = `factory run ${active.id} (${active.display_title}) is ${active.status}`;
-		return { ...base, open, cap, reason };
+		return { ...base, open, lanes, cap, reason };
 	}
 	const { fix, fixSkipped } = selectFix(data);
-	const counted = { ...base, open, cap, fixSkipped };
+	const counted = { ...base, open, lanes, cap, fixSkipped };
 	if (fix) {
 		const reason = `fix round ${fix.round} of ${MAX_FIX_ROUNDS} on PR #${fix.pr} at ${short(fix.head)}`;
 		// Only an open issue that already carries a factory:* label is claimed for a fix round.
@@ -120,7 +128,7 @@ export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 		return { ...counted, fix, reason, moves: working || moves };
 	}
 	if (open >= cap) {
-		return { ...counted, reason: `open-PR cap reached: ${open} open PRs by ${BOT}, cap ${cap}` };
+		return { ...counted, reason: `open-PR cap reached: ${open} open factory PRs, cap ${cap}` };
 	}
 	const { eligible, skipped } = selectIssues(data, states);
 	const first = eligible[0];
@@ -129,6 +137,14 @@ export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 	const working = claim(moves, states, first.number, "dispatched");
 	return { ...counted, eligible, skipped, dispatch: first.number, reason, moves: working };
 };
+
+// The App's open PRs: the factory PRs (`open`, counted against the cap), any commit its bot user
+// authored, a mixed one included (#657), and the lanes' (`lanes`), none of its commits.
+function countOpen(pulls) {
+	const app = pulls.filter((p) => p.user?.login === BOT);
+	const open = app.filter((p) => p.factory_authored === true).length;
+	return { open, lanes: app.length - open };
+}
 
 // The moves with the dispatched issue set to factory:working, replacing any reconcile move of its.
 function claim(moves, states, issue, why) {
@@ -213,8 +229,8 @@ function newestClosed(closed, n) {
 function selectFix({ pulls, reviews, runs }) {
 	const fixSkipped = [];
 	// `factory`: every commit is the App's bot user's (the gather). Lanes open PRs as the App too.
-	const made = pulls.filter((p) => p.user?.login === BOT && p.factory === true);
-	for (const pr of made.sort((a, b) => a.number - b.number)) {
+	const own = pulls.filter((p) => p.user?.login === BOT && p.factory === true);
+	for (const pr of own.sort((a, b) => a.number - b.number)) {
 		const head = pr.head?.sha;
 		const review = newestVerdict(reviews.filter((r) => r.pr === pr.number));
 		if (!head || review?.commit_id !== head || !wantsFixes(review)) continue;
@@ -305,7 +321,10 @@ function readArray(dir, name) {
 
 function summarise(d, enabled) {
 	const lines = ["### Factory sweep", "", `- Switch: ${enabled === "true" ? "on" : "off"}`];
-	if (d.cap !== null) lines.push(`- Open factory PRs: ${d.open} of ${d.cap}`);
+	if (d.cap !== null) {
+		lines.push(`- Open factory PRs: ${d.open} of ${d.cap}`);
+		lines.push(`- Open lane PRs, not counted against the cap: ${d.lanes}`);
+	}
 	lines.push("", "Eligible, in order:", "");
 	if (d.eligible.length === 0) lines.push("- none (or not read)");
 	d.eligible.forEach((e, i) =>
@@ -333,7 +352,8 @@ function summarise(d, enabled) {
 
 // The one log line: what was chosen or why nothing, the counts, and the fix rounds skipped.
 function sweepLine(d) {
-	const counts = d.cap === null ? "" : ` open=${d.open} cap=${d.cap}`;
+	const counts =
+		d.cap === null ? "" : ` factory=${d.open} cap=${d.cap} lanes=${d.lanes} (not counted)`;
 	const fixSkipped = d.fixSkipped.map((s) => `; skipped PR #${s.pr}: ${s.why}`).join("");
 	const chosen = d.dispatch || d.fix ? d.reason : `none: ${d.reason}`;
 	return `SWEEP ${chosen}${counts}${fixSkipped}`;
