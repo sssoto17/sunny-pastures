@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it } from "vitest";
 const LABEL = fileURLToPath(new URL("../factory-label.sh", import.meta.url));
 const OUTCOME = fileURLToPath(new URL("../factory-outcome.sh", import.meta.url));
 const RUN = "https://github.com/o/r/actions/runs/77";
+// The tail of factory run 45249182872's factory job log (#594), as the jobs/{id}/logs endpoint
+// returned it: a byte-order mark, a timestamp on every line and the run scripts echoed in colour.
+const FIXTURE = fileURLToPath(new URL("fixtures/factory-job-594.txt", import.meta.url));
 
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
@@ -27,7 +30,10 @@ echo "$m $path token=$GH_TOKEN" >>"${dir}/calls"
 case "$m $path" in
   "GET repos/o/r/issues/42") echo "$HAVE" ;;
   "GET repos/o/r/actions/runs/77/jobs"*) echo 5 ;;
-  "GET repos/o/r/actions/jobs/5/logs") printf '%s' "$LOG" ;;
+  "GET repos/o/r/actions/jobs/5/logs")
+    n=$(($(cat "${dir}/fetches" 2>/dev/null || echo 0) + 1)); echo "$n" >"${dir}/fetches"
+    if ((n <= \${FAILS:-0})); then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    if [[ -n \${LOG_FILE-} ]]; then cat "$LOG_FILE"; else printf '%s' "$LOG"; fi ;;
 esac
 `,
 	);
@@ -44,6 +50,7 @@ esac
 			GH_TOKEN: "app-token",
 			ISSUE: "42",
 			HAVE: "",
+			LOG_WAIT: "0 0 0 0",
 			...env,
 		},
 	});
@@ -176,8 +183,30 @@ describe("factory-outcome.sh", () => {
 		expect(r.comment).not.toContain("${factory");
 	});
 
+	it("quotes the RESULT lines of a captured factory job log (run 45249182872, #594)", () => {
+		const r = outcome({ HAVE: "working", GATE_RUN: "true", LOG_FILE: FIXTURE });
+		expect(r.comment).toContain(
+			"```text\nRESULT claude=success subtype=success is_error=false num_turns=10 total_cost_usd=0.29726440000000004 duration_ms=29674\nRESULT handoff=none: Claude wrote no branch\nRESULT factory=FACTORY stopped: sandbox mounts node_modules and pnpm-lock.yaml read-only, so the pinned dependencies can't be installed or locked\n```",
+		);
+	});
+
+	it("retries the log while GitHub hasn't published it yet, and logs each miss", () => {
+		const r = outcome({ HAVE: "working", GATE_RUN: "true", LOG_FILE: FIXTURE, FAILS: "2" });
+		expect(r.calls.filter((c) => c.includes("/logs"))).toHaveLength(3);
+		expect(r.log).toMatch(/^LOG attempt 1: no RESULT lines yet \(gh: Not Found \(HTTP 404\)\)$/m);
+		expect(r.comment).toContain("RESULT factory=FACTORY stopped: sandbox mounts");
+	});
+
+	it("retries a log that has no RESULT claude= line yet", () => {
+		const partial = "2026-11-23T10:00:02.0Z RESULT handoff=none: Claude wrote no branch\n";
+		const r = outcome({ HAVE: "working", GATE_RUN: "true", LOG: partial });
+		expect(r.calls.filter((c) => c.includes("/logs"))).toHaveLength(5);
+		expect(r.comment).toContain("```text\nRESULT handoff=none: Claude wrote no branch\n```");
+	});
+
 	it("still sets factory:failed when the log can't be read", () => {
-		const r = outcome({ HAVE: "working", GATE_RUN: "true", LOG: "" });
+		const r = outcome({ HAVE: "working", GATE_RUN: "true", LOG: "", FAILS: "9" });
+		expect(r.calls.filter((c) => c.includes("/logs"))).toHaveLength(5);
 		expect(r.comment).toContain("No `RESULT` lines could be read");
 	});
 

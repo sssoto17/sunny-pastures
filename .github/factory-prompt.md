@@ -47,6 +47,17 @@ runner checks it and, only if it passes, pushes the branch and opens the PR as `
   decision (below): the held PR is how you ask (`AGENTS.md`). `minimumReleaseAge` in
   `pnpm-workspace.yaml` still holds: never lower it. Never allow a package's install or build script
   (`allowBuilds`): a package that needs one is a stop.
+- **Adding a package: `bash .github/scripts/factory-deps.sh add <dir> [--dev] <name@x.y.z>...`**,
+  never `pnpm add`. Your Bash sandbox mounts `pnpm-lock.yaml`, the root `package.json` and
+  `node_modules/.bin` read-only, so pnpm can't write them; the workflow's dependency broker runs
+  `pnpm add --save-exact --ignore-scripts` for you outside it (#635), in the workspace package
+  `<dir>` (`apps/web`), and prints pnpm's output. It takes exact versions only, refuses once
+  `pnpm-workspace.yaml` or the root `package.json` has changed or a workspace `package.json` has
+  changed its dependencies beyond the names you ask for (so add packages only through it), and can't
+  run a script. Never edit `pnpm-lock.yaml` yourself: it refuses a lockfile it didn't write. You
+  can't write `/srv/factory-deps`, where it keeps its copies. Then commit `<dir>/package.json` and
+  `pnpm-lock.yaml` with your work. A version younger than `minimumReleaseAge` fails there: that is a
+  stop, not something to work around.
 - **No local Supabase stack.** Run `pnpm check:fast` and `pnpm test --project unit --project ui`,
   plus each test file you touch. The `db` and acceptance tests run in CI on the PR; say so under
   "How it was verified".

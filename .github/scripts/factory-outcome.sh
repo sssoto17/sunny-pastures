@@ -23,7 +23,8 @@
 # Env: GH_TOKEN (the App's token, issues: write), RUN_TOKEN (the job's GITHUB_TOKEN, actions: read,
 # for the log), GITHUB_REPOSITORY, GITHUB_SERVER_URL, GITHUB_RUN_ID, RUNNER_TEMP; ISSUE, FIX (the
 # fix round's PR or empty), GATE_RUN and GATE_WHY (the gate's outputs), PR (publish's output),
-# FACTORY_RESULT and PUBLISH_RESULT (those jobs' results).
+# FACTORY_RESULT and PUBLISH_RESULT (those jobs' results); LOG_WAIT (optional: the delays between
+# reads of the log, in seconds; tests set zeros).
 # Tests: .github/scripts/tests/factory-label.test.mjs ("factory-outcome.sh")
 set -euo pipefail
 
@@ -42,14 +43,32 @@ elif [[ ${GATE_RUN-} == true ]]; then
   lines=""
   job=$(GH_TOKEN=$RUN_TOKEN gh api "$r/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
     --jq '.jobs[] | select(.name == "factory") | .id' 2>/dev/null | head -n1) || job=""
+  # GitHub publishes a job's log a little after the job ends, and this job starts right after the
+  # factory job: run 45279925105 (#596) asked 4 s after it and read nothing, though the line format
+  # matches (tests: the captured log of run 45249182872). So it asks again after each LOG_WAIT
+  # delay (seconds, 95 in all, inside the job's 4 minutes) until the log holds the `result` step's
+  # `RESULT claude=` line, which that step always writes, and logs each miss with gh's first line.
   if [[ $job =~ ^[1-9][0-9]*$ ]]; then
     log="$RUNNER_TEMP/factory-job.log"
-    if GH_TOKEN=$RUN_TOKEN gh api "$r/actions/jobs/$job/logs" >"$log" 2>/dev/null; then
+    err="$RUNNER_TEMP/factory-job.err"
+    attempt=0
+    for wait in ${LOG_WAIT-5 10 20 30 30} last; do
+      attempt=$((attempt + 1))
+      : >"$log"
+      GH_TOKEN=$RUN_TOKEN gh api "$r/actions/jobs/$job/logs" >"$log" 2>"$err" || true
+      # One line per log line: no byte-order mark or carriage return; the runner's timestamp, when
+      # present, dropped.
+      lines=""
       for k in claude handoff factory; do
-        l=$(grep -E "^[0-9TZ:.-]+ RESULT $k=" "$log" | tail -n1 | cut -d' ' -f2- | tr -d '`\r' | cut -c1-300) || l=""
+        l=$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' "$log" | grep -E "^([0-9]{4}-[0-9TZ:.-]+ )?RESULT $k=" |
+          tail -n1 | sed -E 's/^[0-9]{4}-[0-9TZ:.-]+ //' | tr -d '`\r' | cut -c1-300) || l=""
         [[ -z $l ]] || lines+="$l"$'\n'
       done
-    fi
+      [[ $lines != *"RESULT claude="* ]] || break
+      [[ $wait != last ]] || break
+      echo "LOG attempt $attempt: no RESULT lines yet ($(head -n1 "$err" | tr -cd '[:print:]' | cut -c1-120))"
+      sleep "$wait"
+    done
   fi
   {
     printf 'The factory job ended `%s` and publish `%s`.\n\n' "${FACTORY_RESULT:-unknown}" "${PUBLISH_RESULT:-unknown}"

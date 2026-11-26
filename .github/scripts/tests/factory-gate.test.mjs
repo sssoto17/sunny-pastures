@@ -425,6 +425,45 @@ describe("factory.yml", () => {
 		expect(yml).not.toMatch(/CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '?0/);
 	});
 
+	// #635: the broker does the one write the admin allowed (pnpm-lock.yaml, node_modules), started
+	// after bubblewrap and before Claude, holding nothing secret, its answers where Claude can't write.
+	it("starts the dependency broker before Claude, with no secret, answering from /srv", () => {
+		const start = factory.indexOf("name: Start the dependency broker");
+		expect(start).toBeGreaterThan(factory.indexOf("name: Install bubblewrap for the env scrub"));
+		expect(start).toBeLessThan(factory.indexOf("id: claude"));
+		const step = factory.slice(start, factory.indexOf("id: claude"));
+		// Root runs a root-owned copy of the script, never the checkout's, which the file tools can
+		// rewrite while bash is still reading it (#645's delta review, N2).
+		expect(step).toContain(
+			'sudo install -o root -g root -m 0555 .github/scripts/factory-deps.sh "$FACTORY_DEPS_OUT/factory-deps.sh"',
+		);
+		expect(step).toContain('bash "$FACTORY_DEPS_OUT/factory-deps.sh" serve');
+		expect(step).not.toContain("bash .github/scripts/factory-deps.sh serve");
+		expect(step).toContain("FACTORY_DEPS_OUT: /srv/factory-deps");
+		expect(step).not.toMatch(/secrets\.|github\.token|GH_TOKEN|uses:/);
+		expect(step).toMatch(/::error::the dependency broker didn't start"; exit 1/);
+		// Root's, so the runner user Claude runs as can't change what it trusts (#645's review);
+		// started with a fixed environment, pnpm run as the runner user.
+		expect(step).toContain('sudo install -d -o root -g root -m 0755 "$FACTORY_DEPS_OUT"');
+		expect(step).toMatch(/sudo -n nohup setsid env -i PATH=\/usr\/bin:\/bin /);
+		expect(step).toContain('FACTORY_DEPS_USER="$(id -u):$(id -g)"');
+		// The file tools run in Claude's own process, outside its Bash sandbox: denied there too.
+		const denied = factory.match(/--disallowedTools "([^"]*)"/)[1].split(",");
+		for (const tool of ["Edit", "Write", "MultiEdit"]) {
+			expect(denied).toContain(`${tool}(//srv/factory-deps/**)`);
+		}
+		for (const f of ["pnpm-workspace.yaml", "package.json", ".npmrc", "pnpm-lock.yaml"]) {
+			for (const tool of ["Edit", "Write", "MultiEdit"]) {
+				expect(denied).toContain(`${tool}(/\${{ github.workspace }}/${f})`);
+			}
+		}
+		const claude = factory.slice(factory.indexOf("id: claude"), factory.indexOf("id: handoff"));
+		// Requests go in the hand-off folder, which Claude has with --add-dir.
+		expect(claude).toContain("FACTORY_DEPS: ${{ env.OUT }}/deps");
+		expect(claude).toContain("--add-dir ${{ env.OUT }}");
+		expect(claude).toContain("FACTORY_DEPS_OUT: /srv/factory-deps");
+	});
+
 	it("pins the App's bot user id once, for Claude's commits and for publish's identity check", () => {
 		expect(yml).toMatch(/^ {2}FACTORY_BOT_ID: '355564973'$/m);
 		expect(factory).toContain("bot_id: ${{ env.FACTORY_BOT_ID }}");
