@@ -137,6 +137,19 @@ describe("floor guard, vendored skill folders", () => {
 		expect(r.out).toContain("[unfinished-work] .claude/hooks/hook.sh:2");
 	});
 
+	// The case the name check exists for (review of #669): a nested name would make a new folder
+	// inside one of our own skills look like a new vendored one.
+	it("never lets a nested name skip a new folder inside one of our skills", () => {
+		setup();
+		repo.write({
+			"skills-lock.json": lock(["upstream", "ours/fresh"]),
+			".claude/skills/ours/fresh/run.js": `// ${PENDING}\n`,
+		});
+		const r = guard();
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("[unfinished-work] .claude/skills/ours/fresh/run.js:1");
+	});
+
 	it("skips nothing for an entry with no source", () => {
 		setup();
 		repo.write({
