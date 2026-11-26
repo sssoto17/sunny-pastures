@@ -482,6 +482,13 @@ describe("factory.yml", () => {
 		expect(claude).toMatch(/CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'/);
 	});
 
+	// #659: run 45883747890 ended its turn "waiting" on two background reviews, and the run ended
+	// with the turn, so nothing was handed off.
+	it("starts Claude with background agents and shells off", () => {
+		const claude = factory.slice(factory.indexOf("id: claude"), factory.indexOf("id: handoff"));
+		expect(claude).toMatch(/^ {10}CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'$/m);
+	});
+
 	it("mints the App's token only on the fresh publish runner, after the hand-off is checked", () => {
 		expect(publish.indexOf("factory-publish.sh")).toBeLessThan(
 			publish.indexOf("create-github-app-token"),
@@ -585,6 +592,34 @@ describe("factory.yml", () => {
 		expect(report).toMatch(/needs: \[switch, gate, factory, publish\]/);
 		expect(report).toContain("job_minutes");
 		expect(factory).toContain("total_cost_usd");
+	});
+});
+
+// #659: the factory prompt says what a refused commit means and keeps every review in the
+// foreground, and the run always ends with a FACTORY line.
+describe(".github/factory-prompt.md (#659)", () => {
+	const prompt = readFileSync(
+		fileURLToPath(new URL("../../factory-prompt.md", import.meta.url)),
+		"utf8",
+	).replace(/\s+/g, " ");
+
+	it("names the commit gates and says a refusal is read, fixed or a stop with its reason", () => {
+		expect(prompt).toContain(".claude/hooks/fallow-gate.sh");
+		expect(prompt).toMatch(/read the reason/i);
+		expect(prompt).toContain("FACTORY stopped: <reason>");
+		expect(prompt).toMatch(/never retry the same commit unchanged/i);
+		expect(prompt).toMatch(/never bypass a gate/i);
+	});
+
+	it("forbids background agents and tasks, and ending a turn while waiting for one", () => {
+		expect(prompt).toMatch(/never run an agent, a subagent or a command in the background/i);
+		expect(prompt).toContain("`run_in_background`");
+		expect(prompt).toMatch(/never end your turn while waiting/i);
+		expect(prompt).toMatch(/reviews run in the foreground or not at all/i);
+	});
+
+	it("always ends with a FACTORY line", () => {
+		expect(prompt).toMatch(/every run ends with a `FACTORY` line/i);
 	});
 });
 

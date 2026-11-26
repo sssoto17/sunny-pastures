@@ -286,6 +286,10 @@ jobs:
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
+          # No background agents or shells (#659): the run ends with Claude's turn, so run
+          # 45883747890 ended "waiting" on two background reviews and handed off nothing. This takes
+          # run_in_background off the Agent and Bash tools; .github/factory-prompt.md says the same.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
           FACTORY_DEPS: ${{ env.OUT }}/deps # the broker's request folder (#635), in an --add-dir
           FACTORY_DEPS_OUT: /srv/factory-deps
         with:
@@ -433,7 +437,10 @@ jobs:
       # execution file, the last 25 tool calls (main session and subagents) with only their input's
       # gist: a Bash command, a file path, a subagent's description, a skill's name; a call that
       # failed adds the first line of its error (a hook's, a permission rule's or git's refusal);
-      # tool output is never printed otherwise. Then the calls a permission rule denied, and the
+      # tool output is never printed otherwise. Then the calls a hook or permission rule denied, each
+      # with its reason as up to 6 `TURNS reason` lines (#659: run 45883747890's 7 refused commits
+      # showed none): the message Claude got back, with a hook's `[<command>]: ` prefix (the hook's
+      # own command line from .claude/settings.json) cut, so the hook's words show. Then the
       # last 10 lines of Claude's final message. Each piece is the model's words, so jq cleans it as
       # the `result` step does (control, format and line-separator characters out, no `::` or
       # `##[`), drops anything shaped like a GitHub or Anthropic token (GitHub masks the run's own
@@ -455,13 +462,15 @@ jobs:
             def text: if type == "string" then . elif type == "array" then map(.text? // "") | join(" ") else tostring end;
             def gist: (.input | objects // {}) as $i | if .name == "Bash" then ($i.command // "")
               else ($i.file_path // $i.path // $i.description // $i.skill // $i.pattern // "") end;
+            def reason: text | sub("^(?<h>\\S+ hook error: )\\[.*?\\]:\\s*"; "\(.h)") | split("\n") | map(select(test("\\S")));
             (map(objects | select(.type == "user") | .message.content | arrays | .[] | objects | select(.type == "tool_result")
               | select(.tool_use_id | strings) | {key: .tool_use_id, value: .}) | from_entries) as $res
             | (map(objects | select(.type == "assistant") | .message.content | arrays | .[] | objects | select(.type == "tool_use"))
                 | .[-25:][] | "TURNS call \(.name) \(gist | clean)"
-                + ($res[.id | strings // ""] | if . == null then " -> no result" elif .is_error then " -> error: \(.content | text | split("\n") | map(select(test("\\S"))) | first // "" | clean)" else "" end)),
+                + ($res[.id | strings // ""] | if . == null then " -> no result" elif .is_error then " -> error: \(.content | reason | first // "" | clean)" else "" end)),
               (map(objects | select(.type == "result")) | last | (.permission_denials | arrays)[] | objects
-                | "TURNS denied \(.tool_name) \((.tool_input | objects // {}) | .command // .file_path // "" | clean)"),
+                | "TURNS denied \(.tool_name) \((.tool_input | objects // {}) | .command // .file_path // "" | clean)",
+                  ($res[.tool_use_id | strings // ""] | objects | .content | reason | .[:6][] | "TURNS reason \(clean)")),
               (map(objects | select(.type == "result")) | last | .result | strings | split("\n") | .[-10:][]
                 | "TURNS said \(clean)")' "$f" 2>/dev/null || echo "TURNS none: the execution file isn't readable JSON"
 

@@ -619,20 +619,26 @@ which secret", below).
   job, and `post` still posts the verdict (its `if:` asks for a `review` job that wasn't cancelled
   and a verdict). GitHub drops a job output that holds a secret's value, so a verdict quoting the
   seat token never reaches `post`, and nothing is posted.
-- **The diff, with its control characters visible (#648; admin, 26 Nov 2026).** `gh pr diff` refuses
-  a diff that holds a terminal escape sequence, which stopped the review of #645 before Claude ran.
-  `gather` reads the diff by REST instead (`gh api` with `Accept: application/vnd.github.diff`, the
-  endpoint `gh pr diff` calls, which `gh api` passes through as it is) and pipes it through
+- **The diff, with its control characters visible (#648, #668; admin, 26 Nov 2026).** `gh pr diff`
+  refuses a diff that holds a terminal escape sequence, which stopped the review of #645 before
+  Claude ran. `gather` reads the diff by REST instead (`gh api` with
+  `Accept: application/vnd.github.diff`, the endpoint `gh pr diff` calls). The runner's `gh` refuses
+  that response too unless the call passes `--allow-escape-sequences` (#668: run 45890313722 on
+  #661), so the call passes it: the bytes go to a file, never a terminal. It pipes the file through
   `.github/scripts/visible-escapes.mjs`, a filter: each ESC byte becomes `<ESC>`, every other
   control character (C0 but tab, LF and CR; DEL; C1 as UTF-8) becomes `<U+XXXX>`, and every other
   byte passes unchanged. It writes a count to `diff-escapes.txt`, and `review-prompt.md` tells the
   reviewer what the markers mean. Alternatives considered: `gh pr diff --allow-escape-sequences`
-  (not in every `gh`: 2.89 lacks it, and the runner's version moves with the image) and stripping
-  the sequences (rejected by the admin: an escape sequence can hide text, so the reviewer must see
-  it). A failed `gather` names its reason: an `ERR` trap writes the failing command's own text
-  (never the PR's), its line and statuses as the step's `failure` output, and the Report step turns
-  that into its annotation and the run summary instead of "no execution file". Tests:
-  `.github/scripts/tests/visible-escapes.test.mjs`.
+  (#648 chose `gh api` to avoid the flag, as 2.89 lacks it, but the runner's `gh` refuses from
+  `gh api` as well; the runner's `gh` names the flag in its refusal, and the job runs only there;
+  with the flag either works, so #668 kept the tested `gh api` call and added the flag to it), a
+  fallback without the flag for a `gh` that lacks it (as `factory-outcome.sh` does, #659: not
+  needed, as `review` runs only on the runner's `gh`) and stripping the sequences (rejected by the
+  admin: an escape sequence can hide text, so the reviewer must see it). The test's fake `gh`
+  refuses an ESC byte without the flag, as the runner's does. A failed `gather` names its reason: an
+  `ERR` trap writes the failing command's own text (never the PR's), its line and statuses as the
+  step's `failure` output, and the Report step turns that into its annotation and the run summary
+  instead of "no execution file". Tests: `.github/scripts/tests/visible-escapes.test.mjs`.
 - **Apply, in its own job (#454).** `post` runs on a fresh runner that never ran the model, and is
   the only job that enters `review` and mints the App's token, scoped to contents and pull requests.
   The hand-off is the `review` job's outputs: the verdict, the head, the base and its commit as the
@@ -1300,12 +1306,21 @@ and neither the sweep nor the gate reads Status, Mode or Track.
    or filter) runs after Claude on that runner. A last step, `Claude's last turns` (`if: always()`),
    logs a digest of the execution file as `TURNS` lines: the last 25 tool calls with only their gist
    (a command, a path, a description), the first line of each failed call's error, the denied calls
-   and the last 10 lines of the final message, each piece cleaned as the `RESULT factory=` line is,
-   cut to 200 characters and with token shapes redacted. Tool output is never logged otherwise,
-   since the log is public. _Alternative:_ the execution file as a short-lived artifact was
-   rejected: a public repo's artifacts are readable by any signed-in user, they hold every tool
-   output (any file Claude read), and `actions/upload-artifact` is a new action (as for the
-   reviewer's transcript, above).
+   each with up to 6 `TURNS reason` lines (the message the hook or permission rule sent back, with a
+   hook's `[<command>]: ` prefix cut; #659) and the last 10 lines of the final message, each piece
+   cleaned as the `RESULT factory=` line is, cut to 200 characters and with token shapes redacted.
+   Tool output is never logged otherwise, since the log is public. _Alternative:_ the execution file
+   as a short-lived artifact was rejected: a public repo's artifacts are readable by any signed-in
+   user, they hold every tool output (any file Claude read), and `actions/upload-artifact` is a new
+   action (as for the reviewer's transcript, above). The Claude step sets
+   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` (#659): the run ends with Claude's turn, and run
+   45883747890 (#597) ended "waiting" on two background reviews with nothing handed off, so the
+   Agent and Bash tools lose `run_in_background`, and `factory-prompt.md` says reviews run in the
+   foreground or not at all. The prompt also tells Claude that a refused `git commit` carries the
+   Fallow gate's (or a permission rule's) reason, to fix what it names or stop with
+   `FACTORY stopped: <reason>`, and to end every run with a `FACTORY` line. _Alternative:_ the
+   prompt alone, rejected because a rule the model can miss once is worth a setting that removes the
+   option; the gate itself is unchanged and still applies to the factory.
 4. **`publish`** runs on a fresh runner that never ran the model, with `main`'s checkout.
    `.github/scripts/factory-publish.sh` refuses (`PUBLISH refused: …`, a failed job) a hand-off with
    any entry but the four files, a branch that isn't `<n>-<slug>`, a body without `Closes #<n>`, a
@@ -1319,7 +1334,12 @@ and neither the sweep nor the gate reads Status, Mode or Track.
    reconcile) moves the issue's `factory:*` label (below, "The factory sweep, built") on a fresh
    runner in environment `factory`, with an App token minted with `issues: write` only:
    `factory:review` when publish opened a PR or a fix round ran, `factory:failed` and one comment
-   when the run opened none.
+   when the run opened none. The comment quotes the factory job's `RESULT` lines, read from its log
+   with `gh api --allow-escape-sequences` (the log echoes each script in ANSI colour, and the
+   runner's `gh` refuses such a response without the flag; a `gh` that lacks the flag is asked again
+   without it), with escape sequences and control characters dropped before matching (#659; run
+   45883747890's comment read none). Dropped, not marked as #648 does for the reviewer: only the
+   workflow's own `RESULT` lines are quoted, and those hold no escape the admin needs to see.
 6. **`report`** (`if: always()`) logs `total_cost_usd` and turns, each job's billed minutes (GitHub
    rounds each job up) and their sum, and the PR.
 
@@ -2402,9 +2422,11 @@ the gap: `guard / secrets` and `ci / audit` below.
     ([Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)).
   - Allowed actions: **"Allow sssoto17, and select non-sssoto17, actions and reusable workflows"**,
     with GitHub-created actions allowed and an explicit list for the rest (for example
-    `supabase/setup-cli@*`, `pnpm/action-setup@*`) as the CI/CD step adds them. Today it's "local
-    only", which blocks GitHub-authored actions such as `actions/checkout` and `actions/labeler`, so
-    this must change before the first workflow runs.
+    `pnpm/action-setup@*`) as the CI/CD step adds them. The Supabase CLI needs no entry: CI installs
+    it with the local `supabase-cli` action, a release download checked against a hash written
+    there, not `supabase/setup-cli` (admin, 26 Nov 2026, on #51). Today it's "local only", which
+    blocks GitHub-authored actions such as `actions/checkout` and `actions/labeler`, so this must
+    change before the first workflow runs.
   - **Every action pinned to a full commit SHA with a version comment**, as above. Turn on "Require
     actions to be pinned to a full-length commit SHA". The setting exists (the REST field
     `sha_pinning_required`, off today;

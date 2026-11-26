@@ -163,10 +163,11 @@ jobs:
 
           gh api --paginate "$r/pulls/$PR/files?per_page=100" --jq '.[] | {filename, status,
             additions, deletions, previous_filename}' | jq -s . >"$CTX/files.json"
-          # The diff by REST, which passes it as it is (#648): `gh pr diff` refuses one that holds a
-          # terminal escape sequence. Then each control character becomes a visible marker, and
-          # diff-escapes.txt says how many (review-prompt.md).
-          gh api -H "Accept: application/vnd.github.diff" "$r/pulls/$PR" >"$RUNNER_TEMP/diff.raw"
+          # The diff by REST (#648). The runner's gh refuses a response that holds a terminal escape
+          # sequence, from `gh api` as from `gh pr diff` (#668: run 45890313722 on #661), so the
+          # call allows them: the bytes go to a file, never a terminal. Then each control character
+          # becomes a visible marker, and diff-escapes.txt says how many (review-prompt.md).
+          gh api --allow-escape-sequences -H "Accept: application/vnd.github.diff" "$r/pulls/$PR" >"$RUNNER_TEMP/diff.raw"
           node .github/scripts/visible-escapes.mjs "$CTX/diff.patch" <"$RUNNER_TEMP/diff.raw" \
             >"$CTX/diff-escapes.txt"
           cat "$CTX/diff-escapes.txt"

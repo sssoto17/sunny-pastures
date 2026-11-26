@@ -2,11 +2,11 @@
 # The load VM devcontainer's postCreateCommand (ADR-0009, section 4; #501). Enables Corepack, runs
 # the frozen install, and installs the Supabase CLI and uv from the versions already pinned
 # elsewhere, never a second copy of them:
-#   - the Supabase CLI: SUPABASE_VERSION and SUPABASE_SHA256 in the supabase-stack action, which CI
+#   - the Supabase CLI: SUPABASE_VERSION and SUPABASE_SHA256 in the supabase-cli action, which CI
 #     installs from too; `pnpm supabase:check` then checks the binary against package.json's pin.
 #   - uv: `required-version` in tools/load/pyproject.toml, the load project (#388). Its archive's
 #     hash is below, keyed by version, since no file holds it yet.
-# Each download is checked against its hash before it is unpacked, as the supabase-stack action and
+# Each download is checked against its hash before it is unpacked, as the supabase-cli action and
 # workflow-lint.yml do. linux amd64 only: those are the only hashes pinned. Prints no secret.
 set -euo pipefail
 
@@ -48,7 +48,7 @@ corepack enable --install-directory "$bin"
 # would abort rather than ask to replace it, so it replaces it without asking.
 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile --config.confirmModulesPurge=false
 
-action=.github/actions/supabase-stack/action.yml
+action=.github/actions/supabase-cli/action.yml
 supabase_version=$(pin SUPABASE_VERSION "$action")
 supabase_sha256=$(pin SUPABASE_SHA256 "$action")
 archive="supabase_${supabase_version}_linux_amd64.tar.gz"
