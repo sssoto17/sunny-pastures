@@ -630,7 +630,8 @@ which secret", below).
   byte passes unchanged. It writes a count to `diff-escapes.txt`, and `review-prompt.md` tells the
   reviewer what the markers mean. Alternatives considered: `gh pr diff --allow-escape-sequences`
   (#648 chose `gh api` to avoid the flag, as 2.89 lacks it, but the runner's `gh` refuses from
-  `gh api` as well; the runner's `gh` names the flag in its refusal, and the job runs only there), a
+  `gh api` as well; the runner's `gh` names the flag in its refusal, and the job runs only there;
+  with the flag either works, so #668 kept the tested `gh api` call and added the flag to it), a
   fallback without the flag for a `gh` that lacks it (as `factory-outcome.sh` does, #659: not
   needed, as `review` runs only on the runner's `gh`) and stripping the sequences (rejected by the
   admin: an escape sequence can hide text, so the reviewer must see it). The test's fake `gh`

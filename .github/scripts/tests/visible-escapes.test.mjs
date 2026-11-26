@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runBlock } from "./workflow-step.mjs";
+import { GH_ESCAPE_REFUSAL, runBlock } from "./workflow-step.mjs";
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const SCRIPT = fileURLToPath(new URL("../visible-escapes.mjs", import.meta.url));
@@ -138,12 +138,7 @@ case "$*" in
   *"pulls/7 "*) cat "${dir}/pr.json" >"$out" ;;
   *) echo "fake gh: unexpected call: gh $*" >&2; exit 9 ;;
 esac
-if grep -q $'\\x1b' "$out" && [[ " $* " != *" --allow-escape-sequences "* ]]; then
-  echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2
-  exit 1
-fi
-cat "$out"
-`,
+${GH_ESCAPE_REFUSAL}`,
 	);
 	chmodSync(join(bin, "gh"), 0o755);
 	for (const f of ["out", "env"]) writeFileSync(join(dir, f), "");
@@ -200,7 +195,7 @@ function report({ outcome, failure = "", gate = "true" }) {
 	};
 }
 
-describe("review.yml (#648)", () => {
+describe("review.yml (#648, #668)", () => {
 	it("gathers a diff that holds escape sequences, with each one visible", () => {
 		const g = gather();
 		expect(g.log).not.toMatch(/fake gh: unexpected call/);

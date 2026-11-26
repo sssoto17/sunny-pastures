@@ -15,3 +15,13 @@ export const runBlock = (yml, name) => {
 		.map((l) => l.slice(10))
 		.join("\n");
 };
+
+// Test helper: the lines a fake gh ends with, after it has written its answer to "$out". Like the
+// runner's gh (#668: review run 45890313722 on #661), it refuses an answer that holds an ESC byte
+// unless the call passes --allow-escape-sequences, then prints the answer.
+export const GH_ESCAPE_REFUSAL = `if grep -q $'\\x1b' "$out" && [[ " $* " != *" --allow-escape-sequences "* ]]; then
+  echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2
+  exit 1
+fi
+cat "$out"
+`;

@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { GH_ESCAPE_REFUSAL } from "./workflow-step.mjs";
+
 const SCRIPT = fileURLToPath(new URL("../reviewer-stopped.sh", import.meta.url));
 const TITLE = "Reviewer stopped: startup_failure on review.yml";
 const SINCE = "2026-11-22T10:00:00Z";
@@ -44,13 +46,9 @@ case "$*" in
   *) echo "fake gh: unexpected call: $*" >&2; exit 98 ;;
 esac
 [[ -f $d/$f ]] || f=empty.json
-out=$(jq -r "$jqf" "$d/$f")
-if [[ $out == *$'\\x1b'* && " $* " != *" --allow-escape-sequences "* ]]; then
-  echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2
-  exit 1
-fi
-[[ -z $out ]] || printf '%s\\n' "$out"
-`;
+out="$d/response"
+jq -r "$jqf" "$d/$f" >"$out"
+${GH_ESCAPE_REFUSAL}`;
 
 const run = (id, created = "2026-11-22T11:00:00Z") => ({
 	id,
