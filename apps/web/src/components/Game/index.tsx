@@ -10,8 +10,10 @@ import { createFarmStore, type FarmStore } from "@/client/store";
 import { Button, ToastRegion } from "@/components/ui";
 
 import { Hud } from "../hud";
+import { LevelUp } from "../levelUp";
 import { FarmMap } from "../map";
 import { OrderBoard } from "../orderBoard";
+import { PlotPopover } from "../plots";
 
 /**
  * The game's client root (ADR-0010): it owns loading the farm through `src/client/` and shows the
@@ -57,9 +59,19 @@ export default function Game({ store }: GameProps) {
 
 	return (
 		<>
-			<FarmMap farm={predicted} />
+			<FarmMap
+				farm={predicted}
+				renderLot={(lot, button) =>
+					lot.kind === "plot" ? (
+						<PlotPopover store={farmStore} index={lot.index} label={lot.label} trigger={button} />
+					) : (
+						button
+					)
+				}
+			/>
 			<Hud store={farmStore} />
 			<ToastRegion />
+			<LevelUp store={farmStore} />
 			<div style={ordersStyle}>
 				<OrderBoard store={farmStore} />
 			</div>
