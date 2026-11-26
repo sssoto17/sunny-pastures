@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -67,6 +67,23 @@ describe("Game", () => {
 
 		expect(await screen.findByRole("group", { name: "Farm map" })).toBeTruthy();
 		expect(screen.queryByRole("status")).toBeNull();
+	});
+
+	it("shows the HUD over the map once the farm is ready, and its refusals as toasts", async () => {
+		const api: Api = {
+			loadFarm: () => Promise.resolve(farm),
+			sendAction: () => Promise.reject(new Error("The game sends nothing yet.")),
+		};
+		const store = createFarmStore({ api });
+		render(<Game store={store} />);
+
+		expect(await screen.findByRole("region", { name: "Farm status" })).toBeTruthy();
+
+		act(() => {
+			store.setState({ lastRefusal: "Nothing is ready to harvest." });
+		});
+
+		expect(screen.getByRole("alert").textContent).toBe("Nothing is ready to harvest.");
 	});
 
 	it("shows the Orders button over the map once the farm is ready", async () => {

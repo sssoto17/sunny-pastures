@@ -314,7 +314,7 @@ has a row here, `guard / code-owned` and `guard / acceptance` included; ADR-0004
 | `ci / test` | unit and property tests, including changed-line coverage (MUST-17.1) |
 | `ci / boundaries` | MUST-10.1: `packages/sim` imports nothing outside itself, and client code never imports `src/server/` |
 | `ci / bench` | sim speed: `advance()` and `apply()` medians, inside BASE-04's budget |
-| `ci / ui` | BASE-02 (browsers and widths) and BASE-05 (prediction within 100 ms), tool chosen in #44 |
+| `ci / ui` | BASE-02 (browsers and widths) and BASE-05 (prediction within 100 ms), Playwright ([ADR-0011](0011-browser-tests.md)) |
 | `ci / determinism` | the determinism gate (MUST-17.1) |
 | `ci / acceptance` | acceptance tests on a throwaway stack (MUST-15.3, MUST-17.1) |
 | `ci / audit` | `pnpm audit --audit-level=high`, the required dependency check (area 8) |

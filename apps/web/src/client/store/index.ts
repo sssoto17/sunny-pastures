@@ -176,6 +176,38 @@ export const selectCoins = (store: FarmStore): number | null => store.predicted?
 export const selectLevel = (store: FarmStore): number | null =>
 	store.predicted === null ? null : countLevels(store.predicted.xp);
 
+export interface LevelProgress {
+	/** From 1 (MUST-05.3). */
+	readonly level: number;
+	readonly xp: number;
+	/** The XP that reached this Level. */
+	readonly levelXp: number;
+	/** The XP that reaches the next Level; null at the top Level. */
+	readonly nextLevelXp: number | null;
+}
+
+let lastProgress: LevelProgress | null = null;
+
+/**
+ * The Level with the XP toward the next one, from the Level table (MUST-05.3). The same object
+ * while XP stays the same, so the clock tick doesn't redraw what shows it.
+ */
+export const selectLevelProgress = (store: FarmStore): LevelProgress | null => {
+	if (store.predicted === null) return null;
+
+	const { xp } = store.predicted;
+	if (lastProgress?.xp === xp) return lastProgress;
+
+	const level = countLevels(xp);
+	lastProgress = {
+		level,
+		xp,
+		levelXp: sliceContent.levels[level - 1]?.xp ?? 0,
+		nextLevelXp: sliceContent.levels[level]?.xp ?? null,
+	};
+	return lastProgress;
+};
+
 export interface FarmStorage {
 	readonly silo: StoredGoods;
 	readonly barn: StoredGoods;
@@ -184,6 +216,8 @@ export interface FarmStorage {
 interface StoredGoods {
 	/** Goods by good id; a good has a key only while it has some. */
 	readonly goods: Readonly<Record<string, number>>;
+	/** The goods held, in all: what counts against `capacity` (MUST-06.4). */
+	readonly used: number;
 	readonly capacity: number;
 }
 
@@ -197,8 +231,8 @@ export const selectStorage = (store: FarmStore): FarmStorage | null => {
 	if (cached !== undefined) return cached;
 
 	const storage = {
-		silo: { goods: farm.silo, capacity: sliceContent.silo.capacity },
-		barn: { goods: farm.barn, capacity: sliceContent.barn.capacity },
+		silo: { goods: farm.silo, used: countGoods(farm.silo), capacity: sliceContent.silo.capacity },
+		barn: { goods: farm.barn, used: countGoods(farm.barn), capacity: sliceContent.barn.capacity },
 	};
 	storageByFarm.set(farm, storage);
 	return storage;
@@ -234,4 +268,8 @@ export const selectOrders = (store: FarmStore): readonly OrderSlot[] =>
  */
 function countLevels(xp: number): number {
 	return sliceContent.levels.filter((level) => level.xp <= xp).length;
+}
+
+function countGoods(goods: Readonly<Record<string, number>>): number {
+	return Object.values(goods).reduce((sum, count) => sum + count, 0);
 }

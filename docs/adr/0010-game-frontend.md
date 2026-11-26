@@ -94,7 +94,7 @@ and has no install scripts. Approved by the admin, one by one.
 | `lucide-react` | 1.73.0 | Interface icons only (close, zoom, coins); goods come from the art | Phosphor (no release since May 2025) |
 | `tailwindcss` + `@tailwindcss/postcss` | 4.3.5 | Design tokens in `@theme`, utility styling | CSS Modules + custom properties (spike's first pick: no dependency, slower to write) |
 | `tailwind-variants` | 4.0.2 | Component variants keyed on props (section 6) | hand-written class maps; `cva` |
-| `jsdom` (dev) | 31.0.1 | DOM for the `ui` Vitest project | `happy-dom` 21.0.4 (lighter, less complete where React Aria's popovers and pointer events need it); Vitest Browser Mode (a browser in `ci / test`; that is #44's browser-test decision) |
+| `jsdom` (dev) | 31.0.1 | DOM for the `ui` Vitest project | `happy-dom` 21.0.4 (lighter, less complete where React Aria's popovers and pointer events need it); Vitest Browser Mode (a browser in `ci / test`; not chosen, see [ADR-0011](0011-browser-tests.md), section 2) |
 | `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event` (dev) | 16.3.3, 10.4.2, 14.6.10 | Component tests by role and name | — |
 
 - **Fonts:** Fredoka and Nunito through `next/font` (built into `next` 16.4.6), no package.

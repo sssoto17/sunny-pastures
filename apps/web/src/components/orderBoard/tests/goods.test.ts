@@ -53,8 +53,8 @@ describe("listNeeds", () => {
 			xp: 4,
 		};
 		const storage = {
-			silo: { goods: { wheat: 3, egg: 9 }, capacity: 50 },
-			barn: { goods: { wheat: 9 }, capacity: 50 },
+			silo: { goods: { wheat: 3, egg: 9 }, used: 12, capacity: 50 },
+			barn: { goods: { wheat: 9 }, used: 9, capacity: 50 },
 		};
 
 		expect(listNeeds(order, storage)).toEqual([

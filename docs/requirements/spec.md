@@ -64,7 +64,7 @@ Words in **bold** in the criteria, and the terms they use, are defined in
 | `content` | Validation test over the content data |
 | `accept` | Black-box acceptance test over HTTP in `tests/acceptance/` (MUST-15) |
 | `attack` | Cheat-attack test for a threat in the threat model (MUST-16) |
-| `ui` | Test in a real browser. _Open_: the tool, which is a new dependency (#44) |
+| `ui` | Test in a real browser: Playwright in Chromium, Firefox and WebKit ([ADR-0011](../adr/0011-browser-tests.md)) |
 | `ci` | A CI step, ruleset or repo setting that enforces it |
 | `playtest` | Observed in playtest 1 or 2 (MUST-18) |
 | `metric` | Measured and reported (MUST-19) |
@@ -458,7 +458,8 @@ The grill checked three more and kept them independent of the log:
 
 ## Open questions
 
-1. **The browser-test tool** behind `ui` is a new dependency to approve. To be decided in #44.
+1. ~~**The browser-test tool**~~ Settled 26 Nov (#44): Playwright, `@playwright/test` pinned
+   exactly, in Chromium, Firefox and WebKit ([ADR-0011](../adr/0011-browser-tests.md)).
 2. **The rate limit for T7** (actions per farm per second), and whether it lives in config or in
    content.
 3. **The OWASP 2025 mapping** in MUST-16: check it against the published list before the report
