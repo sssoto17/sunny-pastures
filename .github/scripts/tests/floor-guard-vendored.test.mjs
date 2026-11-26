@@ -40,7 +40,7 @@ const setup = (base = BASE) => (repo = makeRepo(base));
 const guard = () => repo.run(SCRIPT, [], TODAY);
 
 describe("floor guard, vendored skill folders", () => {
-	it("skips a PENDING and a suppression in a skill folder named in skills-lock.json", () => {
+	it("skips unfinished work and a suppression in a skill folder named in skills-lock.json", () => {
 		setup();
 		repo.write({
 			".agents/skills/upstream/run.js": `export const run = 1;\n// ${PENDING}: upstream's\n// ${SUPPRESSION}\n`,
@@ -71,13 +71,13 @@ describe("floor guard, vendored skill folders", () => {
 
 	it.each([
 		[
-			"a PENDING in a hook",
+			"unfinished work in a hook",
 			".claude/hooks/hook.sh",
 			`#!/bin/sh\n# ${PENDING}\n`,
 			"unfinished-work",
 		],
 		[
-			"a PENDING in a skill the repo wrote",
+			"unfinished work in a skill the repo wrote",
 			".claude/skills/ours/run.js",
 			`// ${PENDING}\n`,
 			"unfinished-work",
@@ -88,7 +88,12 @@ describe("floor guard, vendored skill folders", () => {
 			`// ${SUPPRESSION}\n`,
 			"silenced-checker",
 		],
-		["a PENDING outside .claude", "packages/sim/src/a.ts", `// ${PENDING}\n`, "unfinished-work"],
+		[
+			"unfinished work outside .claude",
+			"packages/sim/src/a.ts",
+			`// ${PENDING}\n`,
+			"unfinished-work",
+		],
 	])("still blocks %s", (_, path, content, rule) => {
 		setup();
 		repo.write({ [path]: content });
@@ -97,7 +102,7 @@ describe("floor guard, vendored skill folders", () => {
 		expect(r.out).toContain(`[${rule}] ${path}:`);
 	});
 
-	it("still blocks a PENDING in a folder the merge base had, when the same diff records it", () => {
+	it("still blocks unfinished work in a folder the merge base had, when the same diff records it", () => {
 		setup();
 		repo.write({
 			"skills-lock.json": lock(["upstream", "ours"]),
@@ -106,7 +111,9 @@ describe("floor guard, vendored skill folders", () => {
 		const r = guard();
 		expect(r.code).toBe(1);
 		expect(r.out).toContain("[unfinished-work] .claude/skills/ours/run.js:1");
-		expect(r.out).toContain('"ours" is new in skills-lock.json');
+		expect(r.out).toContain(
+			".claude/skills/ours/ is newly recorded as vendored (skills-lock.json)",
+		);
 	});
 
 	it("skips a folder recorded at the merge base, once a later diff changes it", () => {
@@ -162,5 +169,52 @@ describe("floor guard, vendored skill folders", () => {
 		const r = guard();
 		expect(r.code).toBe(1);
 		expect(r.out).toContain("[test-made-easier] .agents/skills/upstream/a.test.ts:1");
+	});
+
+	// Impeccable's installer writes no skills-lock.json entry (#609): its record is the engine pin it
+	// puts in the skill, scripts/VERSION beside scripts/engine-checksums.txt.
+	describe("a skill folder holding its installer's engine pin", () => {
+		const PIN = {
+			"scripts/VERSION": "0.1.27\n",
+			"scripts/engine-checksums.txt": "0.1.27 impeccable-linux-x64 abc\n",
+		};
+		const pinned = (dir, files) =>
+			Object.fromEntries(Object.entries(files).map(([p, c]) => [`${dir}/${p}`, c]));
+
+		it("skips a newly vendored folder that holds both files", () => {
+			setup();
+			repo.write(
+				pinned(".claude/skills/impeccable", {
+					...PIN,
+					"scripts/live-browser.js": `// ${PENDING}: upstream's\n`,
+				}),
+			);
+			const r = guard();
+			expect(r.code).toBe(0);
+			expect(r.out).toContain('vendored skill "impeccable" (scripts/VERSION)');
+		});
+
+		it("skips an update to a folder that held them at the merge base", () => {
+			setup({ ...BASE, ...pinned(".claude/skills/impeccable", PIN) });
+			repo.write({ ".claude/skills/impeccable/scripts/live.js": `// ${PENDING}\n` });
+			expect(guard().code).toBe(0);
+		});
+
+		it("still blocks a folder with only one of the two files", () => {
+			setup();
+			repo.write({
+				".claude/skills/half/scripts/VERSION": "1.0.0\n",
+				".claude/skills/half/scripts/live.js": `// ${PENDING}\n`,
+			});
+			expect(guard().code).toBe(1);
+		});
+
+		it("still blocks unfinished work in a folder the merge base had, when the same diff adds the pin", () => {
+			setup();
+			repo.write(pinned(".claude/skills/ours", { ...PIN, "run.js": `// ${PENDING}\n` }));
+			const r = guard();
+			expect(r.code).toBe(1);
+			expect(r.out).toContain("[unfinished-work] .claude/skills/ours/run.js:1");
+		});
 	});
 });

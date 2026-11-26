@@ -79,15 +79,22 @@ Also blocked, with no exception possible:
 
 **Vendored skills are not scanned by the floor guard** (#665, admin, 26 Nov 2026). A third-party
 skill keeps its upstream author's code as shipped, so a `TODO` or a suppression in it is theirs, not
-ours, and rewording it would come back with the next update. What counts as vendored is a record,
-never a glob: a skill named in `skills-lock.json` (code-owned), in its two folders,
-`.agents/skills/<name>/` and `.claude/skills/<name>/`. The entry needs a `source`, and its name is
-one folder name. The guard reads the record from the PR's head, since the PR that vendors a skill
-adds its entry, but a name the PR adds covers only a folder the merge base didn't have: recording a
-folder that is already ours doesn't skip the edits made to it in the same PR. A file moved into or
-out of a vendored folder is still scanned. The guard names every skill it skipped in its log. The
-hooks, our own skills and everything else under `.claude/` stay scanned, and the secrets scan,
-Semgrep and every other check still read vendored folders.
+ours, and rewording it would come back with the next update. What counts as vendored is a record its
+installer wrote, never a glob, and both are code-owned:
+
+- a skill named in `skills-lock.json`, the `skills` CLI's record, in the two folders it writes,
+  `.agents/skills/<name>/` and `.claude/skills/<name>/`. The entry needs a `source`, and its name is
+  one folder name;
+- a folder under `.agents/skills/` or `.claude/skills/` holding both `scripts/VERSION` and
+  `scripts/engine-checksums.txt`, the engine pin Impeccable's installer writes in place of a lock
+  entry (#609).
+
+The guard reads the record from the PR's head, since the PR that vendors a skill adds it, but a
+record the PR adds covers only a folder the merge base didn't have: recording a folder that is
+already ours doesn't skip the edits made to it in the same PR. A file moved into or out of a
+vendored folder is still scanned. The guard names every skill it skipped in its log. The hooks, our
+own skills and everything else under `.claude/` stay scanned, and the secrets scan, Semgrep and
+every other check still read vendored folders.
 
 ## Enforced with numbers
 
