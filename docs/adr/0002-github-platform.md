@@ -629,12 +629,15 @@ which secret", below).
   Feature slice, Interface change, Security-sensitive code (no globs until M3), the issue rows and
   Not converging need reading, so they stay the verdict's.
 - **`labeled`:** adding `review:admin` re-runs the review, which dismisses the App's earlier
-  approval and posts a COMMENT (test (e)); a later COMMENT alone wouldn't replace an APPROVE. The
-  job skips every other label, and the label the App adds itself (`sender` is
-  `sunny-reviewer[bot]`), so it can't loop. Its concurrency group is on the job, so a skipped event
-  doesn't cancel a running review. `post` has a group of its own that never cancels (#454): an older
-  run's `post` can't cancel a newer run's review, and a `post` that started finishes its review;
-  `post-review.sh` posts nothing once the head has moved.
+  approval and posts a COMMENT (test (e)); a later COMMENT alone wouldn't replace an APPROVE. Adding
+  it while the App's Request changes stands on the head re-runs it too (#641; admin, 26 Nov 2026):
+  the label can be what a finding asked for, and with no push the head would otherwise stay
+  reviewed, so the Request changes would block for good. That re-run follows "The bot's earlier
+  Request changes" unchanged. The job skips every other label, and the label the App adds itself
+  (`sender` is `sunny-reviewer[bot]`), so it can't loop. Its concurrency group is on the job, so a
+  skipped event doesn't cancel a running review. `post` has a group of its own that never cancels
+  (#454): an older run's `post` can't cancel a newer run's review, and a `post` that started
+  finishes its review; `post-review.sh` posts nothing once the head has moved.
 - **Once per head (#274, 16 Nov; retro 2026-11-15, item F).** Before Claude runs, the `gather` step
   asks `.github/scripts/review-gate.sh`, and every later step waits on its answer. It skips a head
   the App has already reviewed: a review of its own on that commit with a non-empty body, which is
@@ -642,7 +645,14 @@ which secret", below).
   run that died before its summary is retried. The exception keeps test (e) true: the review runs
   again while the PR carries `review:admin` and an approval of the App's still stands (state
   `APPROVED`, not yet dismissed), whatever the event, since a `reopened` at the same head can cancel
-  the `labeled` run. Tests: `.github/scripts/tests/review-gate.test.mjs`.
+  the `labeled` run. A second exception (#641; admin, 26 Nov 2026): on a `labeled` event, the review
+  runs again while the PR carries `review:admin` and the App's standing review is a Request changes
+  on this head. Standing means its latest review that isn't a plain comment, as GitHub counts them:
+  a COMMENTED review doesn't replace a Request changes, and a dismissed one reads `DISMISSED`. Only
+  on `labeled`: once per head holds for every other event, so a `reopened` that cancels that run
+  leaves the Request changes standing until the label is added again. The job's `if:` still drops
+  the label the App adds itself, so a Request changes whose finding the App answered in the same run
+  (PR #639) isn't covered. Tests: `.github/scripts/tests/review-gate.test.mjs`.
 - **An approved head isn't reviewed (#404; admin, 21 Nov 2026).** The gate also skips a head that
   carries an `APPROVED` review from the admin or from `sunny-reviewer[bot]` on that very commit. A
   head with only the bot's Request changes or comments is still reviewed, a push after an approval
@@ -2600,7 +2610,9 @@ outside the sandbox (`docs/agents/sandbox.md`). Q1 and Q2 are decided, so nothin
       approval (#322). When the factory App resolves the thread, the App's next run unresolves it.
       When the admin resolves it, it stays resolved. Until #104, the App also adds `review:admin`
       when it escalates, which holds its approval, so (e) shows no approval; and adding the label
-      makes the App dismiss its approval and turn auto-merge off;
+      makes the App dismiss its approval and turn auto-merge off. Adding it while the App's Request
+      changes stands on the head re-runs the review too (#641), which approves or dismisses that
+      Request changes once its findings are fixed;
     - (f) an App-approved PR that changes one line of `AGENTS.md` still waits for the code owner's
       review (`BLOCKED`).
     - **#495 (22 Nov 2026):** once #566 lands, (e) reads: the App approves a clean escalated PR

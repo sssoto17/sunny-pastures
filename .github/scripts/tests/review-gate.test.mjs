@@ -125,10 +125,65 @@ describe("review-gate.sh", () => {
 	it.each([
 		["a summary that already held the approval", [review("COMMENTED")]],
 		["an approval already dismissed", [review("DISMISSED"), review("COMMENTED")]],
-		["Request changes", [review("CHANGES_REQUESTED")]],
 		["someone else's approval", [review("COMMENTED"), review("APPROVED", { author: "sssoto17" })]],
 	])("skips review:admin added after %s: there is no approval to withdraw", (_name, reviews) => {
 		expect(gate("labeled", reviews, ADMIN).run).toBe("false");
+	});
+
+	// #641 (admin, 26 Nov 2026): review:admin added while the App's Request changes stands on this
+	// head answers a finding without a push, so the review runs again; its re-run then approves or
+	// dismisses its own Request changes (ADR-0002, "The bot's earlier Request changes"). Standing:
+	// the App's latest review that isn't a plain comment, as GitHub counts it.
+	describe("review:admin added while the App's Request changes stands (#641)", () => {
+		it.each([
+			["alone", [review("CHANGES_REQUESTED")]],
+			[
+				"after its empty-body line comments",
+				[review("COMMENTED", { body: "" }), review("CHANGES_REQUESTED")],
+			],
+			[
+				"with a later plain comment, which doesn't replace it",
+				[review("CHANGES_REQUESTED"), review("COMMENTED")],
+			],
+			[
+				"after its approval of an older head was dismissed",
+				[review("DISMISSED", { commit: "old" }), review("CHANGES_REQUESTED")],
+			],
+		])("reviews the head again: Request changes %s", (_name, reviews) => {
+			const g = gate("labeled", reviews, ADMIN);
+			expect(g.code).toBe(0);
+			expect(g.run).toBe("true");
+			expect(g.out).toContain("changes_requested=true");
+		});
+
+		it.each([
+			["a Request changes already dismissed", [review("DISMISSED")]],
+			[
+				"a Request changes on an older head, this head reviewed with a comment",
+				[review("CHANGES_REQUESTED", { commit: "old" }), review("COMMENTED")],
+			],
+			["only a comment review on this head", [review("COMMENTED")]],
+			[
+				"someone else's Request changes",
+				[review("COMMENTED"), review("CHANGES_REQUESTED", { author: "sssoto17" })],
+			],
+		])("skips review:admin added over %s", (_name, reviews) => {
+			expect(gate("labeled", reviews, ADMIN).run).toBe("false");
+		});
+
+		// Once per head stays for every other event (admin, 26 Nov 2026).
+		it.each(["synchronize", "reopened", "ready_for_review", "opened"])(
+			"still skips a %s run on a head with the App's Request changes and review:admin",
+			(action) => {
+				expect(gate(action, [review("CHANGES_REQUESTED")], ADMIN).run).toBe("false");
+			},
+		);
+
+		// The job's `if:` lets through only review:admin; the gate reads the PR's live labels, so a
+		// label removed again before the run starts skips too.
+		it("skips a labeled run when the PR no longer carries review:admin", () => {
+			expect(gate("labeled", [review("CHANGES_REQUESTED")]).run).toBe("false");
+		});
 	});
 
 	it("reviews an unreviewed head whatever the event", () => {
@@ -366,6 +421,14 @@ describe("review.yml", () => {
 				/concurrency:\n\s+group: review-\$\{\{ github\.event\.pull_request\.number \}\}\n\s+cancel-in-progress: true/,
 			);
 		});
+	});
+
+	// #641: the labeled run reaches the gate only for review:admin added by someone other than the
+	// App. An unrelated label, or the label the App adds itself, never starts a job (the loop guard).
+	it("lets through review:admin from anyone but the App, and no other label", () => {
+		expect(yml).toContain(
+			"(github.event.action != 'labeled' || (github.event.label.name == 'review:admin' &&\n      github.event.sender.login != 'sunny-reviewer[bot]'))",
+		);
 	});
 
 	it("keeps the allowed claude-code-action pin (#290)", () => {

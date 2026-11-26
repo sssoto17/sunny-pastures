@@ -61,13 +61,25 @@ head_approved=$(jq --arg bot "${BOT}[bot]" --arg admin "$ADMIN" --arg head "$hea
 # review runs again to dismiss it and turn auto-merge off. Whatever the event: a reopened run at
 # the same head can cancel the labeled one (the job's cancel-in-progress) and must finish its
 # work. A dismissed approval reads DISMISSED, so once a run has withdrawn it, nothing re-runs.
-# Any commit counts, as post-review.sh's dismiss does. It wins over the two skips below.
+# Any commit counts, as post-review.sh's dismiss does. Both exceptions win over the two skips below.
 approved=$(jq --arg u "${BOT}[bot]" 'any(.[]; .author == $u and .state == "APPROVED")' "$REVIEWS")
+# The second exception (#641; admin, 26 Nov 2026): review:admin added while this App's Request
+# changes stands on this head answers a finding without a push, so the review runs again, and its
+# re-run approves or dismisses its own Request changes (ADR-0002, "The bot's earlier Request
+# changes"). Standing means its latest review that isn't a plain comment: a COMMENTED review
+# doesn't replace a Request changes, and a dismissed one reads DISMISSED, as GitHub counts them.
+# Only on `labeled`: once per head holds for every other event.
+changes_requested=false
+if [[ $ACTION == labeled ]]; then
+  changes_requested=$(jq --arg u "${BOT}[bot]" --arg head "$head" \
+    '[.[] | select(.author == $u and .state != "COMMENTED")] | last |
+      (. != null and .state == "CHANGES_REQUESTED" and .commit_id == $head)' "$REVIEWS")
+fi
 
-if [[ ! ($labelled == true && $approved == true) ]]; then
+if [[ ! ($labelled == true && ($approved == true || $changes_requested == true)) ]]; then
   [[ $head_approved != true ]] || skip "approved: the admin or ${BOT} already approved $head"
   [[ $reviewed != true ]] || skip "${BOT} already reviewed $head"
 fi
 
-echo "GATE run: event $ACTION, head $head, base $base, reviewed=$reviewed head_approved=$head_approved labelled=$labelled approved=$approved"
+echo "GATE run: event $ACTION, head $head, base $base, reviewed=$reviewed head_approved=$head_approved labelled=$labelled approved=$approved changes_requested=$changes_requested"
 echo "run=true" >>"$GITHUB_OUTPUT"
