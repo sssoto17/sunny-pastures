@@ -436,6 +436,20 @@ describe("factory.yml", () => {
 		expect(step).toContain("FACTORY_DEPS_OUT: /srv/factory-deps");
 		expect(step).not.toMatch(/secrets\.|github\.token|GH_TOKEN|uses:/);
 		expect(step).toMatch(/::error::the dependency broker didn't start"; exit 1/);
+		// Root's, so the runner user Claude runs as can't change what it trusts (#645's review);
+		// started with a fixed environment, pnpm run as the runner user.
+		expect(step).toContain('sudo install -d -o root -g root -m 0755 "$FACTORY_DEPS_OUT"');
+		expect(step).toMatch(/sudo -n nohup setsid env -i PATH=\/usr\/bin:\/bin /);
+		expect(step).toContain('FACTORY_DEPS_USER="$(id -u):$(id -g)"');
+		// The file tools run in Claude's own process, outside its Bash sandbox: denied there too.
+		const denied = factory.match(/--disallowedTools "([^"]*)"/)[1].split(",");
+		for (const tool of ["Edit", "Write", "MultiEdit"]) {
+			expect(denied).toContain(`${tool}(//srv/factory-deps/**)`);
+		}
+		for (const f of ["pnpm-workspace.yaml", "package.json", ".npmrc"]) {
+			expect(denied).toContain(`Edit(/\${{ github.workspace }}/${f})`);
+			expect(denied).toContain(`Write(/\${{ github.workspace }}/${f})`);
+		}
 		const claude = factory.slice(factory.indexOf("id: claude"), factory.indexOf("id: handoff"));
 		expect(claude).toContain("FACTORY_DEPS: ${{ runner.temp }}/factory-deps");
 		expect(claude).toContain("FACTORY_DEPS_OUT: /srv/factory-deps");

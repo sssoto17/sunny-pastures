@@ -242,20 +242,26 @@ jobs:
 
       # The dependency broker (#635; .github/scripts/factory-deps.sh's header): the one way a run
       # writes pnpm-lock.yaml and node_modules, which Claude's sandbox mounts read-only (admin, 23 Nov
-      # 2026: those two and nothing else). Started here, outside Claude's sandbox, so it outlives this
-      # step and ends with the job. Its answers go in /srv, which Claude's sandbox can't write.
+      # 2026: those two and nothing else). Started here, before Claude and outside its sandbox, so it
+      # outlives this step and ends with the job. It runs as root, with only the variables below, so
+      # its own files in /srv (the pinned pnpm, the config and package.json copies, its answers) are
+      # root's, which Claude's Bash and file tools, as the runner user, can't change; pnpm itself
+      # runs as the runner user (#645's security review).
       - name: Start the dependency broker
         env:
           FACTORY_DEPS: ${{ runner.temp }}/factory-deps
           FACTORY_DEPS_OUT: /srv/factory-deps
         run: |
           set -euo pipefail
-          sudo install -d -o "$(id -u)" -g "$(id -g)" -m 0755 "$FACTORY_DEPS_OUT"
+          sudo install -d -o root -g root -m 0755 "$FACTORY_DEPS_OUT"
           mkdir -p "$FACTORY_DEPS"
-          nohup setsid bash .github/scripts/factory-deps.sh serve </dev/null >/dev/null 2>&1 &
-          for _ in $(seq 50); do [ -f "$FACTORY_DEPS_OUT/ready" ] && break; sleep 0.2; done
+          sudo -n nohup setsid env -i PATH=/usr/bin:/bin HOME="$HOME" COREPACK_HOME="${COREPACK_HOME:-}" \
+            FACTORY_DEPS="$FACTORY_DEPS" FACTORY_DEPS_OUT="$FACTORY_DEPS_OUT" \
+            FACTORY_DEPS_USER="$(id -u):$(id -g)" FACTORY_DEPS_STEP_PATH="$PATH" \
+            bash .github/scripts/factory-deps.sh serve </dev/null >/dev/null 2>&1 &
+          for _ in $(seq 100); do [ -f "$FACTORY_DEPS_OUT/ready" ] && break; sleep 0.2; done
           [ -f "$FACTORY_DEPS_OUT/ready" ] || { echo "::error::the dependency broker didn't start"; exit 1; }
-          echo "RESULT deps_broker=ready"
+          echo "RESULT deps_broker=$(head -n1 "$FACTORY_DEPS_OUT/serve.log" | tr -cd '[:alnum:] @/._:,-')"
 
       # No write credential: only the read-only GITHUB_TOKEN, as github_token (the action also
       # hands it to git and its GitHub tools), and subprocesses get a scrubbed environment (the
@@ -300,7 +306,7 @@ jobs:
             --add-dir ${{ runner.temp }}/factory-context
             --add-dir ${{ env.OUT }}
             --allowedTools "Bash,Edit,Write,MultiEdit,Read,Glob,Grep,Skill,Task,TodoWrite"
-            --disallowedTools "WebFetch,WebSearch,Read(//proc/**)"
+            --disallowedTools "WebFetch,WebSearch,Read(//proc/**),Edit(//srv/factory-deps/**),Write(//srv/factory-deps/**),MultiEdit(//srv/factory-deps/**),Edit(/${{ github.workspace }}/pnpm-workspace.yaml),Write(/${{ github.workspace }}/pnpm-workspace.yaml),Edit(/${{ github.workspace }}/package.json),Write(/${{ github.workspace }}/package.json),Edit(/${{ github.workspace }}/.npmrc),Write(/${{ github.workspace }}/.npmrc)"
 
       # What the broker did, from its own log in /srv (Claude can't write there): one line per
       # request, its checked words and pnpm's exit code.

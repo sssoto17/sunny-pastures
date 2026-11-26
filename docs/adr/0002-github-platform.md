@@ -1440,29 +1440,35 @@ widen the sandbox, so no setting gives the run `pnpm-lock.yaml`. Run 45249182872
 exactly that. The admin decided a run may write `node_modules` and `pnpm-lock.yaml` and nothing else
 newly; `minimumReleaseAge` holds, install and build scripts stay off, and the PR is held
 (`package.json` and the lockfile are code-owned). So the factory job starts
-`.github/scripts/factory-deps.sh serve` before the Claude step, outside Claude's sandbox: Claude
-asks it for `add <dir> [--dev] <name@x.y.z>…`, and it checks the request (a workspace package, exact
-versions, `pnpm-workspace.yaml`, the root `package.json` and `.npmrc` unchanged since it started),
-then runs `pnpm add --save-exact --ignore-scripts --ignore-pnpmfile` in a bubblewrap of its own:
-everything read-only, then the checkout and the pnpm store writable, then `.git`, `.github`,
-`.claude`, `scripts` and the protected files above read-only again, with no environment carried in
-and its own `/tmp` and PID namespace. The pnpm config pnpm reads there is the copy the broker made
-at start-up, before Claude ran, so a change after the check can't reach it; a missing protected file
-is an empty read-only one. Requests are moved into `/srv/factory-deps`, outside every folder
-Claude's sandbox can write, before they are read, and the answers stay there, so the broker never
-reads or writes through a link Claude planted. The broker itself runs only `/usr/bin` and `/bin`
-commands and `/usr/bin/bwrap`, never one from the step's `PATH` (home and `/opt`, which Claude's
-sandbox can write). Against the sandbox Claude already has, the new writes are `pnpm-lock.yaml` and
-`node_modules/.bin`; `.git/hooks`, `.git/config` and the rest stay read-only. Alternatives
-considered: `sandbox.excludedCommands` for `pnpm add` (it would run with none of the scrub's
-protections, and whether the scrub honours it isn't documented); managed settings
-(`allowWriteWithinDeny` lifts a folder inside a denied one, not a denied file); launching Claude
-from another folder (it moves every protection with it); `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` (ruled
-out above). The broker's pnpm and Node are the runner's, found at start-up, which Claude's sandbox
-can still change in `/opt` and home: a changed pnpm would skip `minimumReleaseAge` and the script
-ban, but only inside the broker's bubblewrap, and its lockfile reaches `main` only through the held
-PR. The broker's list of protected paths is copied from Claude Code's, so a Claude Code upgrade that
-adds one needs it added there too.
+`.github/scripts/factory-deps.sh serve` with sudo before the Claude step, outside Claude's sandbox,
+and Claude asks it for `add <dir> [--dev] <name@x.y.z>…`. At start-up, before Claude runs, the
+broker copies what it will trust into `/srv/factory-deps`, root's and read-only, so the runner user
+Claude runs as can't change it with Bash or with the file tools (which run in Claude's own process,
+outside its Bash sandbox, and are denied `/srv/factory-deps` and the pnpm config by
+`--disallowedTools` as well): the standalone pnpm binary `packageManager` pins (from Corepack's
+cache), the pnpm config (`pnpm-workspace.yaml`, the root `package.json`, `.npmrc`) and every
+workspace package's `package.json`. For each request it checks the folder and the exact versions,
+that the config is unchanged and that no workspace `package.json` changed its dependencies beyond
+the names asked for (a `https:` or `github:` dependency would skip `minimumReleaseAge`). Then, as
+the runner user and for at most 600 s, it runs that pnpm with
+`add --save-exact --ignore-scripts --ignore-pnpmfile --config.block-exotic-subdeps=true` in a
+bubblewrap of its own: everything read-only, then the checkout and the pnpm store writable, then
+`.git`, `.github`, `.claude`, `scripts` and the protected files above read-only again, the config as
+copied at start-up and an empty file for a missing one, with no environment carried in and its own
+`/tmp` and PID namespace. A lockfile that gained a `tarball:`, `type: git`, `directory:` or `link:`
+line is put back and refused. As root the broker runs only `/usr/bin` and `/bin` commands and its
+copy of pnpm, never anything from the step's `PATH` (home and `/opt`, which Claude's sandbox can
+write), and it reads and writes the checkout only as the runner user, through `setpriv`. Requests
+are moved into `/srv/factory-deps` before they are read (4096 bytes at most). Against the sandbox
+Claude already has, the new writes are `pnpm-lock.yaml` and `node_modules/.bin`; `.git/hooks`,
+`.git/config` and the rest stay read-only. Alternatives considered: `sandbox.excludedCommands` for
+`pnpm add` (it would run with none of the scrub's protections, and whether the scrub honours it
+isn't documented); managed settings (`allowWriteWithinDeny` lifts a folder inside a denied one, not
+a denied file); launching Claude from another folder (it moves every protection with it);
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` (ruled out above); a separate user for the whole broker (root
+plus `setpriv` keeps its files out of the runner user's reach and pnpm's output owned by it, without
+a new account). The broker's list of protected paths is copied from Claude Code's, so a Claude Code
+upgrade that adds one needs it added there too.
 
 **Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
 environment, but the runner user has sudo, so a prompt injection could still read it from the

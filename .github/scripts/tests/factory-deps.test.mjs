@@ -6,6 +6,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -22,18 +23,21 @@ let broker;
 afterEach(() => {
 	broker?.kill("SIGKILL");
 	broker = undefined;
+	// The broker leaves its copies read-only, as it does on the runner.
+	if (dir) spawnSync("chmod", ["-R", "u+w", dir]);
 	if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
 // A checkout with one workspace package, a fake bwrap that logs its options and runs the command
-// after `--`, and a fake pnpm that logs its arguments, prints a line, writes the lockfile and exits
-// with PNPM_EXIT. `pnpm store path` answers with a folder of the test's own.
+// after `--`, and a fake pnpm (the version package.json pins) that logs its arguments, prints a
+// line, writes LOCK to the lockfile and exits with PNPM_EXIT. `pnpm store path` answers with a
+// folder of the test's own.
 function setup() {
 	dir = mkdtempSync(join(tmpdir(), "factory-deps-"));
 	const root = join(dir, "repo");
 	mkdirSync(join(root, "apps", "web"), { recursive: true });
 	for (const d of [".git", ".github", ".claude", "scripts"]) mkdirSync(join(root, d));
-	writeFileSync(join(root, "package.json"), '{"name":"root"}\n');
+	writeFileSync(join(root, "package.json"), '{"name":"root","packageManager":"pnpm@12.15.0"}\n');
 	writeFileSync(join(root, "pnpm-workspace.yaml"), "minimumReleaseAge: 10080\n");
 	writeFileSync(join(root, "apps", "web", "package.json"), '{"name":"web"}\n');
 	mkdirSync(join(dir, "bin"));
@@ -48,10 +52,11 @@ exec "$@"
 	writeFileSync(
 		join(dir, "bin", "pnpm"),
 		`#!/usr/bin/env bash
-if [[ $* == "store path" ]]; then echo "${dir}/store"; exit 0; fi
+if [[ $* == --version ]]; then echo \${PNPM_VERSION:-12.15.0}; exit 0; fi
+if [[ $* == "store path"* ]]; then echo "${dir}/store"; exit 0; fi
 printf '%s\\n' "$@" >"${dir}/pnpm.args"
 echo "Progress: resolved 1, added 1"
-echo "lockfile" >pnpm-lock.yaml
+printf '%s\\n' "\${LOCK:-lockfileVersion: '9.0'}" >pnpm-lock.yaml
 exit \${PNPM_EXIT:-0}
 `,
 	);
@@ -67,6 +72,7 @@ exit \${PNPM_EXIT:-0}
 			FACTORY_DEPS_POLL: "0.1",
 			FACTORY_DEPS_WAIT: "5",
 			FACTORY_DEPS_BWRAP: join(dir, "bin", "bwrap"),
+			FACTORY_DEPS_STEP_PATH: join(dir, "bin"),
 		},
 	};
 }
@@ -92,6 +98,12 @@ const add = (t, args, env = {}) => {
 	});
 	return { code: res.status, out: res.stdout + res.stderr };
 };
+// The usual request, refused with a message matching `says`.
+const expectRefused = (t, says) => {
+	const r = add(t, ["apps/web", "zustand@5.1.0"]);
+	expect(r.code).toBe(2);
+	expect(r.out).toMatch(says);
+};
 const read = (f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), "utf8") : null);
 
 describe("factory-deps.sh", () => {
@@ -108,6 +120,7 @@ describe("factory-deps.sh", () => {
 			"--save-exact",
 			"--ignore-scripts",
 			"--ignore-pnpmfile",
+			"--config.block-exotic-subdeps=true",
 			"--config.manage-package-manager-versions=false",
 			"--store-dir",
 			join(dir, "store"),
@@ -131,6 +144,13 @@ describe("factory-deps.sh", () => {
 			expect(bwrap).toContain(`--ro-bind\n${join(dir, "out", "config", p)}\n${t.root}/${p}\n`);
 		}
 		expect(read("out/config/pnpm-workspace.yaml")).toBe("minimumReleaseAge: 10080\n");
+		// The pnpm that runs is the broker's copy, with only it and the system's commands on PATH.
+		expect(bwrap).toContain(`--setenv\nPATH\n${join(dir, "out", "bin")}:/usr/bin:/bin\n`);
+		expect(read("out/bin/pnpm")).toBe(read("bin/pnpm"));
+		// What the broker keeps can't be changed by the user Claude runs as.
+		for (const f of ["config/pnpm-workspace.yaml", "ws/apps/web/package.json", "bin/pnpm"]) {
+			expect(statSync(join(dir, "out", f)).mode & 0o222, f).toBe(0);
+		}
 		// A protected file the checkout lacks can't be created: an empty read-only one stands in.
 		for (const p of [".gitmodules", ".env", "yarn.lock"]) {
 			expect(bwrap).toContain(`--ro-bind\n${join(dir, "out", "empty")}\n${t.root}/${p}\n`);
@@ -218,9 +238,7 @@ describe("factory-deps.sh", () => {
 		before?.(t.root);
 		await serve(t);
 		after?.(t.root);
-		const r = add(t, ["apps/web", "zustand@5.1.0"]);
-		expect(r.code).toBe(2);
-		expect(r.out).toMatch(says);
+		expectRefused(t, says);
 		expect(read("pnpm.args")).toBeNull();
 	});
 
@@ -230,9 +248,7 @@ describe("factory-deps.sh", () => {
 		writeFileSync(join(t.root, ".npmrc"), "");
 		expect(add(t, ["apps/web", "zustand@5.1.0"]).code).toBe(0);
 		writeFileSync(join(t.root, ".npmrc"), "registry=https://evil.example/\n");
-		const r = add(t, ["apps/web", "zustand@5.1.0"]);
-		expect(r.code).toBe(2);
-		expect(r.out).toMatch(/^DEPS refused: \.npmrc changed since the run began/m);
+		expectRefused(t, /^DEPS refused: \.npmrc changed since the run began/m);
 	});
 
 	// Claude's sandbox can write home and /opt, which are on the step's PATH: the broker must never
@@ -256,6 +272,36 @@ describe("factory-deps.sh", () => {
 		mkdirSync(join(dir, "requests", "req.dir1", "x"), { recursive: true });
 		await sleep(300);
 		expect(add(t, ["apps/web", "zustand@5.1.0"]).code).toBe(0);
+	});
+
+	it("refuses a workspace package.json that gained a dependency outside the request", async () => {
+		const t = setup();
+		await serve(t);
+		const web = join(t.root, "apps", "web", "package.json");
+		writeFileSync(web, '{"name":"web","dependencies":{"x":"https://evil.example/x.tgz"}}\n');
+		expectRefused(t, /^DEPS refused: apps\/web\/package.json changed its dependencies/m);
+		expect(read("pnpm.args")).toBeNull();
+		// The requested name itself may change: pnpm add rewrites it.
+		writeFileSync(web, '{"name":"web","scripts":{"t":"x"},"dependencies":{"zustand":"^5"}}\n');
+		expect(add(t, ["apps/web", "zustand@5.1.0"]).code).toBe(0);
+	});
+
+	it("puts the lockfile back when it gained a source the registry didn't give", async () => {
+		const t = setup();
+		writeFileSync(join(t.root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+		await serve(t, { LOCK: "  resolution: {tarball: https://evil.example/x.tgz}" });
+		expectRefused(
+			t,
+			/^DEPS refused: the lockfile gained a tarball, git, directory or link source/m,
+		);
+		expect(readFileSync(join(t.root, "pnpm-lock.yaml"), "utf8")).toBe("lockfileVersion: '9.0'\n");
+	});
+
+	it("refuses every request when it found no pnpm of the pinned version", async () => {
+		const t = setup();
+		await serve(t, { PNPM_VERSION: "11.0.0" });
+		expectRefused(t, /^DEPS refused: the broker found no pnpm binary of the version/m);
+		expect(read("out/bin/pnpm")).toBeNull();
 	});
 
 	it("passes pnpm's failure on, with its output", async () => {

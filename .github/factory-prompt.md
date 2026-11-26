@@ -52,7 +52,9 @@ runner checks it and, only if it passes, pushes the branch and opens the PR as `
   `node_modules/.bin` read-only, so pnpm can't write them; the workflow's dependency broker runs
   `pnpm add --save-exact --ignore-scripts` for you outside it (#635), in the workspace package
   `<dir>` (`apps/web`), and prints pnpm's output. It takes exact versions only, refuses once
-  `pnpm-workspace.yaml` or the root `package.json` has changed, and can't run a script. Then commit
+  `pnpm-workspace.yaml` or the root `package.json` has changed or a workspace `package.json` has
+  changed its dependencies beyond the names you ask for (so add packages only through it), and can't
+  run a script. You can't write `/srv/factory-deps`, where it keeps its copies. Then commit
   `<dir>/package.json` and `pnpm-lock.yaml` with your work. A version younger than
   `minimumReleaseAge` fails there: that is a stop, not something to work around.
 - **No local Supabase stack.** Run `pnpm check:fast` and `pnpm test --project unit --project ui`,
