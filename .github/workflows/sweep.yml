@@ -24,15 +24,14 @@
 #   native blockers of the factory:ready ones), PRs (with the commits and the reviewer's reviews of
 #   the App's PRs, and the App's closed PRs) and branches. factory-sweep-gather.sh reads, then
 #   factory-sweep.mjs decides, logs one LABELS line per label move and one SWEEP line, and writes
-#   the job summary: the switch, the open factory PRs against the cap, the uncounted lane PRs,
-#   the eligible issues in
-#   order, the skipped ones and why, the label moves, and the one dispatched or why none. First the
+#   the job summary: the switch, the open factory PRs against the cap, the uncounted lane PRs, the
+#   eligible issues in order, the skipped ones and why, the label moves, and the one dispatched or why none. First the
 #   reconcile (#619, the header of factory-sweep.mjs): a closed issue loses its factory:* labels,
 #   several keep the most advanced, factory:working with no live run and factory:review with no
 #   open PR move on. It dispatches nothing while a factory run is queued, waiting or in progress.
 #   Next comes a fix round (#588): a factory PR whose reviewer's newest verdict on its head asks for
 #   fixes, at most 2 rounds a PR and never twice on one head; the cap doesn't hold it back. It
-#   dispatches no new issue while the open PRs the factory made (drafts included) reach the repo
+#   dispatches no new issue while the open factory PRs (drafts included) reach the repo
 #   variable FACTORY_MAX_OPEN_PRS (default 4 when unset; admin, 22 Nov 2026): opened by
 #   sunny-factory[bot] with a commit its bot user authored. Lane PRs, opened by the App with their
 #   own commits, aren't counted (#657); the SWEEP line and the summary show both. An eligible

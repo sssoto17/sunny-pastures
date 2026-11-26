@@ -1357,28 +1357,30 @@ dispatches (it would hold the Project token and `actions: write` together).
   call.
 - **The decision**, in order, the first that holds deciding: the kill switch (`FACTORY_ENABLED`,
   read before anything else, so nothing is read with it off); a factory run that is queued, waiting,
-  pending, requested or in progress (strictly serial); the **open-PR cap**: open PRs the factory
-  made, drafts included, at or above the repo variable `FACTORY_MAX_OPEN_PRS` (default 4 when unset;
-  a value that isn't a whole number dispatches nothing). It is backpressure on the review queue, and
-  works the same before and after auto-merge: a PR that merges lowers the count and the chain goes
-  on (admin, 22 Nov 2026, replacing a per-day run cap). The factory made a PR when
-  `sunny-factory[bot]` opened it and its bot user authored at least one of its commits
-  (`factory_authored`, read by the gather), so a factory PR that a lane or the admin pushed a fix to
-  still counts. Lane PRs, which `sunny-factory[bot]` opens too ("Lanes open PRs as sunny-factory",
-  below) but whose commits are the lane's own, aren't counted: four of them held the factory back on
-  26 Nov 2026 (sweep run 45876382967; admin, 26 Nov 2026, #657). The `SWEEP` line
+  pending, requested or in progress (strictly serial); the **open-PR cap**: open factory PRs
+  (below), drafts included, at or above the repo variable `FACTORY_MAX_OPEN_PRS` (default 4 when
+  unset; a value that isn't a whole number dispatches nothing). It is backpressure on the review
+  queue, and works the same before and after auto-merge: a PR that merges lowers the count and the
+  chain goes on (admin, 22 Nov 2026, replacing a per-day run cap). A **factory PR** is one
+  `sunny-factory[bot]` opened with at least one commit its bot user authored (`factory_authored`,
+  read by the gather), so a factory PR that a lane or the admin pushed a fix to still counts. Lane
+  PRs, which `sunny-factory[bot]` opens too ("Lanes open PRs as sunny-factory", below) but with none
+  of its bot user's commits, aren't counted: four of them held the factory back on 26 Nov 2026
+  (sweep run 45876382967; admin, 26 Nov 2026, #657). The `SWEEP` line
   (`factory=<n> cap=<n> lanes=<n> (not counted)`) and the job summary show both counts. Pattern: the
-  same provenance test fix rounds use (below), widened from "every commit" to "any commit".
-  Alternatives considered: counting by branch name (`<n>-` versus `claude/…`; a local lane pushes a
-  `<n>-` branch, and the commits are what the factory alone writes as its bot user); "every commit"
-  as for fix rounds (a lane's or the admin's fix commit would drop a factory PR out of the queue it
-  still waits in). Then the eligible issues (admin, 23 Nov 2026, #619: `factory:ready` is the only
-  gate): open, at `factory:ready` after the reconcile (below), opened by the owner or a
-  collaborator, with no `blocked:*` label, no open native blocker
-  (`GET …/issues/{n}/dependencies/blocked_by`), no open PR from a `<n>-` branch and no `<n>-` branch
-  (the gate's rules, so the sweep doesn't dispatch what the gate would refuse). Status, Mode and
-  Track aren't read: Backlog, Ready, In progress or In review all qualify, so the admin can label a
-  whole chain at once and the factory walks it in blocker order.
+  same provenance test fix rounds use (below), widened from "every commit" (the factory's own PR) to
+  "any commit". A lane PR stacked on, or rebased from, an unmerged factory branch carries the
+  factory's commits, so it counts; that errs toward holding the factory back. Alternatives
+  considered: counting by branch name (`<n>-` versus `claude/…`; a local lane pushes a `<n>-`
+  branch, and the commits are what the factory alone writes as its bot user); "every commit" as for
+  fix rounds (a lane's or the admin's fix commit would drop a factory PR out of the queue it still
+  waits in). Then the eligible issues (admin, 23 Nov 2026, #619: `factory:ready` is the only gate):
+  open, at `factory:ready` after the reconcile (below), opened by the owner or a collaborator, with
+  no `blocked:*` label, no open native blocker (`GET …/issues/{n}/dependencies/blocked_by`), no open
+  PR from a `<n>-` branch and no `<n>-` branch (the gate's rules, so the sweep doesn't dispatch what
+  the gate would refuse). Status, Mode and Track aren't read: Backlog, Ready, In progress or In
+  review all qualify, so the admin can label a whole chain at once and the factory walks it in
+  blocker order.
 - **The `factory:*` states (#619).** An issue carries at most one: `factory:ready` (the admin's
   "take this"; only the admin sets it), `factory:working` (a run is going), `factory:review` (a PR
   is waiting), `factory:failed` (the last run ended without a PR, or its PR closed unmerged). Each
@@ -1443,13 +1445,13 @@ holds which secret" rules out).
 
 - **What the sweep picks:** after the kill switch, the cap's parse and the serial rule, and before
   the open-PR cap and any new issue (a fix round adds no PR), the open PR with the lowest number
-  that the factory made: opened by `sunny-factory[bot]` with every commit authored and committed by
-  its bot user. Lanes open their PRs as `sunny-factory[bot]` too ("Lanes open PRs as sunny-factory",
-  below) but commit as themselves, so a lane PR is never picked. Its newest review from
-  `sunny-reviewer[bot]` that gives a verdict (not dismissed, not pending, not one of the
-  empty-bodied reviews that carry its line comments) must be on the PR's current head and be Request
-  changes or start "merge after fixes". `factory-review.mjs` holds those rules for the sweep and the
-  fix gate both.
+  that is the factory's own: opened by `sunny-factory[bot]` with every commit authored and committed
+  by its bot user. Lanes open their PRs as `sunny-factory[bot]` too ("Lanes open PRs as
+  sunny-factory", below) but commit as themselves, so a lane PR is never picked, nor a factory PR a
+  lane or the admin pushed a fix to (#657). Its newest review from `sunny-reviewer[bot]` that gives
+  a verdict (not dismissed, not pending, not one of the empty-bodied reviews that carry its line
+  comments) must be on the PR's current head and be Request changes or start "merge after fixes".
+  `factory-review.mjs` holds those rules for the sweep and the fix gate both.
 - **The loop guard:** at most **2** fix rounds per PR, and never two on one head. A fix run's
   `run-name` is `factory fix #<pr> at <head SHA>`, so the sweep counts a PR's rounds from the
   factory runs it already reads: every such run counts, whatever it did, a run that pushed nothing
@@ -1458,7 +1460,7 @@ holds which secret" rules out).
   that falls out of the count. After 2 rounds the reviewer's own "Not converging" row (3 Request
   changes) is one review away.
 - **Fix mode in `factory.yml`:** `gate` runs `factory-fix-gate.mjs` (through `factory-gather.sh`),
-  which refuses unless the PR is open, the factory made it (the rule above), its branch is
+  which refuses unless the PR is open, it is the factory's own (the rule above), its branch is
   `<n>-<slug>` in this repo, its head is still `head`, and the newest verdict on that head asks for
   fixes and lists at least one Required finding; the issue is the branch's number. `factory` makes
   the PR's branch at `head` and hands Claude only the Required findings and the PR's body, with

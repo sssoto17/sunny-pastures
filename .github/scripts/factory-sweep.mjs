@@ -13,19 +13,19 @@
 //    dispatches nothing (factory.yml's concurrency group would make a new run wait, and a third
 //    would cancel the waiting one);
 // 4. a fix round (#588), before any new issue and whatever the cap, since it adds no PR: the open
-//    PR the factory made with the lowest number whose newest verdict from sunny-reviewer[bot]
-//    (factory-review.mjs: not dismissed, not an empty-bodied line-comment review) is on the PR's
-//    current head and is Request changes or starts "merge after fixes". A fix round takes only a PR
-//    sunny-factory[bot] opened whose every commit is that bot user's (`factory`, read by the
-//    gather): lanes open their PRs as sunny-factory[bot] too (#336) but commit as themselves, so a
-//    lane PR is never picked, nor one a lane or the admin pushed a fix to. The loop guard,
-//    stateless like the rest: the fix runs are the factory runs titled "factory fix #<pr> at <head
-//    SHA>" (factory.yml's run-name), so a PR with a run at its current head, or with 2 fix runs
-//    already (whatever they did, pushed nothing included), is skipped, and the SWEEP line says why.
-//    Only the newest 100 factory runs are read;
-// 5. backpressure on the review queue: as many open PRs (drafts included) the factory made as the
-//    cap, or more, dispatches no new issue. A PR that merges or closes lowers the count, and the
-//    next sweep goes on. The same signal as 4, widened to mixed commits (#657): opened by
+//    PR that is the factory's own with the lowest number whose newest verdict from
+//    sunny-reviewer[bot] (factory-review.mjs: not dismissed, not an empty-bodied line-comment
+//    review) is on the PR's current head and is Request changes or starts "merge after fixes". The
+//    factory's own PR is one sunny-factory[bot] opened whose every commit is that bot user's
+//    (`factory`, read by the gather): lanes open their PRs as sunny-factory[bot] too (#336) but
+//    commit as themselves, so a lane PR is never picked, nor one a lane or the admin pushed a fix
+//    to. The loop guard, stateless like the rest: the fix runs are the factory runs titled "factory
+//    fix #<pr> at <head SHA>" (factory.yml's run-name), so a PR with a run at its current head, or
+//    with 2 fix runs already (whatever they did, pushed nothing included), is skipped, and the SWEEP
+//    line says why. Only the newest 100 factory runs are read;
+// 5. backpressure on the review queue: as many open factory PRs (drafts included) as the cap, or
+//    more, dispatches no new issue. A PR that merges or closes lowers the count, and the next sweep
+//    goes on. A factory PR, the same signal as 4 widened to mixed commits (#657): opened by
 //    sunny-factory[bot] with any commit its bot user authored (`factory_authored`, read by the
 //    gather), so a factory PR a lane or the admin pushed a fix to still counts, since a factory run
 //    made it. Lane PRs, opened as sunny-factory[bot] with none of its commits, aren't counted: the
@@ -138,8 +138,8 @@ export const decideSweep = ({ enabled, maxOpenPrs, ...data }) => {
 	return { ...counted, eligible, skipped, dispatch: first.number, reason, moves: working };
 };
 
-// The App's open PRs a factory run made (`open`, counted against the cap) and the lanes' (`lanes`):
-// a PR with any commit its bot user authored is the factory's, a mixed one included (#657).
+// The App's open PRs: the factory PRs (`open`, counted against the cap), any commit its bot user
+// authored, a mixed one included (#657), and the lanes' (`lanes`), none of its commits.
 function countOpen(pulls) {
 	const app = pulls.filter((p) => p.user?.login === BOT);
 	const open = app.filter((p) => p.factory_authored === true).length;
@@ -229,8 +229,8 @@ function newestClosed(closed, n) {
 function selectFix({ pulls, reviews, runs }) {
 	const fixSkipped = [];
 	// `factory`: every commit is the App's bot user's (the gather). Lanes open PRs as the App too.
-	const made = pulls.filter((p) => p.user?.login === BOT && p.factory === true);
-	for (const pr of made.sort((a, b) => a.number - b.number)) {
+	const own = pulls.filter((p) => p.user?.login === BOT && p.factory === true);
+	for (const pr of own.sort((a, b) => a.number - b.number)) {
 		const head = pr.head?.sha;
 		const review = newestVerdict(reviews.filter((r) => r.pr === pr.number));
 		if (!head || review?.commit_id !== head || !wantsFixes(review)) continue;

@@ -17,8 +17,8 @@
 #   `factory_authored`, true when any of its commits is authored by that bot user (a factory PR a
 #   lane or the admin pushed a fix to). Lanes open their PRs as sunny-factory[bot] too, #336, but
 #   commit as themselves, so both are false on theirs. reviews.json holds sunny-reviewer[bot]'s
-#   reviews of the `factory` PRs, each with its PR's number. The rounds already run are factory runs in
-#   runs.json ("factory fix #<pr> at <sha>"), so nothing else is read for them;
+#   reviews of the `factory` PRs, each with its PR's number. The rounds already run are factory
+#   runs in runs.json ("factory fix #<pr> at <sha>"), so nothing else is read for them;
 # - items.json: the board's issue items with Priority, in the order the REST Projects API lists
 #   them, through scripts/lib/project-rest.sh with BOARD_PROJECT_TOKEN in PROJECT_GH_TOKEN, used on
 #   the Project's calls only. Status, Mode and Track aren't read (#619).
@@ -68,7 +68,7 @@ jq --argjson b "$blocked" 'map(if $b[.number | tostring] then .blocked_by = $b[.
 mv "$dir/issues.tmp" "$dir/issues.json"
 gh api --paginate "$r/pulls?state=open&per_page=100" --jq '.[]
   | {number, head: {ref: .head.ref, sha: .head.sha}, user: {login: .user.login}}' | jq -s . >"$dir/pulls.json"
-# Which of the App's open PRs the factory made (its bot user's commits: factory.yml's
+# Which of the App's open PRs are factory PRs and the factory's own (its bot user's commits: factory.yml's
 # FACTORY_BOT_ID), and the reviewer's reviews of those whose every commit is its own, one read each.
 # Each page of commits answers `own` (every commit authored and committed by the bot user), `mixed`
 # (some authored by it) or `lane` (none, or no commits): `authored` takes any page that isn't

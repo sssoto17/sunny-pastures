@@ -706,24 +706,27 @@ esac
 		expect(closed).toEqual([{ number: 601, head: { ref: "75-x" }, merged_at: null }]);
 	});
 
+	// An open PR as `GET …/pulls?state=open` returns it, trimmed, and a commit of it with its
+	// author's and committer's emails, as `GET …/pulls/{n}/commits` lists it.
+	const openPr = (number, login = BOT) =>
+		JSON.stringify({ number, head: { ref: "x", sha: "s" }, user: { login } });
+	const commit = (author, committer = author) => ({
+		commit: { author: { email: author }, committer: { email: committer } },
+	});
+	const BOT_EMAIL = "355564973+sunny-factory[bot]@users.noreply.github.com";
+
 	// #588, #657: lanes open PRs as sunny-factory[bot] too, so the factory's own are those whose
 	// every commit is its bot user's (`factory`, for fix rounds, and only their reviews are read),
 	// and the cap counts those with any commit its bot user authored (`factory_authored`).
 	it("marks the App's PRs by their commits' authors, and reads the reviews of the factory's own", () => {
-		const p = (number, login) =>
-			JSON.stringify({ number, head: { ref: "x", sha: "s" }, user: { login } });
-		const bot = "355564973+sunny-factory[bot]@users.noreply.github.com";
 		const lane = "noreply@anthropic.com";
-		const c = (author, committer = author) => ({
-			commit: { author: { email: author }, committer: { email: committer } },
-		});
 		const g = gather({
 			FACTORY_ENABLED: "true",
-			FAKE_PULLS: [p(7, BOT), p(8, BOT), p(9, BOT), p(10, BOT), p(11, "sssoto17")].join("\n"),
-			FAKE_COMMITS_7: JSON.stringify([[c(bot), c(bot)]]),
-			FAKE_COMMITS_8: JSON.stringify([[c(bot), c(lane)]]),
-			FAKE_COMMITS_9: JSON.stringify([[c(bot, lane)]]),
-			FAKE_COMMITS_10: JSON.stringify([[c(lane), c(lane)]]),
+			FAKE_PULLS: [openPr(7), openPr(8), openPr(9), openPr(10), openPr(11, "sssoto17")].join("\n"),
+			FAKE_COMMITS_7: JSON.stringify([[commit(BOT_EMAIL), commit(BOT_EMAIL)]]),
+			FAKE_COMMITS_8: JSON.stringify([[commit(BOT_EMAIL), commit(lane)]]),
+			FAKE_COMMITS_9: JSON.stringify([[commit(BOT_EMAIL, lane)]]),
+			FAKE_COMMITS_10: JSON.stringify([[commit(lane), commit(lane)]]),
 		});
 		expect(g.code).toBe(0);
 		const reads = g.calls.split("\n").filter((x) => /\/(commits|reviews)\?/.test(x));
@@ -748,15 +751,11 @@ esac
 
 	// gh --paginate applies --jq to each page: the pages' answers are combined.
 	it("reads every page of a PR's commits, and marks one with none as neither", () => {
-		const bot = "355564973+sunny-factory[bot]@users.noreply.github.com";
-		const c = (email) => ({ commit: { author: { email }, committer: { email } } });
-		const p = (number) =>
-			JSON.stringify({ number, head: { ref: "x", sha: "s" }, user: { login: BOT } });
 		const g = gather({
 			FACTORY_ENABLED: "true",
-			FAKE_PULLS: [p(12), p(13), p(14)].join("\n"),
-			FAKE_COMMITS_12: JSON.stringify([[c(bot)], [c(bot)]]),
-			FAKE_COMMITS_13: JSON.stringify([[c("a@b.c")], [c(bot)]]),
+			FAKE_PULLS: [openPr(12), openPr(13), openPr(14)].join("\n"),
+			FAKE_COMMITS_12: JSON.stringify([[commit(BOT_EMAIL)], [commit(BOT_EMAIL)]]),
+			FAKE_COMMITS_13: JSON.stringify([[commit("a@b.c")], [commit(BOT_EMAIL)]]),
 		});
 		expect(g.code).toBe(0);
 		const pulls = JSON.parse(readFileSync(join(dir, "sweep", "pulls.json"), "utf8"));
