@@ -22,17 +22,19 @@ export interface PlotPopoverProps {
 	readonly store: StoreApi<FarmStore>;
 	/** The plot's index, in content order. */
 	readonly index: number;
+	/** The lot's label ("Plot 1"), which names the popover. */
+	readonly label: string;
 	/** The lot's `Button`, which opens the popover. */
 	readonly trigger: ReactElement;
 }
 
-export function PlotPopover({ store, index, trigger }: PlotPopoverProps) {
+export function PlotPopover({ store, index, label, trigger }: PlotPopoverProps) {
 	const isOwned = useStore(store, (s) => selectPlot(index)(s) !== null);
 	if (!isOwned) return trigger;
 
 	return (
-		<Popover trigger={trigger} label={`Plot ${String(index + 1)}`}>
-			<PlotStatus store={store} index={index} />
+		<Popover trigger={trigger} label={label}>
+			<PlotStatus store={store} index={index} label={label} />
 		</Popover>
 	);
 }
@@ -45,7 +47,8 @@ export function formatTimeLeft(ms: number): string {
 		{ value: Math.floor((seconds % 3600) / 60), unit: "min" },
 		{ value: seconds % 60, unit: "s" },
 	];
-	// The two largest units from the first one that isn't zero, leaving out a zero second unit.
+	// Two units are precise enough for a calm countdown (PRODUCT.md, principle 4); a zero second
+	// unit is left out ("2 min", not "2 min 0 s").
 	const first = parts.findIndex((part) => part.value > 0);
 	if (first === -1) return "0 s";
 
@@ -63,13 +66,10 @@ const crops = Object.entries(sliceContent.crops).map(([id, crop]) => ({
 	price: crop.seedPrice,
 }));
 
-interface PlotStatusProps {
-	readonly store: StoreApi<FarmStore>;
-	readonly index: number;
-}
+type PlotStatusProps = Omit<PlotPopoverProps, "trigger">;
 
 /** The popover's content: mounted only while it is open, so its state starts fresh each time. */
-function PlotStatus({ store, index }: PlotStatusProps) {
+function PlotStatus({ store, index, label }: PlotStatusProps) {
 	const plot = useStore(store, selectPlot(index));
 	const farm = useStore(store, (s) => s.predicted);
 	const now = useStore(store, (s) => s.now);
@@ -90,7 +90,7 @@ function PlotStatus({ store, index }: PlotStatusProps) {
 		setHasActed(true);
 		store.getState().act(action);
 	};
-	const statusLine = (text: string) => (
+	const renderStatus = (text: string) => (
 		<p ref={statusRef} tabIndex={-1}>
 			{text}
 		</p>
@@ -100,7 +100,7 @@ function PlotStatus({ store, index }: PlotStatusProps) {
 	if (plot.status === "empty") {
 		return (
 			<>
-				{statusLine(`Plot ${String(index + 1)} is empty.`)}
+				{renderStatus(`${label} is empty.`)}
 				<ul>
 					{crops.map(({ id, price }) => (
 						<CropOption
@@ -122,7 +122,7 @@ function PlotStatus({ store, index }: PlotStatusProps) {
 	if (plot.status === "growing") {
 		return (
 			<>
-				{statusLine(`${crop} is growing: ${formatTimeLeft(plot.readyAt - now)} left.`)}
+				{renderStatus(`${crop} is growing: ${formatTimeLeft(plot.readyAt - now)} left.`)}
 				{refusal}
 			</>
 		);
@@ -130,7 +130,7 @@ function PlotStatus({ store, index }: PlotStatusProps) {
 
 	return (
 		<>
-			{statusLine(`${crop} is ready.`)}
+			{renderStatus(`${crop} is ready.`)}
 			<Button
 				variant="primary"
 				onPress={() => {

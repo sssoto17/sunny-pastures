@@ -55,7 +55,7 @@ export default function Game({ store }: GameProps) {
 			farm={predicted}
 			renderLot={(lot, button) =>
 				lot.kind === "plot" ? (
-					<PlotPopover store={farmStore} index={lot.index} trigger={button} />
+					<PlotPopover store={farmStore} index={lot.index} label={lot.label} trigger={button} />
 				) : (
 					button
 				)

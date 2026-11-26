@@ -71,7 +71,7 @@ function spriteOf(name: string): string | null {
 	return screen.getByRole("button", { name }).querySelector("img")?.getAttribute("src") ?? null;
 }
 
-describe("plot popover", () => {
+describe("PlotPopover", () => {
 	it("plants wheat, counts down, ripens on the clock and harvests into the silo", async () => {
 		const { user, envelope } = await renderFarm();
 		expect(spriteOf("Plot 1: empty")).toMatch(/plot-empty/);
@@ -99,6 +99,7 @@ describe("plot popover", () => {
 		expect(spriteOf("Plot 1: wheat, ready")).toMatch(/plot-ready/);
 		dialog = await openPlot(user, 1);
 		expect(within(dialog).getByText("Wheat is ready.")).toBeTruthy();
+		expect(selectStorage(store.getState())?.silo.goods["wheat"]).toBeUndefined();
 		await user.click(within(dialog).getByRole("button", { name: "Harvest wheat" }));
 
 		expect(fake.sends[1]?.request.action).toEqual({ type: "harvest", plot: 0 });
@@ -117,7 +118,7 @@ describe("plot popover", () => {
 
 		expect(within(dialog).getByRole("alert").textContent).toBe("The server said refused.");
 		expect(within(dialog).getByRole("button", { name: "Plant wheat" })).toBeTruthy();
-		await userEvent.keyboard("{Escape}");
+		await user.keyboard("{Escape}");
 		expect(screen.getByRole("button", { name: "Plot 2: empty" })).toBeTruthy();
 	});
 
@@ -135,7 +136,7 @@ describe("plot popover", () => {
 		expect(fake.sends).toHaveLength(0);
 	});
 
-	it("opens from the keyboard, and Escape returns focus to the lot", async () => {
+	it("opens from the keyboard, keeps its keys from the map, and Escape returns focus to the lot", async () => {
 		const { user } = await renderFarm();
 		const lot = screen.getByRole("button", { name: "Plot 1: empty" });
 		await user.tab();
@@ -146,6 +147,14 @@ describe("plot popover", () => {
 		const dialog = screen.getByRole("dialog", { name: "Plot 1" });
 		await user.tab();
 		expect(dialog.contains(document.activeElement)).toBe(true);
+		// Keys pressed in the popover stay there: the map behind it doesn't pan or zoom.
+		const map = screen.getByRole("group", { name: "Farm map", hidden: true });
+		const { transform } = (map.firstElementChild as HTMLElement).style;
+		act(() => {
+			within(dialog).getByText("Plot 1 is empty.").focus();
+		});
+		await user.keyboard("{ArrowLeft}+0");
+		expect((map.firstElementChild as HTMLElement).style.transform).toBe(transform);
 		await user.keyboard("{Escape}");
 		expect(screen.queryByRole("dialog")).toBeNull();
 		flushFrames();
