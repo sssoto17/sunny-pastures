@@ -1,0 +1,9 @@
+# gitleaks fingerprints for `guard / secrets`, one finding each: <commit>:<file>:<rule>:<line>.
+# Every entry is a suppression: the floor guard blocks it unless the same PR adds an Exceptions row
+# to CONSTRAINTS.md. A fingerprint names its commit, so a rebase that rewrites the commit needs the
+# new fingerprint from the next run.
+#
+# E26 (#666): `SubtleCrypto.supports()` algorithm and method names in the vendored Modern Web
+# Guidance docs, not keys.
+6662be12babba2270951358b628f7f0bd7fe5289:.claude/skills/modern-web-guidance/guides/security/client-side-encryption.md:generic-api-key:187
+6662be12babba2270951358b628f7f0bd7fe5289:.claude/skills/modern-web-guidance/guides/security/client-side-encryption.md:generic-api-key:201

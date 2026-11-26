@@ -6,4 +6,10 @@
 # (Semgrep v1.184.0: src/targeting/Semgrepignore.ml, src/targeting/Find_targets.ml).
 #
 # Every entry added below is a suppression: the floor guard blocks it unless the same PR adds an
-# Exceptions row to CONSTRAINTS.md (#40). There are none.
+# Exceptions row to CONSTRAINTS.md (#40).
+
+# E27 (#666): unencrypted WebSocket (`ws` scheme) example URLs in the vendored Modern Web Guidance docs
+# (javascript.lang.security.detect-insecure-websocket); example text, not code that runs.
+.claude/skills/modern-web-guidance/guides/security/local-network-access.md
+.claude/skills/modern-web-guidance/guides/security/restrict-outbound-connections.md
+.claude/skills/modern-web-guidance/guides/security/security.md
