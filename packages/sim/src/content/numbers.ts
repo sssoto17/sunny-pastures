@@ -1,4 +1,4 @@
-// The content check's rules on numbers and timers (ADR-0003, section 17).
+// The content check's rules on numbers and timers (ADR-0003, section 17). It changes no value.
 import { fail, isTimer } from "./failure.js";
 import type { Content, ContentFailure } from "./index.js";
 
