@@ -63,7 +63,7 @@ describe("FarmMap lots for sale", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Chicken pen: for sale" }));
 
 		expect(screen.getByRole("button", { name: "Buy" }).hasAttribute("disabled")).toBe(true);
-		expect(screen.getByText("You need 1 more coins to buy this.")).toBeTruthy();
+		expect(screen.getByText("You need 1 more coin to buy this.")).toBeTruthy();
 	});
 
 	it("buys the chicken pen, and a bought lot calls onOpen with the lot", async () => {

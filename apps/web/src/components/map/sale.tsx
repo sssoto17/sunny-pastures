@@ -61,6 +61,8 @@ function findOffer(lot: Lot): Offer | null {
 		if (pen === undefined) return null;
 
 		const level = unlockLevel(pen.id, "pens");
+		if (level === null) return null;
+
 		return { price: pen.price, level, action: { type: "buyPen", pen: lot.index } };
 	}
 
@@ -68,20 +70,25 @@ function findOffer(lot: Lot): Offer | null {
 	if (facility === undefined) return null;
 
 	const level = unlockLevel(facility.id, "facilities");
+	if (level === null) return null;
+
 	return { price: facility.price, level, action: { type: "buyFacility", facility: lot.index } };
 }
 
 /** The Level whose row of the Level table first lists `id` under `unlocks` (MUST-05.3, 05.6). */
-function unlockLevel(id: string, unlocks: "pens" | "facilities"): number {
+function unlockLevel(id: string, unlocks: "pens" | "facilities"): number | null {
 	const { levels }: { levels: readonly LevelRow[] } = sliceContent;
-	return levels.findIndex((row) => row[unlocks].includes(id)) + 1;
+	const index = levels.findIndex((row) => row[unlocks].includes(id));
+	// A lot no Level unlocks has no offer: it can't be bought, so it has no popover.
+	return index === -1 ? null : index + 1;
 }
 
 /** Why "Buy" is off, as a sentence a player reads; null when the farm can buy it. */
 function findReason(offer: Offer, farm: FarmState, level: number): string | null {
 	if (level < offer.level) return `Reach Level ${String(offer.level)} to buy this.`;
 	if (farm.coins < offer.price) {
-		return `You need ${String(offer.price - farm.coins)} more coins to buy this.`;
+		const missing = offer.price - farm.coins;
+		return `You need ${String(missing)} more ${missing === 1 ? "coin" : "coins"} to buy this.`;
 	}
 
 	return null;
