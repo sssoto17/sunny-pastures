@@ -115,7 +115,7 @@ describe("factory.yml, the hand-off (#646)", () => {
 		const r = pack({ setup: commitOn("596-session-client"), files: handoff });
 		expect(r.code).toBe(1);
 		expect(r.result).toEqual([
-			"RESULT handoff=none: branch 596-session-api-client doesn't exist (HEAD: 596-session-client; other branches: 596-session-client+1)",
+			"RESULT handoff=none: branch 596-session-api-client doesn't exist (HEAD: 596-session-client+1; other branches: 596-session-client+1 main+0)",
 		]);
 		expect(r.errors).toEqual([
 			"::error title=Factory hand-off::branch 596-session-api-client doesn't exist",
@@ -124,13 +124,34 @@ describe("factory.yml, the hand-off (#646)", () => {
 		expect(r.output).toBe("");
 	});
 
-	it("names a detached HEAD and no other branches", () => {
+	it("names a detached HEAD", () => {
 		const r = pack({ setup: (repo) => git(repo, "switch", "-q", "--detach"), files: handoff });
 		expect(r.code).toBe(1);
 		expect(r.result).toEqual([
 			expect.stringMatching(
-				/^RESULT handoff=none: branch 596-session-api-client doesn't exist \(HEAD: detached at [0-9a-f]+; other branches: none\)$/,
+				/^RESULT handoff=none: branch 596-session-api-client doesn't exist \(HEAD: detached at [0-9a-f]+\+0; other branches: main\+0\)$/,
 			),
+		]);
+	});
+
+	it("counts commits on HEAD itself, so work committed on main or a detached HEAD shows", () => {
+		const r = pack({
+			setup: (repo) => {
+				writeFileSync(join(repo, "client.ts"), "export {};\n");
+				git(repo, "add", ".");
+				git(repo, "commit", "-q", "-m", "on main");
+			},
+			files: handoff,
+		});
+		expect(r.result).toEqual([
+			"RESULT handoff=none: branch 596-session-api-client doesn't exist (HEAD: main+1; other branches: main+1)",
+		]);
+	});
+
+	it("keeps only plain characters of the branch names Claude made", () => {
+		const r = pack({ setup: commitOn("596-x\u202e`y"), files: handoff });
+		expect(r.result).toEqual([
+			"RESULT handoff=none: branch 596-session-api-client doesn't exist (HEAD: 596-xy+1; other branches: 596-xy+1 main+0)",
 		]);
 	});
 
@@ -141,7 +162,7 @@ describe("factory.yml, the hand-off (#646)", () => {
 		});
 		expect(r.code).toBe(1);
 		expect(r.result).toEqual([
-			"RESULT handoff=none: branch 596-session-api-client has no commits (HEAD: 596-session-api-client; other branches: none)",
+			"RESULT handoff=none: branch 596-session-api-client has no commits (HEAD: 596-session-api-client+0; other branches: main+0)",
 		]);
 		expect(r.output).toBe("");
 	});
@@ -262,6 +283,33 @@ describe("factory.yml, Claude's last turns (#646)", () => {
 		for (const l of r.lines) expect(l).toMatch(/^TURNS [^\r\n]{0,220}$/);
 	});
 
+	it("prints only the first non-empty line of a failed call's output", () => {
+		const r = turns([
+			call("t1", "Bash", { command: "pnpm test" }),
+			answer("t1", "\nExit code 1\nfile contents line\nmore", true),
+			result(""),
+		]);
+		expect(r.lines).toEqual(["TURNS call Bash pnpm test -> error: Exit code 1"]);
+	});
+
+	it("skips malformed entries instead of losing the digest", () => {
+		const r = turns([
+			"a string",
+			{ type: "assistant", message: { content: "plain text" } },
+			{ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: "x" }] } },
+			call("t1", "Read", { file_path: "/ok" }),
+			{ type: "user", message: { content: [{ type: "tool_result", content: "no id" }] } },
+			{ type: "result", result: "end", permission_denials: [{ tool_name: "Bash", tool_input: 3 }] },
+		]);
+		expect(r.code).toBe(0);
+		expect(r.lines).toEqual([
+			"TURNS call Bash  -> no result",
+			"TURNS call Read /ok -> no result",
+			"TURNS denied Bash ",
+			"TURNS said end",
+		]);
+	});
+
 	it("caps each entry at 200 characters", () => {
 		const r = turns([call("t1", "Bash", { command: "x".repeat(500) }), result("")]);
 		expect(r.lines[0]).toBe(`TURNS call Bash ${"x".repeat(200)} -> no result`);
@@ -274,6 +322,10 @@ describe("factory.yml, Claude's last turns (#646)", () => {
 		const r = turns(exec);
 		expect(r.code).toBe(0);
 		expect(r.lines).toEqual([line]);
+	});
+
+	it("throws on a step the workflow doesn't have", () => {
+		expect(() => runBlock(yml, "No such step")).toThrow(/no step "No such step"/);
 	});
 
 	it("runs whatever happened, after Claude's result", () => {

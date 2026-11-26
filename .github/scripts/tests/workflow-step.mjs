@@ -1,8 +1,11 @@
 // Test helper: a workflow step's own `run: |` block, as the workflow has it, so a test can run the
 // step's shell exactly. The block is the lines indented past the step's keys (10 spaces, a job's
-// step), up to the first line that isn't. Used by the factory tests (#615, #646).
+// step), up to the first line that isn't. A step that isn't there throws. Used by the factory tests (#615, #646).
 export const runBlock = (yml, name) => {
-	const step = yml.slice(yml.indexOf(`name: ${name}`));
+	const at = yml.indexOf(`name: ${name}`);
+	const run = yml.indexOf("run: |\n", at);
+	if (at < 0 || run < 0) throw new Error(`no step "${name}" with a run: | block`);
+	const step = yml.slice(at);
 	return step
 		.slice(step.indexOf("run: |\n") + "run: |\n".length)
 		.split("\n")
