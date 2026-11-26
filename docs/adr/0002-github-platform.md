@@ -1462,16 +1462,18 @@ copied at start-up and an empty file for a missing one, with no environment carr
 or a new `link:` line, is put back and refused. As root the broker runs only `/usr/bin` and `/bin`
 commands and its copy of pnpm, never anything from the step's `PATH` (home and `/opt`, which
 Claude's sandbox can write), and it reads and writes the checkout only as the runner user, through
-`setpriv`. Requests are moved into `/srv/factory-deps` before they are read (4096 bytes at most).
-Against the sandbox Claude already has, the new writes are `pnpm-lock.yaml` and `node_modules/.bin`;
-`.git/hooks`, `.git/config` and the rest stay read-only. Alternatives considered:
-`sandbox.excludedCommands` for `pnpm add` (it would run with none of the scrub's protections, and
-whether the scrub honours it isn't documented); managed settings (`allowWriteWithinDeny` lifts a
-folder inside a denied one, not a denied file); launching Claude from another folder (it moves every
-protection with it); `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` (ruled out above); a separate user for the
-whole broker (root plus `setpriv` keeps its files out of the runner user's reach and pnpm's output
-owned by it, without a new account). The broker's list of protected paths is copied from Claude
-Code's, so a Claude Code upgrade that adds one needs it added there too.
+`setpriv`. That holds for the request folder too, which Claude can swap at any time: the runner user
+lists, reads (4096 bytes at most, a regular file only) and deletes each request, and root never acts
+in that folder. Against the sandbox Claude already has, the new writes are `pnpm-lock.yaml` and
+`node_modules/.bin`; `.git/hooks`, `.git/config` and the rest stay read-only. Alternatives
+considered: `sandbox.excludedCommands` for `pnpm add` (it would run with none of the scrub's
+protections, and whether the scrub honours it isn't documented); managed settings
+(`allowWriteWithinDeny` lifts a folder inside a denied one, not a denied file); launching Claude
+from another folder (it moves every protection with it); `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` (ruled
+out above); a separate user for the whole broker (root plus `setpriv` keeps its files out of the
+runner user's reach and pnpm's output owned by it, without a new account). The broker's list of
+protected paths is copied from Claude Code's, so a Claude Code upgrade that adds one needs it added
+there too.
 
 **Residual risk.** The setup-token is in the Claude step: the scrub keeps it out of Bash's
 environment, but the runner user has sudo, so a prompt injection could still read it from the

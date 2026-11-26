@@ -266,6 +266,24 @@ describe("factory-deps.sh", () => {
 		expect(read("hijacked")).toBeNull();
 	});
 
+	// The request folder sits in the hand-off folder, which Claude can write: swapped for a link
+	// after start-up, nothing in the link's target is touched (#645's third review).
+	it("never acts in a request folder that became a link", async () => {
+		const t = setup();
+		await serve(t);
+		const victim = join(dir, "victim");
+		mkdirSync(victim);
+		writeFileSync(join(victim, "req.x1"), "apps/web\nprod\nzustand@5.1.0\n");
+		writeFileSync(join(victim, "req.bad name"), "x\n");
+		rmSync(join(dir, "requests"), { recursive: true });
+		symlinkSync(victim, join(dir, "requests"));
+		await sleep(500);
+		expect(existsSync(join(victim, "req.x1"))).toBe(true);
+		expect(existsSync(join(victim, "req.bad name"))).toBe(true);
+		expect(read("out/res.x1.status")).toBeNull();
+		expect(read("pnpm.args")).toBeNull();
+	});
+
 	it("keeps serving after a request it can't read", async () => {
 		const t = setup();
 		await serve(t);

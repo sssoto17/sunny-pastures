@@ -36,8 +36,8 @@
 # As root the broker runs only /usr/bin and /bin commands (PATH is reset on its first line) and the
 # pnpm it copied, and it never opens a file Claude can change: every read and write in the checkout
 # runs as FACTORY_DEPS_USER through setpriv. Requests come in through FACTORY_DEPS, which Claude can
-# write; each is moved into FACTORY_DEPS_OUT before it is read (4096 bytes at most), and a link is
-# refused. Nothing a request does stops the broker.
+# write, so the user lists, reads (4096 bytes at most, a regular file only) and deletes them; root
+# never acts in that folder. Nothing a request does stops the broker.
 #
 # Env: FACTORY_DEPS (default $GITHUB_WORKSPACE/../factory-out/deps, inside the hand-off folder
 # Claude gets with --add-dir), FACTORY_DEPS_OUT (default
@@ -153,26 +153,29 @@ serve() {
   trap 'rm -f -- "$out/ready"' EXIT
   : >"$out/ready"
   echo "DEPS serving $repo with pnpm ${want:-none}: $($pnpm_ok && echo found || echo "not found, so every request is refused")"
-  local end=$((SECONDS + ${FACTORY_DEPS_TTL:-3600})) req id
+  local end=$((SECONDS + ${FACTORY_DEPS_TTL:-3600})) name
   while ((SECONDS < end)); do
-    for req in "$requests"/req.*; do
-      [[ -e $req || -L $req ]] || continue
-      id=${req##*/req.}
-      if [[ $id =~ ^[0-9A-Za-z-]{1,64}$ ]]; then handle "$req" "$id"; else rm -rf -- "$req" || true; fi
-    done
+    # Claude can swap the request folder at any time, so root never acts in it: the user lists,
+    # reads and deletes, and a folder that became a link is skipped as well.
+    if [[ -d $requests && ! -L $requests ]]; then
+      while IFS= read -r name; do
+        if [[ $name =~ ^req\.([0-9A-Za-z-]{1,64})$ ]]; then
+          handle "$name" "${BASH_REMATCH[1]}"
+        else
+          as_user rm -rf -- "$requests/$name" || true
+        fi
+      done < <(as_user find "$requests" -mindepth 1 -maxdepth 1 -name 'req.*' -printf '%f\n' 2>/dev/null | head -n 50)
+    fi
     sleep "${FACTORY_DEPS_POLL:-1}"
   done
 }
 
-# One request: moved into $out first (where Claude can't swap it), read as one word per line.
+# One request, read and deleted by the user (a regular file only, 4096 bytes at most), as one word
+# per line.
 handle() {
-  local req=$1 id=$2 words=() st
-  rm -rf -- "$out/req"
-  mv -f -- "$req" "$out/req" 2>/dev/null || return 0
-  if [[ -f $out/req && ! -L $out/req ]]; then
-    mapfile -t -n 23 words < <(head -c 4096 "$out/req") || true
-  fi
-  rm -rf -- "$out/req"
+  local name=$1 id=$2 words=() st
+  mapfile -t -n 23 words < <(as_user timeout 10 sh -c \
+    'if [ -f "$1" ] && [ ! -L "$1" ]; then head -c 4096 -- "$1"; fi; rm -rf -- "$1"' sh "$requests/$name") || true
   if run_request "${words[@]}" >"$out/res.$id.log" 2>&1; then st=0; else st=$?; fi
   echo "$st" >"$out/res.$id.tmp"
   mv -f -- "$out/res.$id.tmp" "$out/res.$id.status"
