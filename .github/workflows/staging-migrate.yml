@@ -40,27 +40,31 @@ jobs:
     environment: staging
     permissions:
       contents: read
+    env:
+      # The CLI version .github/actions/supabase-stack and `pnpm supabase:check` pin.
+      SUPABASE_VERSION: 2.122.0
     steps:
       # db push reads supabase/config.toml and supabase/migrations/ only.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: supabase
-      # v3.2.0, published 2 Nov 2026. The CLI version matches .github/actions/supabase-stack and
-      # `pnpm supabase:check`; the next step fails if the action installs another.
+      # v3.2.0, published 2 Nov 2026. The next step fails if it installs another CLI version.
       - uses: supabase/setup-cli@689adcfb80d947100a1eab127289b97d1fb07b13 # v3.2.0
         with:
-          version: 2.122.0
+          version: ${{ env.SUPABASE_VERSION }}
       - name: Check the Supabase CLI's version
         run: |
           version=$(supabase --version)
           echo "Supabase CLI $version"
-          if [[ $version != 2.122.0 ]]; then
-            echo "::error title=Wrong Supabase CLI::expected 2.122.0, got $version"
+          if [[ $version != "$SUPABASE_VERSION" ]]; then
+            echo "::error title=Wrong Supabase CLI::expected $SUPABASE_VERSION, got $version"
             exit 1
           fi
       # Masks the password (as written and percent-decoded), the user, the host and the project ref
       # before any step can print them. Prints nothing itself: the runner hides ::add-mask:: lines.
+      # ::add-mask:: masks one line, so a value with a line break is masked line by line. A password
+      # with a literal backslash isn't decoded, since printf %b would read it as an escape.
       - name: Mask the staging database URL's parts
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
@@ -81,11 +85,17 @@ jobs:
           elif [[ $host =~ ^db\.([a-z0-9]+)\.supabase\.co$ ]]; then
             ref=${BASH_REMATCH[1]}
           fi
-          decoded=$(printf '%b' "${password//%/\\x}")
+          decoded=""
+          if [[ $password != *\\* ]]; then
+            decoded=$(printf '%b' "${password//%/\\x}")
+          fi
           for value in "$password" "$decoded" "$user" "$host" "$ref"; do
-            if [[ -n $value && $value != postgres ]]; then
-              echo "::add-mask::$value"
-            fi
+            while IFS= read -r line; do
+              line=${line%$'\r'}
+              if [[ -n $line && $line != postgres ]]; then
+                echo "::add-mask::$line"
+              fi
+            done <<<"$value"
           done
       # --yes answers db push's "push these migrations?" prompt. No --include-all: a migration
       # older than staging's newest applied one is an error to look at, not something to apply.
