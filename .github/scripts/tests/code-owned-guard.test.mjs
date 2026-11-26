@@ -26,6 +26,8 @@ const RULES = parseCodeOwners(
 );
 const HEAD = "b".repeat(40);
 const OLD = "a".repeat(40);
+// The id of the record the fake `writeRecord` writes.
+const WRITTEN = 900;
 
 const ADMIN = { login: "sssoto17", type: "User" };
 const FACTORY = { login: "sunny-factory[bot]", type: "Bot" };
@@ -119,11 +121,11 @@ const github = ({
 		listFiles: async () => files.map((f) => (typeof f === "string" ? { filename: f } : f)),
 		// The first `lag` reads miss the last event, as a lagging REST list would.
 		listEvents: async () => (reads++ < lag ? events.slice(0, -1) : events),
-		// The first `recordLag` reads miss the record this run wrote (id 900), as the check-runs
+		// The first `recordLag` reads miss the record this run wrote (`WRITTEN`), as the check-runs
 		// list can just after the write (#638, run 45268665252).
 		listRecords: async (sha) => {
 			const lagging = recordReads++ < recordLag;
-			return state.records.filter((r) => r.head_sha === sha && !(lagging && r.id === 900));
+			return state.records.filter((r) => r.head_sha === sha && !(lagging && r.id === WRITTEN));
 		},
 		// The first `keyLag` reads answer stale keys, without the one the record's token names.
 		getKeys: async (fresh) => {
@@ -140,7 +142,7 @@ const github = ({
 		},
 		// What main's run writes: its summary, and a token GitHub signed for main's workflow.
 		writeRecord: async (sha, output, audience) => {
-			const written = record(900, { sha, token: jwt(mainClaims(sha, { aud: audience })) });
+			const written = record(WRITTEN, { sha, token: jwt(mainClaims(sha, { aud: audience })) });
 			state.records.push(written);
 			log.push(`record on ${sha.slice(0, 7)}: ${output.summary}`);
 			return written;
@@ -469,7 +471,7 @@ describe("checkCodeOwned", () => {
 	});
 
 	// Only the run that wrote a record waits for it: any other run reads the records once.
-	it("reads the records once on a run that wrote none", async () => {
+	it("never waits for a record on a run that wrote none", async () => {
 		const gh = github({ events: [added(), removed(ADMIN)] });
 		await rearmed(gh, event());
 		expect(gh.state.waits).toEqual([]);

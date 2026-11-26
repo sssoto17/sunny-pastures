@@ -68,6 +68,8 @@ const WAIT_MS = 2000;
 // The check-runs list can lag a write too (#638): how long a removal run waits before each re-read
 // of the record it just wrote. Six reads over 31 s, well inside the job's five minutes.
 const READ_BACK_MS = [1000, 2000, 4000, 8000, 16000];
+// What the admin does after a run that couldn't write its record: the label is still off.
+const RETRY = " (the admin re-runs this job, or adds review:admin back and removes it again)";
 
 const ESCALATED =
 	"escalated: Code-owned path\n\n`guard / code-owned` added `review:admin`: the diff touches a path " +
@@ -248,11 +250,13 @@ async function signOff(event, pull, events, audience, { listEvents, writeRecord,
 	try {
 		written = await writeRecord(pull.head.sha, output, audience);
 	} catch (e) {
-		throw new CannotRun(`couldn't write the ${SIGN_OFF} record on ${at}: ${e?.message ?? e}`);
+		throw new CannotRun(
+			`couldn't write the ${SIGN_OFF} record on ${at}: ${e?.message ?? e}${RETRY}`,
+		);
 	}
 	if (!written?.id)
 		throw new CannotRun(
-			`couldn't write the ${SIGN_OFF} record on ${at}: GitHub's answer has no id`,
+			`couldn't write the ${SIGN_OFF} record on ${at}: GitHub's answer has no id${RETRY}`,
 		);
 	return { removal, listed, written };
 }
@@ -285,15 +289,15 @@ async function readPr(event, { rules, getPull, listFiles, listEvents, sleep = de
 	return { pull, events, owned: paths.filter((p) => isOwned(rules, p)), number, repo };
 }
 
-// `{ record, listed }`: the newest `code-owned / sign-off` record on `head` that `fromMain` counts,
-// or null, and the ids of every record listed there. `fresh` asks for GitHub's keys again.
+// `{ record, ids }`: the newest `code-owned / sign-off` record on `head` that `fromMain` counts, or
+// null, and the ids of every record listed there. `fresh` asks for GitHub's keys again.
 async function recordFromMain(repo, number, head, { getKeys, listRecords }, fresh = false) {
 	const keys = await getKeys(fresh);
 	const records = await listRecords(head);
 	const counted = records.filter((r) => fromMain(r, { repo, number, head, keys }));
 	return {
 		record: counted.sort((a, b) => a.id - b.id).at(-1) ?? null,
-		listed: records.map((r) => r.id),
+		ids: records.map((r) => r.id),
 	};
 }
 
@@ -318,7 +322,7 @@ function rearmReason(event, signed, removal, short, read) {
 	if (signed?.moved)
 		return `the removal was made on an older head, ${event.pull_request.head.sha.slice(0, 7)}, and the PR's head is now ${short}; the admin removes the label again on ${short}`;
 	const reads = READ_BACK_MS.length + 1;
-	if (signed?.written && read?.listed.includes(signed.written.id))
+	if (signed?.written && read?.ids.includes(signed.written.id))
 		return `this run wrote ${SIGN_OFF} ${signed.written.id} on ${short}, but its token didn't verify against GitHub's OIDC keys in ${reads} reads; the admin removes the label again`;
 	if (signed?.written)
 		return `this run wrote ${SIGN_OFF} ${signed.written.id} on ${short}, but GitHub's check-runs list didn't show it in ${reads} reads; the admin removes the label again`;
@@ -467,7 +471,17 @@ const main = async () => {
 		listEvents: () => all(`issues/${number}/events`),
 		listRecords: checksNamed(SIGN_OFF),
 		listChecks: checksNamed(CHECK),
-		getKeys: async (fresh) => (fresh || !keys ? (keys = await oidc.keys()) : keys),
+		// A fresh read that fails keeps the keys already held: the read-back still verifies with them.
+		getKeys: async (fresh) => {
+			if (keys && !fresh) return keys;
+			try {
+				keys = await oidc.keys();
+			} catch (e) {
+				if (!keys) throw e;
+				console.error(`code-owned: kept the OIDC keys already read: ${e?.message ?? e}`);
+			}
+			return keys;
+		},
 		escalate: async () => {
 			await addLabel();
 			await comment(ESCALATED);
