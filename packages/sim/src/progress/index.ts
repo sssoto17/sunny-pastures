@@ -43,10 +43,7 @@ export function prepareProgressRules(content: Content): ProgressRules {
  * only the Level table, so it takes the progress rules or a content alike: the client passes its
  * content (#667).
  */
-export function levelOf(
-	xp: number,
-	{ levels }: { readonly levels: readonly { readonly xp: number }[] },
-): number {
+export function levelOf(xp: number, { levels }: Pick<ProgressRules, "levels">): number {
 	return levels.filter((level) => level.xp <= xp).length;
 }
 

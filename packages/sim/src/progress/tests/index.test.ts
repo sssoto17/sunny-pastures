@@ -9,7 +9,7 @@ const rules = prepareProgressRules(sliceContent);
 const newFarm = createSim(sliceContent).newFarm("farm-1");
 
 describe("levelOf", () => {
-	it.each([
+	const table = [
 		[0, 1],
 		[9, 1],
 		[10, 2],
@@ -17,17 +17,14 @@ describe("levelOf", () => {
 		[30, 3],
 		[100, 5],
 		[1_000_000, 5],
-	])("puts a farm with %i XP at Level %i (MUST-05.3)", (xp, level) => {
+	] as const;
+
+	it.each(table)("puts a farm with %i XP at Level %i (MUST-05.3)", (xp, level) => {
 		expect(levelOf(xp, rules)).toBe(level);
 	});
 
-	it.each([
-		[0, 1],
-		[29, 2],
-		[30, 3],
-		[1_000_000, 5],
-	])(
-		"reads the Level table from content too, as the client does (#667): %i XP is Level %i",
+	it.each(table)(
+		"reads the Level table from content too, through the package entry, as the client does (#667): %i XP is Level %i",
 		(xp, level) => {
 			expect(levelOfFromEntry(xp, sliceContent)).toBe(level);
 		},

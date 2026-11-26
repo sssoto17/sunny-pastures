@@ -1622,6 +1622,21 @@ describe("floor guard, end to end", () => {
 			});
 			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc:2");
 		});
+
+		it("blocks a drop when the key is in the file twice, so the lines may be different scopes", () => {
+			const nested = RC.replace(
+				'"audit": { "gate": "new-only" }',
+				'"overrides": [{\n    "ignoreDependencies": ["a"]\n  }]',
+			);
+			repo = makeRepo({ ...BASE, ".fallowrc.jsonc": nested });
+			repo.write({
+				".fallowrc.jsonc": nested
+					.replace('["a", "b", "c"]', '["a", "b", "c"]X')
+					.replace('    "ignoreDependencies": ["a"]', '    "ignoreDependencies": ["a", "b", "c"]')
+					.replace('["a", "b", "c"]X', '["a"]'),
+			});
+			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc");
+		});
 	});
 
 	// #125: Prettier's ignore list and settings decide what the formatting check covers, so a widened
