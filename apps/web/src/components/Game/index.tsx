@@ -10,6 +10,7 @@ import { createFarmStore, type FarmStore } from "@/client/store";
 import { Button, ToastRegion } from "@/components/ui";
 
 import { Hud } from "../hud";
+import { LevelUp } from "../levelUp";
 import { FarmMap } from "../map";
 import { OrderBoard } from "../orderBoard";
 
@@ -60,6 +61,7 @@ export default function Game({ store }: GameProps) {
 			<FarmMap farm={predicted} />
 			<Hud store={farmStore} />
 			<ToastRegion />
+			<LevelUp store={farmStore} />
 			<div style={ordersStyle}>
 				<OrderBoard store={farmStore} />
 			</div>
