@@ -14,6 +14,7 @@ import {
 import type { FarmEnvelope } from "@/contract";
 
 import type { Api } from "../api";
+import { withoutAction, type PendingAction } from "./pending";
 import { predict } from "./predict";
 import { sendPending } from "./sync";
 
@@ -21,15 +22,6 @@ import { sendPending } from "./sync";
 // screen subscribes to the slice it shows and the clock tick doesn't redraw the whole farm. It
 // holds the last confirmed farm and the pending actions, and derives the predicted farm with the
 // shared sim (MUST-12). Rejected there: `useReducer` + context, and our own store.
-
-/** An action sent to the server and not yet answered. */
-export interface PendingAction {
-	readonly action: Action;
-	/** From `crypto.randomUUID()`; every retry of this action sends the same one (MUST-12.5). */
-	readonly idempotencyKey: string;
-	/** The time the prediction applied it at, in ms. */
-	readonly at: number;
-}
 
 export interface FarmStore {
 	/** The farm the server last answered with; null until it loads. */
@@ -103,7 +95,7 @@ export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
 		/** Drops the pending action with `key`, so the prediction rolls back, and shows why. */
 		const undo = (key: string, reason: string) => {
 			const { confirmed, now } = get();
-			const pending = get().pending.filter((p) => p.idempotencyKey !== key);
+			const pending = withoutAction(get().pending, key);
 			const predicted = confirmed === null ? null : predict(sim, confirmed, pending, now);
 			set({ pending, predicted, lastRefusal: reason });
 		};
@@ -112,8 +104,11 @@ export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
 			if (isSending) return;
 
 			isSending = true;
-			await sendPending({ api: deps.api, get, confirm, undo });
-			isSending = false;
+			try {
+				await sendPending({ api: deps.api, get, confirm, undo });
+			} finally {
+				isSending = false;
+			}
 		};
 
 		return {
@@ -135,6 +130,8 @@ export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
 				if (!confirm(result.farm, get().pending)) return;
 
 				set({ status: "ready", error: null });
+				// A second load, or a stop while this one was in flight, leaves one tick, never two.
+				stop();
 				tick = setInterval(() => {
 					const { confirmed, pending } = get();
 					const now = readNow();
@@ -176,28 +173,29 @@ export const selectCoins = (store: FarmStore): number | null => store.predicted?
 
 /** The Level from 1, derived from XP through the Level table (MUST-05.3). */
 export const selectLevel = (store: FarmStore): number | null =>
-	store.predicted === null
-		? null
-		: sliceContent.levels.filter((level) => level.xp <= (store.predicted?.xp ?? 0)).length;
+	store.predicted === null ? null : countLevels(store.predicted.xp);
 
-export interface Storage {
-	readonly silo: StoreContents;
-	readonly barn: StoreContents;
+export interface FarmStorage {
+	readonly silo: StoredGoods;
+	readonly barn: StoredGoods;
 }
 
-interface StoreContents {
+interface StoredGoods {
 	/** Goods by good id; a good has a key only while it has some. */
 	readonly goods: Readonly<Record<string, number>>;
 	readonly capacity: number;
 }
 
-const storageByFarm = new WeakMap<FarmState, Storage>();
+const storageByFarm = new WeakMap<FarmState, FarmStorage>();
 
-export const selectStorage = (store: FarmStore): Storage | null => {
+export const selectStorage = (store: FarmStore): FarmStorage | null => {
 	const farm = store.predicted;
 	if (farm === null) return null;
 
-	const storage = storageByFarm.get(farm) ?? {
+	const cached = storageByFarm.get(farm);
+	if (cached !== undefined) return cached;
+
+	const storage = {
 		silo: { goods: farm.silo, capacity: sliceContent.silo.capacity },
 		barn: { goods: farm.barn, capacity: sliceContent.barn.capacity },
 	};
@@ -228,3 +226,11 @@ const noOrders: readonly OrderSlot[] = [];
 /** The order board's slots; empty before the farm loads. */
 export const selectOrders = (store: FarmStore): readonly OrderSlot[] =>
 	store.predicted?.board ?? noOrders;
+
+/**
+ * The Level for `xp`: the Levels whose XP it has reached (MUST-05.3). The sim's `levelOf` holds
+ * the same rule but isn't in the package's interface, so the client counts it from the content.
+ */
+function countLevels(xp: number): number {
+	return sliceContent.levels.filter((level) => level.xp <= xp).length;
+}

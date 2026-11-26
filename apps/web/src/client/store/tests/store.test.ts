@@ -54,6 +54,7 @@ describe("load", () => {
 		const before = newEnvelope(start - 600_000);
 		const planted = accept(before, plant0, start - 600_000);
 		if (!planted.ok) throw new Error("unreachable");
+
 		await loadReady(planted.farm);
 		expect(selectPlot(0)(state())).toEqual({ status: "ready", crop: "wheat" });
 		expect(fake.loads).toHaveLength(1);
@@ -73,6 +74,17 @@ describe("load", () => {
 		expect(state().now).toBe(start + 1_000);
 		vi.advanceTimersByTime(2_000);
 		expect(state().now).toBe(start + 3_000);
+	});
+
+	it("keeps one clock tick when two loads overlap", async () => {
+		const first = state().load();
+		const second = state().load();
+		await fake.loads[0]?.answer({ ok: true, farm: newEnvelope(start) });
+		await fake.loads[1]?.answer({ ok: true, farm: newEnvelope(start) });
+		await Promise.all([first, second]);
+		state().stop();
+		vi.advanceTimersByTime(5_000);
+		expect(state().now).toBe(start);
 	});
 
 	it("sets the error status when the farm can't load", async () => {
@@ -178,6 +190,16 @@ describe("act", () => {
 		expect(state().confirmed?.seq).toBe(1);
 	});
 
+	it("waits 1 s before a retry when the server gives no time", async () => {
+		await loadReady();
+		state().act(plant0);
+		await fake.sends[0]?.answer(failure("network"));
+		await vi.advanceTimersByTimeAsync(999);
+		expect(fake.sends).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(fake.sends[1]?.request.idempotencyKey).toBe(fake.sends[0]?.request.idempotencyKey);
+	});
+
 	it("drops the action after 3 retries and says so in a sentence", async () => {
 		await loadReady();
 		state().act(plant0);
@@ -210,6 +232,7 @@ describe("act", () => {
 		const first = accept(envelope, plant0, start + 10);
 		await fake.sends[0]?.answer(first);
 		if (!first.ok) throw new Error("unreachable");
+
 		expect(state().pending.map((pending) => pending.action)).toEqual([plant1]);
 		expect(selectPlot(1)(state())).toMatchObject({ status: "growing" });
 		expect(fake.sends[1]?.request).toMatchObject({ action: plant1, expectedSeq: 1 });
@@ -219,6 +242,20 @@ describe("act", () => {
 		expect(state().confirmed?.seq).toBe(2);
 		expect(selectCoins(state())).toBe(46);
 		expect(fake.sends).toHaveLength(2);
+	});
+
+	it("rolls back a refused first action under a later prediction", async () => {
+		const envelope = await loadReady();
+		state().act(plant0);
+		state().act(plant1);
+		await fake.sends[0]?.answer(failure("refused"));
+		expect(state().pending.map((pending) => pending.action)).toEqual([plant1]);
+		expect(selectPlot(0)(state())).toEqual({ status: "empty" });
+		expect(selectPlot(1)(state())).toMatchObject({ status: "growing" });
+		expect(selectCoins(state())).toBe(48);
+		expect(fake.sends[1]?.request).toMatchObject({ action: plant1, expectedSeq: 0 });
+		await fake.sends[1]?.answer(accept(envelope, plant1, start));
+		expect(state().pending).toEqual([]);
 	});
 
 	it("asks for a reload when an answer's rules version differs", async () => {

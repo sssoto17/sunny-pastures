@@ -1,7 +1,8 @@
 import type { ErrorCode, FarmEnvelope } from "@/contract";
 
 import type { ActionResult, Api, ApiFailure } from "../api";
-import type { FarmStore, PendingAction } from "./index";
+import type { FarmStore } from "./index";
+import { withoutAction, type PendingAction } from "./pending";
 
 // The send loop (ADR-0010, section 5; ADR-0007, section 3, "Errors"): one action in flight at a
 // time, in the order the player acted, so the server applies them in the order they were predicted
@@ -66,7 +67,7 @@ function send(deps: SyncDeps, entry: PendingAction): Promise<ActionResult> {
 }
 
 function settle(deps: SyncDeps, entry: PendingAction, farm: FarmEnvelope): boolean {
-	const rest = deps.get().pending.filter((p) => p.idempotencyKey !== entry.idempotencyKey);
+	const rest = withoutAction(deps.get().pending, entry.idempotencyKey);
 	return deps.confirm(farm, rest);
 }
 

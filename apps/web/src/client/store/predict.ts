@@ -2,7 +2,7 @@ import type { FarmState, Sim } from "@sunny-pastures/sim";
 
 import type { FarmEnvelope } from "@/contract";
 
-import type { PendingAction } from "./index";
+import type { PendingAction } from "./pending";
 
 /**
  * The predicted farm (ADR-0010, section 4; MUST-12.2): the confirmed farm with each pending action
