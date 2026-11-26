@@ -87,6 +87,11 @@ refused "CLUSTER" \
 refused "REINDEX CONCURRENTLY in a statement after a dollar-quoted body" \
   $'DO $$ BEGIN PERFORM 1; END $$;\nREINDEX INDEX CONCURRENTLY "b";' 2
 
+refused "VACUUM after an E-string with an escaped quote" \
+  $'SELECT E\'it\\\'s\';\nVACUUM;\nSELECT \'x\';' 2
+refused "VACUUM after identifiers with a dollar sign" \
+  $'ALTER TABLE "game"."base" ADD COLUMN a$q$ text;\nVACUUM;\nALTER TABLE "game"."base" ADD COLUMN b$q$ text;' 2
+
 allowed "the words in comments, strings, identifiers and dollar-quoted bodies" \
   "$(
     cat <<'SQL'

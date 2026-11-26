@@ -39,11 +39,12 @@ use strict;
 use warnings;
 my $found = 0;
 for my $file (@ARGV) {
-  open(my $fh, '<', $file) or die "db:check: can't read $file: $!\n";
+  open(my $fh, '<', $file) or do { print STDERR "db:check: can't read $file: $!\n"; exit 2 };
   my $sql = do { local $/; <$fh> };
   close $fh;
   # Blank every character but line breaks, so offsets still give line numbers.
-  $sql =~ s{(--[^\n]*|/\*.*?\*/|'(?:[^']|'')*'|"(?:[^"]|"")*"|(\$(?:[A-Za-z_]\w*)?\$).*?\2)}
+  # E'…' strings take backslash escapes; a $ inside an identifier (allowed) starts no body.
+  $sql =~ s{(--[^\n]*|/\*.*?\*/|\b[Ee]'(?:[^'\\]|\\.|'')*'|'(?:[^']|'')*'|"(?:[^"]|"")*"|(?<![\w\$])(\$(?:[A-Za-z_]\w*)?\$).*?\2)}
            {(my $m = $1) =~ tr/\n/ /c; $m}gse;
   while ($sql =~ /([^;]+)/g) {
     my ($stmt, $start) = ($1, $-[1]);
@@ -64,8 +65,12 @@ PERL
 shopt -s nullglob
 migrations=(supabase/migrations/*.sql)
 shopt -u nullglob
-if ((${#migrations[@]})) && ! autocommits "${migrations[@]}" >&2; then
-  echo "db:check: migrations hold no statements that commit on their own (CONCURRENTLY, VACUUM, ALTER SYSTEM, CLUSTER): supabase db push runs each file as one transaction, and these can't run inside one or rewrite a table under a lock (#64 decision 6). Use the form that runs in a transaction (CREATE INDEX without CONCURRENTLY, say)." >&2
+status=0
+if ((${#migrations[@]})); then autocommits "${migrations[@]}" >&2 || status=$?; fi
+if ((status > 1)); then
+  exit "$status"
+elif ((status == 1)); then
+  echo "db:check: a migration holds a statement that commits on its own; migrations hold none that commit on their own (CONCURRENTLY, VACUUM, ALTER SYSTEM, CLUSTER): supabase db push runs each file as one transaction, and these can't run inside one or rewrite a table under a lock (#64 decision 6). Use the form that runs in a transaction (CREATE INDEX without CONCURRENTLY, say)." >&2
   exit 1
 fi
 
