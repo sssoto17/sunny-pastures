@@ -111,6 +111,14 @@ describe("Meter", () => {
 		expect(meter.getAttribute("aria-valuenow")).toBe("30");
 		expect(meter.getAttribute("aria-valuemax")).toBe("50");
 	});
+
+	it("shows and announces its valueLabel in place of the percentage", () => {
+		render(<Meter label="Barn" value={30} max={50} valueLabel="30 of 50 goods" />);
+
+		const meter = screen.getByRole("meter", { name: "Barn" });
+		expect(meter.getAttribute("aria-valuetext")).toBe("30 of 50 goods");
+		expect(meter.textContent).toContain("30 of 50 goods");
+	});
 });
 
 describe("Dialog", () => {
