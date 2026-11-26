@@ -249,16 +249,19 @@ jobs:
       # runs as the runner user (#645's security review).
       - name: Start the dependency broker
         env:
-          FACTORY_DEPS: ${{ runner.temp }}/factory-deps
+          FACTORY_DEPS: ${{ env.OUT }}/deps
           FACTORY_DEPS_OUT: /srv/factory-deps
         run: |
           set -euo pipefail
           sudo install -d -o root -g root -m 0755 "$FACTORY_DEPS_OUT"
+          # Root runs its own copy: bash reads a script as it goes, and Claude's file tools can
+          # rewrite the checkout's.
+          sudo install -o root -g root -m 0555 .github/scripts/factory-deps.sh "$FACTORY_DEPS_OUT/factory-deps.sh"
           mkdir -p "$FACTORY_DEPS"
           sudo -n nohup setsid env -i PATH=/usr/bin:/bin HOME="$HOME" COREPACK_HOME="${COREPACK_HOME:-}" \
             FACTORY_DEPS="$FACTORY_DEPS" FACTORY_DEPS_OUT="$FACTORY_DEPS_OUT" \
             FACTORY_DEPS_USER="$(id -u):$(id -g)" FACTORY_DEPS_STEP_PATH="$PATH" \
-            bash .github/scripts/factory-deps.sh serve </dev/null >/dev/null 2>&1 &
+            bash "$FACTORY_DEPS_OUT/factory-deps.sh" serve </dev/null >/dev/null 2>&1 &
           for _ in $(seq 100); do [ -f "$FACTORY_DEPS_OUT/ready" ] && break; sleep 0.2; done
           [ -f "$FACTORY_DEPS_OUT/ready" ] || { echo "::error::the dependency broker didn't start"; exit 1; }
           echo "RESULT deps_broker=$(head -n1 "$FACTORY_DEPS_OUT/serve.log" | tr -cd '[:alnum:] @/._:,-')"
@@ -283,7 +286,7 @@ jobs:
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
-          FACTORY_DEPS: ${{ runner.temp }}/factory-deps # the broker's request folder (#635)
+          FACTORY_DEPS: ${{ env.OUT }}/deps # the broker's request folder (#635), in an --add-dir
           FACTORY_DEPS_OUT: /srv/factory-deps
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -306,7 +309,7 @@ jobs:
             --add-dir ${{ runner.temp }}/factory-context
             --add-dir ${{ env.OUT }}
             --allowedTools "Bash,Edit,Write,MultiEdit,Read,Glob,Grep,Skill,Task,TodoWrite"
-            --disallowedTools "WebFetch,WebSearch,Read(//proc/**),Edit(//srv/factory-deps/**),Write(//srv/factory-deps/**),MultiEdit(//srv/factory-deps/**),Edit(/${{ github.workspace }}/pnpm-workspace.yaml),Write(/${{ github.workspace }}/pnpm-workspace.yaml),Edit(/${{ github.workspace }}/package.json),Write(/${{ github.workspace }}/package.json),Edit(/${{ github.workspace }}/.npmrc),Write(/${{ github.workspace }}/.npmrc)"
+            --disallowedTools "WebFetch,WebSearch,Read(//proc/**),Edit(//srv/factory-deps/**),Write(//srv/factory-deps/**),MultiEdit(//srv/factory-deps/**),Edit(/${{ github.workspace }}/pnpm-workspace.yaml),Write(/${{ github.workspace }}/pnpm-workspace.yaml),MultiEdit(/${{ github.workspace }}/pnpm-workspace.yaml),Edit(/${{ github.workspace }}/package.json),Write(/${{ github.workspace }}/package.json),MultiEdit(/${{ github.workspace }}/package.json),Edit(/${{ github.workspace }}/.npmrc),Write(/${{ github.workspace }}/.npmrc),MultiEdit(/${{ github.workspace }}/.npmrc),Edit(/${{ github.workspace }}/pnpm-lock.yaml),Write(/${{ github.workspace }}/pnpm-lock.yaml),MultiEdit(/${{ github.workspace }}/pnpm-lock.yaml)"
 
       # What the broker did, from its own log in /srv (Claude can't write there): one line per
       # request, its checked words and pnpm's exit code.

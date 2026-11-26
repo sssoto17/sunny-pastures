@@ -432,7 +432,13 @@ describe("factory.yml", () => {
 		expect(start).toBeGreaterThan(factory.indexOf("name: Install bubblewrap for the env scrub"));
 		expect(start).toBeLessThan(factory.indexOf("id: claude"));
 		const step = factory.slice(start, factory.indexOf("id: claude"));
-		expect(step).toContain("bash .github/scripts/factory-deps.sh serve");
+		// Root runs a root-owned copy of the script, never the checkout's, which the file tools can
+		// rewrite while bash is still reading it (#645's delta review, N2).
+		expect(step).toContain(
+			'sudo install -o root -g root -m 0555 .github/scripts/factory-deps.sh "$FACTORY_DEPS_OUT/factory-deps.sh"',
+		);
+		expect(step).toContain('bash "$FACTORY_DEPS_OUT/factory-deps.sh" serve');
+		expect(step).not.toContain("bash .github/scripts/factory-deps.sh serve");
 		expect(step).toContain("FACTORY_DEPS_OUT: /srv/factory-deps");
 		expect(step).not.toMatch(/secrets\.|github\.token|GH_TOKEN|uses:/);
 		expect(step).toMatch(/::error::the dependency broker didn't start"; exit 1/);
@@ -446,12 +452,15 @@ describe("factory.yml", () => {
 		for (const tool of ["Edit", "Write", "MultiEdit"]) {
 			expect(denied).toContain(`${tool}(//srv/factory-deps/**)`);
 		}
-		for (const f of ["pnpm-workspace.yaml", "package.json", ".npmrc"]) {
-			expect(denied).toContain(`Edit(/\${{ github.workspace }}/${f})`);
-			expect(denied).toContain(`Write(/\${{ github.workspace }}/${f})`);
+		for (const f of ["pnpm-workspace.yaml", "package.json", ".npmrc", "pnpm-lock.yaml"]) {
+			for (const tool of ["Edit", "Write", "MultiEdit"]) {
+				expect(denied).toContain(`${tool}(/\${{ github.workspace }}/${f})`);
+			}
 		}
 		const claude = factory.slice(factory.indexOf("id: claude"), factory.indexOf("id: handoff"));
-		expect(claude).toContain("FACTORY_DEPS: ${{ runner.temp }}/factory-deps");
+		// Requests go in the hand-off folder, which Claude has with --add-dir.
+		expect(claude).toContain("FACTORY_DEPS: ${{ env.OUT }}/deps");
+		expect(claude).toContain("--add-dir ${{ env.OUT }}");
 		expect(claude).toContain("FACTORY_DEPS_OUT: /srv/factory-deps");
 	});
 

@@ -12,18 +12,20 @@
 #           change anything. Into FACTORY_DEPS_OUT (root-owned; Claude, as the runner user, can't
 #           write it with Bash or the file tools) it copies the pinned pnpm (the standalone binary
 #           for root package.json's packageManager, from Corepack's cache), the pnpm config
-#           (pnpm-workspace.yaml, the root package.json, .npmrc) and every workspace package's
-#           package.json. Then it takes requests until FACTORY_DEPS_TTL seconds (3600) pass. Each
-#           one is checked again, and no workspace package.json may have changed its dependencies
-#           since start-up except the names requested, so no URL, git or file dependency slips in.
+#           (pnpm-workspace.yaml, the root package.json, .npmrc), every workspace package's
+#           package.json and pnpm-lock.yaml. Then it takes requests until FACTORY_DEPS_TTL seconds
+#           (3600) pass. Each one is checked again; no workspace package.json may have changed its
+#           dependencies since start-up except the names requested, and pnpm-lock.yaml must be the
+#           copy or the broker's own last write, so no URL, git or file dependency, and no locked
+#           entry that skips the checks, slips in.
 #           Then, as FACTORY_DEPS_USER (the runner user) and for at most 600 s, it runs
 #             pnpm --filter ./<dir> add --save-exact [--save-dev] --ignore-scripts --ignore-pnpmfile
 #               --config.block-exotic-subdeps=true
 #           inside a bubblewrap of its own: the whole filesystem read-only; the checkout and the
 #           pnpm store writable; the protected paths below read-only again over the checkout, the
 #           config as copied at start-up and an empty file for a missing one; no environment
-#           carried in; its own /tmp and PID namespace. A lockfile that gained a tarball, git,
-#           directory or link source is put back and refused. So the new writes are
+#           carried in; its own /tmp and PID namespace. A lockfile with a tarball, git or directory
+#           source, or a new link, is put back and refused. So the new writes are
 #           `pnpm-lock.yaml` and `node_modules` (the root `.bin` included); a workspace package's
 #           `package.json` was writable already. `minimumReleaseAge` holds, as the copied config
 #           says, and no install script or pnpmfile runs.
@@ -37,7 +39,8 @@
 # write; each is moved into FACTORY_DEPS_OUT before it is read (4096 bytes at most), and a link is
 # refused. Nothing a request does stops the broker.
 #
-# Env: FACTORY_DEPS (default $RUNNER_TEMP/factory-deps), FACTORY_DEPS_OUT (default
+# Env: FACTORY_DEPS (default $GITHUB_WORKSPACE/../factory-out/deps, inside the hand-off folder
+# Claude gets with --add-dir), FACTORY_DEPS_OUT (default
 # /srv/factory-deps); serve: FACTORY_DEPS_USER (uid:gid that pnpm runs as; without it, the broker's
 # own user), FACTORY_DEPS_STEP_PATH (the step's PATH, to find pnpm), COREPACK_HOME or HOME
 # (Corepack's cache), FACTORY_DEPS_TTL (3600), FACTORY_DEPS_POLL (seconds between looks, 1),
@@ -59,10 +62,12 @@ SPEC='^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*@(0|[1-9][0-9]*)\.(0|[1-9]
 DEP_FIELDS='{dependencies, devDependencies, optionalDependencies, peerDependencies,
   peerDependenciesMeta, dependenciesMeta, bundleDependencies, bundledDependencies, overrides,
   resolutions, pnpm, packageManager}'
-EXOTIC='tarball:|type: git|directory:|link:'
+# Lockfile sources the registry didn't give: none anywhere in the file, and no new `link:` (main's
+# lockfile links its own workspace packages).
+EXOTIC='tarball:|type: git|directory:'
 
 out=${FACTORY_DEPS_OUT:-/srv/factory-deps}
-requests=${FACTORY_DEPS:-${RUNNER_TEMP:-/nonexistent}/factory-deps}
+requests=${FACTORY_DEPS:-${GITHUB_WORKSPACE:-$PWD}/../factory-out/deps}
 
 # Why a request is malformed, or nothing: a workspace folder, prod or dev, 1 to 20 exact versions.
 check() {
@@ -131,7 +136,9 @@ serve() {
     mkdir -p "$out/ws/${f%/package.json}"
     cp -- "$p" "$out/ws/$f"
   done
-  chmod -R a-w "$out/config" "$out/ws" "$out/empty"
+  # The lockfile as main has it: pnpm must start from this, or from what the broker last wrote.
+  if [[ -f $repo/pnpm-lock.yaml && ! -L $repo/pnpm-lock.yaml ]]; then cp -- "$repo/pnpm-lock.yaml" "$out/lock.trusted"; else : >"$out/lock.trusted"; fi
+  chmod -R a-w "$out/config" "$out/ws" "$out/empty" "$out/lock.trusted"
   want=$(jq -r '.packageManager // "" | select(startswith("pnpm@")) | ltrimstr("pnpm@") | sub("\\+.*"; "")' \
     "$out/config/package.json" 2>/dev/null) || want=""
   pnpm_ok=true
@@ -199,6 +206,10 @@ run_request() {
       [[ $(user_read "$repo/$f" | dep_fields) == "$(dep_fields <"$out/ws/$f")" ]]
     fi || { echo "DEPS refused: $f changed its dependencies since the run began, beyond this request (git checkout -- $f)"; return 2; }
   done
+  # A locked entry is reused without the release-age or exotic-source checks, so the lockfile
+  # must be the one the broker trusts: main's, or the broker's own last write.
+  [[ $(user_read "$repo/pnpm-lock.yaml" | text_hash) == "$(text_hash <"$out/lock.trusted")" ]] ||
+    { echo "DEPS refused: pnpm-lock.yaml changed since the broker last wrote it; only the broker writes it (git checkout -- pnpm-lock.yaml)"; return 2; }
   local args=(--die-with-parent --new-session --clearenv --unshare-all --share-net
     --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --bind "$repo" "$repo")
   for p in "${PROTECTED_DIRS[@]}"; do
@@ -222,16 +233,15 @@ run_request() {
   done
   local save=(--save-exact) st=0
   [[ $kind == prod ]] || save+=(--save-dev)
-  rm -f -- "$out/lock.before" "$out/package.before"
-  user_read "$repo/pnpm-lock.yaml" >"$out/lock.before"
+  rm -f -- "$out/package.before"
   user_read "$repo/$dir/package.json" >"$out/package.before"
   as_user timeout 600 "$bwrap_bin" "${args[@]}" -- "$out/bin/pnpm" --filter "./$dir" add "${save[@]}" \
     --ignore-scripts --ignore-pnpmfile --config.block-exotic-subdeps=true \
     --config.manage-package-manager-versions=false --store-dir "$store" -- "$@" || st=$?
   # A source the registry didn't give is refused, whatever pnpm made of it.
-  if ((st == 0)) && comm -13 <(sort "$out/lock.before") <(user_read "$repo/pnpm-lock.yaml" | sort) |
-    grep -qE "$EXOTIC"; then
-    as_user cp -- "$out/lock.before" "$repo/pnpm-lock.yaml"
+  if ((st == 0)) && { user_read "$repo/pnpm-lock.yaml" | grep -qE "$EXOTIC" ||
+    comm -13 <(sort "$out/lock.trusted") <(user_read "$repo/pnpm-lock.yaml" | sort) | grep -q 'link:'; }; then
+    as_user cp -- "$out/lock.trusted" "$repo/pnpm-lock.yaml"
     as_user cp -- "$out/package.before" "$repo/$dir/package.json"
     echo "DEPS refused: the lockfile gained a tarball, git, directory or link source; both files are put back"
     return 2
@@ -240,6 +250,9 @@ run_request() {
     chmod u+w "$out/ws/$dir/package.json"
     user_read "$repo/$dir/package.json" >"$out/ws/$dir/package.json"
     chmod a-w "$out/ws/$dir/package.json"
+    rm -f -- "$out/lock.trusted"
+    user_read "$repo/pnpm-lock.yaml" >"$out/lock.trusted"
+    chmod a-w "$out/lock.trusted"
   fi
   return "$st"
 }
@@ -265,7 +278,8 @@ add() {
 
 main() {
   case ${1-} in
-  serve) mkdir -p "$out"; serve >>"$out/serve.log" 2>&1 ;;
+  # exit, not return: bash reads a script as it runs, so nothing after serve may be read again.
+  serve) mkdir -p "$out"; serve >>"$out/serve.log" 2>&1; exit ;;
   add) shift; add "$@" ;;
   *) echo "usage: factory-deps.sh serve | add <dir> [--dev] <name@x.y.z>..." >&2; return 2 ;;
   esac

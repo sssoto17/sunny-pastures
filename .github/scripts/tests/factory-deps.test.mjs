@@ -297,6 +297,39 @@ describe("factory-deps.sh", () => {
 		expect(readFileSync(join(t.root, "pnpm-lock.yaml"), "utf8")).toBe("lockfileVersion: '9.0'\n");
 	});
 
+	// A locked entry is reused without the release-age or source checks (#645's delta review, N1).
+	it("refuses a lockfile that isn't main's or the broker's own last write", async () => {
+		const t = setup();
+		const lock = join(t.root, "pnpm-lock.yaml");
+		writeFileSync(lock, "lockfileVersion: '9.0'\n");
+		await serve(t, { LOCK: "lockfileVersion: '9.0'\nimporters: {}" });
+		// The broker's own write becomes the trusted one, so a second request goes ahead.
+		expect(add(t, ["apps/web", "zustand@5.1.0"]).code).toBe(0);
+		expect(add(t, ["apps/web", "jotai@2.0.0"]).code).toBe(0);
+		rmSync(join(dir, "pnpm.args"));
+		writeFileSync(lock, "packages:\n  x@1.0.0:\n    resolution: {integrity: sha512-planted}\n");
+		expectRefused(t, /^DEPS refused: pnpm-lock.yaml changed since the broker last wrote it/m);
+		expect(read("pnpm.args")).toBeNull();
+	});
+
+	it.each([
+		{ lock: "        version: link:../../packages/sim\n  zustand@5.1.0: {}", code: 0 },
+		{ lock: "        version: link:../../evil", code: 2 },
+	])(
+		"keeps a link main's lockfile already has, but refuses a new one ($code)",
+		async ({ lock, code }) => {
+			const t = setup();
+			writeFileSync(join(t.root, "pnpm-lock.yaml"), "        version: link:../../packages/sim\n");
+			await serve(t, { LOCK: lock });
+			const r = add(t, ["apps/web", "zustand@5.1.0"]);
+			expect(r.code).toBe(code);
+			if (code)
+				expect(r.out).toMatch(
+					/^DEPS refused: the lockfile gained a tarball, git, directory or link source/m,
+				);
+		},
+	);
+
 	it("refuses every request when it found no pnpm of the pinned version", async () => {
 		const t = setup();
 		await serve(t, { PNPM_VERSION: "11.0.0" });
