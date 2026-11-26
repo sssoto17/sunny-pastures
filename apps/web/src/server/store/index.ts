@@ -206,6 +206,43 @@ async function readFarm(
 	{ newFarm, replay }: StoreDeps,
 	playerId: string,
 ): Promise<FarmRecord> {
+	const snapshot = await findSnapshot(handle, playerId);
+	const from = snapshot ?? { seq: 0, at: 0 };
+	const rows = await handle
+		.select({
+			seq: actions.seq,
+			at: actions.at,
+			action: actions.action,
+			rulesVersion: actions.rulesVersion,
+		})
+		.from(actions)
+		.where(and(eq(actions.farmId, playerId), gt(actions.seq, from.seq)))
+		.orderBy(asc(actions.seq));
+	if (snapshot === null && rows.length === 0) return { state: newFarm(playerId), seq: 0, at: 0 };
+
+	const [first] = rows;
+	if (first !== undefined && first.seq !== from.seq + 1) {
+		// `replay` checks the seqs too; the store keeps its own check of this boundary, so a lost
+		// row here is a store error whatever `replay` it was handed (#443).
+		throw new Error(
+			`Store error: the first log row after seq ${String(from.seq)} is seq ${String(first.seq)}, not seq ${String(from.seq + 1)}.`,
+		);
+	}
+
+	const logged = rows.map((row) => ({ ...row, action: readAction(row.action) }));
+	// Called even with no row after the snapshot: an older version's snapshot still gets its version
+	// upgrade (ADR-0006, section 5, step 4).
+	const state = replay(playerId, snapshot, logged);
+	// Unadvanced: at the last row, or at the snapshot when no row follows it.
+	const { seq, at } = rows.at(-1) ?? from;
+	return { state, seq, at };
+}
+
+/** The newest snapshot: the highest seq, and at one seq the higher rules version (ADR-0006, s. 5). */
+async function findSnapshot(
+	handle: Pick<Db, "select">,
+	playerId: string,
+): Promise<{ seq: number; at: number; state: FarmState; rulesVersion: number } | null> {
 	const [snapshot] = await handle
 		.select({
 			seq: snapshots.seq,
@@ -215,49 +252,9 @@ async function readFarm(
 		})
 		.from(snapshots)
 		.where(eq(snapshots.farmId, playerId))
-		// At the same seq, the higher rules version wins (ADR-0006, section 5).
 		.orderBy(desc(snapshots.seq), desc(snapshots.rulesVersion))
 		.limit(1);
-	const fromSeq = snapshot?.seq ?? 0;
-	const rows = await handle
-		.select({
-			seq: actions.seq,
-			at: actions.at,
-			action: actions.action,
-			rulesVersion: actions.rulesVersion,
-		})
-		.from(actions)
-		.where(and(eq(actions.farmId, playerId), gt(actions.seq, fromSeq)))
-		.orderBy(asc(actions.seq));
-	const [first] = rows;
-	const last = rows.at(-1);
-	if (snapshot === undefined && last === undefined) {
-		return { state: newFarm(playerId), seq: 0, at: 0 };
-	}
-
-	if (first !== undefined && first.seq !== fromSeq + 1) {
-		// `replay` checks the seqs too; the store keeps its own check of this boundary, so a lost
-		// row here is a store error whatever `replay` it was handed (#443).
-		throw new Error(
-			`Store error: the first log row after seq ${String(fromSeq)} is seq ${String(first.seq)}, not seq ${String(fromSeq + 1)}.`,
-		);
-	}
-
-	const from =
-		snapshot === undefined
-			? null
-			: {
-					seq: snapshot.seq,
-					state: readState(snapshot.state),
-					rulesVersion: snapshot.rulesVersion,
-				};
-	const logged = rows.map((row) => ({ ...row, action: readAction(row.action) }));
-	// Called even with no row after the snapshot: an older version's snapshot still gets its version
-	// upgrade (ADR-0006, section 5, step 4).
-	const state = replay(playerId, from, logged);
-	return last === undefined
-		? { state, seq: fromSeq, at: snapshot?.at ?? 0 }
-		: { state, seq: last.seq, at: last.at };
+	return snapshot === undefined ? null : { ...snapshot, state: readState(snapshot.state) };
 }
 
 /** The rules version of the farm's row at `seq`, or `null` when there is none. */
