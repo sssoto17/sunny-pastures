@@ -11,8 +11,8 @@ import { Button, ToastRegion } from "@/components/ui";
 
 import { Hud } from "../hud";
 import { FarmMap } from "../map";
-import { PlotPopover } from "../plots";
 import { OrderBoard } from "../orderBoard";
+import { PlotPopover } from "../plots";
 
 /**
  * The game's client root (ADR-0010): it owns loading the farm through `src/client/` and shows the
