@@ -8,6 +8,11 @@
 			"@sunny-pastures/source": "./src/index.ts",
 			"types": "./dist/index.d.ts",
 			"default": "./dist/index.js"
+		},
+		"./versions": {
+			"@sunny-pastures/source": "./src/versions/index.ts",
+			"types": "./dist/versions/index.d.ts",
+			"default": "./dist/versions/index.js"
 		}
 	},
 	"scripts": {

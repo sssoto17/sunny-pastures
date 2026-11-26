@@ -3,7 +3,8 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { sliceContent, stateHash, type Action, type FarmState } from "@sunny-pastures/sim";
+import { stateHash, type Action, type FarmState } from "@sunny-pastures/sim";
+import { registry } from "@sunny-pastures/sim/versions";
 
 import { createRules } from "@/server/rules";
 
@@ -41,7 +42,7 @@ afterAll(async () => {
 	await db.$client.end();
 });
 
-const rules = createRules(sliceContent);
+const rules = createRules(registry);
 
 /** B100's snapshot interval (ADR-0001), where `load` starts from a snapshot instead of seq 0. */
 const snapshotEvery = 100;
@@ -59,12 +60,12 @@ describe("the store gate (B100 with the slice's rules)", () => {
 			const playerId = await createPlayer();
 			// Seeded from the script's id, not the player's (which production uses, MUST-10.3): the
 			// recorded hash is for the script's farm, and the player id is only the uuid B100's
-			// foreign key needs. This `newFarm` ignores the id the store hands it; the contract
-			// suite checks that the store hands it the farm's id.
+			// foreign key needs. This `newFarm` and `replay` ignore the id the store hands them;
+			// the contract suite checks that the store hands `newFarm` the farm's id.
 			const store = createStore({
 				db,
 				newFarm: () => rules.newFarm(script.farmId),
-				replay: rules.replay,
+				replay: (_playerId, snapshot, rows) => rules.replay(script.farmId, snapshot, rows),
 				rulesVersion: rules.rulesVersion,
 			});
 			const afterGap = findGap(script.steps);

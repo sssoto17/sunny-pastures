@@ -4,11 +4,14 @@ import type { Action } from "@sunny-pastures/sim";
 
 import { describeGameStore, playActions, type MakeStore } from "./contract";
 import { makeEntry, newFarm, replay } from "./farms";
-import { createMemoryStore } from "./memoryStore";
+import { createMemoryFarms, createMemoryStore } from "./memoryStore";
 
 // The fake held to the store's contract (ADR-0007 section 6; #383): the same cases B100 passes in
-// store.db.test.ts, with no database.
-const makeMemoryStore: MakeStore = (rules = {}) => createMemoryStore({ newFarm, replay, ...rules });
+// store.db.test.ts, with no database. Every store the contract builds shares one set of farms, as
+// B100's stores share the tables.
+const farms = createMemoryFarms();
+const makeMemoryStore: MakeStore = (rules = {}) =>
+	createMemoryStore({ newFarm, replay, farms, ...rules });
 
 describe("createMemoryStore", () => {
 	describeGameStore(makeMemoryStore);
@@ -113,10 +116,10 @@ describe("createMemoryStore's copies", () => {
 		const seen: Action[][] = [];
 		const store = createMemoryStore({
 			newFarm,
-			replay: (state, actions, to) => {
-				seen.push(actions.map(({ action }) => structuredClone(action)));
-				for (const { action } of actions) (action as { plot: number }).plot = 99;
-				return replay(state, actions, to);
+			replay: (id, snapshot, rows) => {
+				seen.push(rows.map(({ action }) => structuredClone(action)));
+				for (const { action } of rows) (action as { plot: number }).plot = 99;
+				return replay(id, snapshot, rows);
 			},
 		});
 		const entry = makeEntry(newFarm(), 0, 1_000);

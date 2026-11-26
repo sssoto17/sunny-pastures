@@ -89,7 +89,8 @@ function connectMemory(options: MemoryOptions = {}): { connect: Connector; build
 	const builds: Rules[] = [];
 	const connect: Connector = (rules) => {
 		builds.push(rules);
-		const store = createMemoryStore({ newFarm: rules.newFarm, replay: rules.replay });
+		const { newFarm, replay, rulesVersion } = rules;
+		const store = createMemoryStore({ newFarm, replay, rulesVersion });
 		if (options.storeError !== undefined) {
 			vi.spyOn(store, "load").mockRejectedValue(options.storeError);
 		}

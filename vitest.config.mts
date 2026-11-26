@@ -40,6 +40,11 @@ export default defineConfig({
 		alias: [
 			{ find: /^@\//, replacement: fromRoot("apps/web/src/") },
 			{ find: /^@sunny-pastures\/sim$/, replacement: fromRoot("packages/sim/src/index.ts") },
+			// The rules versions' server-only subpath (ADR-0006, "The client"; #535).
+			{
+				find: /^@sunny-pastures\/sim\/versions$/,
+				replacement: fromRoot("packages/sim/src/versions/index.ts"),
+			},
 			{
 				find: /^server-only$/,
 				replacement: fromRoot("apps/web/node_modules/next/dist/compiled/server-only/empty.js"),

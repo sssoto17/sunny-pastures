@@ -46,7 +46,7 @@ describe("createStore (B100) over the game schema", () => {
 		const loaded = await makeB100({ replay: recorded.replay }).load(farmId);
 
 		expect(loaded).toStrictEqual({ state: base, seq: 100, at: 100_000 });
-		expect(recorded.calls).toEqual([]);
+		expect(recorded.calls).toEqual([{ snapshot: { seq: 100, rulesVersion: 2 }, rows: [] }]);
 	});
 
 	it("refuses an at above 2^53 - 1, and writes nothing", async () => {

@@ -1,15 +1,23 @@
 import { expect, it } from "vitest";
 
+import type { FarmState } from "@sunny-pastures/sim";
+
 import type { GameStore, StoreDeps } from "../index";
-import { makeEntry, newFarm, plant, recordReplay, replay } from "./farms";
+import { listRows, makeEntry, newFarm, plant, recordReplay, replay } from "./farms";
 
 // The store contract (ADR-0001, "Store interface"; ADR-0007 section 6, "Action-handler tests: an
 // in-memory store held to a contract"): one suite that B100 runs as a `db` test and the in-memory
 // store as a `unit` test, so the fake can't drift from the store without failing it (Contract
 // test). The cases came over from #373's store.db.test.ts as they were (#383).
 
-/** Builds a store with the stand-in rules (`./farms`), or with the ones a test hands in. */
-export type MakeStore = (rules?: Partial<Pick<StoreDeps, "newFarm" | "replay">>) => GameStore;
+/**
+ * Builds a store with the stand-in rules (`./farms`) at rules version 1, or with the ones a test
+ * hands in. Every store it builds sees the same farms, as two deploys share B100's tables, so a
+ * store at a later version can load and commit to a farm an earlier one wrote (ADR-0006).
+ */
+export type MakeStore = (
+	rules?: Partial<Pick<StoreDeps, "newFarm" | "replay" | "rulesVersion">>,
+) => GameStore;
 
 /**
  * A new farm id no other test uses ("Isolation by farm"): a player made on the stack for B100,
@@ -65,10 +73,15 @@ export function describeGameStore(
 		const store = makeStore();
 		await playActions(store, farmId, 3);
 		// The log playActions wrote: makeEntry's action for each seq, at its second.
-		const logged = [1, 2, 3].map((seq) => ({ seq, at: seq * 1_000, action: plant(seq % 3) }));
+		const logged = [1, 2, 3].map((seq) => ({
+			seq,
+			at: seq * 1_000,
+			action: plant(seq % 3),
+			rulesVersion: 1,
+		}));
 
 		expect(await store.load(farmId)).toStrictEqual({
-			state: replay(newFarm(), logged, 3_000),
+			state: replay(farmId, null, logged),
 			seq: 3,
 			at: 3_000,
 		});
@@ -167,8 +180,7 @@ export function describeGameStore(
 	it("replays the whole log up to seq 99, then loads from the snapshot at seq 100", async () => {
 		const farmId = await makePlayer();
 		const recorded = recordReplay();
-		// One store for the whole case, as the in-memory store keeps its farms per store; commits
-		// never replay, so the calls recorded are the loads' alone.
+		// Commits under an unchanged version never replay, so the calls recorded are the loads' alone.
 		const store = makeStore({ replay: recorded.replay });
 		const farms = await playActions(store, farmId, 99);
 
@@ -183,8 +195,13 @@ export function describeGameStore(
 		}
 
 		expect(await store.load(farmId)).toStrictEqual({ state: farm, seq: 130, at: 130_000 });
-		expect(recorded.calls).toEqual([seqsFrom(1, 99), seqsFrom(101, 130)]);
+		expect(recorded.calls).toEqual([
+			{ snapshot: null, rows: listRows(1, 99, 1) },
+			{ snapshot: { seq: 100, rulesVersion: 1 }, rows: listRows(101, 130, 1) },
+		]);
 	});
+
+	describeRulesVersions(makeStore, makePlayer);
 
 	it("refuses a farm id or an idempotency key that isn't a UUID, and writes nothing", async () => {
 		const farmId = await makePlayer();
@@ -204,9 +221,82 @@ export function describeGameStore(
 /** A value no uuid column takes. */
 const notUuid = "farm-1";
 
-/** The seqs `from` to `to`, both included. */
-function seqsFrom(from: number, to: number): number[] {
-	return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+/** The contract's rules-version cases (ADR-0006, sections 3, 5 and 8; #535). */
+function describeRulesVersions(makeStore: MakeStore, makePlayer: MakePlayer): void {
+	it("hands replay a snapshot with no row after it, so the farm still gets its version upgrade", async () => {
+		const farmId = await makePlayer();
+		const farms = await playActions(makeStore(), farmId, 100);
+		const recorded = recordReplay(upgradeTo2);
+
+		const loaded = await makeStore({ replay: recorded.replay, rulesVersion: 2 }).load(farmId);
+
+		expect(loaded).toStrictEqual({ state: markUpgraded(farms[100]), seq: 100, at: 100_000 });
+		expect(recorded.calls).toEqual([{ snapshot: { seq: 100, rulesVersion: 1 }, rows: [] }]);
+	});
+
+	it("writes the base snapshot with the farm's first action under a later version (ADR-0006, section 3)", async () => {
+		const farmId = await makePlayer();
+		const farms = await playActions(makeStore(), farmId, 3);
+		const version2 = makeStore({ replay: upgradeTo2, rulesVersion: 2 });
+		const { state: upgraded } = await version2.load(farmId);
+		const entry = makeEntry(upgraded, 3, 4_000);
+
+		expect(await version2.commit(farmId, entry)).toEqual({ kind: "committed", seq: 4 });
+
+		// The base at seq 3 holds the farm after its version upgrade, so a load starts from it and
+		// replays only the version 2 row; no replay that doesn't upgrade could give `upgraded` back.
+		const recorded = recordReplay();
+		const loaded = await makeStore({ replay: recorded.replay, rulesVersion: 2 }).load(farmId);
+		expect(upgraded).toStrictEqual(markUpgraded(farms[3]));
+		expect(loaded).toStrictEqual({ state: entry.next, seq: 4, at: 4_000 });
+		expect(recorded.calls).toEqual([
+			{ snapshot: { seq: 3, rulesVersion: 2 }, rows: [{ seq: 4, rulesVersion: 2 }] },
+		]);
+	});
+
+	it("writes no base snapshot for a farm with no action before the later version", async () => {
+		const farmId = await makePlayer();
+		await playActions(makeStore({ rulesVersion: 2 }), farmId, 2);
+		const recorded = recordReplay();
+
+		await makeStore({ replay: recorded.replay, rulesVersion: 2 }).load(farmId);
+
+		expect(recorded.calls).toEqual([{ snapshot: null, rows: listRows(1, 2, 2) }]);
+	});
+
+	it("refuses a commit under a version below the farm's latest, and writes nothing (ADR-0006, section 8)", async () => {
+		const farmId = await makePlayer();
+		const [, , next] = await playActions(makeStore({ rulesVersion: 2 }), farmId, 2);
+		const older = makeStore({ rulesVersion: 1 });
+		const entry = makeEntry(next ?? newFarm(), 2, 3_000);
+
+		await expect(older.commit(farmId, entry)).rejects.toThrow(
+			"Store error: the farm's latest action is under rules version 2, above this store's 1.",
+		);
+		expect((await makeStore({ rulesVersion: 2 }).load(farmId)).seq).toBe(2);
+		expect(await older.processed(farmId, entry.idempotencyKey)).toBeNull();
+	});
+
+	it("throws when replay throws, as on a version the rules don't know (ADR-0006, section 8)", async () => {
+		const farmId = await makePlayer();
+		await playActions(makeStore({ rulesVersion: 2 }), farmId, 1);
+		const unknown = makeStore({
+			replay: () => {
+				throw new Error("Replay error: rules version 2 is unknown here, which knows 1 to 1.");
+			},
+		});
+
+		await expect(unknown.load(farmId)).rejects.toThrow("rules version 2 is unknown here");
+	});
+}
+
+/** A stand-in for version 2's rules: the stand-in replay, then a mark for the version upgrade. */
+const upgradeTo2: StoreDeps["replay"] = (farmId, snapshot, rows) =>
+	markUpgraded(replay(farmId, snapshot, rows));
+
+/** The stand-in's version upgrade: 7 coins, which no stand-in action gives. */
+function markUpgraded(farm: FarmState | undefined): FarmState {
+	return { ...(farm ?? newFarm()), coins: 7 };
 }
 
 /**

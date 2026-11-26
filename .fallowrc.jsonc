@@ -90,6 +90,11 @@
       { "name": "timing", "patterns": ["apps/web/src/server/timing/**"] },
       { "name": "http", "patterns": ["apps/web/src/server/http/**"] },
       { "name": "game", "patterns": ["apps/web/src/server/game/**"] },
+      // The rules versions (ADR-0006, "The client"; #535): the registry and the versioned replay,
+      // the sim package's server-only subpath (`@sunny-pastures/sim/versions`). A zone of its own,
+      // before `sim`, so only the server's `rules` and the composition root reach it, never
+      // `pages` or a client zone; it keeps the sim's purity rule (`calls.forbidden` below).
+      { "name": "simVersions", "patterns": ["packages/sim/src/versions/**"] },
       { "name": "sim", "patterns": ["packages/sim/src/**"] },
       // The acceptance suite (#386; ADR-0007 section 6, "Acceptance tests"): black-box over HTTP,
       // so it imports no zone, and a refactor of the app or the sim can't reshape what it expects.
@@ -110,7 +115,18 @@
       { "from": "components", "allow": ["client", "contract", "sim"] },
       {
         "from": "api",
-        "allow": ["config", "db", "rules", "store", "auth", "timing", "http", "game", "sim"]
+        "allow": [
+          "config",
+          "db",
+          "rules",
+          "store",
+          "auth",
+          "timing",
+          "http",
+          "game",
+          "sim",
+          "simVersions"
+        ]
       },
       // A test-files-only allowance: `api`'s own rule, plus `api` itself and the store's test
       // helpers. Production `api` still reaches only B100, through `store`.
@@ -127,6 +143,7 @@
           "http",
           "game",
           "sim",
+          "simVersions",
           "storeTests"
         ]
       },
@@ -137,7 +154,7 @@
       },
       // `contract` holds the stored `Answer` since #594 (ADR-0010, section 5).
       { "from": "store", "allow": [], "allowTypeOnly": ["db", "sim", "contract"] },
-      { "from": "rules", "allow": ["sim"] },
+      { "from": "rules", "allow": ["sim", "simVersions"] },
       { "from": "auth", "allow": ["config"] },
       { "from": "db", "allow": [], "allowTypeOnly": ["config"] },
       { "from": "config", "allow": [] },
@@ -146,6 +163,8 @@
       // headers. It sees the sim's types, never its code; the timing value is passed in.
       { "from": "http", "allow": ["contract"], "allowTypeOnly": ["sim"] },
       { "from": "sim", "allow": [] },
+      // The versions build on the sim's own modules and nothing else (MUST-10.1).
+      { "from": "simVersions", "allow": ["sim"] },
       // No allowances, type-only included: the suite's expected values are written out literally.
       { "from": "acceptance", "allow": [] },
       { "from": "load", "allow": [] },
@@ -160,13 +179,13 @@
       // The store's test zone, plus the rules and the sim's code to play the script with.
       {
         "from": "storeGate",
-        "allow": ["store", "dbTests", "rules", "sim"],
+        "allow": ["store", "dbTests", "rules", "sim", "simVersions"],
         "allowTypeOnly": ["db"]
       },
       // game's own rule, plus game itself and the store's test helpers; `store` stays type-only.
       {
         "from": "gameTests",
-        "allow": ["game", "rules", "timing", "sim", "storeTests"],
+        "allow": ["game", "rules", "timing", "sim", "simVersions", "storeTests"],
         "allowTypeOnly": ["store", "auth", "contract"]
       }
     ],
@@ -175,6 +194,21 @@
       "forbidden": [
         {
           "from": "sim",
+          "callee": [
+            "Date.now",
+            "Math.random",
+            "performance.now",
+            "crypto.getRandomValues",
+            "crypto.randomUUID",
+            "fetch",
+            "setTimeout",
+            "setInterval",
+            "setImmediate"
+          ]
+        },
+        // The same calls from the versions' zone, which is part of the sim (MUST-10.1; #535).
+        {
+          "from": "simVersions",
           "callee": [
             "Date.now",
             "Math.random",

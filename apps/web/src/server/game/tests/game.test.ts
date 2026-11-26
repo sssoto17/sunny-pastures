@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { sliceContent, stateHash, type Action } from "@sunny-pastures/sim";
+import { stateHash, type Action } from "@sunny-pastures/sim";
+import { registry } from "@sunny-pastures/sim/versions";
 
 import type { Answer, FarmEnvelope } from "@/contract";
 import type { PlayerId } from "@/server/auth";
@@ -19,7 +20,7 @@ import {
 	type SubmitResult,
 } from "../index";
 
-const rules = createRules(sliceContent);
+const rules = createRules(registry);
 
 describe("loadFarm", () => {
 	it("gives a player with no action a new farm at seq 0", async () => {
@@ -349,9 +350,10 @@ function makeDeps({
 	return { store, rules, timing, serverTime };
 }
 
-/** The in-memory store on the slice's rules, with `conflicts` scripted (#383). */
+/** The in-memory store on the game's rules, with `conflicts` scripted (#383). */
 function newStore(conflicts: readonly boolean[] = []): GameStore {
-	return createMemoryStore({ newFarm: rules.newFarm, replay: rules.replay, conflicts });
+	const { newFarm, replay, rulesVersion } = rules;
+	return createMemoryStore({ newFarm, replay, rulesVersion, conflicts });
 }
 
 function buildRequest(

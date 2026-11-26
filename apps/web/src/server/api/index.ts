@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sliceContent } from "@sunny-pastures/sim";
+import { registry } from "@sunny-pastures/sim/versions";
 
 import { createAuth } from "@/server/auth";
 import { readConfig, type Env } from "@/server/config";
@@ -66,8 +66,9 @@ export function connectFromEnv(env: Env): Connector {
  * `connect` builds on the first call that needs it and memoises.
  */
 export function createApi(connect: Connector): Api {
-	// Once per process with the graph (ADR-0007, section 2): one sim, one rules version.
-	const rules = createRules(sliceContent);
+	// Once per process with the graph (ADR-0007, section 2): the registry's sims, and its current
+	// version as the one new actions run and are stamped under (ADR-0006, section 2).
+	const rules = createRules(registry);
 	// A build that throws isn't kept, so a request after the variable is set connects (#470).
 	const connection = memoise(() => connect(rules));
 	const routes = createFarmRoutes({
