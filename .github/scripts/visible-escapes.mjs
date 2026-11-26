@@ -4,11 +4,12 @@
 //
 // Why: an escape sequence in a PR can hide text in a terminal, so the reviewer must see that one
 // is there (admin, 26 Nov 2026), and `gh pr diff` refuses outright to print a diff that holds one,
-// which stopped the review before Claude ran (#645, run 45871690829). So nothing is dropped: each
-// ESC byte becomes the text `<ESC>`, and every other control character, C0 (except tab, line feed
-// and carriage return, which diffs hold as text), DEL and C1 (U+0080-U+009F as UTF-8, where
-// U+009B is a one-byte CSI), becomes `<U+XXXX>`. The rest of the diff passes byte for byte, so a
-// file that isn't UTF-8 is never re-encoded.
+// which stopped the review before Claude ran (#645, run 45871690829). The workflow's `gh api` call
+// passes --allow-escape-sequences for the same reason (#668), so this pass is what keeps them in
+// view. Nothing is dropped: each ESC byte becomes the text `<ESC>`, and every other control
+// character, C0 (except tab, line feed and carriage return, which diffs hold as text), DEL and C1
+// (U+0080-U+009F as UTF-8, where U+009B is a one-byte CSI), becomes `<U+XXXX>`. The rest of the
+// diff passes byte for byte, so a file that isn't UTF-8 is never re-encoded.
 //
 // Usage: node .github/scripts/visible-escapes.mjs <out-file> <diff
 // Writes the visible diff to <out-file> and prints one line saying what it replaced, which the

@@ -6,11 +6,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runBlock } from "./workflow-step.mjs";
+import { GH_ESCAPE_REFUSAL, runBlock } from "./workflow-step.mjs";
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const SCRIPT = fileURLToPath(new URL("../visible-escapes.mjs", import.meta.url));
 const yml = readFileSync(join(ROOT, ".github/workflows/review.yml"), "utf8");
+const GATHER = runBlock(yml, "Gather the PR (read-only token)");
 
 // A diff as #645's (review.yml run 45871690829): a captured Actions log whose lines carry ANSI
 // colour codes, plus the other control characters the script makes visible and the bytes it keeps.
@@ -96,8 +97,12 @@ describe("visible-escapes.mjs", () => {
 });
 
 // The gather step's own shell, run with a fake gh that answers as GitHub did for #645 (#648).
-// Its diff call answers with DIFF; `fails` names the call that fails instead, and `ref` the run's ref.
-function gather({ fails = "", ref = "refs/heads/main" } = {}) {
+// Its diff call answers with DIFF; `fails` names the call that fails instead, `ref` the run's ref,
+// and `script` the step's shell when a test changes it. Like the runner's gh (#668: review run
+// 45890313722 on #661), the fake refuses any response that holds an ESC byte unless the call
+// passes --allow-escape-sequences. The PR's JSON holds its body's ESC escaped as \u001b, as the
+// API sends it, so only a call whose output isn't JSON meets the refusal.
+function gather({ fails = "", ref = "refs/heads/main", script = GATHER } = {}) {
 	dir = mkdtempSync(join(tmpdir(), "review-gather-"));
 	const bin = join(dir, "bin");
 	const temp = join(dir, "temp");
@@ -107,7 +112,7 @@ function gather({ fails = "", ref = "refs/heads/main" } = {}) {
 	const pr = {
 		number: 7,
 		title: "t",
-		body: "",
+		body: `a colour code: ${ESC}[31mred${ESC}[0m`,
 		author: "a",
 		base: "main",
 		base_sha: "b".repeat(40),
@@ -122,21 +127,22 @@ function gather({ fails = "", ref = "refs/heads/main" } = {}) {
 		join(bin, "gh"),
 		`#!/usr/bin/env bash
 echo "gh $*" >>"${dir}/calls"
+out="${dir}/response"
 case "$*" in
-  *graphql*) echo '[]' ;;
+  *graphql*) echo '[]' >"$out" ;;
   *vnd.github.diff*)
-    ${fails === "diff" ? 'echo "gh: HTTP 406: diff too large" >&2; exit 1' : `cat "${dir}/diff"`} ;;
-  *pulls/7/reviews*) ;;
+    ${fails === "diff" ? 'echo "gh: HTTP 406: diff too large" >&2; exit 1' : `cat "${dir}/diff" >"$out"`} ;;
+  *pulls/7/reviews*) : >"$out" ;;
   *pulls/7/files*)
-    ${fails === "files" ? 'echo "gh: HTTP 502" >&2; exit 1' : `echo '{"filename":"log.txt","status":"added","additions":1,"deletions":0}'`} ;;
-  *"pulls/7 "*) cat "${dir}/pr.json" ;;
+    ${fails === "files" ? 'echo "gh: HTTP 502" >&2; exit 1' : `echo '{"filename":"log.txt","status":"added","additions":1,"deletions":0}' >"$out"`} ;;
+  *"pulls/7 "*) cat "${dir}/pr.json" >"$out" ;;
   *) echo "fake gh: unexpected call: gh $*" >&2; exit 9 ;;
 esac
-`,
+${GH_ESCAPE_REFUSAL}`,
 	);
 	chmodSync(join(bin, "gh"), 0o755);
 	for (const f of ["out", "env"]) writeFileSync(join(dir, f), "");
-	const res = spawnSync("bash", ["-c", runBlock(yml, "Gather the PR (read-only token)")], {
+	const res = spawnSync("bash", ["-c", script], {
 		cwd: ROOT,
 		encoding: "utf8",
 		env: {
@@ -189,7 +195,7 @@ function report({ outcome, failure = "", gate = "true" }) {
 	};
 }
 
-describe("review.yml (#648)", () => {
+describe("review.yml (#648, #668)", () => {
 	it("gathers a diff that holds escape sequences, with each one visible", () => {
 		const g = gather();
 		expect(g.log).not.toMatch(/fake gh: unexpected call/);
@@ -201,12 +207,25 @@ describe("review.yml (#648)", () => {
 		expect(g.output).not.toMatch(/^failure=/m);
 	});
 
+	// The fake is only a guard if it refuses as the runner's gh did on #661 (#668): the diff call
+	// without the flag stops gather, and the ERR trap names that call.
+	it("stops on the runner's refusal when the diff call drops --allow-escape-sequences", () => {
+		const call = 'gh api --allow-escape-sequences -H "Accept: application/vnd.github.diff"';
+		expect(GATHER).toContain(call);
+		const g = gather({ script: GATHER.replace(" --allow-escape-sequences -H", " -H") });
+		expect(g.code).toBe(1);
+		expect(g.log).toContain("the response contains terminal escape sequences");
+		expect(g.output.match(/^failure=(.*)$/m)?.[1]).toMatch(
+			/^gather stopped at line \d+ \(exit 1\): gh api -H "Accept: application\/vnd\.github\.diff" /,
+		);
+	});
+
 	it("records why gather failed, naming the command and its line", () => {
 		const g = gather({ fails: "diff" });
 		expect(g.code).toBe(1);
 		const failure = g.output.match(/^failure=(.*)$/m)?.[1];
 		expect(failure).toMatch(
-			/^gather stopped at line \d+ \(exit 1\): gh api -H "Accept: application\/vnd\.github\.diff" /,
+			/^gather stopped at line \d+ \(exit 1\): gh api --allow-escape-sequences -H "Accept: application\/vnd\.github\.diff" /,
 		);
 	});
 
