@@ -3,7 +3,7 @@
 // that reaches every Level, so generated farms run jobs (#84), keep chickens (#86) and trade on the
 // order board (#87), with fast-check's fixed seed from the root config.
 import fc from "fast-check";
-import { describe, expect, inject, it, vi } from "vitest";
+import { afterAll, chai, describe, expect, inject, it, vi } from "vitest";
 
 import { createSim, sliceContent, stateHash } from "../../index.js";
 import type { Action, Content, FarmState, Order, Sim } from "../../index.js";
@@ -23,6 +23,18 @@ vi.setConfig({ testTimeout: inject("propertyTimeout") });
 // runners (cut off at 15.0 to 15.6 s). Twice the timeout gives those runners about 2x without
 // lowering the run count; it applies to both contents, as the test does.
 const roundTripTimeout = 2 * inject("propertyTimeout");
+
+// #678: at 1,000 runs MUST-14.5 makes about 1.3 million expect calls a content, and it took 14.3 to
+// 15.5 s of its 15 s on CI. Chai's proxy, which only turns a misspelt matcher into an error, cost
+// about 1.6 µs of each call's 2.7. Every matcher here is a typed method call, so tsc still fails a
+// misspelt one, called or not, and calling one that doesn't exist still throws. Restored after
+// this file.
+const isProxyUsedBefore = chai.config.useProxy;
+chai.config.useProxy = false;
+afterAll(() => {
+	chai.config.useProxy = isProxyUsedBefore;
+});
+
 const { wheat } = sliceContent.crops;
 
 // The slice's approved Level table and plot prices (admin, 11 Nov, #83), written out rather than

@@ -463,6 +463,8 @@ paragraph. A level-2 Exceptions heading inside a block quote or a list item coun
 <!-- prettier-ignore -->
 | ID | Rule | Path | Reason | Owner | Expires |
 |---|---|---|---|---|---|
+| E26 | config-loosened | .gitleaksignore | #666: two `generic-api-key` fingerprints for `.claude/skills/modern-web-guidance/guides/security/client-side-encryption.md` lines 187 and 201 (commit 6662be1). Vendored third-party docs; the matches are `SubtleCrypto.supports()` algorithm and method names in example text, not keys. Exact findings only, no folder skipped, vendored files unedited (admin, 26 Nov 2026) | @sssoto17 | 2026-12-20 |
+| E27 | config-loosened | .semgrepignore | #666: `javascript.lang.security.detect-insecure-websocket`, 9 hits in three vendored Modern Web Guidance docs (`.claude/skills/modern-web-guidance/guides/security/local-network-access.md`, `restrict-outbound-connections.md`, `security.md`). Vendored third-party docs; the matches are unencrypted WebSocket (`ws` scheme) example URLs in text, not code that runs. Exact files only, no folder globs, vendored files unedited (admin, 26 Nov 2026) | @sssoto17 | 2026-12-20 |
 
 ## Interview record
 
