@@ -4,16 +4,16 @@
 # approves on the code alone (#566): it approves when the verdict has no Required finding and none
 # of its earlier finding threads is still open, whoever opened the PR, escalated or not. The admin's
 # gate is `guard / code-owned` plus review:admin, never a withheld approval ("Solo-admin approvals",
-# #495). Escalation is a label: when a row of CONSTRAINTS.md "Escalation criteria" applies and the PR
-# doesn't carry review:admin, it adds the label, then one plain PR comment `escalated: <rows>`, before
-# it posts any review. No review thread, no finding and no withheld approval for a missed row, and
-# its escalation threads from before #566 are neither memory nor reopened. After an approval it turns
-# on auto-merge (squash) for the reviewed head, and when it doesn't approve it turns off auto-merge
-# that is on (ADR-0002 area 2, flow step 3); on the run that added the label it leaves auto-merge off
-# too, since `guard / code-owned` hasn't read the label yet. It never merges: with the repo's
-# allow_auto_merge off, GitHub refuses, and the review still stands (Q16). On a PR based on anything
-# but DEFAULT_BRANCH, a stacked part (#404), it never leaves auto-merge on: that would merge the part
-# into the part below, and a stack merges whole.
+# #495). Escalation is a label: when a row of CONSTRAINTS.md "Escalation criteria" applies and the
+# PR doesn't carry review:admin, it adds the label, then one plain PR comment `escalated: <rows>`,
+# before it posts any review. No review thread, no finding and no withheld approval for a missed
+# row, and its escalation threads from before #566 are neither memory nor reopened. After an
+# approval it turns on auto-merge (squash) for the reviewed head, and when it doesn't approve it
+# turns off auto-merge that is on (ADR-0002 area 2, flow step 3); on the run that added the label it
+# leaves auto-merge off too, since `guard / code-owned` hasn't read the label yet. It never merges:
+# with the repo's allow_auto_merge off, GitHub refuses, and the review still stands (Q16). On a PR
+# based on anything but DEFAULT_BRANCH, a stacked part (#404), it never leaves auto-merge on: that
+# would merge the part into the part below, and a stack merges whole.
 # Tests: .github/scripts/tests/post-review.test.mjs.
 #
 # HEAD, BASE, BASE_SHA, RESTORED and VERDICT are review.yml's hand-off from the job that ran the
@@ -142,7 +142,7 @@ still_open=$(pick '[.[] | select(open_finding and (fixed | not))] | length')
 # Escalation, before any review (#566): the label first, so no approval lands on a PR the bot
 # escalated without it; a failed add stops the run here (set -e) and posts nothing. Then one plain
 # comment that names the rows: the tuning data (CONSTRAINTS.md), not a gate, so a failed comment
-# only warns. Neither is posted again while the label is on; later rows are named in the summary.
+# only warns. Neither is posted again while the label is on; each review's body names the rows.
 added=false
 if [[ -n $rows && $labelled != true ]]; then
   gh api -X POST "$r/issues/$PR/labels" --silent -f 'labels[]=review:admin'
@@ -194,6 +194,7 @@ fi
 body=$(jq -r .summary "$v")
 [[ -z $unplaced ]] || body+=$'\n\nRequired findings without a place in the diff:\n'"$unplaced"
 ((still_open == 0)) || body+=$'\n\n'"$still_open earlier finding thread(s) still open."
+[[ -z $rows ]] || body+=$'\n\n'"Escalation rows (CONSTRAINTS.md): $rows. \`review:admin\` holds the PR."
 gh api -X POST "$r/pulls/$PR/reviews" --silent -f commit_id="$HEAD" -f event="$event" -f body="$body"
 auto=off
 if [[ $event == APPROVE && ($base_ref != "$DEFAULT_BRANCH" || $added == true) ]]; then
@@ -209,4 +210,4 @@ elif [[ $event == APPROVE ]]; then
   # Refused while allow_auto_merge is off (or the PR merges as it is): the approval stands.
   if [[ $auto_on == true ]] || set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi
 fi
-echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated labelled=$added auto_merge=$auto"
+echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated label_added=$added auto_merge=$auto"

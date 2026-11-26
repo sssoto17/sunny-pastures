@@ -234,9 +234,9 @@ missed row does: it is never a finding, never a review thread, never a Request c
 withheld approval. For the Code-owned path row, the check `guard / code-owned` adds the label from
 the diff as well, with a comment of the same shape, on the PR's first run: it runs when the PR
 opens, on each push and on each label change (#337, #565). A lane that adds the label when it opens
-the PR writes no comment; the bot's review summary names the rows. Those comments and summaries are
-the tuning data (below). The bot checks these rows before the [split size](#split-size), so on a PR
-it escalates, the size is only a note.
+the PR writes no comment; the bot's review names the rows. Those comments and reviews are the tuning
+data (below). The bot checks these rows before the [split size](#split-size), so on a PR it
+escalates, the size is only a note.
 
 <!-- prettier-ignore -->
 | Criterion | Applies when | Who adds the label | Why |

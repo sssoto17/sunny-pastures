@@ -180,7 +180,11 @@ describe("post-review.sh", () => {
 			expect(r.calls).not.toContain("@o");
 			// It says what holds the PR now, and that the review is on the code alone.
 			expect(r.calls).toContain("`guard / code-owned` holds it until the admin removes the label");
-			expect(r.out).toContain("labelled=true");
+			expect(r.out).toContain("label_added=true");
+			// The script, not the model's summary, names the rows in the review's body.
+			expect(r.calls).toMatch(
+				/event=APPROVE -f body=merge\\n\\nEscalation rows \(CONSTRAINTS.md\): Feature slice\./,
+			);
 			// The admin's queue on a factory PR (#37) stays; no request on anyone else's PR.
 			expect(r.calls).toContain("reviewers[]=o");
 			expect(run(verdict(escRows)).calls).not.toContain("requested_reviewers");
