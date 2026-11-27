@@ -305,7 +305,9 @@ Approved by the admin on 11 Nov, in #83's interface review.
 `progress/` owns the Level, unlocks and buying (ADR-0005, section 3). Its interface:
 
 - `levelOf(xp)`: the Level is the number of Level-table rows whose XP the farm has reached
-  (MUST-05.3). It is derived on every call and never stored (section 5).
+  (MUST-05.3). It is derived on every call and never stored (section 5). Since #667 the package
+  entry exports it too, as `levelOf(xp, { levels })`, so the client passes its content's Level table
+  instead of keeping a copy of the rule.
 - `gainXp(farm, xp)`: every rule that earns XP calls it. It pays the level-up coins of each Level
   whose XP lies above the farm's old XP and at or below its new XP (MUST-05.4). XP never goes down,
   so each Level is crossed, and paid, once in a farm's life, however many Levels one gain crosses.

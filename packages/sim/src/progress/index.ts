@@ -38,9 +38,13 @@ export function prepareProgressRules(content: Content): ProgressRules {
 	};
 }
 
-/** The Level a farm with `xp` is at, from 1 (MUST-05.3): the Levels whose XP it has reached. */
-export function levelOf(xp: number, rules: ProgressRules): number {
-	return rules.levels.filter((level) => level.xp <= xp).length;
+/**
+ * The Level a farm with `xp` is at, from 1 (MUST-05.3): the Levels whose XP it has reached. It reads
+ * only the Level table, so it takes the progress rules or a content alike: the client passes its
+ * content (#667).
+ */
+export function levelOf(xp: number, { levels }: Pick<ProgressRules, "levels">): number {
+	return levels.filter((level) => level.xp <= xp).length;
 }
 
 /** Something the farm can buy: unlocked at `level`, then bought for `price` coins. */

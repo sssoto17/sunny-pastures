@@ -267,6 +267,13 @@ const contentChecks: readonly ((content: Content) => readonly ContentFailure[])[
 	checkPlotPrices,
 ];
 
+/**
+ * The current rules version (ADR-0006, "The client"): the registry's highest version, whose content
+ * is `sliceContent`. The client reads it from the package entry, since the registry is server-only;
+ * the registry's tests hold the two equal (#667).
+ */
+export const currentRulesVersion = 1;
+
 /** The M4 slice's content, wheat only for now (#72, D1). */
 export const sliceContent = {
 	start: { coins: 50, plots: 6 },

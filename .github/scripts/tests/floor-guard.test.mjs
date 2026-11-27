@@ -1584,6 +1584,87 @@ describe("floor guard, end to end", () => {
 		expect(guard().out).toContain("[config-loosened]");
 	});
 
+	// #667: an entry dropped from one of Fallow's `ignore*` lists makes Fallow check more, so the
+	// line it leaves behind tightens the config. Anything else on that line still counts.
+	describe("Fallow's ignore lists", () => {
+		const RC =
+			'{\n  "ignoreBinaries": ["supabase"],\n  "ignoreDependencies": ["a", "b", "c"],\n  "audit": { "gate": "new-only" }\n}\n';
+		const run = (after) => {
+			repo = makeRepo({ ...BASE, ".fallowrc.jsonc": RC });
+			repo.write({ ".fallowrc.jsonc": RC.replace('["a", "b", "c"]', after) });
+			return guard();
+		};
+
+		it.each([
+			["one entry dropped", '["a", "c"]'],
+			["every entry but one dropped", '["b"]'],
+			["every entry dropped", "[]"],
+		])("passes %s", (_, after) => {
+			expect(run(after)).toMatchObject({ code: 0 });
+		});
+
+		it.each([
+			["an entry added", '["a", "b", "c", "d"]'],
+			["an entry swapped for another", '["a", "b", "d"]'],
+			["an entry dropped beside another key on the line", '["a", "c"], "ignorePatterns": ["x"]'],
+			["an entry dropped with a comment after it", '["a", "c"], // ignore'],
+		])("blocks %s", (_, after) => {
+			expect(run(after).out).toContain("[config-loosened] .fallowrc.jsonc");
+		});
+
+		it("blocks an entry dropped from one list and added to another", () => {
+			repo = makeRepo({ ...BASE, ".fallowrc.jsonc": RC });
+			repo.write({
+				".fallowrc.jsonc": RC.replace('["a", "b", "c"]', '["a", "c"]').replace(
+					'"ignoreBinaries": ["supabase"]',
+					'"ignoreBinaries": ["supabase", "b"]',
+				),
+			});
+			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc:2");
+		});
+
+		it("blocks a drop when the key is in the file twice, so the lines may be different scopes", () => {
+			const nested = RC.replace(
+				'"audit": { "gate": "new-only" }',
+				'"overrides": [{\n    "ignoreDependencies": ["a"]\n  }]',
+			);
+			repo = makeRepo({ ...BASE, ".fallowrc.jsonc": nested });
+			repo.write({
+				".fallowrc.jsonc": nested
+					.replace('["a", "b", "c"]', '["a", "b", "c"]X')
+					.replace('    "ignoreDependencies": ["a"]', '    "ignoreDependencies": ["a", "b", "c"]')
+					.replace('["a", "b", "c"]X', '["a"]'),
+			});
+			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc");
+		});
+
+		// Each half of the key-once check on its own (review of #697): the key twice in one file only.
+		const override = (entries) =>
+			RC.replace(
+				'"audit": { "gate": "new-only" }',
+				`"overrides": [{\n    "ignoreDependencies": ${entries}\n  }]`,
+			);
+
+		it("blocks a widened list when the old file held the key twice, in an override it drops", () => {
+			// Old: ["a"] at the top, ["a", "b", "c"] in an override. New: the top widens to ["a", "b"].
+			repo = makeRepo({
+				...BASE,
+				".fallowrc.jsonc": override('["a", "b", "c"]').replace('["a", "b", "c"]', '["a"]'),
+			});
+			repo.write({ ".fallowrc.jsonc": RC.replace('["a", "b", "c"]', '["a", "b"]') });
+			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc:3");
+		});
+
+		it("blocks a list moved into an override the new file adds, so it holds the key twice", () => {
+			// Old: ["a", "b", "c"] at the top. New: ["a"] at the top, ["b", "c"] in a new override.
+			repo = makeRepo({ ...BASE, ".fallowrc.jsonc": RC });
+			repo.write({
+				".fallowrc.jsonc": override('["b", "c"]').replace('["a", "b", "c"]', '["a"]'),
+			});
+			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc:5");
+		});
+	});
+
 	// #125: Prettier's ignore list and settings decide what the formatting check covers, so a widened
 	// ignore list or a loosened setting is a moved threshold too (admin, 9 Nov).
 	describe("Prettier's config", () => {

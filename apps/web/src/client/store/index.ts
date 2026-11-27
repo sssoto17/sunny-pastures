@@ -2,6 +2,8 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 
 import {
 	createSim,
+	currentRulesVersion,
+	levelOf,
 	sliceContent,
 	type Action,
 	type FarmState,
@@ -56,12 +58,6 @@ export interface FarmStoreDeps {
 	readonly api: Api;
 }
 
-/**
- * The client's rules version (ADR-0006, "The client"): the registry's current version, whose
- * content is `sliceContent`. An envelope under another version means the server's rules changed,
- * so the client reloads instead of predicting under the wrong rules (MUST-12).
- */
-const rulesVersion = 1;
 const reloadMessage = "The game has been updated. Please reload to update.";
 const loadFailedMessage = "Your farm could not be loaded. Please try again.";
 const tickMs = 1000;
@@ -80,9 +76,14 @@ export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
 			tick = null;
 		};
 
-		/** Takes the server's farm, or reports a rules version this client doesn't run. */
+		/**
+		 * Takes the server's farm, or reports a rules version this client doesn't run. The client runs
+		 * the current version (ADR-0006, "The client"), whose content is `sliceContent`: an envelope
+		 * under another means the server's rules changed, so it reloads instead of predicting under the
+		 * wrong rules (MUST-12).
+		 */
 		const confirm = (farm: FarmEnvelope, pending: readonly PendingAction[]): boolean => {
-			if (farm.rulesVersion !== rulesVersion) {
+			if (farm.rulesVersion !== currentRulesVersion) {
 				stop();
 				set({ status: "error", error: reloadMessage });
 				return false;
@@ -192,14 +193,14 @@ export const selectCoins = (store: FarmStore): number | null => store.predicted?
 
 /** The Level from 1, derived from XP through the Level table (MUST-05.3). */
 export const selectLevel = (store: FarmStore): number | null =>
-	store.predicted === null ? null : countLevels(store.predicted.xp);
+	store.predicted === null ? null : levelOf(store.predicted.xp, sliceContent);
 
 /**
  * The Level of the last confirmed farm (MUST-05.3): what the server accepted, so a prediction that
  * rolls back never raises it (#607). Null until the farm loads.
  */
 export const selectConfirmedLevel = (store: FarmStore): number | null =>
-	store.confirmed === null ? null : countLevels(store.confirmed.state.xp);
+	store.confirmed === null ? null : levelOf(store.confirmed.state.xp, sliceContent);
 
 export interface LevelProgress {
 	/** From 1 (MUST-05.3). */
@@ -223,7 +224,7 @@ export const selectLevelProgress = (store: FarmStore): LevelProgress | null => {
 	const { xp } = store.predicted;
 	if (lastProgress?.xp === xp) return lastProgress;
 
-	const level = countLevels(xp);
+	const level = levelOf(xp, sliceContent);
 	lastProgress = {
 		level,
 		xp,
@@ -286,14 +287,6 @@ const noOrders: readonly OrderSlot[] = [];
 /** The order board's slots; empty before the farm loads. */
 export const selectOrders = (store: FarmStore): readonly OrderSlot[] =>
 	store.predicted?.board ?? noOrders;
-
-/**
- * The Level for `xp`: the Levels whose XP it has reached (MUST-05.3). The sim's `levelOf` holds
- * the same rule but isn't in the package's interface, so the client counts it from the content.
- */
-function countLevels(xp: number): number {
-	return sliceContent.levels.filter((level) => level.xp <= xp).length;
-}
 
 function countGoods(goods: Readonly<Record<string, number>>): number {
 	return Object.values(goods).reduce((sum, count) => sum + count, 0);

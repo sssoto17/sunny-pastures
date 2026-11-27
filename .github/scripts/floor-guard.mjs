@@ -585,6 +585,28 @@ const commentedOut = (f) => {
 		})
 		.map(([first, last]) => (added.has(first) ? first : last));
 };
+// #667: a line that holds one of Fallow's `ignore*` lists and nothing else, `"ignoreX": ["a", "b"],`.
+const IGNORE_LIST = /^\s*"(ignore\w*)"\s*:\s*\[((?:\s*"[^"\\]*"\s*,?)*)\s*\]\s*,?\s*$/;
+const readIgnoreList = (text) => {
+	const m = IGNORE_LIST.exec(text);
+	return m ? { key: m[1], entries: [...m[2].matchAll(/"([^"\\]*)"/g)].map((e) => e[1]) } : null;
+};
+// An added Fallow line that only drops entries from an `ignore*` list a removed line held: Fallow
+// then checks more, so the line tightens the config rather than loosening it (#667). Any entry
+// counts, not only one Fallow reports as redundant: a drop that leaves a real finding fails Fallow's
+// own check. Any other change on the line (an entry added or swapped, another key, a comment) still
+// counts, and so does a key the old or new file holds more than once, such as a list in an override
+// block, since the two lines might then be different scopes.
+const narrowedIgnores = (removed, before, now) => {
+	const once = (lines, key) =>
+		lines.filter((l) => new RegExp(`"${key}"\\s*:`).test(l)).length === 1;
+	const was = removed.map((r) => readIgnoreList(r.text)).filter(Boolean);
+	return (text) => {
+		const list = readIgnoreList(text);
+		if (list === null || !once(before, list.key) || !once(now, list.key)) return false;
+		return was.some((w) => w.key === list.key && list.entries.every((e) => w.entries.includes(e)));
+	};
+};
 const configLoosening = (f, mergeBase) => {
 	const name = basename(f.path);
 	const hits = [];
@@ -619,8 +641,14 @@ const configLoosening = (f, mergeBase) => {
 			name,
 		)
 	) {
+		const narrowed = /fallow/.test(name)
+			? narrowedIgnores(f.removed, oldContent(mergeBase, f.oldPath ?? f.path) ?? [], newLines())
+			: () => false;
 		for (const a of f.added)
-			if (/allowlist|ignore|exclude|disable|skip|\boff\b|["']warn["']/i.test(a.text))
+			if (
+				/allowlist|ignore|exclude|disable|skip|\boff\b|["']warn["']/i.test(a.text) &&
+				!narrowed(a.text)
+			)
 				hits.push(a.line);
 	} else if (/^vitest\.config\./.test(name)) {
 		if (f.status !== "added") {
