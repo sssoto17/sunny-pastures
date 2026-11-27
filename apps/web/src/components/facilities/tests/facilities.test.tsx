@@ -81,6 +81,21 @@ describe("FacilityPopover", () => {
 		expect(within(dialog).getByText("Slot 1: empty")).toBeTruthy();
 	});
 
+	it("shows the shortened job time and the extra slots of a tier-3 and a tier-2 facility", async () => {
+		const user = await renderFarm({ facilities: [owned(3), owned(2)] });
+
+		const mill = await openDialog(user, "Feed mill");
+		expect(within(mill).getByText("Takes 36 s")).toBeTruthy();
+		expect(within(mill).getByText("Slot 3: empty")).toBeTruthy();
+		expect(within(mill).queryByText("Slot 4: empty")).toBeNull();
+		await user.keyboard("{Escape}");
+
+		const bakery = await openDialog(user, "Bakery");
+		expect(within(bakery).getByText("Takes 4 min")).toBeTruthy();
+		expect(within(bakery).getByText("Slot 3: empty")).toBeTruthy();
+		expect(within(bakery).queryByText("Slot 4: empty")).toBeNull();
+	});
+
 	it("makes cookies from wheat and eggs at the bakery", async () => {
 		const user = await renderFarm({ barn: { egg: 2 } });
 		const dialog = await openDialog(user, "Bakery");
