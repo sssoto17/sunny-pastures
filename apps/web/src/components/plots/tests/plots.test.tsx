@@ -14,6 +14,7 @@ import {
 } from "@/client/store/tests/fakeApi";
 
 import Game from "../../Game";
+import { getLotTile } from "../../map/tests/press";
 import { formatTimeLeft } from "../index";
 
 const start = 1_000_000;
@@ -63,7 +64,7 @@ async function renderFarm(envelope = newEnvelope(start)) {
 
 /** Opens Plot `n`'s popover by its lot, whatever its state, and returns the dialog. */
 async function openPlot(user: ReturnType<typeof userEvent.setup>, n: number) {
-	await user.click(screen.getByRole("button", { name: new RegExp(`^Plot ${String(n)}:`) }));
+	await user.click(getLotTile(new RegExp(`^Plot ${String(n)}:`)));
 	return screen.getByRole("dialog", { name: `Plot ${String(n)}` });
 }
 
