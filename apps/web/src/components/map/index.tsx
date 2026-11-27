@@ -173,11 +173,14 @@ function keyToView(key: string): KeyMove | null {
 	}
 }
 
+/** The sprite's own box, so the hit area is placed against the sprite, not the button's padding. */
+const spriteBoxStyle: CSSProperties = { position: "relative", display: "block" };
+
 /**
  * A lot's hit area (#699): the tile's diamond, in the middle of the sprite's square where the tile
  * is drawn. It sits inside the lot's button, so a press on it presses the button, while the rest
  * of the lot, its sprite included, lets presses through to the lot behind. Diamonds of
- * neighbouring tiles meet edge to edge, so every point on the farm belongs to one lot. Rejected:
+ * neighbouring tiles meet edge to edge, so no point on the map belongs to two lots. Rejected:
  * `clip-path` on the button itself, which would also clip its focus ring.
  */
 const tileHitStyle: CSSProperties = {
@@ -214,8 +217,10 @@ function LotButton({ lot, farm, level, onBuy, onOpen, renderLot }: LotButtonProp
 	};
 	const sign = (
 		<Button variant="quiet" {...(isForSale ? {} : { onPress: handleOpen })}>
-			<img src={spriteUrl(sprite)} alt={name} width={tileSize.width} draggable={false} />
-			<span aria-hidden data-lot-tile="" style={tileHitStyle} />
+			<span style={spriteBoxStyle}>
+				<img src={spriteUrl(sprite)} alt={name} width={tileSize.width} draggable={false} />
+				<span aria-hidden data-lot-tile="" style={tileHitStyle} />
+			</span>
 		</Button>
 	);
 	const { x, y } = lotPosition(lot);

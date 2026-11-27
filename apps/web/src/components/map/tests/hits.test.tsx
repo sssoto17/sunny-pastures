@@ -56,17 +56,17 @@ function findHittables(map: HTMLElement): Hittable[] {
 				element,
 				depth: Number(wrapper.style.zIndex),
 				box: {
-					x: px(wrapper.style.left) + px(element.style.left),
-					y: px(wrapper.style.top) + px(element.style.top),
-					width: px(element.style.width),
-					height: px(element.style.height),
+					x: readPx(wrapper.style.left) + readPx(element.style.left),
+					y: readPx(wrapper.style.top) + readPx(element.style.top),
+					width: readPx(element.style.width),
+					height: readPx(element.style.height),
 				},
 				isDiamond: element.style.clipPath === "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
 			})),
 	);
 }
 
-function px(value: string): number {
+function readPx(value: string): number {
 	return value === "" ? 0 : Number(value.replace(/px$/, ""));
 }
 
@@ -89,6 +89,7 @@ function hitTest(map: HTMLElement, point: { x: number; y: number }): HTMLElement
 		.sort((a, b) => b.depth - a.depth);
 	const [top, next] = hits;
 	if (top === undefined) throw new Error(`Nothing takes a press at ${JSON.stringify(point)}.`);
+
 	// The tiles tile the plane, so no two lots' hit areas share a tile's centre.
 	expect(next).toBeUndefined();
 	return top.element;
