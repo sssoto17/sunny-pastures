@@ -1224,15 +1224,16 @@ group keeps one run going and one waiting, and a newly queued run cancels the on
 (GitHub's concurrency docs), so dispatching a whole queue at once would cancel all but two. A
 cancelled run still completes, so it would fire `workflow_run` and start more sweeps; the chain acts
 only on a run that wasn't cancelled. **Open for the build issue:** how `/today`'s agreed order
-reaches the sweep, which otherwise picks by Priority, then board order; and whether `workflow_run`'s
+reaches the sweep, which otherwise picks by Priority, then board order. Whether `workflow_run`'s
 limit of three chained levels resets when a `workflow_dispatch` sits between the sweep and the
-factory job (inference, untested). Moving an issue to Ready can't start a workflow itself, because
-Project field changes aren't an Actions trigger. `GITHUB_TOKEN` can't read a user-owned Project
-(area 5), so the sweep reads the board with a read-only token of the admin's. Which token is #102.
-It is never a classic PAT with `repo`, which would reach every private repository the admin's
-account can, the employer's included. Each run costs at least a whole runner minute: a sweep every
-30 minutes would cost about 1,440 minutes a month while private, and three slots plus the chain
-about 90.
+factory job never came into play: the runs showed that a factory run the sweep dispatches fires no
+`workflow_run`, so the hourly schedule, not the chain, drains the queue ("The factory sweep, built",
+"The chain, as run"; #575). Moving an issue to Ready can't start a workflow itself, because Project
+field changes aren't an Actions trigger. `GITHUB_TOKEN` can't read a user-owned Project (area 5), so
+the sweep reads the board with a read-only token of the admin's. Which token is #102. It is never a
+classic PAT with `repo`, which would reach every private repository the admin's account can, the
+employer's included. Each run costs at least a whole runner minute: a sweep every 30 minutes would
+cost about 1,440 minutes a month while private, and three slots plus the chain about 90.
 
 **Caps (decided 8 Nov).** A repo variable, `FACTORY_ENABLED`, is the kill switch: the sweep, the
 chain and the factory job check it. The reviewer keeps running, so open PRs still get reviewed. Each
@@ -1445,13 +1446,27 @@ dispatches (it would hold the Project token and `actions: write` together).
   list returns; an issue not on the board comes last, by number. `/today`'s agreed order isn't wired
   to the sweep yet: the sweep has no input for it, and the admin steers by Priority, by which issues
   carry `factory:ready` and by their blockers.
-- **The chaining limit:** `workflow_run` doesn't chain more than three levels of workflows. Whether
-  a `workflow_dispatch` between the sweep and the factory resets that count is **unproven**: not
-  tested here, and the docs say nothing on it. A factory run that the sweep's `GITHUB_TOKEN`
-  dispatched fired no `workflow_run` on the first night (run 45075597193 finished at 22:05 UTC, 22
-  Nov, and no sweep followed; #582), as GitHub's rule that events made with the `GITHUB_TOKEN` start
-  no new runs, `workflow_dispatch` and `repository_dispatch` excepted, reads. So the hourly schedule
-  is the loop, at worst one issue an hour, until a dispatch with another token.
+- **The chain, as run (#575; read 27 Nov 2026):** a factory run that the sweep's `GITHUB_TOKEN`
+  dispatched fires no `workflow_run`, as GitHub's rule that events made with the `GITHUB_TOKEN`
+  start no new runs, `workflow_dispatch` and `repository_dispatch` excepted, reads. None of the 17
+  factory runs the sweep dispatched (actor `github-actions[bot]`, 22 to 26 Nov) started a sweep, the
+  first being [45075597193](https://github.com/sssoto17/sunny-pastures/actions/runs/45075597193)
+  (finished 22:05 UTC, 22 Nov; #582). Of the 103 sweep runs to 26 Nov, 98 were `schedule`, 4
+  `workflow_dispatch` and 1 `workflow_run`:
+  [45078097301](https://github.com/sssoto17/sunny-pastures/actions/runs/45078097301) (22:30 UTC, 22
+  Nov), which followed a factory run the admin dispatched by hand
+  ([45078026703](https://github.com/sssoto17/sunny-pastures/actions/runs/45078026703), #541) and
+  dispatched nothing, as `FACTORY_ENABLED` was off. So the chain never ran past that one level, and
+  whether a `workflow_dispatch` between the sweep and the factory resets `workflow_run`'s limit of
+  three chained levels never came into play. The hourly schedule is the loop, at most one issue an
+  hour: each sweep dispatched one item, and none while a factory run went, as #596
+  ([45877195361](https://github.com/sssoto17/sunny-pastures/actions/runs/45877195361)), #597
+  ([45883747890](https://github.com/sssoto17/sunny-pastures/actions/runs/45883747890)), #599
+  ([45898293070](https://github.com/sssoto17/sunny-pastures/actions/runs/45898293070), from sweep
+  [45898200205](https://github.com/sssoto17/sunny-pastures/actions/runs/45898200205)), the fix round
+  for #671 ([45904904219](https://github.com/sssoto17/sunny-pastures/actions/runs/45904904219)) and
+  #602 ([45911064956](https://github.com/sssoto17/sunny-pastures/actions/runs/45911064956)) show.
+  Chaining the next sweep from the factory run with the App's token is parked as #585.
 - **Logs:** one `SWEEP` line and a job summary per run: the switch, the open factory PRs against the
   cap and the uncounted lane PRs, the eligible issues in order, the skipped ones and why, and the
   one dispatched or why none.
