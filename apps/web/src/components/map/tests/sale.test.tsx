@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSim, sliceContent, type Action, type FarmState } from "@sunny-pastures/sim";
 
 import { FarmMap } from "../index";
+import { getLotTile } from "./press";
 
 const sim = createSim(sliceContent);
 
@@ -35,7 +36,7 @@ describe("FarmMap lots for sale", () => {
 	it("shows the name, price and unlocking Level, and buys the feed mill at Level 2", async () => {
 		render(<SaleMap start={{ ...newFarm(500), xp: 10 }} level={2} onOpen={vi.fn()} />);
 
-		await userEvent.click(screen.getByRole("button", { name: "Feed mill: for sale" }));
+		await userEvent.click(getLotTile("Feed mill: for sale"));
 		const popover = screen.getByRole("dialog", { name: "Feed mill" });
 		expect(popover.textContent).toContain(`${String(sliceContent.facilities[0].price)} coins`);
 		expect(popover.textContent).toContain("Unlocks at Level 2");
@@ -49,7 +50,7 @@ describe("FarmMap lots for sale", () => {
 	it("disables Buy at Level 1 and says which Level is needed", async () => {
 		render(<SaleMap start={newFarm(500)} level={1} onOpen={vi.fn()} />);
 
-		await userEvent.click(screen.getByRole("button", { name: "Feed mill: for sale" }));
+		await userEvent.click(getLotTile("Feed mill: for sale"));
 
 		const buy = screen.getByRole("button", { name: "Buy" });
 		expect(buy.hasAttribute("disabled")).toBe(true);
@@ -60,7 +61,7 @@ describe("FarmMap lots for sale", () => {
 		const { price } = sliceContent.pens[0];
 		render(<SaleMap start={{ ...newFarm(price - 1), xp: 10 }} level={2} onOpen={vi.fn()} />);
 
-		await userEvent.click(screen.getByRole("button", { name: "Chicken pen: for sale" }));
+		await userEvent.click(getLotTile("Chicken pen: for sale"));
 
 		expect(screen.getByRole("button", { name: "Buy" }).hasAttribute("disabled")).toBe(true);
 		expect(screen.getByText("You need 1 more coin to buy this.")).toBeTruthy();
@@ -70,9 +71,9 @@ describe("FarmMap lots for sale", () => {
 		const onOpen = vi.fn();
 		render(<SaleMap start={{ ...newFarm(500), xp: 10 }} level={2} onOpen={onOpen} />);
 
-		await userEvent.click(screen.getByRole("button", { name: "Chicken pen: for sale" }));
+		await userEvent.click(getLotTile("Chicken pen: for sale"));
 		await userEvent.click(screen.getByRole("button", { name: "Buy" }));
-		await userEvent.click(screen.getByRole("button", { name: "Chicken pen" }));
+		await userEvent.click(getLotTile("Chicken pen"));
 
 		expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ kind: "pen", index: 0 }));
 	});
