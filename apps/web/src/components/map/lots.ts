@@ -66,21 +66,35 @@ export function mapCenter(): { x: number; y: number } {
 	};
 }
 
-/** What a lot shows and is called, from the farm: the accessible name and the sprite. */
-export function describeLot(lot: Lot, farm: FarmState): { name: string; sprite: SpriteId } {
-	if (lot.kind === "plot") return describePlot(lot, farm);
-
-	const isOwned = (lot.kind === "pen" ? farm.pens : farm.facilities)[lot.index] !== undefined;
-	if (!isOwned) return { name: `${lot.label}: for sale`, sprite: "lotForSale" };
-
-	return { name: lot.label, sprite: lot.sprite };
+export interface LotLook {
+	readonly name: string;
+	readonly sprite: SpriteId;
+	/** True while the lot shows the "For sale" sign: nothing is bought on it yet. */
+	readonly isForSale: boolean;
 }
 
-function describePlot(lot: Lot, farm: FarmState): { name: string; sprite: SpriteId } {
+/** What a lot shows and is called, from the farm: the accessible name and the sprite. */
+export function describeLot(lot: Lot, farm: FarmState): LotLook {
+	if (lot.kind === "plot") return describePlot(lot, farm);
+
+	// An unbought pen or facility is `null` in the farm, one entry per content item (ADR-0003).
+	const entry = (lot.kind === "pen" ? farm.pens : farm.facilities)[lot.index] ?? null;
+	if (entry === null) return forSale(lot);
+
+	return { name: lot.label, sprite: lot.sprite, isForSale: false };
+}
+
+function forSale(lot: Lot): LotLook {
+	return { name: `${lot.label}: for sale`, sprite: "lotForSale", isForSale: true };
+}
+
+function describePlot(lot: Lot, farm: FarmState): LotLook {
 	const plot = farm.plots[lot.index];
-	if (plot === undefined) return { name: `${lot.label}: for sale`, sprite: "lotForSale" };
-	if (plot.status === "empty") return { name: `${lot.label}: empty`, sprite: "plotEmpty" };
+	if (plot === undefined) return forSale(lot);
+	if (plot.status === "empty") {
+		return { name: `${lot.label}: empty`, sprite: "plotEmpty", isForSale: false };
+	}
 
 	const sprite = plot.status === "ready" ? "plotReady" : "plotGrowing";
-	return { name: `${lot.label}: ${plot.crop}, ${plot.status}`, sprite };
+	return { name: `${lot.label}: ${plot.crop}, ${plot.status}`, sprite, isForSale: false };
 }

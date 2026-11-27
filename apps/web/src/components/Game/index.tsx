@@ -4,12 +4,15 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
+import type { Action } from "@sunny-pastures/sim";
+
 import { createApi } from "@/client/api";
 import { getBrowserSession } from "@/client/session";
-import { createFarmStore, type FarmStore } from "@/client/store";
+import { createFarmStore, selectLevel, type FarmStore } from "@/client/store";
 import { Button, ToastRegion } from "@/components/ui";
 
 import { Hud } from "../hud";
+import { LevelUp } from "../levelUp";
 import { FarmMap } from "../map";
 import { OrderBoard } from "../orderBoard";
 import { PlotPopover } from "../plots";
@@ -32,6 +35,7 @@ export default function Game({ store }: GameProps) {
 	const status = useStore(farmStore, (s) => s.status);
 	const error = useStore(farmStore, (s) => s.error);
 	const predicted = useStore(farmStore, (s) => s.predicted);
+	const level = useStore(farmStore, selectLevel);
 
 	useEffect(() => {
 		void farmStore.getState().load();
@@ -39,6 +43,10 @@ export default function Game({ store }: GameProps) {
 			farmStore.getState().stop();
 		};
 	}, [farmStore]);
+
+	const handleBuy = (action: Action) => {
+		farmStore.getState().act(action);
+	};
 
 	const handleRetry = () => {
 		farmStore.setState({ status: "loading", error: null });
@@ -54,12 +62,16 @@ export default function Game({ store }: GameProps) {
 		);
 	}
 
-	if (status === "loading" || predicted === null) return <p role="status">Loading your farm…</p>;
+	if (status === "loading" || predicted === null || level === null) {
+		return <p role="status">Loading your farm…</p>;
+	}
 
 	return (
 		<>
 			<FarmMap
 				farm={predicted}
+				level={level}
+				onBuy={handleBuy}
 				renderLot={(lot, button) =>
 					lot.kind === "plot" ? (
 						<PlotPopover store={farmStore} index={lot.index} label={lot.label} trigger={button} />
@@ -70,6 +82,7 @@ export default function Game({ store }: GameProps) {
 			/>
 			<Hud store={farmStore} />
 			<ToastRegion />
+			<LevelUp store={farmStore} />
 			<div style={ordersStyle}>
 				<OrderBoard store={farmStore} />
 			</div>

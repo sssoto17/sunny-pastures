@@ -311,6 +311,118 @@ jobs:
         if: steps.paths.outputs.run == 'true'
         run: pnpm test:acceptance --reporter=verbose
 
+  # CONSTRAINTS.md, "Browsers and widths (BASE-02)" (#673; ADR-0011): the Playwright specs in
+  # apps/web/e2e/ in six projects, {chromium, firefox, webkit} × {desktop, 360 px with touch}, against
+  # the built app (`next start`, which the Playwright config's webServer runs) on a fresh local
+  # Supabase stack from the same composite action as `ci / acceptance`. One job, not a matrix per
+  # browser, which would pay for the stack three times (ADR-0011, section 5). It runs on every part
+  # of a stack. No step prints a key, token or URL (docs/agents/sandbox.md, "Secrets in output").
+  # Path filter (admin, 22 Nov: don't run CI more than necessary): `ci / acceptance`'s list without
+  # tests/acceptance/, which these tests don't read, plus the Playwright config (inside apps/, named
+  # so the filter shows it); a step, not a `paths:` trigger, so the check always reports.
+  ui:
+    name: ci / ui
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.draft != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      # Since the stack's base, as `ci / acceptance` diffs, so a top part covers every part below it.
+      SINCE: >-
+        ${{ github.event_name == 'push' && github.event.before || format('origin/{0}',
+        github.event.pull_request.stack.base.ref || github.event.repository.default_branch) }}
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the path filter diffs against the base
+      - name: Choose whether to run
+        id: paths
+        run: |
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            run=true
+            why="a push to main always runs the browser tests"
+          else
+            # A base git can't read fails the step: only an empty list means nothing was touched.
+            changed=$(git diff --name-only "$SINCE...HEAD" -- apps packages supabase \
+              apps/web/playwright.config.mts package.json pnpm-lock.yaml pnpm-workspace.yaml \
+              'tsconfig*.json' .github/workflows/ci.yml \
+              .github/actions/setup .github/actions/supabase-stack .github/actions/supabase-cli)
+            if [[ -n $changed ]]; then
+              run=true
+              why="the change touches what the browser tests cover"
+            else
+              run=false
+              why="the change touches none of apps/ (the Playwright config included), packages/, supabase/, package.json, pnpm-lock.yaml, pnpm-workspace.yaml, the root tsconfig*.json, ci.yml or the setup, supabase-stack and supabase-cli actions"
+            fi
+          fi
+          if [[ $run == true ]]; then
+            summary="Browser tests run: $why."
+          else
+            summary="Browser tests skipped, and the check passes: $why."
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: ./.github/actions/setup
+        if: steps.paths.outputs.run == 'true'
+      - name: Start the Supabase stack
+        if: steps.paths.outputs.run == 'true'
+        uses: ./.github/actions/supabase-stack
+      # Next inlines NEXT_PUBLIC_* into the browser's bundle at build time (ADR-0010, section 5), so
+      # the build gets the stack's URL and publishable key, which db:env wrote to ./.env, under those
+      # names. They live in this step's shell only: a value sent to $GITHUB_ENV shows in the env list
+      # of every later step's log. The Playwright config hands ./.env to `next start` the same way.
+      - name: Build the app (sim, then next build) for the stack
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          url=$(sed -n 's/^SUPABASE_URL=//p' .env)
+          key=$(sed -n 's/^SUPABASE_PUBLISHABLE_KEY=//p' .env)
+          if [[ -z $url || -z $key ]]; then
+            echo "::error title=ci / ui::.env has no SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY; did pnpm db:env run?"
+            exit 1
+          fi
+          NEXT_PUBLIC_SUPABASE_URL=$url NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$key \
+            pnpm --filter @sunny-pastures/web build
+      # Each Playwright version downloads the browser builds it was released with, so the cache key
+      # is the installed version: the browsers change only when a reviewed PR moves the exact pin
+      # (ADR-0011, section 5, the gap `minimumReleaseAge` leaves).
+      - name: Read the Playwright version
+        if: steps.paths.outputs.run == 'true'
+        id: playwright
+        run: |
+          version=$(pnpm --filter @sunny-pastures/web exec playwright --version | sed -n 's/^Version //p')
+          [[ -n $version ]] || { echo "::error title=ci / ui::couldn't read Playwright's version"; exit 1; }
+          echo "Playwright $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Restore the browsers
+        if: steps.paths.outputs.run == 'true'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Only the three engines BASE-02 names. --with-deps installs their system libraries, which the
+      # cache doesn't hold, so it runs on a cache hit too; the downloads are then skipped.
+      - name: Install the browsers
+        if: steps.paths.outputs.run == 'true'
+        run: pnpm --filter @sunny-pastures/web exec playwright install --with-deps chromium firefox webkit
+      - name: Run the browser tests
+        if: steps.paths.outputs.run == 'true'
+        run: pnpm --filter @sunny-pastures/web exec playwright test
+      # Traces and screenshots of the failed tests (the config keeps them on failure only), for
+      # 7 days. They hold the throwaway stack's local requests, whose players and keys die with the
+      # runner.
+      - name: Upload the traces and screenshots
+        if: failure() && steps.paths.outputs.run == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-traces
+          path: apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # CONSTRAINTS.md, Determinism row (#48): the recorded script through packages/sim in two
   # processes, against the recorded state hash. No path filter: the hash covers every rules change.
   determinism:

@@ -17,7 +17,7 @@ beforeAll(() => {
 });
 
 function renderMap(state = farm) {
-	render(<FarmMap farm={state} />);
+	render(<FarmMap farm={state} level={1} onBuy={vi.fn()} onOpen={vi.fn()} />);
 	return screen.getByRole("group", { name: "Farm map" });
 }
 

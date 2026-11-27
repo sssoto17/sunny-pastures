@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createSession, type AuthClient } from "../index";
+import { createSession, getBrowserSession, type AuthClient } from "../index";
 
 type Auth = AuthClient;
 
@@ -49,5 +49,51 @@ describe("the session", () => {
 	it("returns null when the refresh gives no session", async () => {
 		const { typed } = fakeAuth("stored", "x", null);
 		expect(await createSession(typed).refreshAccessToken()).toBeNull();
+	});
+});
+
+describe("the browser session", () => {
+	// Obviously fake values: the test checks they never reach the message.
+	const url = "http://supabase.test";
+	const key = "fake-publishable-key";
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	/** The message `getBrowserSession` throws with these variables; "" for a missing one. */
+	function readConfigError(env: { url: string; key: string }): string {
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", env.url);
+		vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", env.key);
+		try {
+			getBrowserSession();
+		} catch (thrown) {
+			return thrown instanceof Error ? thrown.message : String(thrown);
+		}
+		throw new Error("getBrowserSession did not throw.");
+	}
+
+	it("names the missing URL, and prints no value (#684)", () => {
+		const message = readConfigError({ url: "", key });
+		expect(message).toBe(
+			"The game isn't configured: the Supabase URL (NEXT_PUBLIC_SUPABASE_URL) is missing.",
+		);
+		expect(message).not.toContain(key);
+	});
+
+	it("names the missing publishable key, and prints no value (#684)", () => {
+		const message = readConfigError({ url, key: "" });
+		expect(message).toBe(
+			"The game isn't configured: the Supabase publishable key " +
+				"(NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) is missing.",
+		);
+		expect(message).not.toContain(url);
+	});
+
+	it("names both when both are missing, or only blank (#684)", () => {
+		expect(readConfigError({ url: " ", key: "" })).toBe(
+			"The game isn't configured: the Supabase URL (NEXT_PUBLIC_SUPABASE_URL) and " +
+				"publishable key (NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) are missing.",
+		);
 	});
 });

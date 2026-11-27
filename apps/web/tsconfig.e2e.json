@@ -1,0 +1,14 @@
+{
+	"//": "The browser tests and their Playwright config (ADR-0011; #673). They drive the built app through a browser and import nothing from src/ (Fallow's `e2e` zone). Playwright compiles them itself; tsc only checks them.",
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["ES2024", "DOM"],
+		"types": ["node"],
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"emitDeclarationOnly": true,
+		"sourceMap": false,
+		"outDir": "node_modules/.cache/tsc/e2e"
+	},
+	"include": ["e2e", "playwright.config.mts"]
+}
