@@ -1224,16 +1224,15 @@ group keeps one run going and one waiting, and a newly queued run cancels the on
 (GitHub's concurrency docs), so dispatching a whole queue at once would cancel all but two. A
 cancelled run still completes, so it would fire `workflow_run` and start more sweeps; the chain acts
 only on a run that wasn't cancelled. **Open for the build issue:** how `/today`'s agreed order
-reaches the sweep, which otherwise picks by Priority, then board order. Whether `workflow_run`'s
-limit of three chained levels resets when a `workflow_dispatch` sits between the sweep and the
-factory job never came into play: the runs showed that a factory run the sweep dispatches fires no
-`workflow_run`, so the hourly schedule, not the chain, drains the queue ("The factory sweep, built",
-"The chain, as run"; #575). Moving an issue to Ready can't start a workflow itself, because Project
-field changes aren't an Actions trigger. `GITHUB_TOKEN` can't read a user-owned Project (area 5), so
-the sweep reads the board with a read-only token of the admin's. Which token is #102. It is never a
-classic PAT with `repo`, which would reach every private repository the admin's account can, the
-employer's included. Each run costs at least a whole runner minute: a sweep every 30 minutes would
-cost about 1,440 minutes a month while private, and three slots plus the chain about 90.
+reaches the sweep, which otherwise picks by Priority, then board order. The runs settled the chain:
+a factory run the sweep dispatches fires no `workflow_run`, so the hourly schedule, not the chain,
+drains the queue ("The factory sweep, built", "The chain, as run"; #575). Moving an issue to Ready
+can't start a workflow itself, because Project field changes aren't an Actions trigger.
+`GITHUB_TOKEN` can't read a user-owned Project (area 5), so the sweep reads the board with a
+read-only token of the admin's. Which token is #102. It is never a classic PAT with `repo`, which
+would reach every private repository the admin's account can, the employer's included. Each run
+costs at least a whole runner minute: a sweep every 30 minutes would cost about 1,440 minutes a
+month while private, and three slots plus the chain about 90.
 
 **Caps (decided 8 Nov).** A repo variable, `FACTORY_ENABLED`, is the kill switch: the sweep, the
 chain and the factory job check it. The reviewer keeps running, so open PRs still get reviewed. Each
@@ -1458,8 +1457,9 @@ dispatches (it would hold the Project token and `actions: write` together).
   ([45078026703](https://github.com/sssoto17/sunny-pastures/actions/runs/45078026703), #541) and
   dispatched nothing, as `FACTORY_ENABLED` was off. So the chain never ran past that one level, and
   whether a `workflow_dispatch` between the sweep and the factory resets `workflow_run`'s limit of
-  three chained levels never came into play. The hourly schedule is the loop, at most one issue an
-  hour: each sweep dispatched one item, and none while a factory run went, as #596
+  three chained levels never came into play. The hourly schedule is the loop, at most one issue per
+  scheduled sweep (a sweep the admin dispatches by hand can add one between them): a sweep
+  dispatched at most one item, as #596
   ([45877195361](https://github.com/sssoto17/sunny-pastures/actions/runs/45877195361)), #597
   ([45883747890](https://github.com/sssoto17/sunny-pastures/actions/runs/45883747890)), #599
   ([45898293070](https://github.com/sssoto17/sunny-pastures/actions/runs/45898293070), from sweep
