@@ -1637,6 +1637,32 @@ describe("floor guard, end to end", () => {
 			});
 			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc");
 		});
+
+		// Each half of the key-once check on its own (review of #697): the key twice in one file only.
+		const override = (entries) =>
+			RC.replace(
+				'"audit": { "gate": "new-only" }',
+				`"overrides": [{\n    "ignoreDependencies": ${entries}\n  }]`,
+			);
+
+		it("blocks a widened list when the old file held the key twice, in an override it drops", () => {
+			// Old: ["a"] at the top, ["a", "b", "c"] in an override. New: the top widens to ["a", "b"].
+			repo = makeRepo({
+				...BASE,
+				".fallowrc.jsonc": override('["a", "b", "c"]').replace('["a", "b", "c"]', '["a"]'),
+			});
+			repo.write({ ".fallowrc.jsonc": RC.replace('["a", "b", "c"]', '["a", "b"]') });
+			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc:3");
+		});
+
+		it("blocks a list moved into an override the new file adds, so it holds the key twice", () => {
+			// Old: ["a", "b", "c"] at the top. New: ["a"] at the top, ["b", "c"] in a new override.
+			repo = makeRepo({ ...BASE, ".fallowrc.jsonc": RC });
+			repo.write({
+				".fallowrc.jsonc": override('["b", "c"]').replace('["a", "b", "c"]', '["a"]'),
+			});
+			expect(guard().out).toContain("[config-loosened] .fallowrc.jsonc:5");
+		});
 	});
 
 	// #125: Prettier's ignore list and settings decide what the formatting check covers, so a widened
