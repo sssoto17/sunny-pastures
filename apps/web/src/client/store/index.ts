@@ -200,7 +200,7 @@ export const selectLevel = (store: FarmStore): number | null =>
  * rolls back never raises it (#607). Null until the farm loads.
  */
 export const selectConfirmedLevel = (store: FarmStore): number | null =>
-	store.confirmed === null ? null : countLevels(store.confirmed.state.xp);
+	store.confirmed === null ? null : levelOf(store.confirmed.state.xp, sliceContent);
 
 export interface LevelProgress {
 	/** From 1 (MUST-05.3). */
