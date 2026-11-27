@@ -36,13 +36,28 @@ export function createSession(auth: AuthClient): Session {
 
 let browserSession: Session | null = null;
 
-/** The one session of this tab, built on first use from the public Supabase variables. */
+/**
+ * The one session of this tab, built on first use from the public Supabase variables. Throws when
+ * one is missing, with a sentence that names it and no value (#684): a deploy without them is a
+ * setup mistake, not a player's. The store logs it to the console and shows "Try again".
+ */
 export function getBrowserSession(): Session {
-	browserSession ??= createSession(
-		createClient(
-			process.env["NEXT_PUBLIC_SUPABASE_URL"] ?? "",
-			process.env["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] ?? "",
-		).auth,
-	);
+	if (browserSession !== null) return browserSession;
+
+	// Each variable is read by its full name, so Next inlines it into the client bundle.
+	const url = process.env["NEXT_PUBLIC_SUPABASE_URL"]?.trim() ?? "";
+	const key = process.env["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"]?.trim() ?? "";
+	const missing = [
+		...(url === "" ? ["URL (NEXT_PUBLIC_SUPABASE_URL)"] : []),
+		...(key === "" ? ["publishable key (NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)"] : []),
+	];
+	if (missing.length > 0) {
+		const verb = missing.length === 1 ? "is" : "are";
+		throw new Error(
+			`The game isn't configured: the Supabase ${missing.join(" and ")} ${verb} missing.`,
+		);
+	}
+
+	browserSession = createSession(createClient(url, key).auth);
 	return browserSession;
 }

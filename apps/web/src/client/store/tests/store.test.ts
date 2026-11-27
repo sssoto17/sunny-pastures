@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Action } from "@sunny-pastures/sim";
 
+import type { FarmEnvelope } from "@/contract";
+
 import {
 	createFarmStore,
 	selectCoins,
@@ -32,9 +34,19 @@ beforeEach(() => {
 afterEach(() => {
 	store.getState().stop();
 	vi.useRealTimers();
+	vi.restoreAllMocks();
 });
 
 const state = (): FarmStore => store.getState();
+
+/** Keeps what the store logs out of the test output, and returns it to assert on. */
+function catchErrorLogs(): unknown[][] {
+	const logged: unknown[][] = [];
+	vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+		logged.push(args);
+	});
+	return logged;
+}
 
 async function loadReady(envelope = newEnvelope(start)) {
 	const loading = state().load();
@@ -93,6 +105,35 @@ describe("load", () => {
 		await fake.loads[0]?.answer(failure("network"));
 		await loading;
 		expect(state()).toMatchObject({ status: "error", error: "The server said network." });
+	});
+
+	it("resolves with the error status when loading throws, and logs what was thrown (#684)", async () => {
+		const logged = catchErrorLogs();
+		const thrown = new Error("Sign-in broke.");
+		const failing = createFarmStore({
+			api: { ...fake.api, loadFarm: () => Promise.reject(thrown) },
+		});
+
+		await expect(failing.getState().load()).resolves.toBeUndefined();
+		expect(failing.getState()).toMatchObject({
+			status: "error",
+			error: "Your farm could not be loaded. Please try again.",
+		});
+		expect(logged).toEqual([["The farm could not be loaded:", thrown]]);
+	});
+
+	it("resolves with the error status when the loaded farm can't be predicted (#684)", async () => {
+		const logged = catchErrorLogs();
+		const broken = { ...newEnvelope(start), state: undefined } as unknown as FarmEnvelope;
+
+		const loading = state().load();
+		await fake.loads[0]?.answer({ ok: true, farm: broken });
+		await expect(loading).resolves.toBeUndefined();
+		expect(state()).toMatchObject({
+			status: "error",
+			error: "Your farm could not be loaded. Please try again.",
+		});
+		expect(logged).toHaveLength(1);
 	});
 
 	it("asks for a reload when the rules version differs", async () => {

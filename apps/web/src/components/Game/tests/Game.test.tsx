@@ -1,10 +1,10 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSim, sliceContent } from "@sunny-pastures/sim";
 
-import type { Api, LoadResult } from "@/client/api";
+import { createApi, type Api, type LoadResult } from "@/client/api";
 import { createFarmStore } from "@/client/store";
 
 import Game from "../index";
@@ -36,6 +36,10 @@ function setup(...results: LoadResult[]) {
 }
 
 describe("Game", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	it("tells the player, in a status message, that their farm is loading", async () => {
 		setup(farm);
 
@@ -51,6 +55,32 @@ describe("Game", () => {
 			"The server could not load your farm.",
 		);
 		expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+	});
+
+	it("shows Try again, not loading for good, when the session throws during sign-in (#684)", async () => {
+		const logged: unknown[][] = [];
+		vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+			logged.push(args);
+		});
+		// Thrown synchronously, as `getBrowserSession` does when the game isn't configured.
+		const throwing = (): Promise<string | null> => {
+			throw new Error("A fake sign-in error.");
+		};
+		const store = createFarmStore({
+			api: createApi({
+				fetch: () => Promise.reject(new Error("The test sends no request.")),
+				session: { getAccessToken: throwing, refreshAccessToken: throwing },
+			}),
+		});
+		render(<Game store={store} />);
+
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"Your farm could not be loaded. Please try again.",
+		);
+		expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+		expect(store.getState().status).toBe("error");
+		expect(logged).toHaveLength(1);
+		await expect(store.getState().load()).resolves.toBeUndefined();
 	});
 
 	it("loads again when the player presses Try again, and shows the farm if it works", async () => {

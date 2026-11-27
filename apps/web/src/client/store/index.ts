@@ -63,6 +63,7 @@ export interface FarmStoreDeps {
  */
 const rulesVersion = 1;
 const reloadMessage = "The game has been updated. Please reload to update.";
+const loadFailedMessage = "Your farm could not be loaded. Please try again.";
 const tickMs = 1000;
 
 export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
@@ -101,6 +102,29 @@ export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
 			set({ pending, predicted, lastRefusal: reason });
 		};
 
+		/**
+		 * Loads the farm and confirms it; false, with the error status set, when that fails. Anything
+		 * thrown on the way, a sign-in that throws included, ends here as an error the player can
+		 * retry, never as a rejection nobody handles (#684). Its text goes to the console, not the
+		 * screen: a library's message isn't a sentence for a player.
+		 */
+		const loadConfirmed = async (): Promise<boolean> => {
+			try {
+				const result = await deps.api.loadFarm();
+				if (!result.ok) {
+					set({ status: "error", error: result.message });
+					return false;
+				}
+
+				return confirm(result.farm, get().pending);
+			} catch (thrown) {
+				console.error("The farm could not be loaded:", thrown);
+				stop();
+				set({ status: "error", error: loadFailedMessage });
+				return false;
+			}
+		};
+
 		const drain = async () => {
 			if (isSending) return;
 
@@ -122,13 +146,7 @@ export function createFarmStore(deps: FarmStoreDeps): StoreApi<FarmStore> {
 			lastRefusal: null,
 			load: async () => {
 				stop();
-				const result = await deps.api.loadFarm();
-				if (!result.ok) {
-					set({ status: "error", error: result.message });
-					return;
-				}
-
-				if (!confirm(result.farm, get().pending)) return;
+				if (!(await loadConfirmed())) return;
 
 				set({ status: "ready", error: null });
 				// A second load, or a stop while this one was in flight, leaves one tick, never two.
