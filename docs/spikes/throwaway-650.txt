@@ -1,0 +1,5 @@
+2026-11-26T19:33:39.2187508Z [36;1mset -uo pipefail[0m
+2026-11-26T19:33:39.2188043Z [36;1mf=${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}[0m
+2026-11-26T19:33:39.2188574Z [36;1m# Whether Claude ran (#582), logged as `RESULT claude_ran=true`: an execution file, or[0m
+2026-11-26T19:33:39.2189188Z [36;1m# the prompt file the action writes once its checks pass (src/modes/agent/index.ts at the[0m
+2026-11-26T19:33:39.2189831Z [36;1m# pinned SHA, after checkHumanActor), before it installs the CLI and starts Claude. The[0m
