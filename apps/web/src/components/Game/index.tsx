@@ -11,6 +11,7 @@ import { getBrowserSession } from "@/client/session";
 import { createFarmStore, selectLevel, type FarmStore } from "@/client/store";
 import { Button, ToastRegion } from "@/components/ui";
 
+import { FacilityPopover } from "../facilities";
 import { Hud } from "../hud";
 import { LevelUp } from "../levelUp";
 import { FarmMap } from "../map";
@@ -72,13 +73,24 @@ export default function Game({ store }: GameProps) {
 				farm={predicted}
 				level={level}
 				onBuy={handleBuy}
-				renderLot={(lot, button) =>
-					lot.kind === "plot" ? (
-						<PlotPopover store={farmStore} index={lot.index} label={lot.label} trigger={button} />
+				renderLot={(lot, button) => {
+					if (lot.kind === "plot") {
+						return (
+							<PlotPopover store={farmStore} index={lot.index} label={lot.label} trigger={button} />
+						);
+					}
+
+					return lot.kind === "facility" ? (
+						<FacilityPopover
+							store={farmStore}
+							index={lot.index}
+							label={lot.label}
+							trigger={button}
+						/>
 					) : (
 						button
-					)
-				}
+					);
+				}}
 			/>
 			<Hud store={farmStore} />
 			<ToastRegion />
