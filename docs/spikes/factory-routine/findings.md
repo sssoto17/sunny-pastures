@@ -212,3 +212,15 @@ run's CLI is 2.1.325 (run 45928803367's log), whose Stop input carries `last_ass
 hook falls back to the transcript when it doesn't. A block costs turns from `--max-turns`, and
 Claude Code ends the turn itself after 8 blocks in a row with no tool call between them. **Not yet
 seen in a live run:** the first factory run after the merge shows it.
+
+## Build tickets
+
+Filed in Backlog under #58 on 28 Nov 2026, each with a proposed type, Priority, Size and Week in its
+body (the cloud proxy refused the Project, so each carries `triage` until `scripts/issue-fields.sh`
+runs from a local session):
+
+- M5 Playtest 1, since checks 1, 2 and 6 run on them: #706 (the sweep fires the routine, wakes on
+  `factory-done`), #707 (`/factory`, issue mode), #708 (`factory-route.mjs`).
+- Tooling backlog: #709 (personas), #710 (the sweep's triggers and order), #711 (revise and conflict
+  modes), #712 (caps, Risk section, acceptance-path hook), #713 (improvement loop), #714 (build for
+  the stack, Playwright pin check), #715 (retire `factory.yml`, after checks 1, 2 and 6).
