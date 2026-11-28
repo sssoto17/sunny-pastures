@@ -301,6 +301,15 @@
 				"hooks": [
 					{
 						"type": "command",
+						"command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/factory-stop-check.mjs\"",
+						"timeout": 30
+					}
+				]
+			},
+			{
+				"hooks": [
+					{
+						"type": "command",
 						"command": "[ ! -f \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/impeccable\" ] || \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/impeccable\" hook",
 						"timeout": 30,
 						"statusMessage": "Design deep pass"
