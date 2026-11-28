@@ -166,12 +166,12 @@ read-only `GITHUB_TOKEN` and a publish job on a runner that never ran the model.
 
 `.claude/hooks/factory-stop-check.mjs`, registered under `Stop` in `.claude/settings.json`: when the
 last line of the final message that starts with `FACTORY ` starts with `FACTORY ready`, the hook
-returns Claude Code's block decision, with the reason, unless the named branch exists, has commits
-beyond `origin/main` and the tree is clean. Claude then carries on with the reason, and Claude
-Code's own cap (8 blocks in a row with no tool call between) bounds the loop. It acts only in a
-factory run: `GITHUB_ACTIONS=true` with `GITHUB_WORKFLOW=factory` (today's `factory.yml`) or
-`FACTORY_RUN=1` (the routine's environment); every other session gets no output. It ships now,
-whatever the spike concludes, and needs no change to `factory.yml`. Tests:
+returns Claude Code's block decision, with the reason, unless the named branch is a `<N>-<slug>`
+branch that exists, has commits beyond `origin/main` and the tree is clean. Claude then carries on
+with the reason, and Claude Code's own cap (8 blocks in a row with no tool call between) bounds the
+loop. It acts only in a factory run: `GITHUB_ACTIONS=true` with `GITHUB_WORKFLOW=factory` (today's
+`factory.yml`) or `FACTORY_RUN=1` (the routine's environment); every other session gets no output.
+It ships now, whatever the spike concludes, and needs no change to `factory.yml`. Tests:
 `.claude/hooks/factory-stop-check.test.sh`, on a fixture shaped like run 45928803367.
 
 Alternatives considered: a `prompt` or `agent` Stop hook (a model judging the claim, the LLM-router
@@ -180,6 +180,8 @@ claim, and #605's commits did run, on `main`); a check in a later workflow step 
 already has: it finds the missing branch only after the agent can no longer fix it); bash with `jq`
 like the other hooks (Node reads the hook's JSON and the transcript without a parser of our own, as
 `deny-prompts-when-remote.mjs` does); and scoping by `CLAUDE_CODE_REMOTE` (lanes set it too).
+Pattern: a **postcondition guard** on the turn's end, checked against the observed git state rather
+than the agent's account of it.
 
 ## Consequences
 
@@ -191,5 +193,5 @@ like the other hooks (Node reads the hook's JSON and the transcript without a pa
   environment only `main` may use, and the routine accepts only `<mode> <N>`.
 - Runs draw down the admin's Claude Code subscription, as lanes do; the routine's hourly limits (30
   fires per routine) are far above one run at a time.
-- Until checks 1, 2 and 6 run, this ADR stays proposed, and nothing in `factory.yml` changes but the
-  Stop hook.
+- Until checks 1, 2 and 6 run, this ADR stays proposed: `factory.yml` doesn't change, and the one
+  thing that ships is the Stop hook in `.claude/`.

@@ -19,7 +19,7 @@ waits lists the exact steps and the evidence a later session must record here.
 | 4. A routine session can push under `.github/workflows/` | pass (cloud session) | commit `7a03dff` pushed to `throwaway/705-review-probe` |
 | 5. The environment runs the Supabase stack and Playwright Chromium | partly: the stack yes, the pinned Chromium no | below; the factory's setup script must add five things |
 | 6. The #605 retry ends with a PR or a `FACTORY stopped:` reason | waiting on admin setup | needs the routine and `/factory` |
-| 7. The Stop hook refuses a #605-shaped run | pass | `.claude/hooks/factory-stop-check.test.sh`: 27 passed, 0 failed |
+| 7. The Stop hook refuses a #605-shaped run | pass | `.claude/hooks/factory-stop-check.test.sh`: 30 passed, 0 failed |
 
 **What the rule says now.** Checks 1, 2 and 6 decide the runtime. None has failed; all three wait on
 the admin's setup. Until they run, `factory.yml` stays, and the Stop-hook check (7) ships either
@@ -186,14 +186,14 @@ on #605; and the run's Stop-hook refusals, if any, from the transcript. **Fails 
 
 `.claude/hooks/factory-stop-check.mjs`, a `Stop` command hook in `.claude/settings.json`. When the
 last line of the final message that starts with `FACTORY ` starts with `FACTORY ready`, it returns
-`{"decision": "block", "reason": …}` unless the named branch exists, has commits beyond
-`origin/main` and the tree is clean. It acts only in a factory run: `GITHUB_ACTIONS=true` with
-`GITHUB_WORKFLOW=factory` (today's `factory.yml`) or `FACTORY_RUN=1` (the routine's environment).
-Why a command hook in Node, and the alternatives: ADR-0012, section 7.
+`{"decision": "block", "reason": …}` unless the named branch is a `<N>-<slug>` branch that exists,
+has commits beyond `origin/main` and the tree is clean. It acts only in a factory run:
+`GITHUB_ACTIONS=true` with `GITHUB_WORKFLOW=factory` (today's `factory.yml`) or `FACTORY_RUN=1` (the
+routine's environment). Why a command hook in Node, and the alternatives: ADR-0012, section 7.
 
 ```text
 $ bash .claude/hooks/factory-stop-check.test.sh
-factory-stop-check.test.sh: 27 passed, 0 failed
+factory-stop-check.test.sh: 30 passed, 0 failed
 ```
 
 The #605 fixture is a clone whose `main` is 2 commits past `origin/main` with no
@@ -201,17 +201,23 @@ The #605 fixture is a clone whose `main` is 2 commits past `origin/main` with no
 `pnpm boundaries; git switch -c 605-…; git commit …` with the Fallow gate's error, ending
 `FACTORY ready: 605-chicken-pen-feed-eggs`. The hook blocks with "branch 605-chicken-pen-feed-eggs
 doesn't exist (HEAD is main, 2 commits past origin/main)", the fix (`git branch <N>-<slug>`) and the
-way out (`FACTORY stopped: <reason>`). Two mutants each turn tests red: dropping the branch check (4
-fail) and acting outside a factory run (5 fail).
+way out (`FACTORY stopped: <reason>`). `FACTORY ready: main` on the same fixture is refused too:
+`main` exists and holds the commits, but `factory.yml`'s hand-off takes only `<N>-<slug>`. The hook
+decides on the git state alone; the denied command in the transcript shows the shape of the run, and
+the transcript is read only for the final message when the input lacks it. Mutants each turn tests
+red: dropping the branch-exists check (4 fail), acting outside a factory run (5), accepting any
+branch name git takes (2) and acting outside a git work tree (1).
 
 **Under today's `factory.yml`.** The hook needs no workflow change: the Claude step runs
 `claude-code-action`, which loads the project's settings and their hooks, with
-`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which strips credentials only, so `GITHUB_ACTIONS` and
-`GITHUB_WORKFLOW` reach the hook (the coordinator hook already reads `GITHUB_ACTIONS` there). The
-run's CLI is 2.1.325 (run 45928803367's log), whose Stop input carries `last_assistant_message`; the
-hook falls back to the transcript when it doesn't. A block costs turns from `--max-turns`, and
-Claude Code ends the turn itself after 8 blocks in a row with no tool call between them. **Not yet
-seen in a live run:** the first factory run after the merge shows it.
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which is documented to strip credentials, so `GITHUB_ACTIONS`
+and `GITHUB_WORKFLOW` should reach the hook. That is an inference: the coordinator hook's skip on
+`GITHUB_ACTIONS` lets the factory edit on `main`, which suggests the variable survives, but no run
+has logged it. If it doesn't, the hook does nothing there, and the hand-off step still catches the
+claim as today. The run's CLI is 2.1.325 (run 45928803367's log); the hook reads
+`last_assistant_message` and falls back to the transcript when a CLI doesn't send it. A block costs
+turns from `--max-turns`, and Claude Code ends the turn itself after 8 blocks in a row with no tool
+call between them. **Not yet seen in a live run:** the first factory run after the merge shows it.
 
 ## Build tickets
 

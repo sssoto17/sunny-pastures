@@ -84,7 +84,8 @@ FACTORY ready: $BRANCH"
 r605=$(fixture r605)
 commit_file "$r605" pens.tsx
 commit_file "$r605" plots.tsx
-# The transcript holds the denied chained command, as the run's TURNS lines show it.
+# The transcript holds the denied chained command, as the run's TURNS lines show it. The hook
+# decides on the git state alone; the transcript is read only for the final message.
 tr605=$work/r605.jsonl
 jq -cn --arg b "$BRANCH" '{type: "assistant", message: {role: "assistant", content: [{type: "tool_use",
   id: "toolu_1", name: "Bash", input: {command: ("pnpm boundaries; git switch -c " + $b + "; git commit -qm \"feat(web): chicken pen (#605)\"")}}]}}' >"$tr605"
@@ -137,6 +138,10 @@ blocks 'FACTORY ready with no branch name' "$ok" "$(stop_input "$ok" 'FACTORY re
   'names no branch' "${FACTORY_ENV[@]}"
 blocks 'a branch name git would refuse' "$ok" "$(stop_input "$ok" 'FACTORY ready: a..b')" \
   'names no branch' "${FACTORY_ENV[@]}"
+blocks 'main named as the branch, though it holds the commits (#605)' "$r605" "$(stop_input "$r605" 'FACTORY ready: main')" \
+  'names no branch' "${FACTORY_ENV[@]}"
+blocks 'a branch name without the issue number' "$ok" "$(stop_input "$ok" 'FACTORY ready: chicken-pen')" \
+  'names no branch' "${FACTORY_ENV[@]}"
 blocks 'a branch name that looks like an option' "$ok" "$(stop_input "$ok" 'FACTORY ready: --all')" \
   'names no branch' "${FACTORY_ENV[@]}"
 blocks 'the last FACTORY line counts, as factory.yml reads it' "$r605" \
@@ -161,9 +166,11 @@ silent 'another workflow (review.yml)' "$r605" "$(stop_input "$r605" "$READY")" 
 silent 'a workflow named factory outside Actions' "$r605" "$(stop_input "$r605" "$READY")" GITHUB_WORKFLOW=factory
 silent 'FACTORY_RUN other than 1' "$r605" "$(stop_input "$r605" "$READY")" CLAUDE_CODE_REMOTE=true FACTORY_RUN=true
 
-# --- input it can't read: no output (fails open, like the other hooks) --------------------------
+# --- input it can't read, or no repo: no output (fails open, like the other hooks) -------------
 silent 'malformed stdin' "$r605" '{"hook_event_name": "Stop", ' "${FACTORY_ENV[@]}"
 silent 'empty stdin' "$r605" '' "${FACTORY_ENV[@]}"
+mkdir "$work/plain"
+silent 'a folder that is not a git work tree' "$work/plain" "$(stop_input "$work/plain" "$READY")" "${FACTORY_ENV[@]}"
 
 echo "factory-stop-check.test.sh: $pass passed, $fail failed"
 ((fail == 0))

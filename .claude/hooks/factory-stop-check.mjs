@@ -8,18 +8,22 @@
 // `RESULT factory=`) starts with `FACTORY ready`, the turn is refused, with the reason, unless the
 // named branch exists, has commits beyond origin/main and the tree is clean. Claude Code then
 // carries the turn on with the reason (https://code.claude.com/docs/en/hooks, "Stop decision
-// control"); its own cap of 8 continuations in a row bounds the loop, so this keeps no count.
+// control"); its own cap (8 blocks in a row with no tool call between) bounds the loop, so this
+// keeps no count.
 // It acts only in a factory run: today's factory.yml (GITHUB_ACTIONS=true and GITHUB_WORKFLOW=factory,
 // which the scrubbed environment keeps: only credentials are scrubbed), or the routine's environment,
 // which sets FACTORY_RUN=1 (#705, the admin's setup checklist). Every other session, attended or
-// lane, local or cloud, gets no output. Input it can't read gets no output either, as in the other
-// hooks: the hand-off and publish steps still check the branch after the run.
+// lane, local or cloud, gets no output. Input it can't read, or a folder that isn't a git work tree,
+// gets no output either, as in the other hooks: the hand-off and publish steps still check the
+// branch after the run.
 // Git runs with argument lists, never a shell, and the branch name is checked before any git call.
 // Tests: .claude/hooks/factory-stop-check.test.sh
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const BASE = "origin/main";
+// <N>-<slug>: the issue number, then lowercase words joined by hyphens (factory-prompt.md).
+const FACTORY_BRANCH = /^[1-9][0-9]*-[a-z0-9]+(-[a-z0-9]+)*$/;
 // factory.yml's split: CRLF, LF, CR, NEL and the two Unicode separators, written as escapes.
 const LINE_BREAK = /\r\n|[\n\r\u0085\u2028\u2029]/;
 
@@ -43,6 +47,8 @@ function main() {
 	if (claim === null || !claim.startsWith("FACTORY ready")) return;
 
 	const cwd = typeof input.cwd === "string" && input.cwd !== "" ? input.cwd : process.cwd();
+	if (git(["rev-parse", "--is-inside-work-tree"], cwd) !== "true") return;
+
 	const problems = checkClaim(claim, cwd);
 	if (problems.length === 0) return;
 
@@ -99,9 +105,13 @@ function reasonFor(problems) {
 	].join("\n");
 }
 
-/** A name git accepts for a branch, and not one that reads as an option. */
+/**
+ * A factory branch: `<N>-<slug>` as factory-prompt.md names it (factory.yml's hand-off refuses any
+ * other, so `main` holding the commits is refused here, while the agent can still fix it), and a
+ * name git accepts.
+ */
 function isBranchName(name, cwd) {
-	if (name.startsWith("-")) return false;
+	if (!FACTORY_BRANCH.test(name)) return false;
 
 	return git(["check-ref-format", "--branch", name], cwd) !== null;
 }

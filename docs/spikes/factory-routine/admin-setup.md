@@ -83,7 +83,8 @@ At [claude.ai/code/routines](https://claude.ai/code/routines), **New**:
 
 - [ ] In the routine's **API** trigger panel, copy the **Fire URL** (it ends in
       `/routines/trig_…/fire`), click **Generate token** and copy the token from the dialog once.
-      Don't paste either into a session or a terminal.
+      Don't paste the token into a session or a terminal; the URL isn't secret, but it goes straight
+      to step 5 too.
 
 ## 5. Store them for the sweep
 
@@ -94,7 +95,7 @@ Create a GitHub environment that only `main` may use, like `board` and `factory`
 - [ ] In it, a secret `FACTORY_ROUTINE_TOKEN` (the token) and a variable `FACTORY_ROUTINE_URL` (the
       Fire URL; the routine id in it isn't secret, but the variable keeps it in one place). In the
       UI, or
-      `gh secret set FACTORY_ROUTINE_TOKEN --env factory-routine --repo     sssoto17/sunny-pastures`,
+      `gh secret set FACTORY_ROUTINE_TOKEN --env factory-routine --repo sssoto17/sunny-pastures`,
       which reads the value from the prompt, so the shell's history never holds it.
 - [ ] `FACTORY_ENABLED` stays as it is: the sweep reads it before it fires (D16).
 
