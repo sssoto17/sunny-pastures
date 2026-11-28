@@ -10,8 +10,6 @@ import {
 	Meter,
 	Panel,
 	Popover,
-	pulseCycleMs,
-	pulseCycles,
 	showToast,
 	ToastRegion,
 } from "../index";
@@ -83,6 +81,9 @@ describe("IconButton", () => {
 	});
 });
 
+/** Three pulses of 1200 ms (ADR-0010). */
+const threeCyclesMs = 3600;
+
 describe("Badge", () => {
 	it("shows its text with the neutral tone by default", () => {
 		render(<Badge>New</Badge>);
@@ -115,7 +116,7 @@ describe("Badge", () => {
 			expect(screen.getByText("Ready").hasAttribute("data-pulse")).toBe(true);
 
 			act(() => {
-				vi.advanceTimersByTime(pulseCycles * pulseCycleMs - 1);
+				vi.advanceTimersByTime(threeCyclesMs - 1);
 			});
 			expect(screen.getByText("Ready").hasAttribute("data-pulse")).toBe(true);
 

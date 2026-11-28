@@ -67,10 +67,10 @@ export interface BadgeProps {
 	children: ReactNode;
 }
 
-/** One pulse of an attention cue, in ms; the styles animate `[data-pulse]` over this long. */
-export const pulseCycleMs = 1200;
+/** One pulse of an attention cue, in ms: the design-system strand animates `[data-pulse]` over this long. */
+const pulseCycleMs = 1200;
 /** An attention cue pulses this many cycles after it appears, then rests (ADR-0010). */
-export const pulseCycles = 3;
+const pulseCycles = 3;
 
 /**
  * An `attention` badge sets `data-pulse` for its first `pulseCycles` cycles, then rests (ADR-0010,
