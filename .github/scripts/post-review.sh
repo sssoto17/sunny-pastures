@@ -16,7 +16,8 @@
 # a part based on anything but DEFAULT_BRANCH (#404) would merge into the part below, and part 1 on
 # DEFAULT_BRANCH would merge alone, untested, since only the top part runs typecheck, lint and test
 # (#695). The live GET pulls/<n> names the stack, and GET stacks/<n> its open parts; a stack it
-# can't read counts as one with a part above. A stack merges whole.
+# can't read, or one that doesn't list the PR, counts as one with a part above. A stack merges
+# whole.
 # Tests: .github/scripts/tests/post-review.test.mjs.
 #
 # HEAD, BASE, BASE_SHA, RESTORED and VERDICT are review.yml's hand-off from the job that ran the

@@ -491,7 +491,7 @@ describe("post-review.sh", () => {
 			expect(r.out).toContain("auto_merge=stacked");
 		});
 
-		it("holds a part on main whose stack it can't read, or that the stack doesn't list", () => {
+		it("holds a part on main whose stack it can't read or name, or that doesn't list it", () => {
 			for (const opts of [
 				{ stack: [part(7), part(8)], env: { ...inStack, FAIL_STACK: "1" } },
 				{ stack: [part(5), part(8)], env: inStack },
@@ -531,6 +531,7 @@ describe("post-review.sh", () => {
 				stack: [part(7), part(8)],
 				env: { ...inStack, FAKE_AUTO: "true" },
 			});
+			expect(r.calls).not.toContain("stacks/");
 			expect(r.calls).toContain("disablePullRequestAutoMerge");
 			expect(r.calls).not.toContain("enablePullRequestAutoMerge");
 			expect(r.out).toContain("auto_merge=off");

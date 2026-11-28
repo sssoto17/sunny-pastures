@@ -741,11 +741,11 @@ which secret", below).
     as before (`on`, or `refused` while `allow_auto_merge` is off). The admin merges a stack in one
     action ("Stacks", below). _Alternatives:_ reading `ci / stack`'s `top` answer (rejected: it
     exists only after CI has run, the review's `post` job may finish first, and a failed lookup
-    there answers `true` so the suite runs, the unsafe direction for auto-merge); leaving part 1 to
-    auto-merge and relying on the top part's run (rejected: part 1 alone is never tested, and it
-    would merge before that run finished or passed); treating any PR with a `stack` as held,
-    whatever is above it (rejected: `size` counts closed parts, as #693 shows, so a lone open part
-    left in a stack would never auto-merge).
+    there writes no answer, so the suite runs and a reader would have to guess, the unsafe direction
+    for auto-merge); leaving part 1 to auto-merge and relying on the top part's run (rejected: part
+    1 alone is never tested, and it would merge before that run finished or passed); treating any PR
+    with a `stack` as held, whatever is above it (rejected: `size` counts closed parts, as #693
+    shows, so a lone open part left in a stack would never auto-merge).
 - **No subprocess env scrub here (#454).** `factory.yml` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`,
   which needs bubblewrap installed and smoke-tested first. The reviewer's Claude step doesn't: its
   Claude has no Bash, no hooks (`--setting-sources user`), no MCP servers and `Read(//proc/**)`
