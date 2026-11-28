@@ -7,14 +7,15 @@ import type { StoreApi } from "zustand/vanilla";
 import { createSim, sliceContent, type Action, type OwnedPen } from "@sunny-pastures/sim";
 
 import { selectPen, type FarmStore } from "@/client/store";
-import { Badge, Button, Meter, Popover } from "@/components/ui";
+import { Button, Meter, Popover } from "@/components/ui";
 
-import { formatTimeLeft, nameGood } from "../orderBoard";
+import { formatTimeLeft } from "../orderBoard";
 
 /**
  * A bought pen's popover (ADR-0010, "tap a lot for a status popover"; MUST-02): its chickens, the
  * trough as a `Meter`, the next egg's time left from the store's `now`, the eggs waiting, and the
- * "Feed" and "Collect eggs" buttons. Waiting eggs also show beside the pen on the map as a badge.
+ * "Feed" and "Collect eggs" buttons. Waiting eggs show beside the pen as the map's attention
+ * cue (#608).
  * Pattern: a container component over the store's selectors and `act`. Whether a button is off is
  * asked of the shared sim by a dry run of the same action, so the reason shown is the sim's own
  * sentence and the client never restates a rule (MUST-12), as in the plot popover. Rejected:
@@ -37,20 +38,10 @@ export function PenPopover({ store, index, label, trigger }: PenPopoverProps) {
 	const pen = useStore(store, selectPen(index));
 	if (pen === null) return trigger;
 
-	const product = sliceContent.pens[index]?.product ?? "";
 	return (
-		<>
-			<Popover trigger={trigger} label={label}>
-				<PenStatus store={store} index={index} label={label} pen={pen} />
-			</Popover>
-			{pen.products > 0 && (
-				<span style={{ position: "absolute", top: 0, right: 0, pointerEvents: "none" }}>
-					<Badge tone="success">
-						{String(pen.products)} {nameGood(product, pen.products)}
-					</Badge>
-				</span>
-			)}
-		</>
+		<Popover trigger={trigger} label={label}>
+			<PenStatus store={store} index={index} label={label} pen={pen} />
+		</Popover>
 	);
 }
 

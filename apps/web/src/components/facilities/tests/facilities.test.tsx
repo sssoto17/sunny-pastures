@@ -28,7 +28,7 @@ function renderFarm(changes: Partial<FarmState>) {
 }
 
 async function openDialog(user: ReturnType<typeof userEvent.setup>, name: string) {
-	await user.click(getLotTile(name));
+	await user.click(getLotTile(new RegExp(`^${name}`)));
 	const popover = screen.getByRole("dialog", { name });
 	await user.click(within(popover).getByRole("button", { name: "Open" }));
 	return screen.getByRole("dialog", { name });
@@ -39,7 +39,7 @@ describe("FacilityPopover", () => {
 		const running = { status: "running", recipe: "chickenFeed", readyAt: start + 60_000 } as const;
 		const user = await renderFarm({ facilities: [owned(1, [running]), owned(2)] });
 
-		await user.click(getLotTile("Feed mill"));
+		await user.click(getLotTile(/^Feed mill/));
 		const popover = screen.getByRole("dialog", { name: "Feed mill" });
 		expect(within(popover).getByText("Slot 1: chicken feed, running, 1 min left")).toBeTruthy();
 		expect(within(popover).getByText("Slot 2: empty")).toBeTruthy();

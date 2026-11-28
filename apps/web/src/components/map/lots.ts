@@ -1,6 +1,8 @@
-import type { FarmState } from "@sunny-pastures/sim";
+import { sliceContent, type FarmState } from "@sunny-pastures/sim";
 
 import type { SpriteId } from "@/client/sprites";
+
+import { nameGood } from "../orderBoard";
 
 // The lots (GLOSSARY.md, "Lot"): the fixed places on the farm map, in isometric coordinates. A lot
 // is a place, so the table is data and what stands on it comes from the farm's state.
@@ -71,9 +73,17 @@ export interface LotLook {
 	readonly sprite: SpriteId;
 	/** True while the lot shows the "For sale" sign: nothing is bought on it yet. */
 	readonly isForSale: boolean;
+	/**
+	 * What waits to be collected on the lot, as a short phrase ("ready", "2 eggs waiting"), or null
+	 * when nothing does. It is in `name` and is the text of the lot's attention cue (#608).
+	 */
+	readonly cue: string | null;
 }
 
-/** What a lot shows and is called, from the farm: the accessible name and the sprite. */
+/**
+ * What a lot shows and is called, from the farm: the accessible name, the sprite and the attention
+ * cue. A ready plot, a finished job and waiting eggs are the cues (ADR-0010, "attention cues").
+ */
 export function describeLot(lot: Lot, farm: FarmState): LotLook {
 	if (lot.kind === "plot") return describePlot(lot, farm);
 
@@ -81,20 +91,36 @@ export function describeLot(lot: Lot, farm: FarmState): LotLook {
 	const entry = (lot.kind === "pen" ? farm.pens : farm.facilities)[lot.index] ?? null;
 	if (entry === null) return forSale(lot);
 
-	return { name: lot.label, sprite: lot.sprite, isForSale: false };
+	const cue = describeCue(lot, farm);
+	const name = cue === null ? lot.label : `${lot.label}: ${cue}`;
+	return { name, sprite: lot.sprite, isForSale: false, cue };
+}
+
+function describeCue(lot: Lot, farm: FarmState): string | null {
+	if (lot.kind === "pen") {
+		const waiting = farm.pens[lot.index]?.products ?? 0;
+		if (waiting === 0) return null;
+
+		const product = sliceContent.pens[lot.index]?.product ?? "";
+		return `${String(waiting)} ${nameGood(product, waiting)} waiting`;
+	}
+
+	const done = (farm.facilities[lot.index]?.jobs ?? []).filter((job) => job.status === "done");
+	return done.length === 0 ? null : `${String(done.length)} ready`;
 }
 
 function forSale(lot: Lot): LotLook {
-	return { name: `${lot.label}: for sale`, sprite: "lotForSale", isForSale: true };
+	return { name: `${lot.label}: for sale`, sprite: "lotForSale", isForSale: true, cue: null };
 }
 
 function describePlot(lot: Lot, farm: FarmState): LotLook {
 	const plot = farm.plots[lot.index];
 	if (plot === undefined) return forSale(lot);
 	if (plot.status === "empty") {
-		return { name: `${lot.label}: empty`, sprite: "plotEmpty", isForSale: false };
+		return { name: `${lot.label}: empty`, sprite: "plotEmpty", isForSale: false, cue: null };
 	}
 
 	const sprite = plot.status === "ready" ? "plotReady" : "plotGrowing";
-	return { name: `${lot.label}: ${plot.crop}, ${plot.status}`, sprite, isForSale: false };
+	const cue = plot.status === "ready" ? "ready" : null;
+	return { name: `${lot.label}: ${plot.crop}, ${plot.status}`, sprite, isForSale: false, cue };
 }

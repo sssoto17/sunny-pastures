@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
 	Badge,
@@ -81,6 +81,9 @@ describe("IconButton", () => {
 	});
 });
 
+/** Three pulses of 1200 ms (ADR-0010). */
+const threeCyclesMs = 3600;
+
 describe("Badge", () => {
 	it("shows its text with the neutral tone by default", () => {
 		render(<Badge>New</Badge>);
@@ -92,6 +95,50 @@ describe("Badge", () => {
 		render(<Badge tone="success">Done</Badge>);
 
 		expect(screen.getByText("Done").getAttribute("data-tone")).toBe("success");
+	});
+
+	describe("attention pulse", () => {
+		afterEach(() => {
+			vi.useRealTimers();
+			vi.unstubAllGlobals();
+		});
+
+		function stubMotion(isReduced: boolean) {
+			vi.stubGlobal("matchMedia", (query: string) => ({
+				matches: isReduced && query === "(prefers-reduced-motion: reduce)",
+			}));
+		}
+
+		it("sets data-pulse for its first 3 cycles, then rests", () => {
+			vi.useFakeTimers();
+			stubMotion(false);
+			render(<Badge tone="attention">Ready</Badge>);
+			expect(screen.getByText("Ready").hasAttribute("data-pulse")).toBe(true);
+
+			act(() => {
+				vi.advanceTimersByTime(threeCyclesMs - 1);
+			});
+			expect(screen.getByText("Ready").hasAttribute("data-pulse")).toBe(true);
+
+			act(() => {
+				vi.advanceTimersByTime(1);
+			});
+			expect(screen.getByText("Ready").hasAttribute("data-pulse")).toBe(false);
+		});
+
+		it("never pulses under prefers-reduced-motion: reduce", () => {
+			stubMotion(true);
+			render(<Badge tone="attention">Ready</Badge>);
+
+			expect(screen.getByText("Ready").hasAttribute("data-pulse")).toBe(false);
+		});
+
+		it("does not pulse for another tone", () => {
+			stubMotion(false);
+			render(<Badge tone="success">Done</Badge>);
+
+			expect(screen.getByText("Done").hasAttribute("data-pulse")).toBe(false);
+		});
 	});
 });
 
