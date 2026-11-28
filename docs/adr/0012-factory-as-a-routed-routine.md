@@ -16,10 +16,11 @@ read-only token, the actor check. Cloud lanes, which push and open their own PRs
 This ADR records the redesign the admin settled in a grill on 28 Nov 2026 (decisions D1-D16, in
 spike #705's body): the factory moves from `factory.yml` on a GitHub-hosted runner to a Claude Code
 routine, the sweep stays the only dispatcher, and the routing is code. It amends ADR-0002's identity
-decision (section 6). **Status: proposed.** The runtime (sections 1 and 6) is adopted only if spike
-#705's checks 1, 2 and 6 pass (`docs/spikes/factory-routine/findings.md`); if 1, 2 or 6 fails,
-`factory.yml` stays and gains only the Stop-hook check (section 7). Sections 2-5 and 8 don't depend
-on the runtime and go ahead either way, as the build tickets under #58.
+decision (ADR-0002, area 2, "The factory's identity"; here, section 6). **Status: proposed.** The
+runtime (sections 1 and 6) is adopted only if spike #705's checks 1, 2 and 6 pass
+(`docs/spikes/factory-routine/findings.md`); if 1, 2 or 6 fails, `factory.yml` stays and gains only
+the Stop-hook check (section 7). Sections 2-5 and 7 don't depend on the runtime and go ahead either
+way, as the build tickets under #58.
 
 ## Patterns
 
@@ -50,6 +51,11 @@ on the runtime and go ahead either way, as the build tickets under #58.
   choose. The fire token is a secret in the environment `factory-routine`, which only `main` may
   use. A fire has no idempotency key, so the sweep never retries one that may have reached the
   server.
+- **Risk: a sweep that a PR event starts may not reach the token.** A `pull_request_review` run
+  (D11) runs on the PR's ref, not `main`, so the `factory-routine` environment, which admits `main`
+  only, would refuse it the secret. The likely fix: route the review event onto `main` through
+  `repository_dispatch` or `workflow_run` (both run `main`'s copy) and fire from there. #710 must
+  solve it (#716 review).
 - **The routine wakes the sweep.** Its last step sends `repository_dispatch: factory-done`.
 - **Limits (D16):** one run at a time; the open-PR cap stays 4, and a PR run (revise, conflict) is
   exempt; `FACTORY_ENABLED` stays the kill switch, read before the fire.
@@ -59,12 +65,13 @@ on the runtime and go ahead either way, as the build tickets under #58.
 - **Triggers of `sweep.yml`:** `issues: labeled` with `factory:ready`;
   `pull_request_review: submitted` when the review requests changes; `push` to `main`, which scans
   each factory PR's `mergeable`; `repository_dispatch: factory-done`; and the hourly schedule, which
-  is also the stale check.
+  is also the stale check. The `pull_request_review` event reaches the fire step only through `main`
+  (section 1, the risk on the token).
 - **Order:** PRs before issues. Among PRs, conflicts before revisions. Among issues: Priority, then
   Week, then Size (S, M, L), with no open native blocker and no `blocked:*` label. The sweep
   recomputes the order at each dispatch, so no queue label exists.
 
-## 3. Routing and modes (D3, D5, D6, D8, D11, D12, D15)
+## 3. Routing and modes (D3, D4 in D5, D5, D6, D8, D11, D12, D15)
 
 - **Code decides the route (D8).** `factory-route.mjs`, with no model, picks the required steps from
   the event, the type and area labels and the touched paths, and runs again after the build, when
@@ -72,11 +79,12 @@ on the runtime and go ahead either way, as the build tickets under #58.
 - **Issue mode, triage (D3):** only an issue whose decisions are made enters. An open decision ends
   the run with `FACTORY stopped: needs decision: <question>`, the question posted on the issue, and
   a `blocked:*` label. The run never waits for an answer.
-- **Issue mode, the cycle (D5):** the routine runs `/factory issue <N>`: triage, `/plan`,
-  `/build auto`, then the fan-out of Osmani's personas `code-reviewer`, `security-auditor` and
-  `test-engineer` (with `accessibility-auditor` and `web-performance-auditor` on UI), copied into
-  `.claude/agents/`, read-only by their tool lists, and given `REVIEW.md` and `CONSTRAINTS.md`. Then
-  the merge and go/no-go, Required findings back to `/build`, then `scripts/open-pr.sh`.
+- **Issue mode, the cycle (D5; D4 has no item of its own in #705's body: it is folded in here, as D5
+  amends D4):** the routine runs `/factory issue <N>`: triage, `/plan`, `/build auto`, then the
+  fan-out of Osmani's personas `code-reviewer`, `security-auditor` and `test-engineer` (with
+  `accessibility-auditor` and `web-performance-auditor` on UI), copied into `.claude/agents/`,
+  read-only by their tool lists, and given `REVIEW.md` and `CONSTRAINTS.md`. Then the merge and
+  go/no-go, Required findings back to `/build`, then `scripts/open-pr.sh`.
 - **The plan (D6)** and its todo live in one `**Factory plan**` comment on the issue, edited in
   place, never in git.
 - **Revise mode (D11):** acts only on unresolved threads and review bodies from `sunny-reviewer` and
@@ -123,7 +131,7 @@ on the runtime and go ahead either way, as the build tickets under #58.
 - The factory never edits its own command, routes, hooks or personas during a run.
 - The metric: admin touches per merged factory PR.
 
-## 6. Identity: amends ADR-0002 (D2)
+## 6. Identity: amends ADR-0002 (#705, "Runtime and trigger", the Identity item; untagged)
 
 ADR-0002 (area 2, "The factory's identity", decided 8 Nov in #37) gave the factory its own App,
 `sunny-factory`, running from Actions, so that GitHub sees a factory PR as someone else's, with a
@@ -168,11 +176,16 @@ read-only `GITHUB_TOKEN` and a publish job on a runner that never ran the model.
 last line of the final message that starts with `FACTORY ` starts with `FACTORY ready`, the hook
 returns Claude Code's block decision, with the reason, unless the named branch is a `<N>-<slug>`
 branch that exists, has commits beyond `origin/main` and the tree is clean. Claude then carries on
-with the reason, and Claude Code's own cap (8 blocks in a row with no tool call between) bounds the
-loop. It acts only in a factory run: `GITHUB_ACTIONS=true` with `GITHUB_WORKFLOW=factory` (today's
-`factory.yml`) or `FACTORY_RUN=1` (the routine's environment); every other session gets no output.
-It ships now, whatever the spike concludes, and needs no change to `factory.yml`. Tests:
-`.claude/hooks/factory-stop-check.test.sh`, on a fixture shaped like run 45928803367.
+with the reason. The loop has two bounds: the hook refuses at most 3 times per session (a count in a
+file under the temp folder), then lets the turn end with a warning; and Claude Code's own cap,
+"after stop hooks have continued the turn eight times in a row, Claude Code overrides the next block
+and ends the turn. The count of consecutive continuations resets each time Claude calls a tool"
+([hooks docs](https://code.claude.com/docs/en/hooks), "Stop input", read 28 Nov 2026), which alone
+doesn't bound a run that calls a tool between blocks. It acts only in a factory run:
+`GITHUB_ACTIONS=true` with `GITHUB_WORKFLOW=factory` (today's `factory.yml`) or `FACTORY_RUN=1` (the
+routine's environment); every other session gets no output. It ships now, whatever the spike
+concludes, and needs no change to `factory.yml`. Tests: `.claude/hooks/factory-stop-check.test.sh`,
+on a fixture shaped like run 45928803367.
 
 Alternatives considered: a `prompt` or `agent` Stop hook (a model judging the claim, the LLM-router
 problem again, and a cost on every stop); a `PreToolUse` check on `git commit` (it can't see the

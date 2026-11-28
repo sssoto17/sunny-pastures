@@ -37,9 +37,11 @@ commit_file() { # repo file
   git -C "$1" commit -q -m "feat(web): $2 (#605)"
 }
 
-stop_input() { # cwd message [transcript]
-  jq -cn --arg cwd "$1" --arg msg "$2" --arg tr "${3:-}" \
-    '{session_id: "t", transcript_path: $tr, cwd: $cwd, permission_mode: "default",
+# Each input gets its own session id, so the hook's per-session refusal count starts at 0, unless
+# a case passes one (the loop bound's cases).
+stop_input() { # cwd message [transcript] [session]
+  jq -cn --arg cwd "$1" --arg msg "$2" --arg tr "${3:-}" --arg sid "${4:-t$RANDOM$RANDOM}" \
+    '{session_id: $sid, transcript_path: $tr, cwd: $cwd, permission_mode: "default",
       hook_event_name: "Stop", stop_hook_active: false}
      + (if $msg == "" then {} else {last_assistant_message: $msg} end)'
 }
@@ -47,7 +49,7 @@ stop_input() { # cwd message [transcript]
 run_hook() { # dir stdin env-assignments... -> sets code, out
   local dir=$1 input=$2
   shift 2
-  out=$(cd "$dir" && env "$@" timeout 10 node "$hook" <<<"$input" 2>/dev/null)
+  out=$(cd "$dir" && env TMPDIR="$work/state" "$@" timeout 10 node "$hook" <<<"$input" 2>/dev/null)
   code=$?
 }
 
@@ -103,6 +105,21 @@ blocks '#605: in the routine' "$r605" "$(stop_input "$r605" "$READY" "$tr605")" 
   "branch $BRANCH doesn't exist" "${ROUTINE_ENV[@]}"
 blocks '#605: final message read from the transcript when the input lacks it' "$r605" \
   "$(stop_input "$r605" "" "$tr605")" "branch $BRANCH doesn't exist" "${FACTORY_ENV[@]}"
+
+# --- the loop bound: 3 refusals per session, then the turn may end, with a warning ---------------
+loop_input=$(stop_input "$r605" "$READY" "" loop1)
+for i in 1 2 3; do
+  blocks "#605: refusal $i of 3 in one session" "$r605" "$loop_input" "branch $BRANCH doesn't exist" "${FACTORY_ENV[@]}"
+done
+run_hook "$r605" "$loop_input" "${FACTORY_ENV[@]}"
+ok4=$(jq -r 'has("decision") | not' <<<"$out" 2>/dev/null)
+warn4=$(jq -r '.systemMessage | test("refused this FACTORY ready 3 times") and test("doesn.t exist")' <<<"$out" 2>/dev/null)
+[[ $code -eq 0 && $ok4 == true && $warn4 == true ]] && record '#605: the 4th claim ends the turn with a warning' ok ||
+  record '#605: the 4th claim ends the turn with a warning' no
+blocks '#605: another session starts its own count' "$r605" "$(stop_input "$r605" "$READY" "" loop2)" \
+  "branch $BRANCH doesn't exist" "${FACTORY_ENV[@]}"
+blocks '#605: a session id it cannot use as a file name still refuses' "$r605" \
+  "$(stop_input "$r605" "$READY" "" '../x')" "branch $BRANCH doesn't exist" "${FACTORY_ENV[@]}"
 
 # --- the passing case: the branch exists, has commits past origin/main, the tree is clean -------
 ok=$(fixture ok)

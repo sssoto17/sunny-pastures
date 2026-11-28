@@ -8,8 +8,12 @@
 // `RESULT factory=`) starts with `FACTORY ready`, the turn is refused, with the reason, unless the
 // named branch exists, has commits beyond origin/main and the tree is clean. Claude Code then
 // carries the turn on with the reason (https://code.claude.com/docs/en/hooks, "Stop decision
-// control"); its own cap (8 blocks in a row with no tool call between) bounds the loop, so this
-// keeps no count.
+// control"). The loop has a bound of its own: at most MAX_REFUSALS refusals per session, counted in
+// a file under the temp folder; the next false claim ends the turn with a warning, and the hand-off
+// or the sweep's reconcile catches it as before. Claude Code's own cap doesn't suffice alone: "after
+// stop hooks have continued the turn eight times in a row, Claude Code overrides the next block and
+// ends the turn. The count of consecutive continuations resets each time Claude calls a tool"
+// (same page, "Stop input"), so a run that calls a tool between blocks never reaches it.
 // It acts only in a factory run: today's factory.yml (GITHUB_ACTIONS=true and GITHUB_WORKFLOW=factory,
 // which the scrubbed environment keeps: only credentials are scrubbed), or the routine's environment,
 // which sets FACTORY_RUN=1 (#705, the admin's setup checklist). Every other session, attended or
@@ -19,9 +23,13 @@
 // Git runs with argument lists, never a shell, and the branch name is checked before any git call.
 // Tests: .claude/hooks/factory-stop-check.test.sh
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const BASE = "origin/main";
+// Refusals per session before the hook lets a false claim end the turn (#716 review).
+const MAX_REFUSALS = 3;
 // <N>-<slug>: the issue number, then lowercase words joined by hyphens (factory-prompt.md).
 const FACTORY_BRANCH = /^[1-9][0-9]*-[a-z0-9]+(-[a-z0-9]+)*$/;
 // factory.yml's split: CRLF, LF, CR, NEL and the two Unicode separators, written as escapes.
@@ -52,7 +60,39 @@ function main() {
 	const problems = checkClaim(claim, cwd);
 	if (problems.length === 0) return;
 
+	const refused = countRefusal(input.session_id);
+	if (refused > MAX_REFUSALS) {
+		const warning = `factory-stop-check: refused this FACTORY ready ${String(MAX_REFUSALS)} times; letting the turn end. ${problems.join("; ")}.`;
+		process.stdout.write(JSON.stringify({ systemMessage: warning }));
+		return;
+	}
+
 	process.stdout.write(JSON.stringify({ decision: "block", reason: reasonFor(problems) }));
+}
+
+/**
+ * Adds one to the session's refusal count and returns it. When the count can't be kept (no
+ * session id, an unwritable temp folder) it returns 1, so the hook still refuses and Claude Code's
+ * own cap is the bound.
+ */
+function countRefusal(sessionId) {
+	if (typeof sessionId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return 1;
+
+	const dir = join(tmpdir(), "factory-stop-check");
+	const file = join(dir, `${sessionId}.count`);
+	let count = 0;
+	try {
+		count = Number(readFileSync(file, "utf8")) || 0;
+	} catch {
+		// no refusal yet in this session
+	}
+	try {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(file, String(count + 1));
+	} catch {
+		return 1;
+	}
+	return count + 1;
 }
 
 function isFactoryRun(env) {

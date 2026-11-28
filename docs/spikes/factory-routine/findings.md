@@ -19,7 +19,7 @@ waits lists the exact steps and the evidence a later session must record here.
 | 4. A routine session can push under `.github/workflows/` | pass (cloud session) | commit `7a03dff` pushed to `throwaway/705-review-probe` |
 | 5. The environment runs the Supabase stack and Playwright Chromium | partly: the stack yes, the pinned Chromium no | below; the factory's setup script must add five things |
 | 6. The #605 retry ends with a PR or a `FACTORY stopped:` reason | waiting on admin setup | needs the routine and `/factory` |
-| 7. The Stop hook refuses a #605-shaped run | pass | `.claude/hooks/factory-stop-check.test.sh`: 30 passed, 0 failed |
+| 7. The Stop hook refuses a #605-shaped run | pass | `.claude/hooks/factory-stop-check.test.sh`: 36 passed, 0 failed |
 
 **What the rule says now.** Checks 1, 2 and 6 decide the runtime. None has failed; all three wait on
 the admin's setup. Until they run, `factory.yml` stays, and the Stop-hook check (7) ships either
@@ -125,6 +125,12 @@ on every submitted review, and D11's filter on `changes_requested` belongs in th
 GitHub's rule that events made with `GITHUB_TOKEN` start no runs doesn't touch the reviewer, which
 posts with its App's installation token.
 
+**Risk for D11 (#716 review).** A `pull_request_review` run runs on the PR's ref, not `main`, so a
+sweep it starts can't enter the `factory-routine` environment, which admits `main` only, and can't
+fire the routine. The likely fix is to route the review event onto `main` through
+`repository_dispatch` or `workflow_run`, which run `main`'s copy, and fire from there. #710 must
+solve it (ADR-0012, sections 1 and 2).
+
 **Left for the admin:** the branch `throwaway/705-review-probe` still exists. The cloud proxy
 refuses branch deletions ("the proxy rejects branch deletions", cloud-environments docs, "GitHub
 proxy"; here `HTTP 403` on `git push origin :refs/heads/throwaway/705-review-probe`). Delete it in
@@ -137,7 +143,9 @@ accepted (`* [new branch]`), so the GitHub proxy and the admin's connected crede
 workflow change. A routine runs on the same proxy and credential (routines docs, "Repositories and
 branch permissions"), so D14 holds as written: code-owned paths, workflows included, are allowed and
 held by code-owner review. Two proxy limits the design must respect: it refuses branch deletions and
-tag pushes, and it doesn't limit which branch a push updates (rulesets do).
+tag pushes (documented, and seen here on the deletion), and, inferred from the docs rather than
+measured, it doesn't limit which branch a push updates (rulesets do). This was measured from a cloud
+lane, not a routine, so check 4 is read again from the routine's session when check 1 runs.
 
 ## 5. The Supabase stack and Playwright Chromium: the stack yes, the pinned browser no
 
@@ -193,7 +201,7 @@ routine's environment). Why a command hook in Node, and the alternatives: ADR-00
 
 ```text
 $ bash .claude/hooks/factory-stop-check.test.sh
-factory-stop-check.test.sh: 30 passed, 0 failed
+factory-stop-check.test.sh: 36 passed, 0 failed
 ```
 
 The #605 fixture is a clone whose `main` is 2 commits past `origin/main` with no
@@ -206,7 +214,8 @@ way out (`FACTORY stopped: <reason>`). `FACTORY ready: main` on the same fixture
 decides on the git state alone; the denied command in the transcript shows the shape of the run, and
 the transcript is read only for the final message when the input lacks it. Mutants each turn tests
 red: dropping the branch-exists check (4 fail), acting outside a factory run (5), accepting any
-branch name git takes (2) and acting outside a git work tree (1).
+branch name git takes (2) and acting outside a git work tree (1), and never letting a claim through
+after 3 refusals (1).
 
 **Under today's `factory.yml`.** The hook needs no workflow change: the Claude step runs
 `claude-code-action`, which loads the project's settings and their hooks, with
@@ -216,8 +225,13 @@ and `GITHUB_WORKFLOW` should reach the hook. That is an inference: the coordinat
 has logged it. If it doesn't, the hook does nothing there, and the hand-off step still catches the
 claim as today. The run's CLI is 2.1.325 (run 45928803367's log); the hook reads
 `last_assistant_message` and falls back to the transcript when a CLI doesn't send it. A block costs
-turns from `--max-turns`, and Claude Code ends the turn itself after 8 blocks in a row with no tool
-call between them. **Not yet seen in a live run:** the first factory run after the merge shows it.
+turns from `--max-turns`. The loop is bounded twice: the hook refuses at most 3 times per session,
+then lets the turn end with a warning (`systemMessage`), tested; and Claude Code's own cap, "after
+stop hooks have continued the turn eight times in a row, Claude Code overrides the next block and
+ends the turn. The count of consecutive continuations resets each time Claude calls a tool"
+([hooks docs](https://code.claude.com/docs/en/hooks), "Stop input", read 28 Nov 2026), which alone
+doesn't bound a run that calls a tool between blocks, and which 2.1.325 may predate. **Not yet seen
+in a live run:** the first factory run after the merge shows it.
 
 ## Build tickets
 
