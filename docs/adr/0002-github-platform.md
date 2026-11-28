@@ -745,7 +745,12 @@ which secret", below).
     for auto-merge); leaving part 1 to auto-merge and relying on the top part's run (rejected: part
     1 alone is never tested, and it would merge before that run finished or passed); treating any PR
     with a `stack` as held, whatever is above it (rejected: `size` counts closed parts, as #693
-    shows, so a lone open part left in a stack would never auto-merge).
+    shows, so a lone open part left in a stack would never auto-merge). **A known gap, older than
+    #695 (found in #718's review, 28 Nov 2026):** the script decides only when it posts a review. A
+    PR approved with auto-merge on that later becomes a lower part keeps auto-merge on, since
+    `scripts/stack.sh open` (reusing it as part 1) and `add` push only the new part, so no new head
+    and no review run reach it; it would merge alone. A stack is normally opened before any
+    approval, so the window is narrow. Its fix is #720.
 - **No subprocess env scrub here (#454).** `factory.yml` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`,
   which needs bubblewrap installed and smoke-tested first. The reviewer's Claude step doesn't: its
   Claude has no Bash, no hooks (`--setting-sources user`), no MCP servers and `Read(//proc/**)`
