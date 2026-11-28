@@ -19,13 +19,17 @@ const CODEOWNERS = fileURLToPath(new URL("../../CODEOWNERS", import.meta.url)); 
 
 // A fake gh: logs each call on one line, answers reads from fixtures, and refuses the comments
 // the test asks it to (FAIL_LINE: every line comment; FAIL_FILE: file comments on that path;
-// FAIL_LABEL: adding a label; FAIL_COMMENT: a plain PR comment). Labels reads one line of
-// `labels` per call.
+// FAIL_LABEL: adding a label; FAIL_COMMENT: a plain PR comment; FAIL_STACK: reading the stack).
+// Labels reads one line of `labels` per call. GET pulls/7 runs the script's own --jq filter over
+// the PR it builds from FAKE_HEAD, FAKE_AUTHOR, FAKE_AUTO and FAKE_BASE, merged with `pull.json`
+// (the test's `pull`, e.g. its `stack`), so the filter is under test too (#718's review). GET
+// stacks/<n> answers with `stack.json`.
 const FAKE_GH = `#!/usr/bin/env bash
 d=$(dirname "$0")
 a="$*"; printf '%s\\n' "\${a//$'\\n'/\\\\n}" >>"$d/calls"
 case "$*" in
-  "api repos/o/r/pulls/7 --jq"*) printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "\${FAKE_HEAD:-$FAKE_HEAD_DEFAULT}" "\${FAKE_AUTHOR:-sssoto17}" PR_node "\${FAKE_AUTO:-false}" "\${FAKE_BASE:-main}" ;;
+  "api repos/o/r/pulls/7 --jq"*) jq -n --arg h "\${FAKE_HEAD:-$FAKE_HEAD_DEFAULT}" --arg a "\${FAKE_AUTHOR:-sssoto17}" --arg on "\${FAKE_AUTO:-false}" --arg b "\${FAKE_BASE:-main}" --slurpfile x "$d/pull.json" '{head: {sha: $h}, user: {login: $a}, node_id: "PR_node", auto_merge: (if $on == "true" then {merge_method: "squash"} else null end), base: {ref: $b}} + $x[0]' | jq -r "$4" ;;
+  "api repos/o/r/stacks/"*) [ -z "$FAIL_STACK" ] && cat "$d/stack.json" ;;
   "api -X POST repos/o/r/issues/7/labels"*) [ -z "$FAIL_LABEL" ] ;;
   "api -X POST repos/o/r/issues/7/comments"*) [ -z "$FAIL_COMMENT" ] ;;
   *"enablePullRequestAutoMerge"*) [ -z "$FAIL_AUTO" ] ;;
@@ -74,7 +78,18 @@ const FILES = [
 	{ filename: "notes.md", status: "modified" },
 ];
 
-function run(v, { threads = [], labels = ["false"], reviews = [], files = FILES, env = {} } = {}) {
+function run(
+	v,
+	{
+		threads = [],
+		labels = ["false"],
+		reviews = [],
+		files = FILES,
+		pull = {},
+		stack = [],
+		env = {},
+	} = {},
+) {
 	dir = mkdtempSync(join(tmpdir(), "post-review-"));
 	mkdirSync(join(dir, "bin"));
 	writeFileSync(join(dir, "bin/gh"), FAKE_GH);
@@ -84,6 +99,8 @@ function run(v, { threads = [], labels = ["false"], reviews = [], files = FILES,
 	writeFileSync(join(dir, "bin/labels"), `${labels.join("\n")}\n`);
 	writeFileSync(join(dir, "bin/threads.json"), JSON.stringify(threads));
 	writeFileSync(join(dir, "bin/reviews.json"), JSON.stringify(reviews));
+	writeFileSync(join(dir, "bin/pull.json"), JSON.stringify(pull));
+	writeFileSync(join(dir, "bin/stack.json"), JSON.stringify({ number: 693, pull_requests: stack }));
 	writeFileSync(join(dir, "files.json"), JSON.stringify(files));
 	const res = spawnSync("bash", [SCRIPT], {
 		cwd: dir,
@@ -455,6 +472,92 @@ describe("post-review.sh", () => {
 			env: { ...STACKED, FAKE_AUTO: "true" },
 		});
 		expect(held.calls).toContain("disablePullRequestAutoMerge");
+	});
+
+	// #695: part 1 of a native stack is based on main, so the base alone doesn't show it's a part.
+	// Its typecheck, lint and test skip (only the top part runs them), so auto-merge would merge it
+	// alone, untested, without the stack's one merge. The live GET pulls/<n> names its stack, and
+	// GET stacks/<n> whether an open part sits above it (ADR-0002 area 2, "Auto-merge").
+	describe("part 1 of a native stack, on main (#695)", () => {
+		const part = (number, state = "open") => ({ number, state });
+		// GET pulls/7's `stack`, as #691's read: part 1 of 2 of stack #693, on main.
+		const inStack = { stack: { number: 693, position: 1, size: 2, base: { ref: "main" } } };
+
+		it("approves part 1 but never turns its auto-merge on while a part above is open", () => {
+			const r = run(verdict(), { pull: inStack, stack: [part(7), part(8)] });
+			expect(r.code).toBe(0);
+			expect(r.calls).toContain("-f event=APPROVE");
+			expect(r.calls).toContain("api repos/o/r/stacks/693");
+			expect(r.calls).not.toContain("AutoMerge");
+			expect(r.out).toContain("auto_merge=stacked");
+			expect(r.out).toContain("stack=693");
+		});
+
+		it("turns off auto-merge someone turned on, after the approval", () => {
+			const r = run(verdict(), {
+				pull: inStack,
+				stack: [part(7), part(8)],
+				env: { FAKE_AUTO: "true" },
+			});
+			expect(r.calls).toMatch(/event=APPROVE[\s\S]*disablePullRequestAutoMerge/);
+			expect(r.calls).not.toContain("enablePullRequestAutoMerge");
+			expect(r.out).toContain("auto_merge=stacked");
+		});
+
+		it("holds a part on main whose stack it can't read or name, or that doesn't list it", () => {
+			for (const opts of [
+				{ pull: inStack, stack: [part(7), part(8)], env: { FAIL_STACK: "1" } },
+				{ pull: inStack, stack: [part(5), part(8)] },
+				// A stack with no number: nothing is open above 7 in the answer a read would get, so
+				// only the check that the stack has a number holds it.
+				{ pull: { stack: {} }, stack: [part(7), part(8, "closed")] },
+			]) {
+				const r = run(verdict(), opts);
+				expect(r.code).toBe(0);
+				expect(r.calls).toContain("-f event=APPROVE");
+				expect(r.calls).not.toContain("enablePullRequestAutoMerge");
+				expect(r.out).toContain("auto_merge=stacked");
+			}
+		});
+
+		it("treats the last open part on main as a single PR: the parts above were closed", () => {
+			const top = run(verdict(), {
+				pull: inStack,
+				stack: [part(6, "closed"), part(7), part(8, "closed")],
+			});
+			expect(top.calls).toContain("enablePullRequestAutoMerge");
+			expect(top.out).toContain("auto_merge=on");
+			expect(top.out).toContain("stack=693");
+		});
+
+		it.each([
+			["has no stack key", {}],
+			["has a null stack", { stack: null }],
+		])(
+			"leaves a single PR on main whose GET pulls/<n> %s as it was: on, or refused",
+			(_n, pull) => {
+				const on = run(verdict(), { pull, stack: [part(7), part(8)] });
+				expect(on.calls).not.toContain("stacks/");
+				expect(on.calls).toContain("enablePullRequestAutoMerge");
+				expect(on.out).toContain("auto_merge=on");
+				expect(on.out).toContain("stack=none");
+				const refused = run(verdict(), { pull, env: { FAIL_AUTO: "1" } });
+				expect(refused.out).toContain("auto_merge=refused");
+			},
+		);
+
+		it("never reads the stack without an approval, and still turns auto-merge off", () => {
+			const findings = [{ path: "a.ts", line: 3, body: "bug" }];
+			const r = run(verdict({ findings }), {
+				pull: inStack,
+				stack: [part(7), part(8)],
+				env: { FAKE_AUTO: "true" },
+			});
+			expect(r.calls).not.toContain("stacks/");
+			expect(r.calls).toContain("disablePullRequestAutoMerge");
+			expect(r.calls).not.toContain("enablePullRequestAutoMerge");
+			expect(r.out).toContain("auto_merge=off");
+		});
 	});
 
 	// #404 (admin, 21 Nov 2026): the gate read the base's files at BASE_SHA, and the action fetched

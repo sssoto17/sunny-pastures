@@ -726,6 +726,31 @@ which secret", below).
   PR based on anything but `main`, a stacked part, it never turns auto-merge on, and turns off one
   already on (#404): that would squash the part into the part below on its own, and a stack merges
   whole. The log reads `auto_merge=stacked`.
+  - **Every part below the top, part 1 on `main` included (#695; admin, 28 Nov 2026).** Part 1 is
+    based on `main`, so the base alone doesn't show it's a part, and the rule above let it through:
+    on throwaway stack #693 its review run (45912745173) logged `auto_merge=refused`, so only the
+    repo setting stopped part 1 merging alone, with its own `ci / typecheck`, `ci / lint` and
+    `ci / test` skipped for the top part's run ("One test run per stack") and without the stack's
+    one merge. So the script reads the PR's live `stack` from the same `GET pulls/<n>` it already
+    makes for the head (the read `review-gate.sh` and `guard / stack-base` use), and for a PR on
+    `main` in a stack asks `GET stacks/<n>` whether an open part sits above it. If one does, it
+    treats the PR as a stacked part: no auto-merge, one already on turned off, `auto_merge=stacked`.
+    A stack it can't read, or one that doesn't list the PR, counts as having a part above: in doubt,
+    auto-merge stays off. The `RESULT` line also names the stack (`stack=<n>`, `none` outside one).
+    A PR on `main` in no stack, or the last open part of one whose parts above were closed, behaves
+    as before (`on`, or `refused` while `allow_auto_merge` is off). The admin merges a stack in one
+    action ("Stacks", below). _Alternatives:_ reading `ci / stack`'s `top` answer (rejected: it
+    exists only after CI has run, the review's `post` job may finish first, and a failed lookup
+    there writes no answer, so the suite runs and a reader would have to guess, the unsafe direction
+    for auto-merge); leaving part 1 to auto-merge and relying on the top part's run (rejected: part
+    1 alone is never tested, and it would merge before that run finished or passed); treating any PR
+    with a `stack` as held, whatever is above it (rejected: `size` counts closed parts, as #693
+    shows, so a lone open part left in a stack would never auto-merge). **A known gap, older than
+    #695 (found in #718's review, 28 Nov 2026):** the script decides only when it posts a review. A
+    PR approved with auto-merge on that later becomes a lower part keeps auto-merge on, since
+    `scripts/stack.sh open` (reusing it as part 1) and `add` push only the new part, so no new head
+    and no review run reach it; it would merge alone. A stack is normally opened before any
+    approval, so the window is narrow. Its fix is #720.
 - **No subprocess env scrub here (#454).** `factory.yml` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`,
   which needs bubblewrap installed and smoke-tested first. The reviewer's Claude step doesn't: its
   Claude has no Bash, no hooks (`--setting-sources user`), no MCP servers and `Read(//proc/**)`
@@ -992,7 +1017,9 @@ re-ran their checks. That kept ruleset `main` at 0 approvals with last-push appr
   draft until the stack does. Shown on #315: skipped on the lower parts, run on the top one (runs
   43939156451, 43939157918, 43939156505). A required job skipped by its `if:` counts as passing:
   #312 showed ci/lint, ci/test and ci/typecheck "Skipped · Required" with a green summary ("3
-  skipped, 10 successful"; admin, 16 Nov).
+  skipped, 10 successful"; admin, 16 Nov). So a lower part's own green checks never mean it was
+  tested, and the reviewer never turns auto-merge on for any part below the top open one, part 1 on
+  `main` included (#695; "Auto-merge", above).
 - **One CI run per head: drafts around every push** (#358; admin, 21 Nov 2026). A push to a stacked
   part fires `pull_request` `synchronize` twice on the same head, about a second apart:
   `scripts/stack.sh update` pushes the parts in one atomic push, so the part above gets a new head

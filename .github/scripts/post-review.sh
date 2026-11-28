@@ -11,9 +11,13 @@
 # approval it turns on auto-merge (squash) for the reviewed head, and when it doesn't approve it
 # turns off auto-merge that is on (ADR-0002 area 2, flow step 3); on the run that added the label it
 # leaves auto-merge off too, since `guard / code-owned` hasn't read the label yet. It never merges:
-# with the repo's allow_auto_merge off, GitHub refuses, and the review still stands (Q16). On a PR
-# based on anything but DEFAULT_BRANCH, a stacked part (#404), it never leaves auto-merge on: that
-# would merge the part into the part below, and a stack merges whole.
+# with the repo's allow_auto_merge off, GitHub refuses, and the review still stands (Q16). On a
+# part of a native stack below its top open part, it never leaves auto-merge on (auto_merge=stacked):
+# a part based on anything but DEFAULT_BRANCH (#404) would merge into the part below, and part 1 on
+# DEFAULT_BRANCH would merge alone, untested, since only the top part runs typecheck, lint and test
+# (#695). The live GET pulls/<n> names the stack, and GET stacks/<n> its open parts; a stack it
+# can't read, or one that doesn't list the PR, counts as one with a part above. A stack merges
+# whole.
 # Tests: .github/scripts/tests/post-review.test.mjs.
 #
 # HEAD, BASE, BASE_SHA, RESTORED and VERDICT are review.yml's hand-off from the job that ran the
@@ -73,8 +77,11 @@ if [[ ${1-} == --check ]]; then
   exit 0
 fi
 r="repos/$GITHUB_REPOSITORY" t="$RUNNER_TEMP/threads.json"
-now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null), .base.ref] | @tsv')
-IFS=$'\t' read -r head_now author node auto_on base_ref <<<"$now"
+# The live read, as review-gate.sh's (gather's) and `guard / stack-base`'s: its `stack` names the
+# native stack the PR is in, part 1 on main included, or is null outside one (#695).
+now=$(gh api "$r/pulls/$PR" --jq '[.head.sha, .user.login, .node_id, (.auto_merge != null), .base.ref,
+  (if .stack == null then "none" else (.stack.number // "unknown") end)] | @tsv')
+IFS=$'\t' read -r head_now author node auto_on base_ref stack <<<"$now"
 if [[ $head_now != "$HEAD" ]]; then
   echo "the head moved to $head_now: the newer run reviews it"
   exit 0
@@ -108,6 +115,16 @@ defs='def own: ((.comments.nodes[0].author.login // "") | sub("\\[bot\\]$"; ""))
   def fixed: .id as $i | ($v[0].resolve_threads // []) | index($i) != null;
   def open_finding: own and (esc | not) and (.isResolved | not);'
 pick() { jq -r --arg bot "$BOT" --slurpfile v "$v" "$defs $1" "$t"; }
+part_above() { # true when another open part sits above this PR in its stack, else false (#695).
+  # GET stacks/<n> lists the parts bottom to top, closed and merged ones included (stack #693).
+  # In doubt, true: a stack it can't read, or one that doesn't list this PR, keeps auto-merge off.
+  local n
+  [[ $stack =~ ^[0-9]+$ && $PR =~ ^[0-9]+$ ]] || { echo true; return; }
+  n=$(gh api "$r/stacks/$stack" 2>/dev/null | jq --argjson pr "$PR" '.pull_requests
+    | (map(.number) | index($pr)) as $i
+    | if $i == null then -1 else [.[$i + 1:][] | select(.state == "open")] | length end') || n=-1
+  if [[ $n == 0 ]]; then echo false; else echo true; fi
+}
 
 labelled=$(gh api "$r/issues/$PR/labels" --jq 'any(.[]; .name == "review:admin")')
 # The rows that depend only on paths are computed here as well, so a verdict can't drop them
@@ -197,8 +214,16 @@ body=$(jq -r .summary "$v")
 [[ -z $rows ]] || body+=$'\n\n'"Escalation rows (CONSTRAINTS.md): $rows. \`review:admin\` holds the PR."
 gh api -X POST "$r/pulls/$PR/reviews" --silent -f commit_id="$HEAD" -f event="$event" -f body="$body"
 auto=off
-if [[ $event == APPROVE && ($base_ref != "$DEFAULT_BRANCH" || $added == true) ]]; then
-  # A stacked part never auto-merges into the part below. On the run that just added the label,
+held=false # a part of a native stack below its top open part, on main or not (#695)
+if [[ $event == APPROVE && $base_ref != "$DEFAULT_BRANCH" ]]; then
+  held=true
+elif [[ $event == APPROVE && $stack != none ]]; then
+  held=$(part_above)
+fi
+if [[ $event == APPROVE && ($held == true || $added == true) ]]; then
+  # A stacked part never auto-merges: above part 1 it would merge into the part below, and part 1
+  # on main would merge alone, its typecheck, lint and test skipped for the top part's run (#695);
+  # a stack merges whole, in one action. On the run that just added the label,
   # `guard / code-owned` may still read green until its `labeled` run finishes, so auto-merge waits
   # for a later head; the admin merges after the sign-off.
   auto=stacked
@@ -210,4 +235,4 @@ elif [[ $event == APPROVE ]]; then
   # Refused while allow_auto_merge is off (or the PR merges as it is): the approval stands.
   if [[ $auto_on == true ]] || set_auto enable 2>/dev/null; then auto=on; else auto=refused; fi
 fi
-echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated label_added=$added auto_merge=$auto"
+echo "RESULT event=$event findings=$nfind still_open=$still_open escalated=$escalated label_added=$added auto_merge=$auto stack=${stack//[^0-9a-z]/%}"
