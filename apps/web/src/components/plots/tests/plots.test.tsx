@@ -1,17 +1,12 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { sliceContent } from "@sunny-pastures/sim";
 
-import { createFarmStore, selectStorage } from "@/client/store";
-import {
-	accept,
-	createFakeApi,
-	failure,
-	newEnvelope,
-	type FakeApi,
-} from "@/client/store/tests/fakeApi";
+import { selectStorage } from "@/client/store";
+import { useFarmHarness } from "@/client/store/tests/clock";
+import { accept, failure, newEnvelope } from "@/client/store/tests/fakeApi";
 
 import Game from "../../Game";
 import { getLotTile } from "../../map/tests/press";
@@ -20,33 +15,7 @@ import { formatTimeLeft } from "../index";
 const start = 1_000_000;
 const growMs = sliceContent.crops.wheat.growSeconds * 1000;
 
-let fake: FakeApi;
-let store: ReturnType<typeof createFarmStore>;
-
-beforeEach(() => {
-	// The farm's clock and the animation frames are fake; Testing Library's async `act` waits on a
-	// real `setTimeout`, so that one stays real.
-	vi.useFakeTimers({
-		now: start,
-		toFake: [
-			"Date",
-			"setInterval",
-			"clearInterval",
-			"requestAnimationFrame",
-			"cancelAnimationFrame",
-		],
-	});
-	fake = createFakeApi();
-	store = createFarmStore({ api: fake.api });
-});
-
-afterEach(() => {
-	store.getState().stop();
-	// React Aria waits a frame to restore focus and finish its transitions; run the frames left, so
-	// none is held across tests.
-	flushFrames();
-	vi.useRealTimers();
-});
+const harness = useFarmHarness(start);
 
 function flushFrames() {
 	act(() => {
@@ -57,8 +26,8 @@ function flushFrames() {
 /** Renders the game and answers its load with `envelope`, so the map is on screen. */
 async function renderFarm(envelope = newEnvelope(start)) {
 	const user = userEvent.setup();
-	render(<Game store={store} />);
-	await act(() => fake.loads[0]?.answer({ ok: true, farm: envelope }));
+	render(<Game store={harness.store} />);
+	await act(() => harness.fake.loads[0]?.answer({ ok: true, farm: envelope }));
 	return { user, envelope };
 }
 
@@ -84,8 +53,14 @@ describe("PlotPopover", () => {
 		// The prediction shows at once, before the server answers (MUST-12).
 		const growing = within(dialog).getByText("Wheat is growing: 2 min left.");
 		expect(document.activeElement).toBe(growing);
-		expect(fake.sends[0]?.request.action).toEqual({ type: "plant", plot: 0, crop: "wheat" });
-		await act(() => fake.sends[0]?.answer(accept(envelope, fake.sends[0].request.action, start)));
+		expect(harness.fake.sends[0]?.request.action).toEqual({
+			type: "plant",
+			plot: 0,
+			crop: "wheat",
+		});
+		await act(() =>
+			harness.fake.sends[0]?.answer(accept(envelope, harness.fake.sends[0].request.action, start)),
+		);
 
 		act(() => {
 			vi.advanceTimersByTime(30_000);
@@ -100,11 +75,11 @@ describe("PlotPopover", () => {
 		expect(spriteOf("Plot 1: wheat, ready")).toMatch(/plot-ready/);
 		dialog = await openPlot(user, 1);
 		expect(within(dialog).getByText("Wheat is ready.")).toBeTruthy();
-		expect(selectStorage(store.getState())?.silo.goods["wheat"]).toBeUndefined();
+		expect(selectStorage(harness.store.getState())?.silo.goods["wheat"]).toBeUndefined();
 		await user.click(within(dialog).getByRole("button", { name: "Harvest wheat" }));
 
-		expect(fake.sends[1]?.request.action).toEqual({ type: "harvest", plot: 0 });
-		expect(selectStorage(store.getState())?.silo.goods["wheat"]).toBeGreaterThanOrEqual(2);
+		expect(harness.fake.sends[1]?.request.action).toEqual({ type: "harvest", plot: 0 });
+		expect(selectStorage(harness.store.getState())?.silo.goods["wheat"]).toBeGreaterThanOrEqual(2);
 		expect(within(dialog).getByText("Plot 1 is empty.")).toBeTruthy();
 		await user.keyboard("{Escape}");
 		expect(spriteOf("Plot 1: empty")).toMatch(/plot-empty/);
@@ -115,7 +90,7 @@ describe("PlotPopover", () => {
 		const dialog = await openPlot(user, 2);
 		await user.click(within(dialog).getByRole("button", { name: "Plant wheat" }));
 
-		await act(() => fake.sends[0]?.answer(failure("refused")));
+		await act(() => harness.fake.sends[0]?.answer(failure("refused")));
 
 		expect(within(dialog).getByRole("button", { name: "Plant wheat" })).toBeTruthy();
 		await user.keyboard("{Escape}");
@@ -135,7 +110,7 @@ describe("PlotPopover", () => {
 			within(dialog).getByText("Planting wheat costs 2 coins, and the farm has 1."),
 		).toBeTruthy();
 		await user.click(plant);
-		expect(fake.sends).toHaveLength(0);
+		expect(harness.fake.sends).toHaveLength(0);
 	});
 
 	it("opens from the keyboard, keeps its keys from the map, and Escape returns focus to the lot", async () => {

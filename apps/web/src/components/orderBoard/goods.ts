@@ -14,7 +14,7 @@ export interface GoodNeed extends GoodCount {
  * The order's goods in its own order, each with the farm's count of it in the good's own store, as
  * the sim's `take` reads it: a crop from the silo, any other good from the barn (MUST-06.4).
  */
-export function listNeeds(order: Order, storage: FarmStorage): readonly GoodNeed[] {
+export function listNeeds(order: Pick<Order, "goods">, storage: FarmStorage): readonly GoodNeed[] {
 	return order.goods.map((good) => {
 		const store = Object.hasOwn(sliceContent.crops, good.good) ? storage.silo : storage.barn;
 		return { ...good, have: store.goods[good.good] ?? 0 };

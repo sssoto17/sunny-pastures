@@ -10,6 +10,9 @@ import { Badge, Button, Dialog } from "@/components/ui";
 import { countDeliverable } from "./goods";
 import { OrderSlotView } from "./slot";
 
+// The goods' copy and counts, for the facility dialog (#603), which reads the same silo and barn.
+export { formatTimeLeft, listNeeds, nameGood } from "./goods";
+
 /**
  * The order board (MUST-04; ADR-0010): an "Orders" button, counting the orders the farm can
  * deliver, that opens the board as a dialog with one entry per slot. It reads the predicted farm

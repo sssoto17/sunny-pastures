@@ -114,7 +114,8 @@ export interface PopoverProps {
 	trigger: ReactElement;
 	/** The popover's accessible name. */
 	label: string;
-	children: ReactNode;
+	/** Content, or a function of `close`, for a button inside that closes the popover. */
+	children: ReactNode | ((close: () => void) => ReactNode);
 }
 
 export function Popover({ trigger, label, children }: PopoverProps) {
@@ -122,7 +123,9 @@ export function Popover({ trigger, label, children }: PopoverProps) {
 		<DialogTrigger>
 			{trigger}
 			<AriaPopover>
-				<AriaDialog aria-label={label}>{children}</AriaDialog>
+				<AriaDialog aria-label={label}>
+					{typeof children === "function" ? ({ close }) => children(close) : children}
+				</AriaDialog>
 			</AriaPopover>
 		</DialogTrigger>
 	);
