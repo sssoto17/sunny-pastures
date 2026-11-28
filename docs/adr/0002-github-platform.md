@@ -1160,6 +1160,12 @@ PRs are what the admin approves. The facts behind it are in the research for #60
 (`docs/spikes/research-factory-identity.md` on the throwaway branch `research/factory-identity`),
 where each claim is marked as documented, repo record or inference. The options #37 weighed:
 
+> **Proposed amendment, 28 Nov 2026 (ADR-0012, section 6; spike #705):** if the routine runtime is
+> adopted, the factory's PRs still open as `sunny-factory[bot]`, through `scripts/open-pr.sh` and
+> `open-pr.yml`, but its commits and pushes are the admin's account, as a cloud lane's are, and the
+> read-only token GitHub enforced is replaced by deny rules and hooks. Until ADR-0012 is accepted,
+> the decision below stands.
+
 <!-- prettier-ignore -->
 | | (a) App, GitHub-hosted runners | (b) App, self-hosted runner | (c) Claude self-hosted environment | (d) own `claude -p` dispatcher |
 |---|---|---|---|---|
