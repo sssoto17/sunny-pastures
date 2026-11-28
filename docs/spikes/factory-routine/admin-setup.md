@@ -1,9 +1,9 @@
 # Admin setup: the factory routine
 
 Steps only the admin can do, in the claude.ai UI and the repo's settings, before checks 1, 2 and 6
-of spike #705 can run (`findings.md`, beside this file). Nothing here prints a secret: the token is
-pasted into a form, never into a terminal or a session. Agents don't create, fire or configure the
-routine (admin, 28 Nov 2026).
+of spike #705 can run (`findings.md`, beside this file; the verify issue #719 holds them). Nothing
+here prints a secret: the token is pasted into a form, never into a terminal or a session. Agents
+don't create, fire or configure the routine (admin, 28 Nov 2026).
 
 Checked against the docs on 28 Nov 2026: [routines](https://code.claude.com/docs/en/routines.md),
 [cloud environments](https://code.claude.com/docs/en/cloud-environments.md),

@@ -8,25 +8,26 @@ don't exist yet, and only the admin can create them (`admin-setup.md`, beside th
 
 Each check below has a verdict: **pass**, **fail**, **pass on prior evidence** (the planned probe
 couldn't run, and earlier runs answer the question) or **waiting on admin setup**. A check that
-waits lists the exact steps and the evidence a later session must record here.
+waits lists the exact steps and the evidence a later session must record here. Checks 1, 2 and 6,
+and the re-read of check 4, are held by the verify issue #719, which stays open until they run.
 
 <!-- prettier-ignore -->
 | Check | Verdict | Evidence |
 |---|---|---|
-| 1. A fire from an Actions runner starts a session | waiting on admin setup | the routine, its token and a fire step on `main` don't exist yet |
-| 2. The session's `factory-done` starts `sweep.yml` | waiting on admin setup | half shown: a cloud session's `repository_dispatch` starts a workflow ([46182591111](https://github.com/sssoto17/sunny-pastures/actions/runs/46182591111)); `sweep.yml` has no `factory-done` trigger yet |
+| 1. A fire from an Actions runner starts a session | waiting on admin setup (#719) | the routine, its token and a fire step on `main` don't exist yet |
+| 2. The session's `factory-done` starts `sweep.yml` | waiting on admin setup (#719) | half shown: a cloud session's `repository_dispatch` starts a workflow ([46182591111](https://github.com/sssoto17/sunny-pastures/actions/runs/46182591111)); `sweep.yml` has no `factory-done` trigger yet |
 | 3. A `sunny-reviewer` review fires `pull_request_review` | pass on prior evidence | the probe PR was refused (below); 70 `pull_request_review` runs of `code-owned.yml` with actor `sunny-reviewer[bot]`, 22-23 Nov |
 | 4. A routine session can push under `.github/workflows/` | pass (cloud session) | commit `7a03dff` pushed to `throwaway/705-review-probe` |
 | 5. The environment runs the Supabase stack and Playwright Chromium | partly: the stack yes, the pinned Chromium no | below; the factory's setup script must add five things |
-| 6. The #605 retry ends with a PR or a `FACTORY stopped:` reason | waiting on admin setup | needs the routine and `/factory` |
+| 6. The #605 retry ends with a PR or a `FACTORY stopped:` reason | waiting on admin setup (#719) | needs the routine and `/factory` |
 | 7. The Stop hook refuses a #605-shaped run | pass | `.claude/hooks/factory-stop-check.test.sh`: 36 passed, 0 failed |
 
 **What the rule says now.** Checks 1, 2 and 6 decide the runtime. None has failed; all three wait on
-the admin's setup. Until they run, `factory.yml` stays, and the Stop-hook check (7) ships either
-way, as the rule says. The runtime-independent parts (routing, modes, personas, caps, improvement
-loop) go ahead as the build tickets under #58.
+the admin's setup, in #719. Until they run, `factory.yml` stays, and the Stop-hook check (7) ships
+either way, as the rule says. The runtime-independent parts (routing, modes, personas, caps,
+improvement loop) go ahead as the build tickets under #58.
 
-## 1. Fire from an Actions runner: waiting on admin setup
+## 1. Fire from an Actions runner: waiting on admin setup (#719)
 
 **Why it can't run yet.** The fire endpoint takes a per-routine bearer token that only the admin can
 generate, in the claude.ai UI, and a runner can only hold it as an environment secret, which only
@@ -78,7 +79,7 @@ only), so it needs a merged workflow.
 (the session id may be shown; the token never), and the session URL showing the run started. **Fails
 if** the status isn't 200 or no session starts within 2 minutes; record the error envelope.
 
-## 2. `factory-done` wakes the sweep: waiting on admin setup
+## 2. `factory-done` wakes the sweep: waiting on admin setup (#719)
 
 **Shown already.** A cloud session on the admin's account can send `repository_dispatch` and it
 starts a workflow: this spike's `scripts/open-pr.sh` call sent `open-pr` and started
@@ -145,7 +146,7 @@ branch permissions"), so D14 holds as written: code-owned paths, workflows inclu
 held by code-owner review. Two proxy limits the design must respect: it refuses branch deletions and
 tag pushes (documented, and seen here on the deletion), and, inferred from the docs rather than
 measured, it doesn't limit which branch a push updates (rulesets do). This was measured from a cloud
-lane, not a routine, so check 4 is read again from the routine's session when check 1 runs.
+lane, not a routine, so check 4 is read again from the routine's session when check 1 runs (#719).
 
 ## 5. The Supabase stack and Playwright Chromium: the stack yes, the pinned browser no
 
@@ -179,7 +180,7 @@ Chromium with `cdn.playwright.dev` and `playwright.download.prss.microsoft.com` 
 script that builds the app for the stack from `.env`, so no agent reads `.env` by hand (a build
 ticket). The later session reruns this check in the factory's environment and records it here.
 
-## 6. The #605 retry: waiting on admin setup
+## 6. The #605 retry: waiting on admin setup (#719)
 
 **Steps:** once the routine exists (`admin-setup.md`) and `/factory` has its minimal form (the build
 ticket "the `/factory` command"), the admin re-labels #605 `factory:ready` after removing

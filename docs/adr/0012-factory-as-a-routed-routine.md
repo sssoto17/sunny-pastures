@@ -17,10 +17,10 @@ This ADR records the redesign the admin settled in a grill on 28 Nov 2026 (decis
 spike #705's body): the factory moves from `factory.yml` on a GitHub-hosted runner to a Claude Code
 routine, the sweep stays the only dispatcher, and the routing is code. It amends ADR-0002's identity
 decision (ADR-0002, area 2, "The factory's identity"; here, section 6). **Status: proposed.** The
-runtime (sections 1 and 6) is adopted only if spike #705's checks 1, 2 and 6 pass
-(`docs/spikes/factory-routine/findings.md`); if 1, 2 or 6 fails, `factory.yml` stays and gains only
-the Stop-hook check (section 7). Sections 2-5 and 7 don't depend on the runtime and go ahead either
-way, as the build tickets under #58.
+runtime (sections 1 and 6) is adopted only if spike #705's checks 1, 2 and 6 pass (held by the
+verify issue #719; `docs/spikes/factory-routine/findings.md`); if 1, 2 or 6 fails, `factory.yml`
+stays and gains only the Stop-hook check (section 7). Sections 2-5 and 7 don't depend on the runtime
+and go ahead either way, as the build tickets under #58.
 
 ## Patterns
 
