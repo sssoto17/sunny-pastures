@@ -30,7 +30,7 @@ function isOff(popover: HTMLElement, name: string): boolean {
 }
 
 async function openPopover(user: ReturnType<typeof userEvent.setup>) {
-	await user.click(getLotTile("Chicken pen"));
+	await user.click(getLotTile(/^Chicken pen/));
 	return screen.getByRole("dialog", { name: "Chicken pen" });
 }
 
@@ -102,11 +102,11 @@ describe("PenPopover", () => {
 			vi.advanceTimersByTime(180_000);
 		});
 		expect(within(popover).getByText("Eggs waiting: 1")).toBeTruthy();
-		expect(screen.getByText("1 egg")).toBeTruthy();
+		expect(screen.getByText("1 egg waiting")).toBeTruthy();
 
 		await user.click(within(popover).getByRole("button", { name: "Collect eggs" }));
 		expect(selectStorage(harness.store.getState())?.barn.goods["egg"]).toBe(1);
 		expect(within(popover).getByText("Eggs waiting: 0")).toBeTruthy();
-		expect(screen.queryByText("1 egg")).toBeNull();
+		expect(screen.queryByText("1 egg waiting")).toBeNull();
 	});
 });

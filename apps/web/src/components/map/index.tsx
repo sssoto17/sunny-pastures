@@ -15,7 +15,7 @@ import {
 import type { Action, FarmState } from "@sunny-pastures/sim";
 
 import { spriteUrl } from "@/client/sprites";
-import { Button, IconButton } from "@/components/ui";
+import { Badge, Button, IconButton } from "@/components/ui";
 
 import { useGestures } from "./gestures";
 import { describeLot, lotDepth, lotPosition, lots, mapCenter, tileSize, type Lot } from "./lots";
@@ -211,7 +211,7 @@ function showButton(_lot: Lot, button: ReactElement): ReactNode {
  * sale opens its purchase popover; a bought one calls `onOpen`, wrapped by `renderLot`.
  */
 function LotButton({ lot, farm, level, onBuy, onOpen, renderLot }: LotButtonProps) {
-	const { name, sprite, isForSale } = describeLot(lot, farm);
+	const { name, sprite, isForSale, cue } = describeLot(lot, farm);
 	const handleOpen = () => {
 		onOpen?.(lot);
 	};
@@ -240,6 +240,11 @@ function LotButton({ lot, farm, level, onBuy, onOpen, renderLot }: LotButtonProp
 				<LotSale lot={lot} farm={farm} level={level} trigger={sign} onBuy={onBuy} />
 			) : (
 				renderLot(lot, sign)
+			)}
+			{cue !== null && (
+				<span style={{ position: "absolute", top: 0, right: 0, pointerEvents: "none" }}>
+					<Badge tone="attention">{cue}</Badge>
+				</span>
 			)}
 		</div>
 	);

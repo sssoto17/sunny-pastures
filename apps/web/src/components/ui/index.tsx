@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactElement, ReactNode } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import {
 	Button as AriaButton,
 	Dialog as AriaDialog,
@@ -67,8 +67,42 @@ export interface BadgeProps {
 	children: ReactNode;
 }
 
+/** One pulse of an attention cue, in ms; the styles animate `[data-pulse]` over this long. */
+export const pulseCycleMs = 1200;
+/** An attention cue pulses this many cycles after it appears, then rests (ADR-0010). */
+export const pulseCycles = 3;
+
+/**
+ * An `attention` badge sets `data-pulse` for its first `pulseCycles` cycles, then rests (ADR-0010,
+ * "Accessibility bar"). Under `prefers-reduced-motion: reduce` it never sets it.
+ */
 export function Badge({ tone = "neutral", children }: BadgeProps) {
-	return <span data-tone={tone}>{children}</span>;
+	const isPulsing = usePulse(tone === "attention");
+	return (
+		<span data-tone={tone} {...(isPulsing ? { "data-pulse": "" } : {})}>
+			{children}
+		</span>
+	);
+}
+
+/** True for the first cycles after mount while `isOn`; never under reduced motion. */
+function usePulse(isOn: boolean): boolean {
+	const [isPulsing, setIsPulsing] = useState(false);
+	useEffect(() => {
+		const isStill =
+			typeof window.matchMedia === "function" &&
+			window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		if (!isOn || isStill) return;
+
+		setIsPulsing(true);
+		const timer = setTimeout(() => {
+			setIsPulsing(false);
+		}, pulseCycles * pulseCycleMs);
+		return () => {
+			clearTimeout(timer);
+		};
+	}, [isOn]);
+	return isPulsing;
 }
 
 export interface PanelProps {
