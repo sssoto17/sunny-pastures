@@ -15,8 +15,8 @@ const away = 8 * hour;
 const confirmedAt = 1_000_000;
 const harness = useFarmHarness(confirmedAt + away);
 
-/** A farm with a crop planted, a job started and a chicken fed at `confirmedAt`: all take under 8 h. */
-function buildBusyFarm(): FarmState {
+/** A farm with a crop planted, a job started and a chicken fed at `at`: all take under 8 h. */
+function buildBusyFarm(at: number): FarmState {
 	const start: FarmState = {
 		...sim.newFarm("farm-cues"),
 		silo: { wheat: 10 },
@@ -33,21 +33,25 @@ function buildBusyFarm(): FarmState {
 		{ type: "feed", pen: 0 },
 	];
 	return actions.reduce((state, action) => {
-		const result = sim.apply(state, action, confirmedAt);
+		const result = sim.apply(state, action, at);
 		if (!result.ok) throw new Error(result.reason);
 		return result.state;
 	}, start);
 }
 
-async function loadAwayFarm() {
+async function loadFarmConfirmedAt(at: number) {
 	render(<Game store={harness.store} />);
-	const state = buildBusyFarm();
+	const state = buildBusyFarm(at);
 	await act(() =>
 		harness.fake.loads[0]?.answer({
 			ok: true,
-			farm: { seq: 0, at: confirmedAt, state, rulesVersion: 1 },
+			farm: { seq: 0, at, state, rulesVersion: 1 },
 		}),
 	);
+}
+
+function loadAwayFarm() {
+	return loadFarmConfirmedAt(confirmedAt);
 }
 
 function stubMotion(isReduced: boolean) {
@@ -106,5 +110,20 @@ describe("attention cues", () => {
 		const cues = map.querySelectorAll("[data-tone='attention']");
 		expect(cues).toHaveLength(3);
 		for (const cue of cues) expect(cue.hasAttribute("data-pulse")).toBe(false);
+	});
+
+	it("shows no cue on a growing plot, a running job or a pen with no eggs waiting", async () => {
+		stubMotion(false);
+		// Confirmed at the clock's own time: nothing has had time to finish.
+		await loadFarmConfirmedAt(confirmedAt + away);
+
+		const map = screen.getByRole("group", { name: "Farm map" });
+		expect(map.querySelectorAll("[data-tone='attention']")).toHaveLength(0);
+
+		for (const name of [/^Plot 1: wheat, growing$/, /^Feed mill$/, /^Chicken pen$/]) {
+			expect(screen.getByRole("button", { name })).toBeTruthy();
+		}
+		expect(screen.queryByText("ready")).toBeNull();
+		expect(screen.queryByText(/waiting$/)).toBeNull();
 	});
 });
