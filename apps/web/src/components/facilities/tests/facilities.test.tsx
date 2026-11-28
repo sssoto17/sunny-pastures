@@ -1,14 +1,13 @@
-import { act, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, screen, within } from "@testing-library/react";
+import type userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { sliceContent, type FarmState, type OwnedFacility } from "@sunny-pastures/sim";
 
 import { selectStorage } from "@/client/store";
 import { useFarmHarness } from "@/client/store/tests/clock";
-import { newEnvelope } from "@/client/store/tests/fakeApi";
 
-import Game from "../../Game";
+import { renderLoadedFarm } from "../../Game/tests/loaded";
 import { getLotTile } from "../../map/tests/press";
 
 const start = 1_000_000;
@@ -19,20 +18,13 @@ function owned(tier: number, jobs: OwnedFacility["jobs"] = []): OwnedFacility {
 	return { tier, jobs, lastRecipe: null, addOns: { loop: false, collector: false } };
 }
 
-/** A farm with both facilities bought, `changes` over a new farm, rendered once its load answers. */
-async function renderFarm(changes: Partial<FarmState>) {
-	const user = userEvent.setup();
-	const envelope = newEnvelope(start);
-	const state = {
-		...envelope.state,
-		xp: 100,
+/** A farm with both facilities bought and wheat in the silo, `changes` over a new farm. */
+function renderFarm(changes: Partial<FarmState>) {
+	return renderLoadedFarm(harness, start, {
 		silo: { wheat: 10 },
 		facilities: [owned(1), owned(2)],
 		...changes,
-	};
-	render(<Game store={harness.store} />);
-	await act(() => harness.fake.loads[0]?.answer({ ok: true, farm: { ...envelope, state } }));
-	return user;
+	});
 }
 
 async function openDialog(user: ReturnType<typeof userEvent.setup>, name: string) {

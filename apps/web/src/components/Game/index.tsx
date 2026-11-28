@@ -16,6 +16,7 @@ import { Hud } from "../hud";
 import { LevelUp } from "../levelUp";
 import { FarmMap } from "../map";
 import { OrderBoard } from "../orderBoard";
+import { PenPopover } from "../pens";
 import { PlotPopover } from "../plots";
 
 /**
@@ -80,15 +81,19 @@ export default function Game({ store }: GameProps) {
 						);
 					}
 
-					return lot.kind === "facility" ? (
+					if (lot.kind === "pen") {
+						return (
+							<PenPopover store={farmStore} index={lot.index} label={lot.label} trigger={button} />
+						);
+					}
+
+					return (
 						<FacilityPopover
 							store={farmStore}
 							index={lot.index}
 							label={lot.label}
 							trigger={button}
 						/>
-					) : (
-						button
 					);
 				}}
 			/>
