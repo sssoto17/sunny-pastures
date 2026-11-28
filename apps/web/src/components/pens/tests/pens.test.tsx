@@ -67,6 +67,15 @@ describe("PenPopover", () => {
 		expect(harness.fake.sends).toHaveLength(0);
 	});
 
+	it("says one chicken, not one chickens, for a pen of one", async () => {
+		const one: OwnedPen = { trough: 0, animals: [{ status: "idle" }], products: 0 };
+		const user = await renderFarm({ pens: [one] });
+
+		const popover = await openPopover(user);
+
+		expect(within(popover).getByText("1 chicken, 1 waiting for feed")).toBeTruthy();
+	});
+
 	it("says the trough is full when it is", async () => {
 		const full: OwnedPen = {
 			trough: 1,

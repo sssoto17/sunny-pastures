@@ -80,7 +80,8 @@ function PenStatus({ store, index, label, pen }: PenStatusProps) {
 		<>
 			<h3>{label}</h3>
 			<p>
-				{String(pen.animals.length)} chickens, {String(waiting)} waiting for feed
+				{String(pen.animals.length)} {pen.animals.length === 1 ? "chicken" : "chickens"},{" "}
+				{String(waiting)} waiting for feed
 			</p>
 			<Meter
 				label="Trough"
